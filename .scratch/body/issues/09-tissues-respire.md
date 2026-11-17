@@ -1,7 +1,7 @@
 # 09: Tissues respire
 
 Type: task
-Status: claimed
+Status: resolved
 Claimed by: b09d-build
 Blocked by: 02, 08, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
@@ -17,7 +17,7 @@ Blocked by: 02, 08, `.scratch/research/issues/11-law-forms-gas-loop.md`
 - [x] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved (09a)
 - [x] The body admits over a cycle with its reactions running, which [ticket 02](02-reactions.md) left unshown (09a)
 - [x] From [research 12](../../research/issues/12-law-forms-heat.md): every bed's heat, the skin bed's included, reaches the core heat store, which replaces the skin heat store for the skin bed above. A reaction's heat lands in its bed's own thermal pool, so each bed needs a transfer to the core store, first order in that pool at a declared speed (a model default). 09a
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget. Each PR of this ticket gives its lines (below): 09a, 09b and 09c have, 09d will
+- [x] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget. Each PR of this ticket gives its lines (below)
 
 **Non-goals:** which fuel a bed burns (ticket 16), temperature's effect on rate, and heat exchange with the room (ticket 12).
 
@@ -70,6 +70,10 @@ The ticket lands as four PRs: 09a the burn, 09b lactate and the oxygen debt, 09c
 
 ## Cost
 
+09d's lines on the beelink, base main at `b3959b71bb39` and head in this PR, back to back in one job, both in the dearer landing state (2,745 landing solves): rows 1,442 to 1,445, unknowns 1,442 to 1,445, columns 1,422 at both, nonzeros 9,723 to 9,902, steps 11,794 at both, solves 15,264 at both (ordinary 12,519, landing 2,745), 5,233.1 to 5,486.7 M a simulated second, instructions a solve 20.57 to 21.57 M (+4.8%). So 09d takes 253.6 M of the 363.8 M left, and 110.2 M is left for 10 and 11. That is over the 25 M a PR may take unflagged. A profile by symbol over one timed repeat at each, user instructions sampled, puts 42% of the rise in the elimination's factoring (68.8 to 84.7 G), 22% in the forward evaluation (45.6 to 53.9 G) and 8% in hashing. The work's field read at eleven beds and the contractile store's sum over 21 sites add 179 nonzeros (inferred cause of the factoring's rise, not traced). The `contractile store` row scale of 1e6, measured, keeps the steps and solves at 09c's: without it the store's accuracy refused 180 steps and the minute took 13,663 steps.
+
+Admission in the same job: 354.4 s at the base (load 4.3) and 219.6 s at the head (load 3.4). The loads differ and the fall is not explained.
+
 The exception recorded for the burn is withdrawn. The budget restated in ticket 26 covers it: the burn took about 152 M of the 595.1 M at a fixed landing count.
 
 09c's lines on the beelink, base main at `5a6991cea226` and head in this PR, both in the dearer landing state (2,745 landing solves): rows 1,442, unknowns 1,442 and columns 1,422 at both, nonzeros 9,713 to 9,723, steps 11,794 at both, solves 15,264 at both (ordinary 12,519, landing 2,745), 5,214.3 to 5,230.9 M a simulated second, instructions a solve 20.497 to 20.562 M (+0.32%). So 09c takes 16.6 M of the 380.4 M left, and 363.8 M is left for 09d, 10 and 11.
@@ -83,3 +87,7 @@ Accepted flag: admission rose in every pair measured, and the rise is unproven. 
 09a's lines on the beelink, base main at `020a4a403ffb` and head in this PR: rows 1,419 to 1,431, unknowns 1,419 to 1,431, columns 1,356 to 1,400, nonzeros 9,514 to 9,625, steps 11,794 to 11,797, solves 15,263 to 14,510 (ordinary 12,519 to 12,522, landing 2,744 to 1,988), 4,958.6 to 4,865.9 M a simulated second, instructions a solve 19.493 to 20.121 M (+3.2%). The base's landing count is in the dearer of its two states and the head's in the cheaper one (native-contract 64), so the line falls only by that. At a fixed landing count the burn adds about 152 M (inferred, at the head's 14,510 solves). The rise in instructions a solve, +0.628 M, is over this ticket's 2.5% flag. On main `e8e8bc0afc9f`, before the walk went, the same burn measured +0.465 M (+1.7%), so the walk's removal both shrank the base and left the burn's part larger: a profile by symbol is owed.
 
 Accepted flag: admission rises with the burn, because it now solves the fuels, the beds' heat and the element totals in each bed's cells. The pair in this PR, back to back at loads of 3 to 9: 299.8 to 315.9 s (+5.4%), the march 56.8 to 63.1 s (+11%) and the ring 243.0 to 252.8 s (+4.0%). The base ran at the higher load, so the rise may be larger. Two earlier pairs at one load gave about 12%.
+
+## Answer
+
+09d closes the ticket. The coronary bed's fuel pays the heart's stroke work and the muscle bed's the walls', so no column ends at `chemical energy`. CV carries the work on arrow 78 as a memory of the stroke work, and MT's demand at the coronary bed reads it. The earn run did not earn the coronary bed: [ticket 35](35-the-coronary-bed-leaves-the-map.md) removes it, and [ticket 36](36-the-whole-body-answers-posture.md) takes the whole body's answer to posture. [Research 18](../../research/issues/18-heart-work-time-course-and-efficiency.md) asks for the work's speed and the efficiency of muscle work.
