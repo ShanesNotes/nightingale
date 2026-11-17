@@ -45,6 +45,7 @@ Both contract drafts drop Pulse's fixed rate lanes; the coupled solve is the def
 | | |
 |---|---|
 | Pulse reference | `BloodChemistryModel.cpp` in Pulse REL_4_3_2; today's crate cites it line by line in its source headers |
+| Speciation | `ng-blood-chemistry` states it at every capillary bed through blood chemistry's own port, and metabolism reads the two partial pressures through its row of the readers' table |
 | Proposed crate | `ng-chemistry` (see the [crate map](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/crate-map.md)) |
 
 ## Decided
