@@ -188,6 +188,21 @@ impl<U: Sensed> NonMaterial for Reference<U> {}
 /// A valve's flow is memory: a rate of an amount, never an amount, and no column reads it but its own edge's.
 impl material::Sealed for Rate<Water> {}
 impl NonMaterial for Rate<Water> {}
+/// The heart's work is memory as a rate of energy, the average a reader of it needs, and energy itself never is:
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn shadow<'b>(scope: &mut FragmentBuilder<'b, Cardiovascular>, domain: Admissible<Energy>) {
+///     scope.state::<Energy>("shadow-energy", domain);
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn work<'b>(scope: &mut FragmentBuilder<'b, Cardiovascular>, domain: Admissible<Rate<Energy>>) {
+///     scope.state::<Rate<Energy>>("work", domain);
+/// }
+/// ```
+impl material::Sealed for Rate<Energy> {}
+impl NonMaterial for Rate<Energy> {}
 
 macro_rules! sensed {
     ($($dimension:ty),*) => {$(

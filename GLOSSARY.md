@@ -388,7 +388,7 @@ _Avoid_: content alone
 A reaction in a bed's cells that turns one fuel and oxygen into carbon dioxide and water, its energy into the bed's heat. Rung 0 has one burn a fuel, glucose and fatty acids, each at a share of the bed's oxygen rate.
 
 **Oxygen demand**:
-The oxygen a bed's cells would burn each second with oxygen enough, a parameter of each bed.
+The oxygen a bed's cells would burn each second with oxygen enough, a parameter of each bed. At the bed that pays the stroke work it is a basal value plus the oxygen of the heart's work, read from arrow 78.
 
 **Oxygen rate**:
 The oxygen a bed's cells burn each second. It follows the oxygen demand until the cells' oxygen partial pressure can no longer pass that much, and then follows the partial pressure: a smooth minimum of the two, less that minimum's value at no cell oxygen. So it is zero when the cells hold no oxygen, never runs a burn backward and cannot draw a cell's oxygen below zero.
@@ -401,6 +401,9 @@ The heat store at each bed that takes its reactions' energy and passes it to the
 
 **Paying bed**:
 The capillary bed whose heat pays the heart's stroke work or the walls' work, named in the schema for each work. With none named, the work starts at the receipt `chemical energy`.
+
+**Myocardial work**:
+The heart's stroke work as CV emits it on arrow 78: a memory that follows the stroke work in systole and falls in diastole at one stated speed, because no algebraic law may hold by the rhythm's modes. Over a beat its mean is the stroke work's.
 
 **Oxygen reach**:
 A bed's conductance from its cells' oxygen partial pressure to the oxygen they can burn, a parameter of each bed. The oxygen rate follows the reach times that pressure until it nears the demand.

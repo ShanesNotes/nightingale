@@ -37,7 +37,8 @@ pub fn declare<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardio
 }
 
 /// As `declare`, and each plain edge's resistance also scales by viscosity (line 114) over a reference and by the oxygen
-/// debt of the bed it feeds (line 90). Only the whole body's root calls it, so the slice keeps its model.
+/// debt of the bed it feeds (line 90), and the heart's work goes to metabolism (line 78). Only the whole body's root
+/// calls it, so the slice keeps its model.
 pub fn declare_in_the_whole_body<'b>(
     scope: CardiovascularScope<'b>,
 ) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
@@ -64,6 +65,6 @@ fn declare_with<'b>(
     valves(&mut cv, &ports, &pressure, &head, wave)?;
     afferents(&mut cv, &pressure, &head, wave)?;
     capillary_fields(&mut cv, &pressure, wave);
-    walls.energy(&mut cv, &ports, &heart, &head, wave)?;
+    walls.energy(&mut cv, &ports, &heart, &head, wave, whole_body)?;
     Ok(cv.finish())
 }

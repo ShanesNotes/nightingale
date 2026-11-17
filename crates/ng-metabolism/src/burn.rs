@@ -1,5 +1,5 @@
 use crate::diffusion::CellOxygen;
-use ng_contract::catalog::{Defines, OxygenDebtPerBed};
+use ng_contract::catalog::{Defines, MyocardialWorkAndBedFlow, OxygenDebtPerBed, Reads};
 use ng_contract::*;
 
 type Bed<'b, 'k> = Kernel<'b, 'k, Metabolism, CapillaryBed>;
@@ -18,17 +18,37 @@ struct OxygenRate<'a, 'b> {
     demand: SiteKey<'b, Rate<Oxygen>>,
     reach: SiteKey<'b, Conductance<Oxygen>>,
     width_share: SiteKey<'b, Dimensionless>,
+    work: Option<Work<'b>>,
+}
+
+struct Work<'b> {
+    line: MyocardialWorkAndBedFlow<Reads<'b, Metabolism>>,
+    share: SiteKey<'b, Dimensionless>,
+    oxygen_per_energy: Parameter<'b, Metabolism, Quotient<Oxygen, Energy>>,
 }
 
 impl<'b> OxygenRate<'_, 'b> {
+    fn demand<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Rate<Oxygen>> {
+        let basal = k.site_parameter(&self.demand);
+        let Some(work) = &self.work else {
+            return basal;
+        };
+        let (power, per) = (
+            k.read(&work.line.myocardial_work),
+            k.parameter(&work.oxygen_per_energy),
+        );
+        let product = k.multiply(power, per);
+        let oxygen = k.as_dimension(product);
+        let share = k.site_parameter(&work.share);
+        let paid = k.scale(oxygen, share);
+        k.add(basal, paid)
+    }
+
     fn at<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Rate<Oxygen>> {
         let pressure = self.cells.pressure(k);
         let reach = k.site_parameter(&self.reach);
         let allowed = k.conductance_flow(reach, pressure);
-        let (demand, share) = (
-            k.site_parameter(&self.demand),
-            k.site_parameter(&self.width_share),
-        );
+        let (demand, share) = (self.demand(k), k.site_parameter(&self.width_share));
         let width = k.scale(demand, share);
         let none = k.zero();
         let ceiling = k.smooth_max(demand, none, width);
@@ -40,10 +60,12 @@ impl<'b> OxygenRate<'_, 'b> {
 
 /// Each bed's cells burn glucose, `glucose + 6 O2 -> 6 CO2 + 6 H2O`, and fatty acids, `fatty acid + 23 O2 -> 16 CO2 +
 /// 16 H2O`, each releasing its energy into the bed's heat. The glucose burn takes a share `s` of the bed's oxygen rate
-/// and the fatty acid burn the rest, so the share fixes the respiratory quotient at `s + 16 (1 - s) / 23`.
+/// and the fatty acid burn the rest, so the share fixes the respiratory quotient at `s + 16 (1 - s) / 23`. Given line
+/// 78, each bed's demand also carries its share of the heart's work.
 pub fn burn<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     cells: &CellOxygen<'b>,
+    work: Option<MyocardialWorkAndBedFlow<Reads<'b, Metabolism>>>,
 ) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, BURN_NS)?;
     let key = ParameterKey::new;
@@ -52,6 +74,11 @@ pub fn burn<'b>(
         demand: laws.site_parameter(key("mt.oxygen-demand"), Admissible::nonnegative()),
         reach: laws.site_parameter(key("mt.oxygen-reach"), Admissible::positive()),
         width_share: laws.site_parameter(key("mt.oxygen-rate-width-share"), Admissible::positive()),
+        work: work.map(|line| Work {
+            line,
+            share: laws.site_parameter(key("mt.work-share"), Admissible::unit_interval()),
+            oxygen_per_energy: laws.parameter(key("mt.oxygen-per-energy"), Admissible::positive()),
+        }),
     };
     let share: SiteKey<'b, Dimensionless> =
         laws.site_parameter(key("mt.glucose-share"), Admissible::unit_interval());
@@ -119,7 +146,7 @@ fn lactate<'b>(
             .energy_into(Space::Thermal),
     );
     let split = laws.site_kernel(|mut k| {
-        let (oxygen, demand) = (rate.at(&mut k), k.site_parameter(&rate.demand));
+        let (oxygen, demand) = (rate.at(&mut k), rate.demand(&mut k));
         let gap = k.subtract(demand, oxygen);
         let none = k.zero();
         let short = k.smooth_max(gap, none, none);

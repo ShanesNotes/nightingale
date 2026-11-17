@@ -80,6 +80,16 @@ const INTERSTITIAL_BUFFER_RATIO: f64 = 15.0;
 const CELL_BUFFER_RATIO: f64 = 10.0;
 const GLUCOSE_SHARE: f64 = 5.0 / 28.0;
 const PER_OXYGEN: f64 = GLUCOSE_SHARE + 16.0 * (1.0 - GLUCOSE_SHARE) / 23.0;
+const ENERGY_PER_OXYGEN: f64 =
+    GLUCOSE_SHARE * GLUCOSE_ENERGY / 6.0 + (1.0 - GLUCOSE_SHARE) * FAT_ENERGY / 23.0;
+/// The coronary bed pays the heart's stroke work, so its stated demand is a basal value plus that work's oxygen. The
+/// basal is its stated 8 less the oxygen of the resting work measured on this body, 18,072 a second, so its whole-beat
+/// burn stays at 8. The muscle bed pays the walls' work, 2.2e-5 of oxygen a second, with no such correction.
+const STROKE_PAYER: &str = "coronary bed";
+const STROKE_WORK_OXYGEN: f64 = 1.32;
+/// How fast line 78's work follows the stroke work: a model default with no source (research 18).
+const WORK_SPEED: f64 = 0.25;
+const CONTRACTILE_SIZE: f64 = 1e6;
 /// The oxygen reach meets the demand at this cell pressure, and the oxygen rate falls short of the demand only below
 /// twice it, 34 mmHg. Every bed's cells sit at 38 mmHg or more at rest, so none splits glucose there or admits lactate,
 /// and halving the one-bed fixture's flow takes its cells under it.
@@ -269,10 +279,19 @@ fn burn_rest(site: &str, species: Species, space: Space) -> Option<f64> {
         (Species::Glucose, Space::Cells) => GLUCOSE_SET - glucose / FEED_SPEED,
         (Species::FattyAcids, Space::Cells) => FAT_SET - fat / FEED_SPEED,
         (Species::Water, Space::Cells) => CELL_WATER + (6.0 * glucose + 16.0 * fat) / WATER_SPEED,
-        (Species::Energy, Space::Thermal) => (glucose * GLUCOSE_ENERGY + fat * FAT_ENERGY) / BED_HEAT_SPEED,
+        (Species::Energy, Space::Thermal) => basal(site, used) * ENERGY_PER_OXYGEN / BED_HEAT_SPEED,
         (Species::Lactate, Space::Cells) => CELL_LACTATE_AT_REST,
         _ => return None,
     })
+}
+
+/// The burn adds the work's oxygen back to the payer's demand and passes its heat to the walls.
+fn basal(bed: &str, used: f64) -> f64 {
+    if bed == STROKE_PAYER {
+        used - STROKE_WORK_OXYGEN
+    } else {
+        used
+    }
 }
 
 fn ten_to(power: f64) -> f64 {
@@ -575,6 +594,7 @@ pub fn body_packet_at_viscosity_exponent(
                     packet.row_scale(kind, Measure::<Rate<Water>>::new(FLOW_SIZE)?)?
                 }
                 "wall power" => packet.row_scale(kind, Measure::<Rate<Energy>>::new(POWER_SIZE)?)?,
+                "contractile store" => packet.row_scale(kind, Measure::<Energy>::new(CONTRACTILE_SIZE)?)?,
                 _ => {}
             }
         }
@@ -911,6 +931,11 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     let lung = Binding::Site(site::<CapillaryBed>("pulmonary bed")?);
     set::<Dimensionless>(packet, "mt.lung-share", lung, 1.0)?;
     burn(packet)?;
+    set::<Dimensionless>(packet, "mt.work-share", Binding::Class(Class::CapillaryBed), 0.0)?;
+    let payer = Binding::Site(site::<CapillaryBed>(STROKE_PAYER)?);
+    set::<Dimensionless>(packet, "mt.work-share", payer, 1.0)?;
+    set::<Quotient<Oxygen, Energy>>(packet, "mt.oxygen-per-energy", body, 1.0 / ENERGY_PER_OXYGEN)?;
+    set::<Rate<Dimensionless>>(packet, "cv.work-speed", body, WORK_SPEED)?;
     let blood = Binding::Network(Network::Vascular);
     set::<Dimensionless>(packet, "cv.debt-share", blood, 0.0)?;
     set::<Oxygen>(packet, "cv.debt-half", blood, 1.0)?;
@@ -923,7 +948,7 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
             set::<Dimensionless>(packet, "cv.debt-share", at, share)?;
             set::<Oxygen>(packet, "cv.debt-half", at, used * DEBT_HALF_TIME)?;
         }
-        set::<Rate<Oxygen>>(packet, "mt.oxygen-demand", at, used)?;
+        set::<Rate<Oxygen>>(packet, "mt.oxygen-demand", at, basal(bed, used))?;
         set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / BODY_CELL_PRESSURE_AT_DEMAND)?;
         set::<Conductance<Oxygen>>(packet, "mt.wall-oxygen-conductance", at, used / HEAD)?;
         set::<Conductance<Oxygen>>(packet, "mt.cell-oxygen-conductance", at, used / HEAD)?;
@@ -1021,19 +1046,20 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// variation: twice the quantity's worst change over a ten-second window of this body's first minute from its admitted
 /// start, rounded up to one significant figure. It is a synthetic target that scores a solver and judges no body. The
 /// body's measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set
-/// (record 0004). Energy's change is the walls' elastic store filling and the core's heat store emptying as the run
-/// settles from the admitted start, 4,970.7 in and 1,583.6 out over the first ten seconds, while over the first minute
-/// a bed's fuels move under 1e-6 and its heat under 0.1. Oxygen's and carbon's change is mostly the blood gases' swing
-/// within a beat, read across windows that hold no whole number of beats, and hydrogen's is a bed's cell water and
-/// fuels settling. The species are the held gut's and skin's water and salts and vasopressin's held secretion and
-/// clearance. Oxygen and carbon dioxide as species keep only held pools that never move, so the slice's bound for an
-/// unmoved species holds them.
-const ENERGY_DRIFT: f64 = 7e3;
+/// (record 0004). Energy's worst change is 1,355, in the window from 47 s, with the work paid inside the body. Oxygen's
+/// and carbon's change is mostly the blood gases' swing within a beat, read across windows that hold no whole number of
+/// beats, and hydrogen's is a bed's cell fuels and water settling. At the stroke work's payer they settle by 0.077 over
+/// the first ten seconds, at the feeds' speed, and admission solves them whatever their start, so its cells take a
+/// bound of their own; every other bed's cells change by under 7.5e-6. The species are the held gut's and skin's
+/// water and salts and vasopressin's held secretion and clearance. Oxygen and carbon dioxide as species keep only held
+/// pools that never move, so the slice's bound for an unmoved species holds them.
+const ENERGY_DRIFT: f64 = 3e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
-    (Element::Carbon, 0.8),
+    (Element::Carbon, 0.9),
     (Element::Hydrogen, 2e-5),
     (Element::Oxygen, 5.0),
 ];
+const PAYER_HYDROGEN_DRIFT: f64 = 0.2;
 const SPECIES_DRIFTS: [(Species, f64); 6] = [
     (Species::Energy, ENERGY_DRIFT),
     (Species::Water, 0.04),
@@ -1052,7 +1078,10 @@ impl DriftTable for BodyDrifts {
         let named = SPECIES_DRIFTS.iter().find(|(named, _)| *named == Q::SPECIES);
         Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
     }
-    fn element(&self, element: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+    fn element(&self, element: Element, at: &[SiteId]) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+        if element == Element::Hydrogen && at.iter().all(|site| site.key() == STROKE_PAYER) {
+            return Measure::new(PAYER_HYDROGEN_DRIFT).map(Some);
+        }
         let named = ELEMENT_DRIFTS.iter().find(|(named, _)| *named == element);
         named.map(|(_, drift)| Measure::new(*drift)).transpose()
     }

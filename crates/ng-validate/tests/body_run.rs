@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "b4cdd5039bd7898d742ea99e414a53e981894ae78a227ad885885034724230f6";
-const ADMITTED_SEAL: &str = "26bd65588f1346d4a8e0e964e6793c6be60e50707a0a20396beee6d95b45f3a9";
+const PACKET: &str = "56e1777030310c36956fa04a7b47fb19b74f6844b43fc7dd2022c484d396f3ba";
+const ADMITTED_SEAL: &str = "e0b126c54ced42d9ee03ed9a032ebb87f7c9b25c043b34cdec1df8b256859e47";
 
 struct Counted {
     core: ng_solver::Core,
@@ -487,8 +487,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet b4cdd5039bd7898d742ea99e414a53e981894ae78a227ad885885034724230f6
-        seal 25aa4c562c32628864eaf3efc8dae3f23ddac96b2dbf7cfc979cd75f9ed016b7
+        packet 56e1777030310c36956fa04a7b47fb19b74f6844b43fc7dd2022c484d396f3ba
+        seal 6af0189c8744c91f4982269440c29049db3d0acc8a03cc821babb986d9cf1f22
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
@@ -507,15 +507,17 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
     "#]].assert_eq(&trace);
 }
 
-/// The coronary bed's inflow edge has no tone, no feedback share and no fall, so its pressure drop over its flow is
-/// the packet's resistance times viscosity over its reference.
+/// The coronary bed's inflow edge has no tone and no fall, so its pressure drop over its flow, over the share of its
+/// resistance the bed's debt keeps, is the packet's resistance times viscosity over its reference.
 const CORONARY_RESISTANCE: f64 = 1.4 / 0.1;
+const CORONARY_DEBT: (f64, f64) = (0.5, 8e-3);
 
 struct Edge {
     hematocrit: f64,
     viscosity: f64,
     drop: f64,
     flow: f64,
+    debt: f64,
 }
 impl Edge {
     fn at(start: &Start, session: &Session<'_, Running>) -> Self {
@@ -551,16 +553,22 @@ impl Edge {
             viscosity: value(field("HC", "viscosity", Context::Body)),
             drop: pressure(arteries) - pressure(coronary),
             flow: value(field("CV", "circulation", edge)),
+            debt: value(field("MT", "oxygen_debt_per_bed", Context::Site(coronary))),
         }
     }
+    fn kept(&self) -> f64 {
+        let ((share, half), owed) = (CORONARY_DEBT, self.debt);
+        (half + (owed - share * owed)) / (owed + half)
+    }
     fn resistance(&self) -> f64 {
-        self.drop / self.flow
+        self.drop / self.flow / self.kept()
     }
 }
 
 /// A 400 mL water bolus into the gut lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is
-/// its drop over the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from
-/// the drop's. The body's gases are read at the start of a beat before the bolus and after it, so the beat's swing in
+/// its drop over the packet's resistance times viscosity's ratio and the share its bed's debt keeps, so the run tells
+/// viscosity's part of the flow from the drop's. By 30 s the coronary bed owes a little oxygen, its burn rippling with
+/// the heart's work. The body's gases are read at the start of a beat before the bolus and after it, so the beat's swing in
 /// them does not enter.
 fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &Start) {
     let mut session = start.session();
@@ -630,7 +638,7 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &
         after.resistance() / before.resistance(),
     );
     let report = format!(
-        "hematocrit {} to {}, viscosity {} to {}, resistance ratio {resisted}, drop {} to {}, flow {} to {}",
+        "hematocrit {} to {}, viscosity {} to {}, resistance ratio {resisted}, drop {} to {}, flow {} to {}, debt {} to {}",
         before.hematocrit,
         after.hematocrit,
         before.viscosity,
@@ -638,11 +646,13 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &
         before.drop,
         after.drop,
         before.flow,
-        after.flow
+        after.flow,
+        before.debt,
+        after.debt
     );
     assert!(after.hematocrit < before.hematocrit && ratio < 1.0, "{report}");
     assert!((resisted - ratio).abs() < 1e-9, "{report}");
-    let through_viscosity = after.drop / before.drop / ratio;
+    let through_viscosity = after.drop / before.drop / ratio / (after.kept() / before.kept());
     assert!(
         after.flow > before.flow && (after.flow / before.flow - through_viscosity).abs() < 1e-9,
         "{report}"
@@ -767,11 +777,16 @@ fn burned(body: &CompiledBody, columns: &[ColumnId], from: &[f64], to: &[f64]) -
     burned
 }
 
-/// No fuel pays work yet, so every column that takes heat from a bed's thermal pool, but the burns that fill it, ends
-/// at the core store and nowhere else.
-fn only_the_core_store_takes_the_beds_heat(body: &CompiledBody, columns: &[ColumnId]) {
+fn pays_work(body: &CompiledBody, column: ColumnId) -> bool {
+    ["stroke work", "wall work"].contains(&body.columns()[column.index()].origin().local)
+}
+
+fn only_the_core_store_takes_the_beds_heat_but_its_burns_and_the_work_it_pays(
+    body: &CompiledBody,
+    columns: &[ColumnId],
+) {
     let core = site::<TissueSite>("body");
-    for column in columns.iter().filter(|column| !burns(body, **column)) {
+    for column in (columns.iter()).filter(|column| !burns(body, **column) && !pays_work(body, **column)) {
         let thermal = |at: &dyn Fn(SiteId) -> bool| {
             count(body, *column, |site, species, space| {
                 species == Species::Energy && space == Space::Thermal && at(site)
@@ -799,10 +814,16 @@ fn only_the_core_store_takes_the_beds_heat(body: &CompiledBody, columns: &[Colum
 fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned_over_whole_beats(
     start: &Start,
 ) {
-    let (muscle, lung_bed) = (
+    let (muscle, lung_bed, payer) = (
         site::<CapillaryBed>("muscle bed"),
         site::<CapillaryBed>("pulmonary bed"),
+        site::<CapillaryBed>("coronary bed"),
     );
+    let paying_heat = RowKind::Amount {
+        site: payer,
+        species: Species::Energy,
+        space: Space::Thermal,
+    };
     let inflow = field(
         "CV",
         "circulation",
@@ -832,6 +853,7 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         inflow: f64,
         stored: f64,
         heat: f64,
+        paying: f64,
     }
     let mut samples: Vec<Sample> = Vec::new();
     let mut openings: Vec<(u64, u64)> = Vec::new();
@@ -856,6 +878,7 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
             inflow: value(start, session, inflow),
             stored: held_at(start, session, muscle, Species::Oxygen),
             heat: bed_heat(start, session),
+            paying: value(start, session, paying_heat),
         });
     });
     let onsets = onsets(&openings);
@@ -970,13 +993,97 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         (net - (used + change)).abs() <= 1e-9 * (net.abs() + used.abs()),
         "the muscle bed took {net} of oxygen against {used} used and {change} stored"
     );
-    only_the_core_store_takes_the_beds_heat(body, &columns);
+    only_the_core_store_takes_the_beds_heat_but_its_burns_and_the_work_it_pays(body, &columns);
     assert!(
         (beats.heat_out - (beats.energy - stored)).abs() <= 1e-9 * beats.energy,
         "the core store took {} of heat against {} of fuel energy less {stored} the beds kept",
         beats.heat_out,
         beats.energy
     );
+    the_coronary_beds_fuel_pays_the_stroke_work_over_whole_beats(body, &columns, [&beginning, &end], held);
+    let kept = sample(last).paying - sample(first).paying;
+    let (mut heat, rest) = (0.0, lead(body_start_guess(paying_heat).expect("a finite guess")));
+    for pair in samples
+        .windows(2)
+        .filter(|pair| pair[0].at >= first && pair[1].at <= last)
+    {
+        heat += 0.5 * (pair[0].paying + pair[1].paying) * (pair[1].at - pair[0].at) as f64 / 1e9 / held;
+    }
+    assert!(
+        (heat - rest).abs() <= AT_REST * rest,
+        "the coronary bed holds {heat} of heat over whole beats against its rest of {rest}"
+    );
+    let paid = paid_by(body, &columns, payer, [&beginning, &end]);
+    assert!(
+        (paid.to_core - (paid.energy - paid.work - kept)).abs() <= 1e-6 * paid.energy,
+        "the coronary bed's heat took {paid:?} and kept {kept}"
+    );
+}
+
+#[derive(Debug)]
+struct Paid {
+    oxygen: f64,
+    energy: f64,
+    work: f64,
+    to_core: f64,
+}
+
+fn paid_by(body: &CompiledBody, columns: &[ColumnId], bed: SiteId, [from, to]: [&[f64]; 2]) -> Paid {
+    let mut paid = Paid {
+        oxygen: 0.0,
+        energy: 0.0,
+        work: 0.0,
+        to_core: 0.0,
+    };
+    let heat = |site, species, space| site == bed && species == Species::Energy && space == Space::Thermal;
+    for column in columns {
+        let moved = to[column.index()] - from[column.index()];
+        if burns(body, *column) && at_bed(body, *column, bed) {
+            paid.oxygen -= count(body, *column, |_, species, _| species == Species::Oxygen) * moved;
+            paid.energy += count(body, *column, |_, species, _| species == Species::Energy) * moved;
+        } else if pays_work(body, *column) {
+            paid.work -= count(body, *column, heat) * moved;
+        } else if !burns(body, *column) {
+            paid.to_core -= count(body, *column, heat) * moved;
+        }
+    }
+    paid
+}
+
+fn the_coronary_beds_fuel_pays_the_stroke_work_over_whole_beats(
+    body: &CompiledBody,
+    columns: &[ColumnId],
+    window: [&[f64]; 2],
+    held: f64,
+) {
+    let payer = site::<CapillaryBed>("coronary bed");
+    let burned = paid_by(body, columns, payer, window).oxygen / held;
+    assert!(
+        (burned - PAYER_DEMAND).abs() <= PAYER_MEAN * PAYER_DEMAND,
+        "the coronary bed burns {burned} oxygen a second over whole beats against {PAYER_DEMAND}"
+    );
+    for column in columns {
+        let column = &body.columns()[column.index()];
+        assert!(
+            column
+                .receipt()
+                .is_none_or(|receipt| receipt.boundary() != "chemical energy"),
+            "{:?} ends at chemical energy",
+            column.origin()
+        );
+    }
+    for (local, bed) in [("stroke work", "coronary bed"), ("wall work", "muscle bed")] {
+        let from = site::<CapillaryBed>(bed);
+        for column in columns
+            .iter()
+            .filter(|column| body.columns()[column.index()].origin().local == local)
+        {
+            let taken = count(body, *column, |site, species, space| {
+                site == from && species == Species::Energy && space == Space::Thermal
+            });
+            assert_eq!(taken, -1.0, "a {local} column takes no heat from the {bed}");
+        }
+    }
 }
 const LEDGER: f64 = 1e-4;
 
@@ -994,6 +1101,10 @@ const DEMANDS: [(&str, f64); 11] = [
     ("bone bed", 2.0),
 ];
 const AT_DEMAND: f64 = 2e-4;
+/// The coronary bed's burn ripples with the heart's work within a beat, so it meets its stated demand only over whole
+/// beats, to this share.
+const PAYER_MEAN: f64 = 1e-3;
+const PAYER_DEMAND: f64 = 8.0;
 const AT_REST: f64 = 2e-4;
 const AT_REST_LACTATE: f64 = 1e-9;
 
@@ -1123,7 +1234,7 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             })
             .sum();
         assert!(
-            (used - demand).abs() <= AT_DEMAND * demand,
+            key == "coronary bed" || (used - demand).abs() <= AT_DEMAND * demand,
             "the {key} burns {used} oxygen a second against its demand of {demand}"
         );
         for (species, space) in [
@@ -1139,8 +1250,9 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             };
             let held = value(start, &admitted, kind);
             let rest = lead(body_start_guess(kind).expect("a finite guess"));
+            let ripples = key == "coronary bed" && species == Species::Energy;
             assert!(
-                (held - rest).abs() <= AT_REST * rest.abs(),
+                ripples || (held - rest).abs() <= AT_REST * rest.abs(),
                 "the {key} admits {held} of {species:?} in {space:?} against its rest of {rest}"
             );
         }

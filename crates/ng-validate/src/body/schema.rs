@@ -106,6 +106,8 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
     ] {
         schema.pool::<Energy>(heat, Space::Thermal)?;
     }
+    schema.pay_work(Work::Stroke, site::<CapillaryBed>("coronary bed")?)?;
+    schema.pay_work(Work::Walls, site::<CapillaryBed>("muscle bed")?)?;
     boundaries(&mut schema)?;
     Ok(schema)
 }

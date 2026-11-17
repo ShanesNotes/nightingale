@@ -2699,7 +2699,7 @@ old = '''
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
             drifts
-                .element(element)?
+                .element(element, &sites(combination))?
                 .map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,
         ),
 '''
@@ -2710,7 +2710,7 @@ new = '''
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
             drifts
-                .element(element)?
+                .element(element, &sites(combination))?
                 .map_or_else(|| Measure::new(SYNTHETIC_ENERGY_DRIFT), Ok)?,
         ),
 '''
@@ -2725,7 +2725,7 @@ old = '''
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
             drifts
-                .element(element)?
+                .element(element, &sites(combination))?
                 .map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,
         ),
 '''
@@ -2735,7 +2735,7 @@ new = '''
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
             drifts
-                .element(element)?
+                .element(element, &sites(combination))?
                 .map_or_else(|| Measure::new(SYNTHETIC_ENERGY_DRIFT), Ok)?,
         ),
 '''
@@ -3756,8 +3756,8 @@ test = "-p ng-validate --test body each_beds_burns_carry_their_fuels_atoms_and_e
 [[mutant]]
 name = "carbon-element-drift-bound-tightened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Carbon, 0.8),'''
-new = '''(Element::Carbon, 0.4),'''
+old = '''(Element::Carbon, 0.9),'''
+new = '''(Element::Carbon, 0.45),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -4302,3 +4302,47 @@ new = '''            if route.is_some() {
                 check_ends(law, zero, &contexts, anatomy)?;
             }'''
 test = "-p ng-contract --lib edge_read::a_guard_on_a_body_wide_mode_that_states_the_read_is_refused"
+
+[[mutant]]
+name = "work-share-at-every-bed"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''    set::<Dimensionless>(packet, "mt.work-share", Binding::Class(Class::CapillaryBed), 0.0)?;'''
+new = '''    set::<Dimensionless>(packet, "mt.work-share", Binding::Class(Class::CapillaryBed), 1.0)?;'''
+test = "-p ng-validate --test viscosity only_the_coronary_beds_burn_follows_the_hearts_work_and_in_proportion"
+
+[[mutant]]
+name = "demand-reads-no-work"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''        let share = k.site_parameter(&work.share);'''
+new = '''        let share = k.zero();'''
+test = "-p ng-validate --test viscosity only_the_coronary_beds_burn_follows_the_hearts_work_and_in_proportion"
+
+[[mutant]]
+name = "work-memory-ignores-systole"
+path = "crates/ng-cardiovascular/src/walls/stroke_work.rs"
+old = '''            let work = k.as_dimension(product);'''
+new = '''            let _ = product;
+            let work = k.zero();'''
+test = "-p ng-validate --test viscosity the_work_follows_the_contractile_store_in_systole_and_the_field_is_the_memory"
+
+[[mutant]]
+name = "work-paid-from-outside-in-the-body"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''    schema.pay_work(Work::Stroke, site::<CapillaryBed>("coronary bed")?)?;
+    schema.pay_work(Work::Walls, site::<CapillaryBed>("muscle bed")?)?;'''
+new = ''''''
+test = "-p ng-validate --test body the_coronary_bed_pays_the_stroke_work_and_the_muscle_bed_the_walls_so_none_ends_at_chemical_energy"
+
+[[mutant]]
+name = "payer-hydrogen-bound-loosened"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''const PAYER_HYDROGEN_DRIFT: f64 = 0.2;'''
+new = '''const PAYER_HYDROGEN_DRIFT: f64 = 0.4;'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
+
+[[mutant]]
+name = "every-beds-hydrogen-takes-the-payers-bound"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''        if element == Element::Hydrogen && at.iter().all(|site| site.key() == STROKE_PAYER) {'''
+new = '''        if element == Element::Hydrogen {'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"

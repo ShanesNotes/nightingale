@@ -564,11 +564,12 @@ pub fn arena_certificate(
 }
 
 /// A body's own drift bounds, each in its species' unit, for the species it `names` in place of the slice's table,
-/// and in atoms for each element it bounds in place of `SYNTHETIC_DRIFT`.
+/// and in atoms for each element it bounds in place of `SYNTHETIC_DRIFT`. An element's bound may differ by the sites
+/// its quantity's amounts sit at.
 pub trait DriftTable {
     fn names(&self, species: Species) -> bool;
     fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError>;
-    fn element(&self, _: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+    fn element(&self, _: Element, _at: &[SiteId]) -> Result<Option<Measure<Atoms>>, AdmissionError> {
         Ok(None)
     }
 }
@@ -609,7 +610,19 @@ pub fn certificate_with(
         }
     }
     let basis = body.conserved_basis();
-    let quantities = basis.ids().map(|quantity| match quantity.book() {
+    let sites = |combination: &Combination| {
+        let mut at: Vec<SiteId> = (combination.terms().iter())
+            .filter_map(|(row, _)| match body.rows()[row.index()].kind() {
+                RowKind::Amount { site, .. } => Some(site),
+                RowKind::Memory(_) | RowKind::Algebraic(_) => None,
+            })
+            .collect();
+        at.sort_unstable();
+        at.dedup();
+        at
+    };
+    let quantities = (basis.combinations().iter()).map(|combination| (combination.id(), combination));
+    let quantities = quantities.map(|(quantity, combination)| match quantity.book() {
         Book::Of(Species::Energy) | Book::Energy if drifts.names(Species::Energy) => {
             Species::Energy.visit(Bounded(quantity, drifts))
         }
@@ -629,7 +642,7 @@ pub fn certificate_with(
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
             drifts
-                .element(element)?
+                .element(element, &sites(combination))?
                 .map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,
         ),
         Book::Charge => QuantityPolicy::charge(quantity, Measure::new(0.0)?, Measure::new(CLOSURE_RELATIVE)?),

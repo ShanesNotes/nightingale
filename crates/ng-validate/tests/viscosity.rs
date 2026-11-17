@@ -45,6 +45,17 @@ fn staged_on(
     packet: ParameterPacket<SyntheticFixture>,
     each: &[Vec<(usize, f64)>],
 ) -> Result<Vec<Vec<f64>>, InitializationFailure> {
+    let first = |workspace: &AdmissionWorkspace| vec![workspace.legs_of(0)[0]];
+    let staged = staged_in(body, packet, each, first)?;
+    Ok(staged.into_iter().flatten().collect())
+}
+
+fn staged_in(
+    body: &CompiledBody,
+    packet: ParameterPacket<SyntheticFixture>,
+    each: &[Vec<(usize, f64)>],
+    legs: impl Fn(&AdmissionWorkspace) -> Vec<LegHandle>,
+) -> Result<Vec<Vec<Vec<f64>>>, InitializationFailure> {
     let lens = body_lens(body)?;
     let parameters = body.bind(packet)?;
     let port = BoundaryPort::new(Vec::new())?;
@@ -60,11 +71,10 @@ fn staged_on(
                 workspace.unknowns_mut()[slot] = value;
             }
         }
-        residuals.push(
-            system
-                .stage_residuals(&workspace, workspace.legs_of(0)[0])?
-                .to_vec(),
-        );
+        let at_each = (legs(&workspace).into_iter())
+            .map(|leg| system.stage_residuals(&workspace, leg))
+            .collect::<Result<Vec<_>, _>>()?;
+        residuals.push(at_each);
     }
     Ok(residuals)
 }
@@ -344,5 +354,125 @@ fn every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt(
     fed.sort_unstable();
     assert_eq!(owed.len(), 11);
     assert_eq!(moved, fed);
+    Ok(())
+}
+
+fn cells(bed: &'static str, species: Species) -> RowKind {
+    RowKind::Amount {
+        site: site::<CapillaryBed>(bed),
+        species,
+        space: Space::Cells,
+    }
+}
+
+fn memory(local: &'static str) -> RowKind {
+    RowKind::Memory(Slot {
+        law: LawName { owner: "CV", local },
+        at: Context::Body,
+    })
+}
+
+const BEDS: [&str; 11] = [
+    "pulmonary bed",
+    "gut bed",
+    "muscle bed",
+    "glomerular bed",
+    "peritubular bed",
+    "brain bed",
+    "coronary bed",
+    "liver bed",
+    "fat bed",
+    "skin bed",
+    "bone bed",
+];
+
+/// Each bed's cells hold oxygen at 10,000 mmHg, so every oxygen rate sits at its demand and the burns move with the
+/// demand alone.
+#[test]
+fn only_the_coronary_beds_burn_follows_the_hearts_work_and_in_proportion() -> Result<(), InitializationFailure>
+{
+    let body = whole_body()?;
+    let work = index(&body, algebraic("CV", "myocardial_work", Context::Body));
+    let oxygen: Vec<usize> = (BEDS.iter())
+        .map(|bed| index(&body, cells(bed, Species::Oxygen)))
+        .collect();
+    let mut plenty: Vec<(usize, f64)> = (BEDS.iter())
+        .map(|bed| (index(&body, cells(bed, Species::Water)), 1_000.0))
+        .collect();
+    plenty.extend(oxygen.iter().map(|row| (*row, 10_000.0)));
+    let each: Vec<_> = [0.0, 18_000.0, 36_000.0]
+        .iter()
+        .map(|w| [plenty.clone(), vec![(work, *w)]].concat())
+        .collect();
+    let staged = staged(&body, &each)?;
+    for (bed, row) in BEDS.iter().zip(&oxygen) {
+        let (once, twice) = (
+            staged[1][*row] - staged[0][*row],
+            staged[2][*row] - staged[0][*row],
+        );
+        if *bed == "coronary bed" {
+            assert!(once != 0.0, "the coronary bed's burn ignores the work");
+            assert!(
+                (twice - 2.0 * once).abs() <= 1e-6 * once.abs(),
+                "{once} then {twice}"
+            );
+        } else {
+            assert_eq!(
+                once.to_bits(),
+                0f64.to_bits(),
+                "the {bed}'s burn moves with the work"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Every leg a staged start holds is in systole, the start's mode, so diastole's fall shows only in a run, where the
+/// work's whole-beat mean meets what the stroke work paid.
+#[test]
+fn the_work_follows_the_contractile_store_in_systole_and_the_field_is_the_memory()
+-> Result<(), InitializationFailure> {
+    let body = whole_body()?;
+    let (held, store, activation, work) = (
+        index(&body, memory("work memory")),
+        index(&body, algebraic("CV", "contractile store", Context::Body)),
+        index(&body, memory("activation")),
+        index(&body, algebraic("CV", "myocardial_work", Context::Body)),
+    );
+    let at = |memory: f64, stored: f64, field: f64| {
+        vec![(held, memory), (store, stored), (activation, 0.0), (work, field)]
+    };
+    let each = [
+        at(0.0, 1e4, 0.0),
+        at(0.0, 2e4, 0.0),
+        at(0.0, 3e4, 0.0),
+        at(1e4, 1e4, 1e4),
+        at(2e4, 1e4, 0.0),
+    ];
+    let every = |workspace: &AdmissionWorkspace| -> Vec<LegHandle> {
+        (0..)
+            .map(|point| workspace.legs_of(point))
+            .take_while(|legs| !legs.is_empty())
+            .flatten()
+            .collect()
+    };
+    let staged = staged_in(&body, body_packet(&body)?, &each, every)?;
+    assert!(!staged[0].is_empty());
+    for (leg, first) in staged[0].iter().enumerate() {
+        let row = |state: usize, row: usize| staged[state][leg][row];
+        let (once, twice) = (row(1, held) - first[held], row(2, held) - first[held]);
+        let itself = row(3, held) - first[held];
+        assert!(once != 0.0, "leg {leg}: the memory ignores the store");
+        assert!(
+            (twice - 2.0 * once).abs() <= 1e-9 * once.abs(),
+            "leg {leg}: {once} then {twice}"
+        );
+        assert!(
+            itself * once < 0.0,
+            "leg {leg}: the memory moves with itself as with the store"
+        );
+        assert_eq!(row(3, work), 0.0, "leg {leg}: the field is not the memory");
+        assert_eq!(row(4, work).abs(), 2e4, "leg {leg}: the field is not the memory");
+    }
     Ok(())
 }

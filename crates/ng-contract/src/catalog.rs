@@ -445,8 +445,9 @@ coupling_map! {
     77 Cardiovascular => Nervous, "baroreceptor afferents", live,
         wired (BaroreceptorAfferents { carotid_sinus_stretch: Dimensionless => 6, aortic_arch_stretch: Dimensionless => 6 });
     78 Cardiovascular => Metabolism, "myocardial work, flow per bed", sink,
-        wired (MyocardialWorkAndBedFlow { myocardial_work: Rate<Energy> => 9,
-            flow_per_bed: PerSite<CapillaryBed, Rate<Volume>> => 9 });
+        wired (MyocardialWorkAndBedFlow { myocardial_work: Rate<Energy> => 9 })
+        held [flow_per_bed: PerSite<CapillaryBed, Rate<Volume>> => Cardiovascular
+            "no law reads a bed's flow at rung 0: a bed's oxygen arrives by the blood's own transport into its plasma"];
     79 Cardiovascular => Endocrine, "wall stress", sink,
         wired (WallStress { atrial_wall_stress: Pressure => 17 })
         held [ventricular_wall_stress: Pressure => Cardiovascular "one natriuretic peptide is secreted, on atrial stretch"];
@@ -550,7 +551,7 @@ const _: () = assert!(SLICE.mapped() == 27 && SLICE.unmapped() == 11);
 const _: () = assert!(SLICE.incident_mapped == 27 && SLICE.incident_unmapped == 1);
 const _: () = assert!(WHOLE_BODY.live == 18 && WHOLE_BODY.relation == 5 && WHOLE_BODY.held == 15);
 const FIELDS: FieldCount = field_count();
-const _: () = assert!(FIELDS.wired == 21 && FIELDS.held == 29 && FIELDS.wire_and_hold == 6);
+const _: () = assert!(FIELDS.wired == 20 && FIELDS.held == 30 && FIELDS.wire_and_hold == 7);
 const _: () = {
     let mut i = 0;
     while i < MAP_EDGES {
@@ -575,7 +576,7 @@ const _: () = {
     }
 };
 const _: () = {
-    let wire_and_hold = [79, 87, 89, 90, 95, 114];
+    let wire_and_hold = [78, 79, 87, 89, 90, 95, 114];
     let mut i = 0;
     while i < wire_and_hold.len() {
         let carries = ARROWS[wire_and_hold[i] - 77].carries;
@@ -639,7 +640,8 @@ const _: () = {
 };
 
 const _: () = {
-    let plan: [(usize, &str, &str); 29] = [
+    let plan: [(usize, &str, &str); 30] = [
+        (78, "flow_per_bed", "CV"),
         (79, "ventricular_wall_stress", "CV"),
         (87, "thermostat_set_point", "NS"),
         (87, "sweat_drive", "NS"),
@@ -688,11 +690,10 @@ const _: () = {
     assert!(n == plan.len());
 };
 const _: () = {
-    let plan: [(usize, &str, u8); 21] = [
+    let plan: [(usize, &str, u8); 20] = [
         (77, "carotid_sinus_stretch", 6),
         (77, "aortic_arch_stretch", 6),
         (78, "myocardial_work", 9),
-        (78, "flow_per_bed", 9),
         (79, "atrial_wall_stress", 17),
         (80, "capillary_pressure", 6),
         (80, "venous_pressure", 6),
