@@ -438,3 +438,53 @@ fn a_named_payer_reaches_the_model_hash_where_it_moves_no_column() -> Result<(),
     }
     Ok(())
 }
+
+#[test]
+fn named_work_without_an_elastic_store_is_refused_instead_of_dropped() -> Result<(), AdmissionError> {
+    let payers = [(Work::Stroke, "liver bed"), (Work::Walls, "gut bed")];
+    let complete = paid_work(&payers, true)?;
+    assert!(!columns(&complete, "stroke work").is_empty());
+    assert_eq!(columns(&complete, "wall work").len(), 1);
+
+    let mut schema = Schema::new(whole_body()?)?;
+    watery_spaces_left_out(&mut schema);
+    schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+    for &(work, bed) in &payers {
+        schema.pay_work(work, site::<CapillaryBed>(bed))?;
+    }
+    let class = wave()?;
+    let compiled = assemble(schema, |mut body| {
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let stroke = ports.stroke_work(&mut cv);
+        let still = cv.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_at(&stroke, still);
+        let walls = ports.wall_work(&mut cv);
+        let none = cv.kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer(Transfer::new(&walls, none));
+        body.add(cv.finish());
+        let (mut fl, ports) = body.fluids()?.parts();
+        let pumps = ports.pump_work(&mut fl);
+        let still = fl.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, fl.every_mode(), class)
+        });
+        fl.transfer_at(&pumps, still);
+        body.add(fl.finish());
+        body.compile()
+    });
+    match compiled {
+        Err(AdmissionError::Compile(_)) => Ok(()),
+        Err(other) => Err(other),
+        Ok(body) => panic!(
+            "named work without an elastic store compiled: {} stroke work columns and {} wall work columns",
+            columns(&body, "stroke work").len(),
+            columns(&body, "wall work").len()
+        ),
+    }
+}
