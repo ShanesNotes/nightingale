@@ -20,6 +20,8 @@ Blocked by: 06, 26, `.scratch/research/issues/14-law-forms-volume-and-acid.md`
 
 From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md) and [research 14](../../research/issues/14-law-forms-volume-and-acid.md): insulin multiplies the pump's maximum rate in the muscle and fat beds by `rho = 1 + S_K E_ins`, which [ticket 15](15-insulin-and-glucagon.md) writes, so this ticket's pump carries that factor at 1 until ticket 15 lands.
 
+From [ticket 09](09-tissues-respire.md)'s third PR: the edge from the glomerular bed into the peritubular bed would answer the peritubular bed's oxygen debt, so its debt share is 0 at rung 0, and that vessel's tone is this ticket's to state.
+
 From [ticket 03](03-whole-body-lists.md)'s Answer: the pumps' work is a heat route that draws on the receipt `chemical energy` until [ticket 09](09-tissues-respire.md) pays work by fuel. Once beds burn fuel, the pump law keeps its share out of the bed's demand.
 
 From [ticket 04](04-scopes-ports-and-census.md):

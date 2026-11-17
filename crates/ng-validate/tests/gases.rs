@@ -118,7 +118,8 @@ const OXYGEN_PER_LACTATE: f64 = 3.0;
 const LACTATE_BURN_SPEED: f64 = 0.02;
 const LACTATE_HALF_PRESSURE: f64 = 2.0;
 const DEBT_SHARE: f64 = 0.5;
-const DEBT_HALF: f64 = DEMAND * 1e-3;
+const DEBT_HALF_TIME: f64 = 1e-3;
+const DEBT_HALF: f64 = DEMAND * DEBT_HALF_TIME;
 
 fn ten_to(power: f64) -> f64 {
     exp(power * LN_10)
@@ -587,6 +588,7 @@ struct Start {
     cell_conductance: f64,
     cell_lactate: f64,
     stated_debt: f64,
+    debt_share: f64,
 }
 impl Start {
     fn at(plasma: Speciated) -> Self {
@@ -605,6 +607,7 @@ impl Start {
             cell_conductance: used() / HEAD,
             cell_lactate: 0.0,
             stated_debt: 0.0,
+            debt_share: DEBT_SHARE,
         }
     }
     fn cold(plasma: Speciated) -> Self {
@@ -843,8 +846,13 @@ fn packet_from(
     }
     set::<Rate<Dimensionless>>(&mut packet, "fixture.renewal", body_wide, start.renewal)?;
     if declares(body, "fixture.debt-half") {
-        set::<Dimensionless>(&mut packet, "fixture.debt-share", body_wide, DEBT_SHARE)?;
-        set::<Oxygen>(&mut packet, "fixture.debt-half", body_wide, DEBT_HALF)?;
+        set::<Dimensionless>(&mut packet, "fixture.debt-share", body_wide, start.debt_share)?;
+        set::<Oxygen>(
+            &mut packet,
+            "fixture.debt-half",
+            body_wide,
+            start.demand * DEBT_HALF_TIME,
+        )?;
     }
     if declares(body, "fixture.oxygen-per-lactate") {
         let per = OXYGEN_PER_LACTATE;
@@ -2621,7 +2629,7 @@ fn the_beds_resistance_meets_its_form_at_no_debt_a_hair_under_none_and_its_half(
         );
     }
     for debt in [0.0, -1e-29, DEBT_HALF] {
-        let share = (debt + DEBT_HALF - DEBT_SHARE * debt) / (debt + DEBT_HALF);
+        let share = (DEBT_HALF + (debt - DEBT_SHARE * debt)) / (debt + DEBT_HALF);
         let start = Start {
             stated_debt: debt,
             ..rest
@@ -2635,6 +2643,31 @@ fn the_beds_resistance_meets_its_form_at_no_debt_a_hair_under_none_and_its_half(
             "at a debt of {debt} the plasma holds {held} oxygen against {expected}, a share of {share}"
         );
     }
+    Ok(())
+}
+
+#[test]
+fn a_full_debt_share_keeps_a_positive_resistance_at_finite_debt() -> Result<(), InitializationFailure> {
+    let (plain, stated) = (compiled(Cells::HeldUse)?, compiled(Cells::HeldUseAtAStatedDebt)?);
+    let rest = Start::at(speciated(ARTERIAL));
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let without = after(admitted(&plain, &core, &store, rest)?, 1);
+    let debt = 1e16;
+    let retained = DEBT_HALF / (debt + DEBT_HALF);
+    let start = Start {
+        stated_debt: debt,
+        debt_share: 1.0,
+        renewal: rest.renewal * retained,
+        ..rest
+    };
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let with = after(admitted(&stated, &core, &store, start)?, 1);
+    let expected = column_rate(&plain, &without, ARTERY_OXYGEN);
+    let delivered = column_rate(&stated, &with, ARTERY_OXYGEN);
+    assert!(
+        expected > 0.0 && close(delivered, expected, 1e-10),
+        "{delivered} against {expected}"
+    );
     Ok(())
 }
 
@@ -2666,7 +2699,7 @@ fn halving_the_flow_raises_extraction_then_the_debt_and_the_flow_with_the_debt()
     let debts: Vec<f64> = seen.debts.iter().map(|(_, debt)| *debt).collect();
     let widest = (seen.flows.iter().zip(&debts))
         .map(|(flow, debt)| {
-            let share = (debt + DEBT_HALF - DEBT_SHARE * debt) / (debt + DEBT_HALF);
+            let share = (DEBT_HALF + (debt - DEBT_SHARE * debt)) / (debt + DEBT_HALF);
             (flow * RENEWAL / start.renewal * share - 1.0).abs()
         })
         .fold(0.0, |widest, off| if off > widest { off } else { widest });
@@ -2735,6 +2768,42 @@ fn with_the_loop_closed_each_stress_settles_with_no_refusal_and_every_pressure_i
         assert!(seen.least_rates.iter().all(|least| *least >= 0.0), "{report}");
         assert!(still.iter().all(|share| *share < 1e-3), "{report}");
     }
+    Ok(())
+}
+
+#[test]
+fn the_closed_loops_half_response_uses_the_beds_stated_demand() -> Result<(), InitializationFailure> {
+    let body = compiled(Cells::BurningInTheLoop)?;
+    let settled = settled(&body)?;
+    let start = Start {
+        demand: 3.0 * DEMAND,
+        renewal: RENEWAL,
+        oxygen_reach: BODY_REACH,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let session = readmitted(&body, &core, &store, start, &settled)?;
+    let session = run_until(session, SimTime::from_ns(SECOND / 10))
+        .unwrap_or_else(|stopped| panic!("{:?}", stopped.fault()));
+    let debt = value(&body, &session, field("oxygen_debt_per_bed")?);
+    let seconds = session
+        .conservation()
+        .head()
+        .expect("a step")
+        .interval()
+        .length_ns() as f64
+        / SECOND as f64;
+    let owed_before_the_burn = debt + OXYGEN_PER_LACTATE * extent(&body, &session, "lactate burn") * seconds;
+    let half = start.demand * DEBT_HALF_TIME;
+    let least_resistance = 1.0 - DEBT_SHARE * owed_before_the_burn / (owed_before_the_burn + half);
+    let most_delivered = flow(start.renewal) * start.arterial.oxygen_content / least_resistance;
+    let delivered = column_rate(&body, &session, ARTERY_OXYGEN);
+    assert!(debt > 0.0 && delivered > 0.0);
+    assert!(
+        delivered <= most_delivered * (1.0 + 1e-3),
+        "at demand {} and debt at most {owed_before_the_burn}, the artery delivers {delivered}, above {most_delivered}",
+        start.demand
+    );
     Ok(())
 }
 

@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "c275ac4e5a654ab465c4459137309074fc3577728f1642f5f225c7e561de003c";
-const ADMITTED_SEAL: &str = "e0bcb8b8fcad54ce4308ac30d5b881bc262a4719a13b38f7bd08a7a391d0810d";
+const PACKET: &str = "b4cdd5039bd7898d742ea99e414a53e981894ae78a227ad885885034724230f6";
+const ADMITTED_SEAL: &str = "26bd65588f1346d4a8e0e964e6793c6be60e50707a0a20396beee6d95b45f3a9";
 
 struct Counted {
     core: ng_solver::Core,
@@ -487,8 +487,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet c275ac4e5a654ab465c4459137309074fc3577728f1642f5f225c7e561de003c
-        seal a29a098d48689089c560b90d48c4cf545716ff93213525a9d03890adc18f8d3e
+        packet b4cdd5039bd7898d742ea99e414a53e981894ae78a227ad885885034724230f6
+        seal 25aa4c562c32628864eaf3efc8dae3f23ddac96b2dbf7cfc979cd75f9ed016b7
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
@@ -1158,7 +1158,7 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
                 "the {key} {when} holds {held} lactate in its cells and owes {owed} oxygen"
             );
             let whole = owed + half;
-            let kept = (whole - share * owed) / whole;
+            let kept = (half + (owed - share * owed)) / whole;
             assert_eq!(
                 kept.to_bits(),
                 1f64.to_bits(),

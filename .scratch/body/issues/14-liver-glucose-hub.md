@@ -16,6 +16,8 @@ Blocked by: 02, 13, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 
 **Non-goals:** drug clearance, bile, ammonia's effect on the brain, and zones within the liver.
 
+From [ticket 09](09-tissues-respire.md)'s third PR: the liver bed's two inflows are this card's sinusoids, so the circulation's answer to a bed's oxygen debt reaches neither, and the liver bed has no such answer until this ticket's sinusoid law reads the liver bed's debt on arrow 90 or rules that it does not.
+
 From [research 12](../../research/issues/12-law-forms-heat.md) and [research 13](../../research/issues/13-law-forms-gut-and-fuels.md): the meal's heat comes from the storage and conversion reactions, so each storage and conversion reaction this ticket writes burns a share of what it uses in its own counts and posts that heat into the liver bed's thermal pool, by the row "The meal's heat" in research 13's table for ticket 16.
 
 From [ticket 29](29-the-charge-default.md): the liver's conversions, glucose from lactate, urea from amino acids and the fixed acid from their sulfur, are written with neutral moieties and no hydrogen ion or counter-charge term. Every term's fixed charge is zero, so only elements and energy can leave such a reaction open.
