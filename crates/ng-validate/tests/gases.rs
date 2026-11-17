@@ -1141,19 +1141,17 @@ fn a_fast_renewal(
         local,
     };
     let renewed = renewed(Cells::HeldUse, start, law)?;
-    Ok((renewed.named, renewed.accepted))
+    Ok((renewed.refused, renewed.accepted))
 }
 
 #[derive(Debug)]
 struct Renewed {
-    named: usize,
-    again: usize,
+    refused: usize,
+    refused_again: usize,
     accepted: usize,
     others: Vec<String>,
 }
 
-/// Steps a tenth of a second, counting the trials refused by `law`'s own op, those refused by it again on the retry
-/// that follows, and the steps accepted.
 fn renewed(cells: Cells, start: Start, law: LawName) -> Result<Renewed, InitializationFailure> {
     let (body, core, store) = (
         compiled(cells)?,
@@ -1162,8 +1160,8 @@ fn renewed(cells: Cells, start: Start, law: LawName) -> Result<Renewed, Initiali
     );
     let mut session = admitted(&body, &core, &store, start)?;
     let mut renewed = Renewed {
-        named: 0,
-        again: 0,
+        refused: 0,
+        refused_again: 0,
         accepted: 0,
         others: Vec::new(),
     };
@@ -1189,8 +1187,8 @@ fn renewed(cells: Cells, start: Start, law: LawName) -> Result<Renewed, Initiali
                     if !named {
                         renewed.others.push(format!("{:?}", retrying.refused().reason()));
                     }
-                    renewed.named += usize::from(named);
-                    renewed.again += usize::from(named && before);
+                    renewed.refused += usize::from(named);
+                    renewed.refused_again += usize::from(named && before);
                     before = named;
                     attempt = retrying.retry();
                 }
@@ -1219,8 +1217,8 @@ fn a_fast_renewal_is_refused_by(
         local,
     };
     let renewed = renewed(Cells::HeldUse, start, law)?;
-    assert!(renewed.named > 0, "no step was refused by {local}");
-    assert!(renewed.again > 0, "no retry was refused by {local} again");
+    assert!(renewed.refused > 0, "no step was refused by {local}");
+    assert!(renewed.refused_again > 0, "no retry was refused by {local} again");
     Ok(())
 }
 
@@ -1791,7 +1789,6 @@ fn named(owner: &str, local: &str) -> String {
     format!("LawName {{ owner: {owner:?}, local: {local:?} }}")
 }
 
-/// The items of the first list after `label` in a program's listing, split at its own commas.
 fn items<'a>(listing: &'a str, label: &str) -> Vec<&'a str> {
     let start = listing.find(label).expect("a program lists it") + label.len();
     let (mut depth, mut from, mut items) = (0, start, Vec::new());
@@ -1902,7 +1899,7 @@ fn a_second_reader_adds_no_row_and_a_refusal_in_its_own_arithmetic_names_it() ->
         local: "gas gap",
     };
     let renewed = renewed(Cells::SecondReader, start, law)?;
-    assert!(renewed.named > 0, "no step was refused by the second reader: {renewed:?}");
-    assert!(renewed.again > 0, "no retry was refused by the second reader again: {renewed:?}");
+    assert!(renewed.refused > 0, "no step was refused by the second reader: {renewed:?}");
+    assert!(renewed.refused_again > 0, "no retry was refused by the second reader again: {renewed:?}");
     Ok(())
 }

@@ -36,7 +36,6 @@ struct Plasma<'b> {
     ions: StrongIons<'b>,
 }
 
-/// Blood chemistry's own reads of what it states, and the Henry's law terms its carbon dioxide partial pressure uses.
 struct Stated<'b> {
     oxygen_partial_pressure: Port<'b, Pressure>,
     saturation: Port<'b, Dimensionless>,
