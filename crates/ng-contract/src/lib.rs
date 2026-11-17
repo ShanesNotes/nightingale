@@ -281,6 +281,21 @@
 //!     k.exp(x)
 //! }
 //! ```
+//! `expm1` takes a dimensionless argument, as `exp` does: a pressure has no exponential.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn pressure<'b, 'k>(k: &mut Kernel<'b, 'k, Renal>, p: Expr<'b, 'k, Renal, Pressure>)
+//!     -> Expr<'b, 'k, Renal, Dimensionless> {
+//!     k.expm1(p)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn share<'b, 'k>(k: &mut Kernel<'b, 'k, Renal>, x: Expr<'b, 'k, Renal, Dimensionless>)
+//!     -> Expr<'b, 'k, Renal, Dimensionless> {
+//!     k.expm1(x)
+//! }
+//! ```
 //! A guard fires only its own owner's transition: a renal guard cannot switch a valve.
 //! ```compile_fail,E0308
 //! use ng_contract::*;
@@ -481,6 +496,21 @@
 //! fn vein<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
 //!     volume: &ReadPort<'b, Cardiovascular, PerSite<Blood, Volume>>) -> Expr<'b, 'k, Cardiovascular, Volume> {
 //!     k.at_site_in(volume)
+//! }
+//! ```
+//! A law on one tissue's beds reads every bed's entries, and not a vein's.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn lung<'b, 'k>(k: &mut Kernel<'b, 'k, Metabolism, Beds<Lung>>,
+//!     pressure: &ReadPort<'b, Metabolism, PerSite<Veins, Pressure>>) -> Expr<'b, 'k, Metabolism, Pressure> {
+//!     k.at_site_in(pressure)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn lung<'b, 'k>(k: &mut Kernel<'b, 'k, Metabolism, Beds<Lung>>,
+//!     pressure: &ReadPort<'b, Metabolism, PerSite<CapillaryBed, Pressure>>) -> Expr<'b, 'k, Metabolism, Pressure> {
+//!     k.at_site_in(pressure)
 //! }
 //! ```
 //! Only this crate says which set includes which.
@@ -750,6 +780,21 @@
 //! use ng_contract::*;
 //! fn cancels<T: SameDimension<Temperature>>() {}
 //! cancels::<Quotient<Energy, Quotient<Energy, Temperature>>>();
+//! ```
+//! A viscosity over a viscosity is dimensionless, so a resistance scales by the blood's viscosity over a reference.
+//! ```
+//! use ng_contract::*;
+//! fn ratio<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular>, blood: Expr<'b, 'k, Cardiovascular, Viscosity>,
+//!     reference: Expr<'b, 'k, Cardiovascular, Viscosity>) -> Expr<'b, 'k, Cardiovascular, Dimensionless> {
+//!     let ratio = k.divide(blood, reference);
+//!     k.as_dimension(ratio)
+//! }
+//! ```
+//! A viscosity over a pressure is not.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn share<T: SameDimension<Dimensionless>>() {}
+//! share::<Quotient<Viscosity, Pressure>>();
 //! ```
 //! A membrane's reflection is a share, so it is dimensionless.
 //! ```compile_fail,E0308
@@ -1595,7 +1640,7 @@ pub use image::*;
 pub use law::*;
 pub use lens::{Channel, ChannelSpec, ObservationLens};
 pub use packet::*;
-pub use pinned::exp;
+pub use pinned::{exp, expm1};
 pub use problem::*;
 pub use provenance::*;
 pub use quadrature::*;

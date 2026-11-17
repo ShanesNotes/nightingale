@@ -203,3 +203,7 @@ mutants = ["unwired-read-passes", "unwired-read-off-the-rows-set"]
 [[row]]
 core = "A sensor reads arterial speciation at a segment the map does not sample"
 mutants = ["speciated-takes-every-segment", "explicit-read-off-its-set"]
+
+[[row]]
+core = "A law reads one tissue's bed where the map gives that tissue no bed or two"
+mutants = ["only-at-sums"]

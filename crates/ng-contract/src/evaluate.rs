@@ -58,6 +58,7 @@ enum Instr {
     Relax([usize; 3]),
     Volume([usize; 1]),
     Upwind([usize; 5]),
+    Expm1([usize; 1]),
 }
 
 /// A read is split by where its value comes from, so a parameter or unknown is copied from the caller's slice with no
@@ -158,6 +159,7 @@ impl Tape {
                 Op::Relax(operands) => Instr::Relax(*operands),
                 Op::Volume(operand) => Instr::Volume(*operand),
                 Op::Upwind(operands) => Instr::Upwind(*operands),
+                Op::Expm1(operand) => Instr::Expm1(*operand),
             };
             self.steps.push((at, instr));
         }
@@ -312,6 +314,7 @@ fn apply(instr: Instr, values: &[f64], partial_volume: f64) -> Result<f64, Opera
         Instr::SmoothMax([a, b, width]) => smooth(at(a), at(b), at(width), 1.0).0,
         Instr::SmoothMin([a, b, width]) => smooth(at(a), at(b), at(width), -1.0).0,
         Instr::Exp([x]) => pinned::exp(at(x)),
+        Instr::Expm1([x]) => pinned::expm1(at(x)),
         Instr::Logistic([x]) => 1.0 / (1.0 + pinned::exp(-at(x))),
         Instr::Ln([x]) => pinned::ln(at(x)).ok_or(OperatorDomain::LogarithmArgument)?,
         Instr::Relax([target, current, speed]) => at(speed) * (at(target) - at(current)),
@@ -461,6 +464,7 @@ fn backward(arithmetic: Arithmetic<'_>, values: &[f64], partial_volume: f64, slo
                 slopes[width] += slope * 0.5 * sign * across;
             }
             Instr::Exp([x]) => slopes[x] += slope * values[at],
+            Instr::Expm1([x]) => slopes[x] += slope * (values[at] + 1.0),
             Instr::Logistic([x]) => slopes[x] += slope * values[at] * (1.0 - values[at]),
             Instr::Ln([x]) => slopes[x] += slope / values[x],
             Instr::Relax([target, current, speed]) => {
@@ -1176,6 +1180,7 @@ mod tests {
             Op::Relax(operands) => ("relax", operands.to_vec()),
             Op::Volume(operand) => ("volume", operand.to_vec()),
             Op::Upwind(operands) => ("upwind", operands.to_vec()),
+            Op::Expm1(operand) => ("expm1", operand.to_vec()),
         })
     }
 
@@ -1195,6 +1200,7 @@ mod tests {
             Instr::Relax(operands) => ("relax", operands.to_vec()),
             Instr::Volume(operand) => ("volume", operand.to_vec()),
             Instr::Upwind(operands) => ("upwind", operands.to_vec()),
+            Instr::Expm1(operand) => ("expm1", operand.to_vec()),
         }
     }
 

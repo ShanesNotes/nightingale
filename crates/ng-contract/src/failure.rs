@@ -1,6 +1,6 @@
 use crate::{
     AnatomyDefect, AnchorId, Binding, Book, Digest, InputId, Lasting, LawName, ModeValue, ParameterKey,
-    Predicate, QuantityId, RowId, RowKind, SimTime, SiteId, Slot, SourceId, Space, Species,
+    Predicate, QuantityId, RowId, RowKind, SimTime, SiteId, Sites, Slot, SourceId, Space, Species,
 };
 
 /// A refusal at a construction call, at `AnatomyBuilder::finish`, at `Assembly::compile`, or at admission.
@@ -378,6 +378,8 @@ pub enum CompileDefect {
     /// A kernel that adds a site term, attached where it stands at no site: a body memory's rate, or a guard's zero,
     /// named by its mode variable. A term is written in only at a site of its set, so there it would vanish.
     TermOffSite { law: LawName },
+    /// A row `FragmentBuilder::only_at` reads at the only site of a set the map gives no site or more than one.
+    NotOneSite { law: LawName, set: Sites },
     /// A guard that resets a row whose set does not hold zero, so a firing would publish a state no run can resume.
     ResetOutsideSet { law: LawName },
     /// A law reads a junction at a site the map neither supplies nor states that no nerve reaches.

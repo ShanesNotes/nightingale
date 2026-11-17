@@ -195,6 +195,13 @@ fn step(instr: Instr, jets: &[Jet], partial_volume: f64) -> Option<Jet> {
                 slope: value.times(at(x).slope)?,
             }
         }
+        Instr::Expm1([x]) => {
+            let value = at(x).value.monotone(|x| Some(pinned::expm1(x)))?;
+            Jet {
+                value,
+                slope: value.plus(Bounds::exact(1.0))?.times(at(x).slope)?,
+            }
+        }
         Instr::Logistic([x]) => {
             let logistic = |x: f64| Some(1.0 / (1.0 + pinned::exp(-x)));
             let value = at(x).value.monotone(logistic)?;

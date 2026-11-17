@@ -3957,6 +3957,29 @@ new = ''''''
 test = "-p ng-contract --lib written::a_fields_range_is_judged_under_the_field_in_each_program_it_is_written_into"
 
 [[mutant]]
+name = "only-at-sums"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+                let [site] = anatomy.in_set(set)[..] else {
+                    return Err(CompileDefect::NotOneSite { law: law.name, set });
+                };
+                vec![(Context::Site(site), Target::Row(row))]
+'''
+new = '''
+                (anatomy.in_set(set).into_iter())
+                    .map(|site| (Context::Site(site), Target::Row(row)))
+                    .collect()
+'''
+test = "-p ng-contract --test one_site a_map_with_two_lung_beds_is_refused_by_the_law_and_the_set"
+
+[[mutant]]
+name = "expm1-as-exp-minus-one"
+path = "crates/ng-contract/src/pinned.rs"
+old = '''        0 => r + s,'''
+new = '''        0 => exp(x) - 1.0,'''
+test = "-p ng-contract --lib pinned::tests::expm1_is_within_one_ulp_of_the_correctly_rounded_value"
+
+[[mutant]]
 name = "ledger-walk-drops-the-last-nonzero-column"
 path = "crates/ng-record/src/history.rs"
 old = '''    for &(column, net) in nonzero {'''
