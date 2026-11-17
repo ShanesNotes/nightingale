@@ -1,5 +1,5 @@
 use crate::shared::drive;
-use ng_contract::catalog::{BloodViscosity, Reads, TubuloglomerularFeedback};
+use ng_contract::catalog::{BloodViscosity, OxygenDebtPerBed, Reads, TubuloglomerularFeedback};
 use ng_contract::*;
 
 pub(crate) fn plain_edges<'b>(
@@ -9,7 +9,7 @@ pub(crate) fn plain_edges<'b>(
     pressure: &ReadPort<'b, Cardiovascular, PerSite<Blood, Pressure>>,
     head: &Parameter<'b, Cardiovascular, Quotient<Pressure, Length>>,
     wave: RateClass,
-    reads_viscosity: bool,
+    whole_body: bool,
 ) -> Result<(), AdmissionError> {
     let resistance =
         cv.edge_parameter::<_, Resistance>(ParameterKey::new("cv.resistance"), Admissible::positive());
@@ -21,13 +21,20 @@ pub(crate) fn plain_edges<'b>(
     );
     let alpha = ports.effect::<Norepinephrine>();
     let feedback: TubuloglomerularFeedback<Reads<'_, Cardiovascular>> = cv.receive();
-    let viscosity = reads_viscosity.then(|| {
+    let viscosity = whole_body.then(|| {
         let line: BloodViscosity<Reads<'b, Cardiovascular>> = cv.receive();
         let reciprocal = cv.parameter::<Quotient<Dimensionless, Viscosity>>(
             ParameterKey::new("cv.reference-viscosity-reciprocal"),
             Admissible::positive(),
         );
         (line.viscosity, reciprocal)
+    });
+    let debt = whole_body.then(|| {
+        let line: OxygenDebtPerBed<Reads<'b, Cardiovascular>> = cv.receive();
+        let share =
+            cv.end_parameter::<Dimensionless>(ParameterKey::new("cv.debt-share"), Admissible::unit_interval());
+        let half = cv.end_parameter::<Oxygen>(ParameterKey::new("cv.debt-half"), Admissible::positive());
+        (line.oxygen_debt_per_bed, share, half)
     });
     let flow = cv.edge_kernel(|mut k| {
         let head_across = drive(&mut k, pressure, head);
@@ -53,6 +60,15 @@ pub(crate) fn plain_edges<'b>(
                 let ratio = k.multiply(reciprocal, mu);
                 let ratio: Expr<'_, '_, _, Dimensionless> = k.as_dimension(ratio);
                 k.scale(total, ratio)
+            }
+            None => total,
+        };
+        let total = match &debt {
+            Some((owed, share, half)) => {
+                let owed = k.downstream_if_in(owed);
+                let (share, half) = (k.downstream_parameter(share), k.downstream_parameter(half));
+                let kept = resistance_share_at_debt(&mut k, owed, share, half);
+                k.scale(total, kept)
             }
             None => total,
         };

@@ -36,9 +36,9 @@ pub fn declare<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardio
     declare_with(scope, false)
 }
 
-/// As `declare`, and each plain edge's resistance also scales by viscosity (line 114) over a reference. Only a root
-/// that declares hematology's law calls it, so the slice keeps its model.
-pub fn declare_reading_viscosity<'b>(
+/// As `declare`, and each plain edge's resistance also scales by viscosity (line 114) over a reference and by the oxygen
+/// debt of the bed it feeds (line 90). Only the whole body's root calls it, so the slice keeps its model.
+pub fn declare_in_the_whole_body<'b>(
     scope: CardiovascularScope<'b>,
 ) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
     declare_with(scope, true)
@@ -46,7 +46,7 @@ pub fn declare_reading_viscosity<'b>(
 
 fn declare_with<'b>(
     scope: CardiovascularScope<'b>,
-    reads_viscosity: bool,
+    whole_body: bool,
 ) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
     let (mut cv, ports) = scope.parts();
     let wave = RateClass::new(RateBand::Wave, WAVE_NS)?;
@@ -67,7 +67,7 @@ fn declare_with<'b>(
         &pressure,
         &head,
         wave,
-        reads_viscosity,
+        whole_body,
     )?;
     valves(&mut cv, &ports, &pressure, &head, wave)?;
     afferents(&mut cv, &pressure, &head, wave)?;

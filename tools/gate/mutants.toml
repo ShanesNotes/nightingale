@@ -3637,6 +3637,21 @@ new = '''let kept = k.add(whole, lost);'''
 test = "-p ng-validate --test gases the_beds_resistance_meets_its_form_at_no_debt_a_hair_under_none_and_its_half"
 
 [[mutant]]
+name = "debt-read-at-the-edges-upstream-end"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        Where::Down | Where::DownIn(_) => ends.map(|end| end.1),'''
+new = '''        Where::Down => ends.map(|end| end.1),
+        Where::DownIn(_) => ends.map(|end| end.0),'''
+test = "-p ng-validate --test viscosity a_beds_inflow_resistance_falls_with_its_debt_by_its_form"
+
+[[mutant]]
+name = "peritubular-inflow-widens-with-its-debt"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };'''
+new = '''let share = DEBT_SHARE;'''
+test = "-p ng-validate --test viscosity every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt"
+
+[[mutant]]
 name = "lactate-burns-with-no-cell-oxygen"
 path = "crates/ng-metabolism/src/burn.rs"
 old = '''let share = k.divide(pressure, reach);'''
