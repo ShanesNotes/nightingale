@@ -23,7 +23,6 @@ pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
         .pool::<Glucose, CapillaryBed>(Space::Interstitium)
         .pool::<FattyAcids, CapillaryBed>(Space::Interstitium)
         .pool::<Lactate, CapillaryBed>(Space::Interstitium)
-        .pool::<Lactate, Besides<Liver>>(Space::Cells)
         .pool::<Triglyceride, Beds<Fat>>(Space::Cells)
         .pool::<Glycerol, Beds<Fat>>(Space::Cells);
     let mut held = body.hold(declaration)?;

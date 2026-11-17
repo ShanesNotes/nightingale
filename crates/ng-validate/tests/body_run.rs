@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "cb439bb8b1525e9b8bc86ef20275aae820c40f2daef9b4bb9d54e4955e05bf42";
-const ADMITTED_SEAL: &str = "020537da74bf27e34c116e3b001d008a9b4078dd1e671c48bf441b87da113162";
+const PACKET: &str = "66cae635363a2400d2e79bff042c37bf675158feca0c8f827b67fbc87112329c";
+const ADMITTED_SEAL: &str = "91167a0d29014b60a3d7651f8553ccfeafc74964cdc1d01fa634a568cbc1d72d";
 
 struct Counted {
     core: ng_solver::Core,
@@ -306,7 +306,7 @@ fn counted_until<'s>(
 
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (Session<'_, Running>, Minute) {
     let pools = start.held_pools();
-    assert_eq!(pools.len(), 333);
+    assert_eq!(pools.len(), 322);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
         let view = session.record().accepted();
         pools.iter().map(|(row, _)| view.value(*row).bits()).collect()
@@ -356,7 +356,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11797, quantities 415, held routes 97
+        steps 11797, quantities 404, held routes 97
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -487,8 +487,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet cb439bb8b1525e9b8bc86ef20275aae820c40f2daef9b4bb9d54e4955e05bf42
-        seal 0529b29e15bcd7c633bdfc233ea0192caf876e1ecbf1096fce93ab7da4ca215b
+        packet 66cae635363a2400d2e79bff042c37bf675158feca0c8f827b67fbc87112329c
+        seal 78087eed2a4e6debf1503f6ca90ed68e3665d7f9bb37a82db71f97c5eab196ae
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
@@ -694,7 +694,8 @@ fn count(body: &CompiledBody, column: ColumnId, on: impl Fn(SiteId, Species, Spa
 
 fn burns(body: &CompiledBody, column: ColumnId) -> bool {
     let origin = body.columns()[column.index()].origin();
-    origin.owner == "MT" && ["glucose burn", "fatty acid burn"].contains(&origin.local)
+    origin.owner == "MT"
+        && ["glucose burn", "fatty acid burn", "glycolysis", "lactate burn"].contains(&origin.local)
 }
 
 fn at_bed(body: &CompiledBody, column: ColumnId, bed: SiteId) -> bool {
@@ -994,6 +995,7 @@ const DEMANDS: [(&str, f64); 11] = [
 ];
 const AT_DEMAND: f64 = 2e-4;
 const AT_REST: f64 = 2e-4;
+const AT_REST_LACTATE: f64 = 1e-9;
 
 fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
     let body = &start.body;
@@ -1038,6 +1040,19 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             assert!(
                 (held - rest).abs() <= AT_REST * rest.abs(),
                 "the {key} admits {held} of {species:?} in {space:?} against its rest of {rest}"
+            );
+        }
+        let lactate = RowKind::Amount {
+            site: bed,
+            species: Species::Lactate,
+            space: Space::Cells,
+        };
+        let debt = field("MT", "oxygen_debt_per_bed", Context::Site(bed));
+        for (when, session) in [("admitted", &admitted), ("a step on", &stepped)] {
+            let (held, owed) = (value(start, session, lactate), value(start, session, debt));
+            assert!(
+                held.abs() <= AT_REST_LACTATE && owed.abs() <= 3.0 * AT_REST_LACTATE,
+                "the {key} {when} holds {held} lactate in its cells and owes {owed} oxygen"
             );
         }
     }

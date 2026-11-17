@@ -3544,34 +3544,95 @@ test = "-p ng-validate --test gases the_bed_settles_where_the_fick_identity_puts
 name = "burn-reads-no-demand"
 path = "crates/ng-metabolism/src/burn.rs"
 old = '''
-        let bent = k.smooth_min(demand, allowed, width);
-        let none = k.zero();
-        let offset = k.smooth_min(demand, none, width);
-        k.subtract(bent, offset)'''
+        let shortfall = k.smooth_max(short, none, width);
+        k.subtract(ceiling, shortfall)'''
 new = '''
-        let bent = k.smooth_min(demand, allowed, width);
-        let none = k.subtract(bent, bent);
+        let shortfall = k.smooth_max(short, none, width);
+        let unused = k.subtract(ceiling, shortfall);
+        let none = k.subtract(unused, unused);
         k.add(demand, none)'''
 test = "-p ng-validate --test gases the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_refused"
 
 [[mutant]]
 name = "oxygen-rate-is-a-smooth-max"
 path = "crates/ng-metabolism/src/burn.rs"
-old = '''let bent = k.smooth_min(demand, allowed, width);'''
-new = '''let bent = k.smooth_max(demand, allowed, width);'''
+old = '''let shortfall = k.smooth_max(short, none, width);'''
+new = '''let shortfall = k.smooth_min(short, none, width);'''
 test = "-p ng-validate --test gases the_bed_at_rest_burns_its_demand"
 
 [[mutant]]
 name = "oxygen-rate-keeps-its-offset"
 path = "crates/ng-metabolism/src/burn.rs"
-old = '''
-        let bent = k.smooth_min(demand, allowed, width);
-        let none = k.zero();
-        let offset = k.smooth_min(demand, none, width);
-        k.subtract(bent, offset)'''
-new = '''
-        k.smooth_min(demand, allowed, width)'''
+old = '''let ceiling = k.smooth_max(demand, none, width);'''
+new = '''let ceiling = k.add(demand, none);'''
 test = "-p ng-validate --test gases the_oxygen_rate_is_zero_with_no_cell_oxygen_and_never_runs_a_burn_backward"
+
+[[mutant]]
+name = "oxygen-rate-is-two-smooth-minima"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''
+        let ceiling = k.smooth_max(demand, none, width);
+        let short = k.subtract(demand, allowed);
+        let shortfall = k.smooth_max(short, none, width);
+        k.subtract(ceiling, shortfall)'''
+new = '''
+        let ceiling = k.smooth_max(demand, none, width);
+        let bent = k.smooth_min(demand, allowed, width);
+        let offset = k.smooth_min(demand, none, width);
+        let bent = k.add(bent, ceiling);
+        let bent = k.subtract(bent, ceiling);
+        k.subtract(bent, offset)'''
+test = "-p ng-validate --test gases an_abundant_oxygen_reach_preserves_the_beds_demand"
+
+[[mutant]]
+name = "glycolysis-off"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''
+        let glucose = k.multiply(short, per);
+        let value = k.as_dimension(glucose);'''
+new = '''
+        let glucose = k.multiply(short, per);
+        let value = k.as_dimension(glucose);
+        let value = k.subtract(value, value);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
+
+[[mutant]]
+name = "glycolysis-splits-at-rest"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let short = k.smooth_max(gap, none, none);'''
+new = '''let short = k.smooth_max(gap, none, oxygen);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
+
+[[mutant]]
+name = "lactate-burn-runs-backward"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let first_order = k.relax(held, none, speed);'''
+new = '''let first_order = k.relax(none, held, speed);'''
+test = "-p ng-validate --test gases burning_lactate_never_makes_a_negative_oxygen_debt"
+
+[[mutant]]
+name = "lactate-burns-with-no-cell-oxygen"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let share = k.divide(pressure, reach);'''
+new = '''let share = k.divide(reach, reach);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
+
+[[mutant]]
+name = "debt-goes-below-zero"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let oxygen = k.multiply(per, held);'''
+new = '''let none = k.zero();
+        let held = k.subtract(none, held);
+        let oxygen = k.multiply(per, held);'''
+test = "-p ng-validate --test gases burning_lactate_never_makes_a_negative_oxygen_debt"
+
+[[mutant]]
+name = "debt-reads-no-lactate"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let oxygen = k.multiply(per, held);'''
+new = '''let held = k.subtract(held, held);
+        let oxygen = k.multiply(per, held);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
 
 [[mutant]]
 name = "p50-acidity-shift-reversed"
@@ -3586,6 +3647,20 @@ path = "crates/ng-blood-chemistry/src/oxygen.rs"
 old = '''        let apart = k.subtract(read, standard);'''
 new = '''        let apart = k.subtract(standard, read);'''
 test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
+
+[[mutant]]
+name = "lactate-energy-500"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''pub(super) const LACTATE_ENERGY: f64 = 450.0;'''
+new = '''pub(super) const LACTATE_ENERGY: f64 = 500.0;'''
+test = "-p ng-validate --test body each_beds_glycolysis_and_lactate_burn_carry_their_atoms_and_energy_into_its_cells_and_heat"
+
+[[mutant]]
+name = "water-drift-bound-loosened"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''(Species::Water, 0.04),'''
+new = '''(Species::Water, 0.08),'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
 name = "oxygen-element-drift-bound-loosened"
@@ -3632,8 +3707,8 @@ test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_one
 [[mutant]]
 name = "hydrogen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Hydrogen, 3e-5),'''
-new = '''(Element::Hydrogen, 6e-5),'''
+old = '''(Element::Hydrogen, 6e-6),'''
+new = '''(Element::Hydrogen, 1.2e-5),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
