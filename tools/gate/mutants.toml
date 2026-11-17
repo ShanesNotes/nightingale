@@ -4062,6 +4062,30 @@ new = '''            Instr::Expm1([x]) => slopes[x] += slope * (values[at] + 1.0
 test = "-p ng-contract --test expm1 a_laws_slope_of_expm1_is_e_to_its_argument"
 
 [[mutant]]
+name = "expm1-reduction-rounding-not-carried"
+path = "crates/ng-contract/src/pinned.rs"
+old = '''    let s = tail + carried * (1.0 + r);'''
+new = '''    let s = tail + 0.0 * carried;'''
+test = "-p ng-contract --lib pinned::tests::expm1_carries_the_reductions_rounding_to_the_correctly_rounded_value"
+
+[[mutant]]
+name = "expm1-enclosure-slope-from-its-value"
+path = "crates/ng-contract/src/evaluate/enclosure.rs"
+old = '''                slope: at(x)
+                    .value
+                    .monotone(|x| Some(pinned::exp(x)))?
+                    .times(at(x).slope)?,'''
+new = '''                slope: value.times(at(x).slope)?,'''
+test = "-p ng-contract --lib evaluate::enclosure::tests::an_expm1_step_bounds_its_value_and_its_slope_across_zero_and_its_branches"
+
+[[mutant]]
+name = "expm1-enclosure-value-is-exp"
+path = "crates/ng-contract/src/evaluate/enclosure.rs"
+old = '''            let value = at(x).value.monotone(|x| Some(pinned::expm1(x)))?;'''
+new = '''            let value = at(x).value.monotone(|x| Some(pinned::exp(x)))?;'''
+test = "-p ng-contract --lib evaluate::enclosure::tests::an_expm1_step_bounds_its_value_and_its_slope_across_zero_and_its_branches"
+
+[[mutant]]
 name = "ledger-walk-drops-the-last-nonzero-column"
 path = "crates/ng-record/src/history.rs"
 old = '''    for &(column, net) in nonzero {'''

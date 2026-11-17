@@ -280,6 +280,27 @@ mod tests {
         }
     }
 
+    // Correctly rounded from the exact sum, at inputs where a port of this routine without the reduction's carried
+    // rounding misses that double.
+    const EXPM1_CARRIED: [(u64, u64); 8] = [
+        (0xBFF0A2B23F3BAB70, 0xBFE4AFB0CCC06217),
+        (0xBFE02A23B932AFFF, 0xBFD9619699136743),
+        (0xBFD99AAB2BEBDE68, 0xBFD51A3152FC0739),
+        (0xBFD7D4FA53463BC2, 0xBFD3E5D84D1C1CD7),
+        (0x3FD62E42FEFA39F0, 0x3FDA827999FCEF33),
+        (0x3FF0A322353303E9, 0x3FFD42797D9AD3DA),
+        (0x3FF12187226FD68A, 0x3FFEAD954F64E869),
+        (0x4001CE285E575B60, 0x402084ECD1C995A3),
+    ];
+
+    #[test]
+    fn expm1_carries_the_reductions_rounding_to_the_correctly_rounded_value() {
+        for (x, want) in EXPM1_CARRIED {
+            let got = expm1(f64::from_bits(x));
+            assert_eq!(got.to_bits(), want, "expm1({x:#x}) = {:#x}", got.to_bits());
+        }
+    }
+
     #[test]
     fn expm1_is_exact_at_zero_and_saturates_past_its_thresholds() {
         assert_eq!(expm1(0.0).to_bits(), 0.0_f64.to_bits());

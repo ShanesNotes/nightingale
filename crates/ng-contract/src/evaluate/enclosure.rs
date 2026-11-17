@@ -279,3 +279,56 @@ pub(crate) fn enclose(
     }
     Some(jets[arithmetic.length - 1])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Bounds, Instr, Jet, step};
+    use crate::pinned;
+
+    fn near(bound: f64, at: f64) -> bool {
+        (bound - at).abs() <= at.abs() * 128.0 * f64::EPSILON + 2.0 * f64::MIN_POSITIVE
+    }
+
+    #[test]
+    fn an_expm1_step_bounds_its_value_and_its_slope_across_zero_and_its_branches() {
+        let spans = [
+            (-0.5, 0.5),
+            (0.3, 0.4),
+            (-0.4, -0.3),
+            (-40.0, -30.0),
+            (1e-20, 1e-10),
+            (20.0, 60.0),
+        ];
+        for (lo, hi) in spans {
+            let operand = Jet {
+                value: Bounds { lo, hi },
+                slope: Bounds::exact(1.0),
+            };
+            let jet = step(Instr::Expm1([0]), &[operand], 1.0).expect("bounds inside the range");
+            let (value, slope) = (
+                [pinned::expm1(lo), pinned::expm1(hi)],
+                [pinned::exp(lo), pinned::exp(hi)],
+            );
+            assert!(
+                jet.value.lo <= value[0] && jet.value.hi >= value[1],
+                "[{lo}, {hi}]: {:?}",
+                jet.value
+            );
+            assert!(
+                near(jet.value.lo, value[0]) && near(jet.value.hi, value[1]),
+                "[{lo}, {hi}]: {:?}",
+                jet.value
+            );
+            assert!(
+                jet.slope.lo <= slope[0] && jet.slope.hi >= slope[1],
+                "[{lo}, {hi}]: {:?}",
+                jet.slope
+            );
+            assert!(
+                near(jet.slope.lo, slope[0]) && near(jet.slope.hi, slope[1]),
+                "[{lo}, {hi}]: {:?}",
+                jet.slope
+            );
+        }
+    }
+}
