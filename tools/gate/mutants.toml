@@ -3649,10 +3649,10 @@ new = '''        let apart = k.subtract(standard, read);'''
 test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
 
 [[mutant]]
-name = "lactate-energy-500"
+name = "lactate-energy-50000"
 path = "crates/ng-validate/src/body/schema.rs"
-old = '''pub(super) const LACTATE_ENERGY: f64 = 450.0;'''
-new = '''pub(super) const LACTATE_ENERGY: f64 = 500.0;'''
+old = '''pub(super) const LACTATE_ENERGY: f64 = 45_000.0;'''
+new = '''pub(super) const LACTATE_ENERGY: f64 = 50_000.0;'''
 test = "-p ng-validate --test body each_beds_glycolysis_and_lactate_burn_carry_their_atoms_and_energy_into_its_cells_and_heat"
 
 [[mutant]]
@@ -3691,10 +3691,10 @@ new = '''.map_or_else(|| Measure::new(SYNTHETIC_DRIFT), |_| Measure::new(SYNTHET
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
-name = "fatty-acid-energy-2800"
+name = "fatty-acid-energy-280000"
 path = "crates/ng-validate/src/body/schema.rs"
-old = '''pub(super) const FAT_ENERGY: f64 = 3_000.0;'''
-new = '''pub(super) const FAT_ENERGY: f64 = 2_800.0;'''
+old = '''pub(super) const FAT_ENERGY: f64 = 300_000.0;'''
+new = '''pub(super) const FAT_ENERGY: f64 = 280_000.0;'''
 test = "-p ng-validate --test body each_beds_burns_carry_their_fuels_atoms_and_energy_into_its_cells_and_heat"
 
 [[mutant]]
