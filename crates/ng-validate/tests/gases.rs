@@ -2186,56 +2186,108 @@ fn the_bed_at_rest_splits_no_glucose_and_owes_no_oxygen() -> Result<(), Initiali
     Ok(())
 }
 
+/// The body states a reach that meets the demand at 10 mmHg, where the bed holds its demand up to half again its demand
+/// and down to three tenths of its flow; the fixture's own reach, at 20 mmHg, gives the contrast.
+const BODY_REACH: f64 = DEMAND / 10.0;
+
+struct Repaid {
+    built: f64,
+    least: f64,
+    half: Option<f64>,
+    tenth: Option<f64>,
+    report: String,
+}
+
+fn stressed_and_repaid(
+    body: &CompiledBody,
+    settled: &[(RowKind, f64)],
+    (demand, renewal, oxygen_reach): (f64, f64, f64),
+) -> Result<Repaid, InitializationFailure> {
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let stressed = Start {
+        demand,
+        renewal,
+        oxygen_reach,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let session = readmitted(body, &core, &store, stressed, settled)?;
+    let (end, stress) = march(body, session, 120)?;
+    let built = value(body, &end, field("oxygen_debt_per_bed")?);
+    let at_end = rest_of(body, &end);
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let back = Start {
+        oxygen_reach,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let session = readmitted(body, &core, &store, back, &at_end)?;
+    let (_, repay) = march(body, session, 300)?;
+    let (half, tenth) = (
+        half_time(&repay.debts, 0.0, 0.5),
+        half_time(&repay.debts, 0.0, 0.1),
+    );
+    let report = format!(
+        "demand {demand}, renewal {renewal}, reach {oxygen_reach}: debt {built} after {} steps, least pressures {:?} and {:?}, half repaid at {half:?} s, a tenth left at {tenth:?} s, refused {:?} and {:?}",
+        stress.steps, stress.least, repay.least, stress.refusals, repay.refusals
+    );
+    assert!(
+        stress.refusals.is_empty() && repay.refusals.is_empty(),
+        "{report}"
+    );
+    assert!(
+        stress.least.iter().chain(&repay.least).all(|least| *least > 0.0),
+        "{report}"
+    );
+    assert!(
+        stress
+            .least_rates
+            .iter()
+            .chain(&repay.least_rates)
+            .all(|least| *least >= 0.0),
+        "{report}"
+    );
+    Ok(Repaid {
+        built,
+        least: stress.least[2],
+        half,
+        tenth,
+        report,
+    })
+}
+
 #[test]
-fn a_raised_demand_or_a_halved_flow_builds_a_debt_that_the_burn_repays() -> Result<(), InitializationFailure>
-{
+fn at_the_bodys_reach_twice_the_demand_or_a_quarter_of_the_flow_builds_a_debt_that_the_burn_repays()
+-> Result<(), InitializationFailure> {
     let body = compiled(Cells::Burning)?;
     let settled = settled(&body)?;
-    for (demand, renewal) in [
-        (1.5 * DEMAND, RENEWAL),
-        (3.0 * DEMAND, RENEWAL),
-        (DEMAND, 0.5 * RENEWAL),
+    for case in [
+        (2.0 * DEMAND, RENEWAL, BODY_REACH),
+        (3.0 * DEMAND, RENEWAL, BODY_REACH),
+        (DEMAND, 0.25 * RENEWAL, BODY_REACH),
     ] {
-        let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
-        let stressed = Start {
-            demand,
-            renewal,
-            ..Start::at(speciated(ARTERIAL))
-        };
-        let session = readmitted(&body, &core, &store, stressed, &settled)?;
-        let (end, stress) = march(&body, session, 120)?;
-        let built = value(&body, &end, field("oxygen_debt_per_bed")?);
-        let at_end = rest_of(&body, &end);
-        let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
-        let back = Start::at(speciated(ARTERIAL));
-        let session = readmitted(&body, &core, &store, back, &at_end)?;
-        let (_, repay) = march(&body, session, 300)?;
-        let (half, tenth) = (
-            half_time(&repay.debts, 0.0, 0.5),
-            half_time(&repay.debts, 0.0, 0.1),
-        );
-        let report = format!(
-            "demand {demand}, renewal {renewal}: debt {built} after {} steps, least pressures {:?} and {:?}, half repaid at {half:?} s, a tenth left at {tenth:?} s, refused {:?} and {:?}",
-            stress.steps, stress.least, repay.least, stress.refusals, repay.refusals
-        );
-        assert!(
-            stress.refusals.is_empty() && repay.refusals.is_empty(),
-            "{report}"
-        );
-        assert!(
-            stress.least.iter().chain(&repay.least).all(|least| *least > 0.0),
-            "{report}"
-        );
-        assert!(built > 0.0, "{report}");
-        assert!(
-            stress
-                .least_rates
-                .iter()
-                .chain(&repay.least_rates)
-                .all(|least| *least >= 0.0),
-            "{report}"
-        );
-        assert!(tenth.is_some(), "{report}");
+        let repaid = stressed_and_repaid(&body, &settled, case)?;
+        assert!(repaid.built > 1e-3, "{}", repaid.report);
+        assert!(repaid.tenth.is_some(), "{}", repaid.report);
+    }
+    for case in [
+        (1.5 * DEMAND, RENEWAL, BODY_REACH),
+        (DEMAND, 0.5 * RENEWAL, BODY_REACH),
+    ] {
+        let repaid = stressed_and_repaid(&body, &settled, case)?;
+        assert!(repaid.built < 1e-6, "no debt within the reach: {}", repaid.report);
+    }
+    Ok(())
+}
+
+#[test]
+fn at_the_fixtures_own_reach_half_again_the_demand_or_half_the_flow_builds_a_debt()
+-> Result<(), InitializationFailure> {
+    let body = compiled(Cells::Burning)?;
+    let settled = settled(&body)?;
+    let reach = DEMAND / CELL_PRESSURE_AT_DEMAND;
+    for case in [(1.5 * DEMAND, RENEWAL, reach), (DEMAND, 0.5 * RENEWAL, reach)] {
+        let repaid = stressed_and_repaid(&body, &settled, case)?;
+        assert!(repaid.built > 1e-3, "{}", repaid.report);
+        assert!(repaid.tenth.is_some(), "{}", repaid.report);
     }
     Ok(())
 }

@@ -992,6 +992,60 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
 }
 
 #[test]
+fn each_beds_glycolysis_and_lactate_burn_carry_their_atoms_and_energy_into_its_cells_and_heat()
+-> Result<(), AdmissionError> {
+    let body = whole_body()?;
+    let mut seen = [0; 2];
+    for column in body.columns() {
+        let (which, expected): (usize, &[(Species, Space, i64)]) = match column.origin().local {
+            "glycolysis" => (
+                0,
+                &[
+                    (Species::Glucose, Space::Cells, -1),
+                    (Species::Lactate, Space::Cells, 2),
+                    (Species::Energy, Space::Thermal, 100),
+                ],
+            ),
+            "lactate burn" => (
+                1,
+                &[
+                    (Species::Lactate, Space::Cells, -1),
+                    (Species::Oxygen, Space::Cells, -3),
+                    (Species::CarbonDioxide, Space::Cells, 3),
+                    (Species::Water, Space::Cells, 3),
+                    (Species::Energy, Space::Thermal, 450),
+                ],
+            ),
+            _ => continue,
+        };
+        let Context::Site(bed) = column.context() else {
+            panic!("a reaction off a bed: {:?}", column.context());
+        };
+        let mut terms: Vec<(RowKind, i64)> = (column.terms().iter())
+            .map(|(row, count)| (body.rows()[row.index()].kind(), *count))
+            .collect();
+        let mut wanted: Vec<(RowKind, i64)> = (expected.iter())
+            .map(|&(species, space, count)| {
+                (
+                    RowKind::Amount {
+                        site: bed,
+                        species,
+                        space,
+                    },
+                    count,
+                )
+            })
+            .collect();
+        terms.sort_by_key(|term| format!("{term:?}"));
+        wanted.sort_by_key(|term| format!("{term:?}"));
+        assert_eq!(terms, wanted, "{:?} at {bed:?}", column.origin());
+        seen[which] += 1;
+    }
+    assert_eq!(seen, [11, 11]);
+    Ok(())
+}
+
+#[test]
 fn each_beds_burns_carry_their_fuels_atoms_and_energy_into_its_cells_and_heat() -> Result<(), AdmissionError>
 {
     let body = whole_body()?;

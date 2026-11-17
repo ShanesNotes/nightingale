@@ -93,7 +93,6 @@ const WATER_SPEED: f64 = 10.0;
 const GLUCOSE_PER_OXYGEN_SHORT: f64 = 1.0 / 6.0;
 const LACTATE_BURN_SPEED: f64 = 0.02;
 const LACTATE_HALF_PRESSURE: f64 = 2.0;
-const OXYGEN_PER_LACTATE: f64 = 3.0;
 const CELL_LACTATE_AT_REST: f64 = 0.0;
 const ALVEOLAR_CARBON_DIOXIDE: f64 = 30.0;
 const CARBON_DIOXIDE_HEAD: f64 = 1.0;
@@ -562,6 +561,7 @@ pub fn body_packet_at_viscosity_exponent(
     packet.start_mode(stirring, "still", NOTE)?;
 
     table(&mut packet, exponent)?;
+    oxygen_per_lactate(&mut packet, body)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -922,6 +922,29 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     Ok(())
 }
 
+/// The debt's oxygen to each lactate is the lactate burn's own counts, read from the compiled body.
+fn oxygen_per_lactate(
+    packet: &mut ParameterPacket<SyntheticFixture>,
+    body: &CompiledBody,
+) -> Result<(), AdmissionError> {
+    let burn = LawName {
+        owner: Metabolism::CARD,
+        local: "lactate burn",
+    };
+    let column = (body.columns().iter()).find(|column| column.origin() == burn);
+    let count = |species| {
+        (column.into_iter().flat_map(|column| column.terms()))
+            .filter(|(row, _)| {
+                matches!(body.rows()[row.index()].kind(), RowKind::Amount { species: of, .. } if of == species)
+            })
+            .map(|&(_, count)| count as f64)
+            .sum::<f64>()
+    };
+    let beds = Binding::Class(Class::CapillaryBed);
+    let per = count(Species::Oxygen) / count(Species::Lactate);
+    set::<Quotient<Oxygen, Lactate>>(packet, "mt.oxygen-per-lactate", beds, per)
+}
+
 fn burn(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
     let (body, beds) = (Binding::Body, Binding::Class(Class::CapillaryBed));
     set::<Dimensionless>(packet, "mt.glucose-share", beds, GLUCOSE_SHARE)?;
@@ -944,8 +967,7 @@ fn burn(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionE
         "mt.lactate-burn-half-pressure",
         beds,
         LACTATE_HALF_PRESSURE,
-    )?;
-    set::<Quotient<Oxygen, Lactate>>(packet, "mt.oxygen-per-lactate", beds, OXYGEN_PER_LACTATE)
+    )
 }
 
 fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
