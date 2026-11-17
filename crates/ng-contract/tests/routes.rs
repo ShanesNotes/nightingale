@@ -418,6 +418,50 @@ fn a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat() -> 
 }
 
 #[test]
+fn the_same_bed_named_twice_for_one_work_is_refused() -> Result<(), AdmissionError> {
+    let mut schema = Schema::new(whole_body()?)?;
+    let liver = site::<CapillaryBed>("liver bed");
+    schema.pay_work(Work::Stroke, liver)?;
+    assert_eq!(
+        schema.pay_work(Work::Stroke, liver),
+        Err(AdmissionError::WorkPaidTwice { work: Work::Stroke })
+    );
+    Ok(())
+}
+
+#[test]
+fn a_payer_with_no_heat_beside_a_work_with_no_store_is_refused_for_the_heat() -> Result<(), AdmissionError> {
+    let mut schema = Schema::new(whole_body()?)?;
+    watery_spaces_left_out(&mut schema);
+    let liver = site::<CapillaryBed>("liver bed");
+    schema.pay_work(Work::Stroke, liver)?;
+    schema.pay_work(Work::Walls, liver)?;
+    let class = wave()?;
+    let compiled = assemble(schema, |mut body| {
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let stroke = ports.stroke_work(&mut cv);
+        let still = cv.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_at(&stroke, still);
+        let walls = ports.wall_work(&mut cv);
+        let none = cv.kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer(Transfer::new(&walls, none));
+        body.add(cv.finish());
+        body.compile()
+    });
+    let refused = Err(AdmissionError::Compile(CompileDefect::PayerHoldsNoHeat {
+        site: liver,
+    }));
+    assert_eq!(compiled.map(|_| ()), refused);
+    Ok(())
+}
+
+#[test]
 fn a_named_payer_reaches_the_model_hash_where_it_moves_no_column() -> Result<(), AdmissionError> {
     let unnamed = paid_work(&[], false)?;
     let hashes = [

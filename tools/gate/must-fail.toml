@@ -205,6 +205,10 @@ core = "A sensor reads arterial speciation at a segment the map does not sample"
 mutants = ["speciated-takes-every-segment", "explicit-read-off-its-set"]
 
 [[row]]
+core = "A law reads one tissue's bed where the map gives that tissue no bed or two"
+mutants = ["only-at-sums"]
+
+[[row]]
 core = "A body that names a bed to pay its work while compile still ends the work at the receipt"
 mutants = ["work-paid-from-outside", "work-paid-from-outside-in-the-run"]
 

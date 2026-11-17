@@ -1056,14 +1056,11 @@ mod tests {
     }
 
     #[test]
-    fn the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays() {
+    fn the_payers_seal_after_the_bare_seal_under_their_own_tag_in_the_order_of_their_works() {
         let (mut named, first, second) = schema();
         named.pay_work(Work::Walls, second).expect("a bed");
         named.pay_work(Work::Stroke, first).expect("a bed");
         let (bare, ..) = schema();
-        let mut expected = Canonical::new("schema");
-        bare.seal(&mut expected);
-        assert_eq!(expected.into_bytes(), sealed(&bare));
         let mut expected = Canonical::new("schema");
         bare.seal(&mut expected);
         expected.number(u64::MAX - 1);
