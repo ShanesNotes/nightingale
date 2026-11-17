@@ -8,8 +8,7 @@ mod table;
 pub use anatomy::body_anatomy;
 pub use keep_back::{FluidRoute, KEEP_BACKS, KeepBack};
 pub use packet::{
-    BODY_CELL_PRESSURE_AT_DEMAND, body_certificate, body_lens, body_packet,
-    body_packet_at_viscosity_exponent, body_start_guess,
+    body_certificate, body_lens, body_packet, body_packet_at_viscosity_exponent, body_start_guess,
 };
 pub use schema::body_schema;
 pub use table::{HOLD_TABLE, Held, Hold, Release};

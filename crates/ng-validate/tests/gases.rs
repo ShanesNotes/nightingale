@@ -2505,7 +2505,8 @@ fn the_bed_at_rest_splits_no_glucose_and_owes_no_oxygen() -> Result<(), Initiali
     Ok(())
 }
 
-const BODY_REACH: f64 = DEMAND / BODY_CELL_PRESSURE_AT_DEMAND;
+const CELL_PRESSURE_AT_DEMAND: f64 = 17.0;
+const BODY_REACH: f64 = DEMAND / CELL_PRESSURE_AT_DEMAND;
 const REACH_AT_TEN: f64 = DEMAND / 10.0;
 
 struct Repaid {

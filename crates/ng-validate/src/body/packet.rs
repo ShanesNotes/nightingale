@@ -83,7 +83,7 @@ const PER_OXYGEN: f64 = GLUCOSE_SHARE + 16.0 * (1.0 - GLUCOSE_SHARE) / 23.0;
 /// The reach meets the demand at this cell pressure, and the oxygen rate falls short of the demand only below twice it,
 /// 34 mmHg. Every bed's cells sit at 38 mmHg or more at rest, so none splits glucose there or admits lactate, and
 /// halving a bed's flow takes the cells under it.
-pub const BODY_CELL_PRESSURE_AT_DEMAND: f64 = 17.0;
+const BODY_CELL_PRESSURE_AT_DEMAND: f64 = 17.0;
 const DEBT_SHARE: f64 = 0.5;
 const DEBT_HALF_TIME: f64 = 1e-3;
 const WIDTH_SHARE_OF_DEMAND: f64 = 0.02;
