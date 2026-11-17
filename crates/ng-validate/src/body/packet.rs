@@ -86,7 +86,7 @@ const PER_OXYGEN: f64 = GLUCOSE_SHARE + 16.0 * (1.0 - GLUCOSE_SHARE) / 23.0;
 pub const BODY_CELL_PRESSURE_AT_DEMAND: f64 = 17.0;
 /// The greatest share of its resistance a bed's inflow edge loses to the bed's oxygen debt, and the time of its demand
 /// at whose debt it has lost half of that. The peritubular bed's inflow leaves the glomerular bed, and that vessel's
-/// tone is the kidney's, so its share is zero.
+/// tone is the kidney's, so its share is zero. The liver bed's inflows are the hepatic sinusoids', which read neither.
 const DEBT_SHARE: f64 = 0.5;
 const DEBT_HALF_TIME: f64 = 1e-3;
 const WIDTH_SHARE_OF_DEMAND: f64 = 0.02;
@@ -919,9 +919,11 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     set::<Oxygen>(packet, "cv.debt-half", blood, 1.0)?;
     for (bed, used) in BEDS.into_iter().zip(USES) {
         let at = Binding::Site(site::<CapillaryBed>(bed)?);
-        let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };
-        set::<Dimensionless>(packet, "cv.debt-share", at, share)?;
-        set::<Oxygen>(packet, "cv.debt-half", at, used * DEBT_HALF_TIME)?;
+        if bed != "liver bed" {
+            let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };
+            set::<Dimensionless>(packet, "cv.debt-share", at, share)?;
+            set::<Oxygen>(packet, "cv.debt-half", at, used * DEBT_HALF_TIME)?;
+        }
         set::<Rate<Oxygen>>(packet, "mt.oxygen-demand", at, used)?;
         set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / BODY_CELL_PRESSURE_AT_DEMAND)?;
         set::<Conductance<Oxygen>>(packet, "mt.wall-oxygen-conductance", at, used / HEAD)?;
