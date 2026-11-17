@@ -3739,9 +3739,9 @@ test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_one
 
 [[mutant]]
 name = "saturation-set-finite"
-path = "crates/ng-blood-chemistry/src/lib.rs"
-old = '''("oxygen saturation", Admissible::unit_interval())'''
-new = '''("oxygen saturation", Admissible::finite())'''
+path = "crates/ng-contract/src/scope/blood_chemistry.rs"
+old = '''row::<OxygenSaturation>(laws, Admissible::unit_interval())'''
+new = '''row::<OxygenSaturation>(laws, Admissible::finite())'''
 test = "-p ng-validate --test gases a_saturation_outside_zero_to_one_is_refused_before_carbamino_reads_it"
 
 [[mutant]]
@@ -4063,3 +4063,110 @@ path = "crates/ng-record/src/history.rs"
 old = '''    for &(column, net) in nonzero {'''
 new = '''    for &(column, net) in nonzero.split_last().map_or(nonzero, |(_, rest)| rest) {'''
 test = "-p ng-record --lib history::tests::the_nonzero_columns_flow_and_seal_with_the_bits_of_every_column"
+
+[[mutant]]
+name = "edge-read-at-the-upstream-end"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Where::Down | Where::DownIn(_) => ends.map(|end| end.1),'''
+new = '''Where::Down => ends.map(|end| end.1), Where::DownIn(_) => ends.map(|end| end.0),'''
+test = "-p ng-contract --lib edge_read::each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero"
+
+[[mutant]]
+name = "edge-read-zero-at-a-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''&& landed.is_none_or(|site| !anatomy.in_set(set).contains(&site))'''
+new = '''&& landed.is_some()'''
+test = "-p ng-contract --lib edge_read::each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes"
+path = "crates/ng-contract/src/compile.rs"
+old = '''return Err(CompileDefect::EndOffSet { law });'''
+new = ''''''
+test = "-p ng-contract --lib edge_read::a_law_none_of_whose_edges_ends_in_the_set_is_refused_by_name"
+
+[[mutant]]
+name = "edge-read-seals-its-tag-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''                set.seal(out);'''
+new = '''                let _ = set;'''
+test = "-p ng-contract --lib edge_read::a_downstream_reads_set_is_in_its_program_seal"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes-for-guards"
+path = "crates/ng-contract/src/compile.rs"
+old = '''check_ends(law, zero, &contexts, anatomy)?;'''
+new = ''''''
+test = "-p ng-contract --lib edge_read::an_edge_guard_none_of_whose_edges_ends_in_the_set_is_refused_by_name"
+
+[[mutant]]
+name = "edge-read-end-off-set-checks-its-first-set-alone"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            return Err(CompileDefect::EndOffSet { law });
+        }
+    }'''
+new = '''            return Err(CompileDefect::EndOffSet { law });
+        }
+        return Ok(());
+    }'''
+test = "-p ng-contract --lib edge_read::a_kernel_that_reads_two_sets_is_refused_when_either_misses_in_either_order"
+
+[[mutant]]
+name = "edge-read-lands-tests-the-upstream-end"
+path = "crates/ng-contract/src/compile.rs"
+old = '''matches!(context, Context::Edge { to, .. } if anatomy.in_set(set).contains(to))'''
+new = '''matches!(context, Context::Edge { from, .. } if anatomy.in_set(set).contains(from))'''
+test = "-p ng-contract --lib edge_read::a_law_whose_edges_only_leave_the_set_is_refused"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes-a-law-with-no-edge"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        if !contexts.iter().any(lands) {'''
+new = '''        if !contexts.is_empty() && !contexts.iter().any(lands) {'''
+test = "-p ng-contract --lib edge_read::a_law_with_no_edge_at_all_is_refused_when_it_states_the_read"
+
+[[mutant]]
+name = "speciation-row-under-metabolism"
+path = "crates/ng-validate/src/body/holds/mt.rs"
+old = '''    let oxygen_pressure = &gases.oxygen_partial_pressure;'''
+new = '''    let (copy_out, copy) = laws.site_field::<CapillaryBed, Pressure>("oxygen partial pressure", Admissible::positive());
+    let stated = laws.site_kernel(|mut k| {
+        let value = k.at_site(&gases.oxygen_partial_pressure);
+        k.finish(value, laws.every_mode(), RateClass::new(RateBand::Reflex, 1_000_000_000).expect("a class"))
+    });
+    laws.define_at(&copy_out, stated);
+    let oxygen_pressure = &copy;'''
+test = "-p ng-validate --test gases blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops"
+
+[[mutant]]
+name = "reader-states-the-explicit-field"
+path = "crates/ng-validate/src/body/holds/mt.rs"
+old = '''    let carbon_dioxide_pressure = &gases.carbon_dioxide_partial_pressure;'''
+new = '''    let (copy_out, copy) = laws.site_field::<CapillaryBed, Pressure>("carbon dioxide partial pressure", Admissible::positive());
+    let stated = laws.site_kernel(|mut k| {
+        let value = k.at_site(&gases.carbon_dioxide_partial_pressure);
+        k.finish(value, laws.every_mode(), RateClass::new(RateBand::Reflex, 1_000_000_000).expect("a class"))
+    });
+    laws.define_at(&copy_out, stated);
+    let carbon_dioxide_pressure = &copy;'''
+test = "-p ng-validate --test gases blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops"
+
+[[mutant]]
+name = "edge-read-discarded-read-is-not-checked"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let &Input::Read(_, Where::DownIn(set)) = input else {'''
+new = '''        ;
+    for input in inputs {
+        let &Input::Read(_, Where::DownIn(set)) = input else {'''
+test = "-p ng-contract --lib edge_read::a_read_the_law_discards_is_still_checked"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes-a-guard-off-a-route"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            check_ends(law, zero, &contexts, anatomy)?;'''
+new = '''            if route.is_some() {
+                check_ends(law, zero, &contexts, anatomy)?;
+            }'''
+test = "-p ng-contract --lib edge_read::a_guard_on_a_body_wide_mode_that_states_the_read_is_refused"

@@ -2,12 +2,16 @@
 //! glucose and fatty acids by metabolism's laws from held feeds, so blood chemistry's speciation, metabolism's wall
 //! diffusion and its burn meet closed forms with no body admission. Every value is synthetic.
 
+extern crate alloc;
+
+use alloc::collections::BTreeSet;
 use core::f64::consts::LN_10;
 use core::num::NonZeroU64;
-use ng_blood_chemistry::{Plasma, StrongIons, speciate};
+use ng_blood_chemistry::speciate;
 use ng_cardiovascular::resistance_share_at_debt;
+use ng_contract::catalog::{PlasmaGases, Reads, SPECIATION_READERS};
 use ng_contract::*;
-use ng_metabolism::{GasRoutes, PlasmaPressure, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
+use ng_metabolism::{GasRoutes, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
 use ng_record::{Running, Session, Step};
 use ng_validate::*;
 
@@ -214,6 +218,7 @@ enum Cells {
     BurningUnderTwoCards,
     BurningInTheLoop,
     HeldUseAtAStatedDebt,
+    SecondReader,
 }
 
 fn compiled(cells: Cells) -> Result<CompiledBody, AdmissionError> {
@@ -254,7 +259,7 @@ fn compiled(cells: Cells) -> Result<CompiledBody, AdmissionError> {
     schema.carry::<DietBase, CapillaryBed>(Space::Plasma);
     schema.carry::<FixedAcid, CapillaryBed>(Space::Plasma);
     let (into, out) = (BoundaryDirection::IntoBody, BoundaryDirection::OutOfBody);
-    let burns = !matches!(cells, Cells::HeldUse | Cells::HeldUseAtAStatedDebt);
+    let burns = !matches!(cells, Cells::HeldUse | Cells::HeldUseAtAStatedDebt | Cells::SecondReader);
     schema.boundary::<Oxygen>("artery oxygen", into, bed, Space::Plasma)?;
     schema.boundary::<Oxygen>("vein oxygen", out, bed, Space::Plasma)?;
     schema.boundary::<CarbonDioxide>("artery carbon dioxide", into, bed, Space::Plasma)?;
@@ -299,38 +304,20 @@ fn compiled(cells: Cells) -> Result<CompiledBody, AdmissionError> {
             .pool::<Ketones, CapillaryBed>(plasma)
             .pool::<DietBase, CapillaryBed>(plasma)
             .pool::<FixedAcid, CapillaryBed>(plasma);
-        let (laws, _) = body.hold(held)?.parts();
+        let held = body.hold(held)?;
+        let (mut laws, ports) = body.blood_chemistry(Some(held))?.parts();
+        speciate(&mut laws, &ports)?;
         body.add(laws.finish());
 
         let (mut laws, ports) = body.metabolism(None)?.parts();
         let oxygen = GasRoutes::<Oxygen>::request(&mut laws, &ports);
         let carbon_dioxide = GasRoutes::<CarbonDioxide>::request(&mut laws, &ports);
-        let wall = &oxygen.wall;
-        let plasma = Plasma {
-            water: wall.from_amount::<Water>(),
-            oxygen: wall.from_amount::<Oxygen>(),
-            carbon_dioxide: wall.from_amount::<CarbonDioxide>(),
-            hemoglobin: wall.from_amount::<Hemoglobin>(),
-            ions: StrongIons {
-                sodium: wall.from_amount::<Sodium>(),
-                potassium: wall.from_amount::<Potassium>(),
-                magnesium: wall.from_amount::<Magnesium>(),
-                calcium: wall.from_amount::<Calcium>(),
-                chloride: wall.from_amount::<Chloride>(),
-                lactate: wall.from_amount::<Lactate>(),
-                ketones: wall.from_amount::<Ketones>(),
-                diet_base: wall.from_amount::<DietBase>(),
-                fixed_acid: wall.from_amount::<FixedAcid>(),
-            },
-        };
-        let speciated = speciate(&mut laws, &plasma)?;
-        let oxygen_pressure: PlasmaPressure<'_, '_> = &|k| k.at_site(&speciated.oxygen_partial_pressure);
-        let carbon_dioxide_pressure: PlasmaPressure<'_, '_> =
-            &|k| speciated.carbon_dioxide_partial_pressure(k);
-        let cell_oxygen = oxygen_diffusion(&mut laws, &oxygen, oxygen_pressure)?;
-        carbon_dioxide_diffusion(&mut laws, &carbon_dioxide, carbon_dioxide_pressure)?;
+        let gases: PlasmaGases<Reads<'_, Metabolism>> = laws.receive();
+        let cell_oxygen = oxygen_diffusion(&mut laws, &oxygen, &gases.oxygen_partial_pressure)?;
+        carbon_dioxide_diffusion(&mut laws, &carbon_dioxide, &gases.carbon_dioxide_partial_pressure)?;
         match cells {
             Cells::HeldUse | Cells::HeldUseAtAStatedDebt => {}
+            Cells::SecondReader => second_reader(&mut laws, &gases)?,
             Cells::Burning | Cells::BurningUnderTwoCards | Cells::BurningInTheLoop => {
                 burn(&mut laws, &cell_oxygen)?
             }
@@ -685,6 +672,7 @@ fn guess(row: RowKind, start: Start) -> f64 {
             "oxygen saturation" => start.guess.saturation,
             "bicarbonate" => start.guess.bicarbonate,
             "acidity" => start.guess.acidity,
+            "gas gap" => start.guess.oxygen_pressure,
             "oxygen_debt_per_bed" => 0.0,
             _ => panic!("no start for {row:?}"),
         },
@@ -898,11 +886,13 @@ fn value(body: &CompiledBody, session: &Session<'_, Running>, kind: RowKind) -> 
 }
 
 fn field(local: &'static str) -> Result<RowKind, AdmissionError> {
+    let owner = if SPECIATION.contains(&local) {
+        BloodChemistry::CARD
+    } else {
+        Metabolism::CARD
+    };
     Ok(RowKind::Algebraic(Slot {
-        law: LawName {
-            owner: Metabolism::CARD,
-            local,
-        },
+        law: LawName { owner, local },
         at: Context::Site(site::<CapillaryBed>(BED)?),
     }))
 }
@@ -1156,11 +1146,7 @@ fn oxygen_and_carbon_dioxide_close_to_the_ledgers_floor_through_speciation()
     Ok(())
 }
 
-fn refused_by(body: &CompiledBody, source: SourceId, local: &'static str) -> bool {
-    let law = LawName {
-        owner: Metabolism::CARD,
-        local,
-    };
+fn refused_by(body: &CompiledBody, source: SourceId, law: LawName) -> bool {
     matches!(
         body.refusal_sources()[source.index()],
         RefusalSource::Divisor { law: named } | RefusalSource::LogarithmArgument { law: named } if named == law
@@ -1189,7 +1175,7 @@ fn a_trial_whose_bound_share_leaves_zero_to_one_is_refused_by_name() -> Result<(
             Err(InitializationFailure::Undefined { law }) => assert_eq!(
                 law,
                 LawName {
-                    owner: Metabolism::CARD,
+                    owner: BloodChemistry::CARD,
                     local: "oxygen partial pressure"
                 }
             ),
@@ -1220,7 +1206,7 @@ fn a_bicarbonate_at_or_above_what_the_total_leaves_is_refused_by_name() -> Resul
             Err(InitializationFailure::Undefined { law }) => assert_eq!(
                 law,
                 LawName {
-                    owner: Metabolism::CARD,
+                    owner: BloodChemistry::CARD,
                     local: "acidity"
                 }
             ),
@@ -1264,43 +1250,75 @@ fn a_fast_renewal(
     renewal: f64,
     local: &'static str,
 ) -> Result<(usize, usize), InitializationFailure> {
-    let (body, core, store) = (
-        compiled(Cells::HeldUse)?,
-        ng_solver::Core::new(SECOND / 100),
-        MemoryStore::default(),
-    );
     let start = Start {
         arterial,
         renewal,
         ..Start::at(speciated(ARTERIAL))
     };
+    let law = LawName {
+        owner: BloodChemistry::CARD,
+        local,
+    };
+    let renewed = renewed(Cells::HeldUse, start, law)?;
+    Ok((renewed.refused, renewed.accepted))
+}
+
+#[derive(Debug)]
+struct Renewed {
+    refused: usize,
+    refused_again: usize,
+    accepted: usize,
+    others: Vec<String>,
+}
+
+fn renewed(cells: Cells, start: Start, law: LawName) -> Result<Renewed, InitializationFailure> {
+    let (body, core, store) = (
+        compiled(cells)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
     let mut session = admitted(&body, &core, &store, start)?;
-    let (mut named, mut accepted) = (0, 0);
+    let mut renewed = Renewed {
+        refused: 0,
+        refused_again: 0,
+        accepted: 0,
+        others: Vec::new(),
+    };
     let finite = |session: &Session<'_, Running>| {
         let view = session.record().accepted();
         (body.rows().iter()).all(|row| f64::from_bits(view.value(row.id()).bits()[0]).is_finite())
     };
     'run: while session.record().accepted().time().nanoseconds() < SECOND / 10 {
-        let mut attempt = session.step();
+        let (mut attempt, mut before) = (session.step(), false);
         loop {
             match attempt {
                 Step::Accepted(next, _) => {
                     session = next;
-                    accepted += 1;
+                    renewed.accepted += 1;
                     assert!(finite(&session), "an accepted value that is not finite");
                     break;
                 }
                 Step::Refused(retrying) => {
-                    if let NumericalRefusal::TrialDomain { source } = retrying.refused().reason() {
-                        named += usize::from(refused_by(&body, source, local));
+                    let named = matches!(
+                        retrying.refused().reason(),
+                        NumericalRefusal::TrialDomain { source } if refused_by(&body, source, law)
+                    );
+                    if !named {
+                        renewed.others.push(format!("{:?}", retrying.refused().reason()));
                     }
+                    renewed.refused += usize::from(named);
+                    renewed.refused_again += usize::from(named && before);
+                    before = named;
                     attempt = retrying.retry();
                 }
-                Step::Faulted(_) => break 'run,
+                Step::Faulted(faulted) => {
+                    renewed.others.push(format!("{:?}", faulted.fault()));
+                    break 'run;
+                }
             }
         }
     }
-    Ok((named, accepted))
+    Ok(renewed)
 }
 
 fn a_fast_renewal_is_refused_by(
@@ -1308,8 +1326,18 @@ fn a_fast_renewal_is_refused_by(
     renewal: f64,
     local: &'static str,
 ) -> Result<(), InitializationFailure> {
-    let (named, _) = a_fast_renewal(arterial, renewal, local)?;
-    assert!(named > 0, "no step was refused by {local}");
+    let start = Start {
+        arterial,
+        renewal,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let law = LawName {
+        owner: BloodChemistry::CARD,
+        local,
+    };
+    let renewed = renewed(Cells::HeldUse, start, law)?;
+    assert!(renewed.refused > 0, "no step was refused by {local}");
+    assert!(renewed.refused_again > 0, "no retry was refused by {local} again");
     Ok(())
 }
 
@@ -1923,6 +1951,183 @@ fn a_second_cards_glucose_burn_at_the_bed_is_refused_as_owned_twice() -> Result<
         "{laws:?}"
     );
     assert_eq!(at, site::<CapillaryBed>(BED)?);
+    Ok(())
+}
+
+/// A second law of metabolism that reads both partial pressures, `P = (P_O2 - P_CO2) P_O2 / (P_O2 - P_CO2)`,
+/// so its own divide refuses a trial that carries the oxygen partial pressure below the carbon dioxide one while its
+/// value stays the oxygen partial pressure.
+fn second_reader<'b>(
+    laws: &mut FragmentBuilder<'b, Metabolism>,
+    gases: &PlasmaGases<Reads<'b, Metabolism>>,
+) -> Result<(), AdmissionError> {
+    let class = RateClass::new(RateBand::Reflex, SECOND)?;
+    let (gap_out, _) = laws.site_field::<CapillaryBed, Pressure>("gas gap", Admissible::finite());
+    let law = laws.site_kernel(|mut k| {
+        let oxygen = k.at_site(&gases.oxygen_partial_pressure);
+        let carbon_dioxide = k.at_site(&gases.carbon_dioxide_partial_pressure);
+        let gap = k.subtract(oxygen, carbon_dioxide);
+        let quotient = k.divide(oxygen, gap);
+        let ratio: Expr<'b, '_, Metabolism, Dimensionless> = k.as_dimension(quotient);
+        let value = k.scale(gap, ratio);
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.define_at(&gap_out, law);
+    Ok(())
+}
+
+const SPECIATION: [&str; 5] = [
+    OxygenPartialPressure::NAME,
+    OxygenSaturation::NAME,
+    Bicarbonate::NAME,
+    Acidity::NAME,
+    CarbonDioxidePartialPressure::NAME,
+];
+
+fn named(owner: &str, local: &str) -> String {
+    format!("LawName {{ owner: {owner:?}, local: {local:?} }}")
+}
+
+fn items<'a>(listing: &'a str, label: &str) -> Vec<&'a str> {
+    let start = listing.find(label).expect("a program lists it") + label.len();
+    let (mut depth, mut from, mut items) = (0, start, Vec::new());
+    for (at, c) in listing[start..].char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' if depth == 0 => {
+                items.push(listing[from..start + at].trim());
+                break;
+            }
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                items.push(listing[from..start + at].trim());
+                from = start + at + 1;
+            }
+            _ => {}
+        }
+    }
+    items.retain(|item| !item.is_empty());
+    items
+}
+
+/// Each card outside blood chemistry, with each speciation quantity one of its programs reads: a row it reads by its
+/// own op, or the explicit field whose ops compile wrote in. A read inside those written ops is the field's own.
+fn speciation_readers(body: &CompiledBody) -> BTreeSet<(String, &'static str)> {
+    let field = named(BloodChemistry::CARD, CarbonDioxidePartialPressure::NAME);
+    let mut readers = BTreeSet::new();
+    for program in body.programs() {
+        let listing = format!("{program:?}");
+        let owner = (listing.split("owner: \"").nth(1))
+            .and_then(|rest| rest.split('"').next())
+            .expect("a program names its law");
+        if owner == BloodChemistry::CARD {
+            continue;
+        }
+        let written: Vec<&str> = (items(&listing, "origins: [").into_iter())
+            .filter(|origin| origin.ends_with(&format!("{field})")))
+            .filter_map(|origin| origin.trim_start_matches('(').split(',').next())
+            .collect();
+        if !written.is_empty() {
+            readers.insert((owner.to_string(), CarbonDioxidePartialPressure::NAME));
+        }
+        for (at, op) in items(&listing, "ops: [").into_iter().enumerate() {
+            let index = at.to_string();
+            for quantity in SPECIATION {
+                let read = format!("Field({})", named(BloodChemistry::CARD, quantity));
+                if op.contains(&read) && !written.contains(&index.as_str()) {
+                    readers.insert((owner.to_string(), quantity));
+                }
+            }
+        }
+    }
+    readers
+}
+
+#[test]
+fn blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops() -> Result<(), AdmissionError> {
+    for (body, beds) in [(compiled(Cells::HeldUse)?, 1), (whole_body()?, 11)] {
+        for quantity in SPECIATION {
+            let owners: Vec<&str> = (body.rows().iter())
+                .filter_map(|row| match row.kind() {
+                    RowKind::Algebraic(slot) if slot.law.local == quantity => Some(slot.law.owner),
+                    _ => None,
+                })
+                .collect();
+            let rows = if quantity == CarbonDioxidePartialPressure::NAME {
+                0
+            } else {
+                beds
+            };
+            assert_eq!(owners, vec![BloodChemistry::CARD; rows], "{quantity}");
+        }
+        let listings: Vec<String> = body
+            .programs()
+            .iter()
+            .map(|program| format!("{program:?}"))
+            .collect();
+        let field = named(BloodChemistry::CARD, CarbonDioxidePartialPressure::NAME);
+        let written = listings.iter().filter(|listing| listing.contains(&field)).count();
+        assert!(
+            written >= 3,
+            "the explicit field's ops stand in {written} programs"
+        );
+        assert!(
+            !listings
+                .iter()
+                .any(|listing| listing.contains(&format!("Field({field})")))
+        );
+        for quantity in SPECIATION {
+            let stand_in = named(Metabolism::CARD, quantity);
+            assert!(
+                !listings.iter().any(|listing| listing.contains(&stand_in)),
+                "{stand_in}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn only_metabolism_reads_speciation_and_only_what_its_wired_row_lists() -> Result<(), AdmissionError> {
+    let wired: BTreeSet<(String, &'static str)> = (SPECIATION_READERS.iter())
+        .flat_map(|row| (row.wired.iter()).map(move |read| (row.reader.to_string(), read.quantity)))
+        .collect();
+    assert_eq!(speciation_readers(&compiled(Cells::HeldUse)?), wired);
+    assert_eq!(speciation_readers(&whole_body()?), wired);
+    Ok(())
+}
+
+#[test]
+fn a_second_reader_adds_no_row_and_a_refusal_in_its_own_arithmetic_names_it()
+-> Result<(), InitializationFailure> {
+    let (once, twice) = (compiled(Cells::HeldUse)?, compiled(Cells::SecondReader)?);
+    assert_eq!(
+        twice.rows().len(),
+        once.rows().len() + 1,
+        "the second reader's own row only"
+    );
+    let low = speciated(Point {
+        ln_over_p50: 0.1,
+        carbon_dioxide_pressure: 50.0,
+    });
+    let start = Start {
+        arterial: low,
+        renewal: 100.0,
+        ..Start::at(speciated(VENOUS))
+    };
+    let law = LawName {
+        owner: Metabolism::CARD,
+        local: "gas gap",
+    };
+    let renewed = renewed(Cells::SecondReader, start, law)?;
+    assert!(
+        renewed.refused > 0,
+        "no step was refused by the second reader: {renewed:?}"
+    );
+    assert!(
+        renewed.refused_again > 0,
+        "no retry was refused by the second reader again: {renewed:?}"
+    );
     Ok(())
 }
 
