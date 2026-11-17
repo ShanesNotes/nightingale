@@ -8,7 +8,7 @@ This doc governs every prose file in the repo: what may enter, which words docs 
 
 ## 2. What belongs in the repo
 
-A doc earns its load when it binds behavior, defines a word, records a hard-to-reverse choice, or scopes buildable work. Anything else stays out.
+A doc earns its load when it binds behavior, defines a word, records a hard-to-reverse choice, or scopes buildable work. The README also introduces the project to human readers: its manifesto explains the ambition without changing the SRS, decision records or engineering scope. Agents read that framing when working on public presentation, not as a build contract. Anything else stays out.
 
 | Path | Role | Why an agent loads it | Authority |
 |---|---|---|---|
@@ -21,9 +21,10 @@ A doc earns its load when it binds behavior, defines a word, records a hard-to-r
 | `docs/governance.md` | This doc | Before adding, moving, renaming or deleting a doc, term or record | Rules for docs |
 | `data/` | The source and inference records behind the reviewed packet and healthy-range set, as derived, cited numbers, with the identities they must close. Source text never enters | When binding a clinical value or writing a check that judges one | Below the records: a value is only as good as its source record |
 | `.scratch/` | Tickets: buildable slices with blocking edges | When picking up the slice a ticket names | Work, not authority |
-| `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/agents/`, `.agents/skills/` | Entry points, agent operating notes and the verify skill | At session start, to find the rest, and the skill before claiming a change works | Point, never restate |
+| `README.md` | Human-facing introduction, manifesto and navigation | When orienting a reader or working on public presentation | Context, never engineering authority |
+| `AGENTS.md`, `CLAUDE.md`, `docs/agents/`, `.agents/skills/` | Agent operating notes and the verify skill | At session start, to find the rest, and the skill before claiming a change works | Point, never restate |
 
-Stays out: council drafts, model transcripts and session logs, review rounds, briefs, scratch notes, duplicated summaries, roadmaps that restate tickets, vision statements and personal framing, and nightingale-pulse files, which are read by permalink at the import commit and never copied.
+Stays out: council drafts, model transcripts and session logs, review rounds, briefs, scratch notes, duplicated summaries, roadmaps that restate tickets, vision statements and personal framing outside the README, and nightingale-pulse files, which are read by permalink at the import commit and never copied.
 
 A PR that adds a file names which agent loads it and when. Two sizes are worth questioning, as applications of the principle: about a dozen prose files outside `docs/atlas/` and `.scratch/`, and a doc past about 400 lines.
 
@@ -84,7 +85,7 @@ Sharpening ends, and a doc change then needs a ticket that build work exposed, w
 - a dead relative link, including an index row that points at nothing
 - a dead code-formatted repo path (a nightingale-pulse path must be a permalink)
 - a crate name from pulse's `vitals` family
-- `AGENTS.md` over 60 lines, because every session loads it whole, or `README.md` over 40, because it only points onward
+- `AGENTS.md` over 60 lines, because every session loads it whole, or `README.md` over 40, to keep its introduction and navigation bounded
 - status text, because an agent would load stale state as fact: a heading that starts with Status, Current state, Progress, Next, Changelog, Session or Open, a `Status:` label, or a table row labelled status
 - an ISO date, or `TODO`, `FIXME` or `TBD`
 - an em dash
