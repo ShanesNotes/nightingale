@@ -4114,6 +4114,13 @@ new = '''find(|_| false)'''
 test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
 
 [[mutant]]
+name = "a-payer-without-heat-compiles-beside-a-work-without-a-store"
+path = "crates/ng-contract/src/compile.rs"
+old = '''find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+new = '''find(|_| false)'''
+test = "-p ng-contract --test routes a_payer_with_no_heat_beside_a_work_with_no_store_is_refused_for_the_heat"
+
+[[mutant]]
 name = "paid-work-without-a-store-compiles"
 path = "crates/ng-contract/src/compile.rs"
 old = '''find(|&&(work, _)| !stored && requested(work))'''
@@ -4149,7 +4156,7 @@ name = "payers-kept-in-the-order-named-in-the-seal"
 path = "crates/ng-contract/src/scope.rs"
 old = '''                self.payers.insert(at, (work, bed));'''
 new = '''                self.payers.push((work, bed));'''
-test = "-p ng-contract --lib scope::tests::the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays"
+test = "-p ng-contract --lib scope::tests::the_payers_seal_after_the_bare_seal_under_their_own_tag_in_the_order_of_their_works"
 
 
 [[mutant]]
@@ -4157,7 +4164,7 @@ name = "payer-tag-is-the-energy-tag"
 path = "crates/ng-contract/src/scope.rs"
 old = '''            out.number(u64::MAX - 1);'''
 new = '''            out.number(u64::MAX);'''
-test = "-p ng-contract --lib scope::tests::the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays"
+test = "-p ng-contract --lib scope::tests::the_payers_seal_after_the_bare_seal_under_their_own_tag_in_the_order_of_their_works"
 
 
 [[mutant]]
@@ -4165,7 +4172,7 @@ name = "payers-seal-with-no-tag"
 path = "crates/ng-contract/src/scope.rs"
 old = '''            out.number(u64::MAX - 1);'''
 new = '''            let _ = u64::MAX;'''
-test = "-p ng-contract --lib scope::tests::the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays"
+test = "-p ng-contract --lib scope::tests::the_payers_seal_after_the_bare_seal_under_their_own_tag_in_the_order_of_their_works"
 
 
 [[mutant]]
@@ -4193,6 +4200,14 @@ new = '''            Ok(at) => {
                 Ok(())
             }'''
 test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+[[mutant]]
+name = "work-paid-twice-takes-the-same-bed-again"
+path = "crates/ng-contract/src/scope.rs"
+old = '''            Ok(_) => Err(AdmissionError::WorkPaidTwice { work }),'''
+new = '''            Ok(at) if self.payers[at].1 == bed => Ok(()),
+            Ok(_) => Err(AdmissionError::WorkPaidTwice { work }),'''
+test = "-p ng-contract --test routes the_same_bed_named_twice_for_one_work_is_refused"
 
 [[mutant]]
 name = "edge-read-at-the-upstream-end"
