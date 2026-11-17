@@ -1,6 +1,6 @@
 use super::super::schema::{CELL_WATER_OUT, FAT_FEED, GLUCOSE_FEED, LUNG_CARBON_DIOXIDE, LUNG_OXYGEN};
 use super::FIXED;
-use ng_blood_chemistry::{Plasma, StrongIons, speciate};
+use ng_contract::catalog::{PlasmaGases, Reads};
 use ng_contract::*;
 use ng_metabolism::{GasRoutes, PlasmaPressure, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
 
@@ -37,27 +37,9 @@ pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
     let (mut laws, ports) = body.metabolism(Some(held))?.parts();
     let oxygen = GasRoutes::<Oxygen>::request(&mut laws, &ports);
     let carbon_dioxide = GasRoutes::<CarbonDioxide>::request(&mut laws, &ports);
-    let wall = &oxygen.wall;
-    let plasma = Plasma {
-        water: wall.from_amount::<Water>(),
-        oxygen: wall.from_amount::<Oxygen>(),
-        carbon_dioxide: wall.from_amount::<CarbonDioxide>(),
-        hemoglobin: wall.from_amount::<Hemoglobin>(),
-        ions: StrongIons {
-            sodium: wall.from_amount::<Sodium>(),
-            potassium: wall.from_amount::<Potassium>(),
-            magnesium: wall.from_amount::<Magnesium>(),
-            calcium: wall.from_amount::<Calcium>(),
-            chloride: wall.from_amount::<Chloride>(),
-            lactate: wall.from_amount::<Lactate>(),
-            ketones: wall.from_amount::<Ketones>(),
-            diet_base: wall.from_amount::<DietBase>(),
-            fixed_acid: wall.from_amount::<FixedAcid>(),
-        },
-    };
-    let speciated = speciate(&mut laws, &plasma)?;
-    let oxygen_pressure: PlasmaPressure<'_, '_> = &|k| k.at_site(&speciated.oxygen_partial_pressure);
-    let carbon_dioxide_pressure: PlasmaPressure<'_, '_> = &|k| speciated.carbon_dioxide_partial_pressure(k);
+    let gases: PlasmaGases<Reads<'_, Metabolism>> = laws.receive();
+    let oxygen_pressure = &gases.oxygen_partial_pressure;
+    let carbon_dioxide_pressure = &gases.carbon_dioxide_partial_pressure;
     let cells = oxygen_diffusion(&mut laws, &oxygen, oxygen_pressure)?;
     carbon_dioxide_diffusion(&mut laws, &carbon_dioxide, carbon_dioxide_pressure)?;
     burn(&mut laws, &cells)?;
@@ -127,7 +109,7 @@ fn restore<'b, Q: Substance>(
 fn lung_exchange<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     (oxygen, carbon_dioxide): &(Pair<'b, Metabolism, Oxygen>, Pair<'b, Metabolism, CarbonDioxide>),
-    [oxygen_pressure, carbon_dioxide_pressure]: [PlasmaPressure<'_, 'b>; 2],
+    [oxygen_pressure, carbon_dioxide_pressure]: [&PlasmaPressure<'b>; 2],
 ) -> Result<(), AdmissionError> {
     let share = laws.site_parameter::<CapillaryBed, Dimensionless>(
         ParameterKey::new("mt.lung-share"),
@@ -153,7 +135,7 @@ fn pulmonary_row<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     [name, ..]: [&'static str; 3],
     share: &SiteParameter<'b, Metabolism, CapillaryBed, Dimensionless>,
-    plasma: PlasmaPressure<'_, 'b>,
+    plasma: &PlasmaPressure<'b>,
 ) -> Result<AlgebraicSlot<'b, Metabolism, Pressure>, AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
     let pulmonary = laws.algebraic::<Pressure>(name, Admissible::positive());
@@ -162,7 +144,7 @@ fn pulmonary_row<'b>(
         k.finish(value, laws.every_mode(), class)
     });
     let each = laws.site_kernel::<CapillaryBed, _, _>(|mut k| {
-        let (pressure, share) = (plasma(&mut k), k.site_parameter(share));
+        let (pressure, share) = (k.at_site(plasma), k.site_parameter(share));
         let value = k.scale(pressure, share);
         k.finish(value, laws.every_mode(), class)
     });

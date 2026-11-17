@@ -4,9 +4,10 @@
 
 use core::f64::consts::LN_10;
 use core::num::NonZeroU64;
-use ng_blood_chemistry::{Plasma, StrongIons, speciate};
+use ng_blood_chemistry::speciate;
+use ng_contract::catalog::{PlasmaGases, Reads};
 use ng_contract::*;
-use ng_metabolism::{GasRoutes, PlasmaPressure, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
+use ng_metabolism::{GasRoutes, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
 use ng_record::{Running, Session, Step};
 use ng_validate::*;
 
@@ -281,36 +282,17 @@ fn compiled(cells: Cells) -> Result<CompiledBody, AdmissionError> {
             .pool::<Ketones, CapillaryBed>(plasma)
             .pool::<DietBase, CapillaryBed>(plasma)
             .pool::<FixedAcid, CapillaryBed>(plasma);
-        let (laws, _) = body.hold(held)?.parts();
+        let held = body.hold(held)?;
+        let (mut laws, ports) = body.blood_chemistry(Some(held))?.parts();
+        speciate(&mut laws, &ports)?;
         body.add(laws.finish());
 
         let (mut laws, ports) = body.metabolism(None)?.parts();
         let oxygen = GasRoutes::<Oxygen>::request(&mut laws, &ports);
         let carbon_dioxide = GasRoutes::<CarbonDioxide>::request(&mut laws, &ports);
-        let wall = &oxygen.wall;
-        let plasma = Plasma {
-            water: wall.from_amount::<Water>(),
-            oxygen: wall.from_amount::<Oxygen>(),
-            carbon_dioxide: wall.from_amount::<CarbonDioxide>(),
-            hemoglobin: wall.from_amount::<Hemoglobin>(),
-            ions: StrongIons {
-                sodium: wall.from_amount::<Sodium>(),
-                potassium: wall.from_amount::<Potassium>(),
-                magnesium: wall.from_amount::<Magnesium>(),
-                calcium: wall.from_amount::<Calcium>(),
-                chloride: wall.from_amount::<Chloride>(),
-                lactate: wall.from_amount::<Lactate>(),
-                ketones: wall.from_amount::<Ketones>(),
-                diet_base: wall.from_amount::<DietBase>(),
-                fixed_acid: wall.from_amount::<FixedAcid>(),
-            },
-        };
-        let speciated = speciate(&mut laws, &plasma)?;
-        let oxygen_pressure: PlasmaPressure<'_, '_> = &|k| k.at_site(&speciated.oxygen_partial_pressure);
-        let carbon_dioxide_pressure: PlasmaPressure<'_, '_> =
-            &|k| speciated.carbon_dioxide_partial_pressure(k);
-        let cell_oxygen = oxygen_diffusion(&mut laws, &oxygen, oxygen_pressure)?;
-        carbon_dioxide_diffusion(&mut laws, &carbon_dioxide, carbon_dioxide_pressure)?;
+        let gases: PlasmaGases<Reads<'_, Metabolism>> = laws.receive();
+        let cell_oxygen = oxygen_diffusion(&mut laws, &oxygen, &gases.oxygen_partial_pressure)?;
+        carbon_dioxide_diffusion(&mut laws, &carbon_dioxide, &gases.carbon_dioxide_partial_pressure)?;
         match cells {
             Cells::HeldUse => {}
             Cells::Burning | Cells::BurningUnderTwoCards => burn(&mut laws, &cell_oxygen)?,
@@ -783,7 +765,7 @@ fn value(body: &CompiledBody, session: &Session<'_, Running>, kind: RowKind) -> 
 fn field(local: &'static str) -> Result<RowKind, AdmissionError> {
     Ok(RowKind::Algebraic(Slot {
         law: LawName {
-            owner: Metabolism::CARD,
+            owner: BloodChemistry::CARD,
             local,
         },
         at: Context::Site(site::<CapillaryBed>(BED)?),
@@ -1041,7 +1023,7 @@ fn oxygen_and_carbon_dioxide_close_to_the_ledgers_floor_through_speciation()
 
 fn refused_by(body: &CompiledBody, source: SourceId, local: &'static str) -> bool {
     let law = LawName {
-        owner: Metabolism::CARD,
+        owner: BloodChemistry::CARD,
         local,
     };
     matches!(
@@ -1072,7 +1054,7 @@ fn a_trial_whose_bound_share_leaves_zero_to_one_is_refused_by_name() -> Result<(
             Err(InitializationFailure::Undefined { law }) => assert_eq!(
                 law,
                 LawName {
-                    owner: Metabolism::CARD,
+                    owner: BloodChemistry::CARD,
                     local: "oxygen partial pressure"
                 }
             ),
@@ -1103,7 +1085,7 @@ fn a_bicarbonate_at_or_above_what_the_total_leaves_is_refused_by_name() -> Resul
             Err(InitializationFailure::Undefined { law }) => assert_eq!(
                 law,
                 LawName {
-                    owner: Metabolism::CARD,
+                    owner: BloodChemistry::CARD,
                     local: "acidity"
                 }
             ),
