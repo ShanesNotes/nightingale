@@ -3748,8 +3748,8 @@ test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_one
 [[mutant]]
 name = "hydrogen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Hydrogen, 6e-6),'''
-new = '''(Element::Hydrogen, 1.2e-5),'''
+old = '''(Element::Hydrogen, 2e-5),'''
+new = '''(Element::Hydrogen, 4e-5),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]

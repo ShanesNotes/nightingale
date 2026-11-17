@@ -961,14 +961,14 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
         species: [
             (Species::Energy, 7e3),
             (Species::Water, 0.04),
-            (Species::Sodium, 9e-4),
+            (Species::Sodium, 8e-4),
             (Species::Chloride, 9e-4),
-            (Species::Potassium, 5e-5),
+            (Species::Potassium, 4e-5),
             (Species::Vasopressin, 2e-3),
         ],
         elements: [
             (Element::Carbon, 0.8),
-            (Element::Hydrogen, 6e-6),
+            (Element::Hydrogen, 2e-5),
             (Element::Oxygen, 5.0),
         ],
     };

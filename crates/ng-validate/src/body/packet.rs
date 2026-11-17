@@ -1037,9 +1037,9 @@ const ELEMENT_DRIFTS: [(Element, f64); 3] = [
 const SPECIES_DRIFTS: [(Species, f64); 6] = [
     (Species::Energy, ENERGY_DRIFT),
     (Species::Water, 0.04),
-    (Species::Sodium, 9e-4),
+    (Species::Sodium, 8e-4),
     (Species::Chloride, 9e-4),
-    (Species::Potassium, 5e-5),
+    (Species::Potassium, 4e-5),
     (Species::Vasopressin, 2e-3),
 ];
 
