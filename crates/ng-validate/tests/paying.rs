@@ -468,7 +468,10 @@ fn with_the_burn_raised_by_the_work_the_beds_heat_passes_the_burn_less_the_work_
             raised: true,
         });
         let less = paid.mean_burn_energy - work;
-        assert!((paid.mean_to_core - less).abs() <= 1e-6 * less, "{work}: {paid:?}");
+        assert!(
+            (paid.mean_to_core - less).abs() <= 1e-6 * less,
+            "{work}: {paid:?}"
+        );
         assert_eq!(paid.receipt_over_run, 0.0, "{work}: {paid:?}");
     }
 }
@@ -489,7 +492,10 @@ fn with_the_burn_not_raised_the_beds_heat_settles_lower_by_the_work_over_the_hea
             raised: false,
         });
         let lower = receipt.bed_heat_at_end - work / BED_HEAT_SPEED;
-        assert!((paid.bed_heat_at_end - lower).abs() <= 1e-6 * lower, "{work}: {paid:?} against {lower}");
+        assert!(
+            (paid.bed_heat_at_end - lower).abs() <= 1e-6 * lower,
+            "{work}: {paid:?} against {lower}"
+        );
         assert_eq!(paid.receipt_over_run, 0.0, "{work}: {paid:?}");
     }
 }
