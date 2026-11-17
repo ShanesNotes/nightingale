@@ -1,22 +1,23 @@
 # 09: Tissues respire
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: b09a-burn
 Blocked by: 02, 08, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
 **What to build:** Each bed burns fuel with oxygen into carbon dioxide, water and heat, as a reaction at the bed ([ticket 02](02-reactions.md)). Rung 0 burns glucose and fatty acids in a fixed proportion, which fixes the respiratory quotient, and oxidizes lactate, until [ticket 16](16-fuel-stores.md) splits the mix. Research 11 gives no form for burning lactate, so that form is still to find. The heat joins the core heat store, or the skin heat store for the skin bed, because only tissue sites hold heat, and the water joins the bed's water. Tissue carbon dioxide has a store, because blood alone settles too fast when breathing changes. When supply falls short of demand, an oxygen debt and lactate build, and the debt reaches the vessels as the signal for local flow. The work of the heart and the vessel walls, which the slice books against metabolism, is charged once.
 
 **Releases:** the metabolism card's hold, and coupling arrows 78 (work and flow to metabolism) and 90 (oxygen debt to the vessels).
 
-- [ ] Tests: the reaction's proportions close every book, and each rate law matches its form at stated points
-- [ ] Run: over a window in which a bed's flow changes, oxygen in less oxygen out equals oxygen used plus the change in what the bed stores, and at a steady state that is flow times the difference between arterial and venous content. Carbon dioxide made over oxygen used equals the declared quotient. The energy book closes: heat equals the fuel's energy less work
-- [ ] No work is paid from outside the body: the exterior chemical energy that pays the heart and the vessel walls in the slice is replaced by fuel burned at the bed
-- [ ] Run: halving one bed's flow raises its extraction, then its debt, then its flow, in that order
-- [ ] Run: the slice's posture checks once with the heart's work paid at the muscle bed and no coronary bed. The coronary bed stays only if they fail without it (record 0002)
-- [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
-- [ ] The body admits over a cycle with its reactions running, which [ticket 02](02-reactions.md) left unshown
-- [ ] From [research 12](../../research/issues/12-law-forms-heat.md): every bed's heat, the skin bed's included, reaches the core heat store, which replaces the skin heat store for the skin bed above. A reaction's heat lands in its bed's own thermal pool, so each bed needs a transfer to the core store, first order in that pool at a declared speed (a model default)
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
+- [ ] Tests: the reaction's proportions balance every element and energy, and each rate law matches its form at stated points. 09a meets it for the two burns, the oxygen rate and the bed heat on the one-bed fixture; 09b takes glycolysis and lactate's burn
+- [ ] Run: over a window in which a bed's flow changes, oxygen in less oxygen out equals oxygen used plus the change in what the bed stores, and at a steady state that is flow times the difference between arterial and venous content. Carbon dioxide made over oxygen used equals the declared quotient. Energy closes: heat equals the fuel's energy less work. 09a meets it with no work paid by fuel yet (heat to the core store equals the fuel's energy less the beds' change); 09d adds the work
+- [ ] No work is paid from outside the body: the exterior chemical energy that pays the heart and the vessel walls in the slice is replaced by fuel burned at the bed. 09d, after a native-contract change (below)
+- [ ] Run: halving one bed's flow raises its extraction, then its debt, then its flow, in that order. 09b states the debt and 09c arrow 90
+- [ ] Run: the slice's posture checks once with the heart's work paid at the muscle bed and no coronary bed. The coronary bed stays only if they fail without it (record 0002). 09d
+- [x] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved (09a)
+- [x] The body admits over a cycle with its reactions running, which [ticket 02](02-reactions.md) left unshown (09a)
+- [x] From [research 12](../../research/issues/12-law-forms-heat.md): every bed's heat, the skin bed's included, reaches the core heat store, which replaces the skin heat store for the skin bed above. A reaction's heat lands in its bed's own thermal pool, so each bed needs a transfer to the core store, first order in that pool at a declared speed (a model default). 09a
+- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget. Each PR of this ticket gives its lines (below)
 
 **Non-goals:** which fuel a bed burns (ticket 16), temperature's effect on rate, and heat exchange with the room (ticket 12).
 
@@ -35,3 +36,19 @@ From [ticket 04](04-scopes-ports-and-census.md):
 From [ticket 08](08-blood-carries-gases.md)'s second PR: a fixed use can outrun supply. The plan's one-bed fixture drove a cell's oxygen partial pressure below zero at +50% of its use, so 08's runs keep their steps in use small, and this ticket's uptake, which supply limits, ends that.
 
 From [ticket 08](08-blood-carries-gases.md)'s third PR: the body packet's `BY_ACIDITY`, `BY_CARBON_DIOXIDE`, `WEAK` and `CARBAMINO` and its `Blood`, and the gas fixture's `ARTERIAL`, `Speciated` and `Start`, name their values by a tuple's positions, with a comment to say which is which. Named fields would let those eight comments go, at about 60 changed lines, so the first ticket that restates the packet's gases takes them.
+
+## The four PRs
+
+The ticket lands as four PRs: 09a the burn, 09b lactate and the oxygen debt, 09c arrow 90, 09d arrow 78. The plan and its prototypes are outside the repo.
+
+- 09d waits on a contract change: the heart's and the vessel walls' work start at the exterior's chemical energy, and no route family starts at a bed's heat store.
+- Research 11's debt in memory cannot be stated, because memory is body-wide only. So 09b reads the debt from the cells' lactate.
+- The oxygen rate is research 11's smooth minimum less its value at no cell oxygen, `smooth_min(D, k P, s D) - smooth_min(D, 0, s D)`, with the width a share `s` of the demand. A review of nightingale#180 found the plain form below zero there, and on the one-bed fixture with the cell membrane shut and the cells at 0 mmHg it ran both burns backward at up to 9.4e-3 oxygen a second, raising the cells to 2e-3 mmHg. So the rate is zero at a cell partial pressure of zero, and it passes the demand by at most that offset, `D (sqrt(1 + s^2) - 1) / 2`, which is 1e-4 of the demand at `s` = 0.02. 09b's debt form takes the same offset.
+
+## Cost
+
+Exception to ticket 26's budget, recorded by the oversight seat: this ticket may pass the gas loop's allowance. Ticket 08 took 677.7 M of the loop's 750.9 M, nearly all of it in the cost of a solve, and the burn alone adds about 152 M at a fixed landing count, measured in 09a on main `020a4a403ffb`. The ledger's walk of every combination against every column, a quarter of the body's line and no law's work, is gone as of that main (nightingale#181). The loop's budget is restated in ticket 26 from measured lines. Until then each PR of this ticket gives its line, its solves by kind and its instructions a solve at its base and its head.
+
+09a's lines on the beelink, base main at `020a4a403ffb` and head in this PR: rows 1,419 to 1,431, unknowns 1,419 to 1,431, columns 1,356 to 1,400, nonzeros 9,514 to 9,625, steps 11,794 to 11,797, solves 15,263 to 14,510 (ordinary 12,519 to 12,522, landing 2,744 to 1,988), 4,958.6 to 4,865.9 M a simulated second, instructions a solve 19.493 to 20.121 M (+3.2%). The base's landing count is in the dearer of its two states and the head's in the cheaper one (native-contract 64), so the line falls only by that. At a fixed landing count the burn adds about 152 M (inferred, at the head's 14,510 solves). The rise in instructions a solve, +0.628 M, is over this ticket's 2.5% flag. On main `e8e8bc0afc9f`, before the walk went, the same burn measured +0.465 M (+1.7%), so the walk's removal both shrank the base and left the burn's part larger: a profile by symbol is owed.
+
+Accepted flag: admission rises with the burn, because it now solves the fuels, the beds' heat and the element totals in each bed's cells. The pair in this PR, back to back at loads of 3 to 9: 299.8 to 315.9 s (+5.4%), the march 56.8 to 63.1 s (+11%) and the ring 243.0 to 252.8 s (+4.0%). The base ran at the higher load, so the rise may be larger. Two earlier pairs at one load gave about 12%.

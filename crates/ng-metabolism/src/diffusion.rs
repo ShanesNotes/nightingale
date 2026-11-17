@@ -32,6 +32,50 @@ struct Tissue<'a, 'b, Q> {
     buffered: Option<Parameter<'b, Metabolism, Dimensionless>>,
 }
 
+impl<'b, Q: Substance + Plain> Tissue<'_, 'b, Q> {
+    fn pressure<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Pressure> {
+        tissue_pressure(
+            k,
+            (&self.gas, &self.water),
+            self.solubility,
+            self.buffered.as_ref(),
+        )
+    }
+}
+
+fn tissue_pressure<'b, 'k, Q: Substance + Plain>(
+    k: &mut Bed<'b, 'k>,
+    (gas, water): (&Port<'b, Q>, &Port<'b, Water>),
+    solubility: &Solubility<'b, Q>,
+    buffered: Option<&Parameter<'b, Metabolism, Dimensionless>>,
+) -> Expr<'b, 'k, Metabolism, Pressure> {
+    let (gas, water) = (k.at_site(gas), k.at_site(water));
+    let volume = k.volume(water);
+    let quotient = k.divide(gas, volume);
+    let content: Expr<'b, 'k, Metabolism, Concentration<Q>> = k.as_dimension(quotient);
+    let mut solubility = k.parameter(solubility);
+    if let Some(ratio) = buffered {
+        let ratio = k.parameter(ratio);
+        let buffered = k.scale(solubility, ratio);
+        solubility = k.add(solubility, buffered);
+    }
+    let quotient = k.divide(content, solubility);
+    k.as_dimension(quotient)
+}
+
+/// The oxygen partial pressure of each bed's cells, as the membrane's diffusion reads it.
+pub struct CellOxygen<'b> {
+    solubility: Solubility<'b, Oxygen>,
+    gas: Port<'b, Oxygen>,
+    water: Port<'b, Water>,
+}
+
+impl<'b> CellOxygen<'b> {
+    pub(crate) fn pressure<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Pressure> {
+        tissue_pressure(k, (&self.gas, &self.water), &self.solubility, None)
+    }
+}
+
 enum Side<'a, 'b, Q> {
     Plasma(PlasmaPressure<'a, 'b>),
     Tissue(&'a Tissue<'a, 'b, Q>),
@@ -41,20 +85,7 @@ impl<'b, Q: Substance + Plain> Side<'_, 'b, Q> {
     fn pressure<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Pressure> {
         match self {
             Self::Plasma(pressure) => pressure(k),
-            Self::Tissue(space) => {
-                let (gas, water) = (k.at_site(&space.gas), k.at_site(&space.water));
-                let volume = k.volume(water);
-                let quotient = k.divide(gas, volume);
-                let content: Expr<'b, 'k, Metabolism, Concentration<Q>> = k.as_dimension(quotient);
-                let mut solubility = k.parameter(space.solubility);
-                if let Some(ratio) = &space.buffered {
-                    let ratio = k.parameter(ratio);
-                    let buffered = k.scale(solubility, ratio);
-                    solubility = k.add(solubility, buffered);
-                }
-                let quotient = k.divide(content, solubility);
-                k.as_dimension(quotient)
-            }
+            Self::Tissue(space) => space.pressure(k),
         }
     }
 }
@@ -100,12 +131,13 @@ fn tissues<'a, 'b, Q: Substance + Plain>(
 }
 
 /// Oxygen across each bed's capillary wall, from the plasma's partial pressure to the interstitium's, and across its
-/// cell membrane, from the interstitium's to the cells', each `J = G (P_from - P_to)` with one conductance a bed.
+/// cell membrane, from the interstitium's to the cells', each `J = G (P_from - P_to)` with one conductance a bed. It
+/// returns the cells' partial pressure, which the burn reads.
 pub fn oxygen_diffusion<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     routes: &GasRoutes<'b, Oxygen>,
     plasma: PlasmaPressure<'_, 'b>,
-) -> Result<(), AdmissionError> {
+) -> Result<CellOxygen<'b>, AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, DIFFUSION_NS)?;
     let solubility = laws.parameter(
         ParameterKey::new("mt.tissue-oxygen-solubility"),
@@ -122,7 +154,11 @@ pub fn oxygen_diffusion<'b>(
         membrane,
         class,
     );
-    Ok(())
+    Ok(CellOxygen {
+        solubility,
+        gas: routes.membrane.to_amount::<Oxygen>(),
+        water: routes.membrane.to_amount::<Water>(),
+    })
 }
 
 /// Carbon dioxide across the same two walls by the same rate. A tissue space has no acidity until ticket 18, so its

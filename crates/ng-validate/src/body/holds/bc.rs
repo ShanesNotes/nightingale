@@ -3,7 +3,6 @@ use ng_contract::*;
 
 pub(super) fn blood_chemistry(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<BloodChemistry>::new(Vec::new(), Vec::new(), FIXED)
-        .pool::<Water, CapillaryBed>(Space::Cells)
         .pool::<Sodium, CapillaryBed>(Space::Cells)
         .pool::<Potassium, Beds<Muscle>>(Space::Cells)
         .pool::<Potassium, Beds<Fat>>(Space::Cells)
