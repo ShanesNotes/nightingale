@@ -4,8 +4,9 @@ type Port<'b, U> = ReadPort<'b, Metabolism, PerSite<CapillaryBed, U>>;
 type Bed<'b, 'k> = Kernel<'b, 'k, Metabolism, CapillaryBed>;
 type Solubility<'b, Q> = Parameter<'b, Metabolism, Quotient<Concentration<Q>, Pressure>>;
 
-/// A bed's plasma partial pressure of one gas, as speciation states it.
-pub type PlasmaPressure<'r, 'b> = &'r dyn for<'k> Fn(&mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Pressure>;
+/// A bed's plasma partial pressure of one gas, as blood chemistry states it, read through metabolism's row of the
+/// readers' table.
+pub type PlasmaPressure<'b> = Port<'b, Pressure>;
 
 const DIFFUSION_NS: u64 = 1_000_000_000;
 
@@ -77,14 +78,14 @@ impl<'b> CellOxygen<'b> {
 }
 
 enum Side<'a, 'b, Q> {
-    Plasma(PlasmaPressure<'a, 'b>),
+    Plasma(&'a PlasmaPressure<'b>),
     Tissue(&'a Tissue<'a, 'b, Q>),
 }
 
 impl<'b, Q: Substance + Plain> Side<'_, 'b, Q> {
     fn pressure<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Pressure> {
         match self {
-            Self::Plasma(pressure) => pressure(k),
+            Self::Plasma(pressure) => k.at_site(pressure),
             Self::Tissue(space) => space.pressure(k),
         }
     }
@@ -136,7 +137,7 @@ fn tissues<'a, 'b, Q: Substance + Plain>(
 pub fn oxygen_diffusion<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     routes: &GasRoutes<'b, Oxygen>,
-    plasma: PlasmaPressure<'_, 'b>,
+    plasma: &PlasmaPressure<'b>,
 ) -> Result<CellOxygen<'b>, AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, DIFFUSION_NS)?;
     let solubility = laws.parameter(
@@ -166,7 +167,7 @@ pub fn oxygen_diffusion<'b>(
 pub fn carbon_dioxide_diffusion<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     routes: &GasRoutes<'b, CarbonDioxide>,
-    plasma: PlasmaPressure<'_, 'b>,
+    plasma: &PlasmaPressure<'b>,
 ) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, DIFFUSION_NS)?;
     let key = ParameterKey::new;

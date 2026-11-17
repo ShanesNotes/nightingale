@@ -249,6 +249,14 @@ pub enum AdmissionError {
         site: SiteId,
         space: Space,
     },
+    /// A site named to pay work that is no capillary bed.
+    PayerNotABed {
+        site: SiteId,
+    },
+    /// A work named a payer twice, the same bed or another.
+    WorkPaidTwice {
+        work: crate::Work,
+    },
     /// A policy limit in a dimension the combination does not balance.
     QuantityDimension {
         quantity: QuantityId,
@@ -360,6 +368,9 @@ pub enum CompileDefect {
     UnclaimedLaw { law: LawName },
     /// A read of a coupling field no owner emits. An omitted law is not zero.
     UnemittedField { law: LawName, field: LawName },
+    /// An edge's read of a narrower set at an end that no edge the law holds on has in that set, so it would read zero
+    /// everywhere.
+    EndOffSet { law: LawName },
     /// A segment the map samples where no law of another card reads blood chemistry's speciation, so the mark would
     /// keep rows nothing uses.
     UnreadSample { site: SiteId },
@@ -436,6 +447,10 @@ pub enum CompileDefect {
     ConservationOverflow { law: Option<LawName> },
     /// A reaction whose pools exist together at no site of its set.
     ReactionNowhere { law: LawName },
+    /// A bed named to pay work whose heat the schema holds no pool for.
+    PayerHoldsNoHeat { site: SiteId },
+    /// A work a law requests and a bed is named to pay, with no elastic store at the root for it to end at.
+    PaidWorkHasNoStore { work: crate::Work },
     /// A site where a reaction stands without the energy pool its energy goes to.
     ReactionEndpoint {
         law: LawName,

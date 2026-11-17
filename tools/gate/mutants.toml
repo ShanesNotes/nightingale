@@ -3649,10 +3649,10 @@ new = '''        let apart = k.subtract(standard, read);'''
 test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
 
 [[mutant]]
-name = "lactate-energy-500"
+name = "lactate-energy-50000"
 path = "crates/ng-validate/src/body/schema.rs"
-old = '''pub(super) const LACTATE_ENERGY: f64 = 450.0;'''
-new = '''pub(super) const LACTATE_ENERGY: f64 = 500.0;'''
+old = '''pub(super) const LACTATE_ENERGY: f64 = 45_000.0;'''
+new = '''pub(super) const LACTATE_ENERGY: f64 = 50_000.0;'''
 test = "-p ng-validate --test body each_beds_glycolysis_and_lactate_burn_carry_their_atoms_and_energy_into_its_cells_and_heat"
 
 [[mutant]]
@@ -3691,10 +3691,10 @@ new = '''.map_or_else(|| Measure::new(SYNTHETIC_DRIFT), |_| Measure::new(SYNTHET
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
-name = "fatty-acid-energy-2800"
+name = "fatty-acid-energy-280000"
 path = "crates/ng-validate/src/body/schema.rs"
-old = '''pub(super) const FAT_ENERGY: f64 = 3_000.0;'''
-new = '''pub(super) const FAT_ENERGY: f64 = 2_800.0;'''
+old = '''pub(super) const FAT_ENERGY: f64 = 300_000.0;'''
+new = '''pub(super) const FAT_ENERGY: f64 = 280_000.0;'''
 test = "-p ng-validate --test body each_beds_burns_carry_their_fuels_atoms_and_energy_into_its_cells_and_heat"
 
 [[mutant]]
@@ -3713,9 +3713,9 @@ test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_one
 
 [[mutant]]
 name = "saturation-set-finite"
-path = "crates/ng-blood-chemistry/src/lib.rs"
-old = '''("oxygen saturation", Admissible::unit_interval())'''
-new = '''("oxygen saturation", Admissible::finite())'''
+path = "crates/ng-contract/src/scope/blood_chemistry.rs"
+old = '''row::<OxygenSaturation>(laws, Admissible::unit_interval())'''
+new = '''row::<OxygenSaturation>(laws, Admissible::finite())'''
 test = "-p ng-validate --test gases a_saturation_outside_zero_to_one_is_refused_before_carbamino_reads_it"
 
 [[mutant]]
@@ -4091,3 +4091,212 @@ path = "crates/ng-record/src/history.rs"
 old = '''    for &(column, net) in nonzero {'''
 new = '''    for &(column, net) in nonzero.split_last().map_or(nonzero, |(_, rest)| rest) {'''
 test = "-p ng-record --lib history::tests::the_nonzero_columns_flow_and_seal_with_the_bits_of_every_column"
+
+[[mutant]]
+name = "work-paid-from-outside"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        Some(&(_, bed)) => Terminal::Pool(heat(bed)),'''
+new = '''        Some(_) => Terminal::Exterior("chemical energy"),'''
+test = "-p ng-contract --test routes a_named_bed_pays_the_heart_and_the_walls_from_its_heat_and_the_pumps_keep_their_receipt"
+
+[[mutant]]
+name = "work-paid-from-outside-in-the-run"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        Some(&(_, bed)) => Terminal::Pool(heat(bed)),'''
+new = '''        Some(_) => Terminal::Exterior("chemical energy"),'''
+test = "-p ng-validate --test paying with_the_burn_raised_by_the_work_the_beds_heat_passes_the_burn_less_the_work_to_the_core_store"
+
+[[mutant]]
+name = "a-payer-without-heat-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+new = '''find(|_| false)'''
+test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+[[mutant]]
+name = "paid-work-without-a-store-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''find(|&&(work, _)| !stored && requested(work))'''
+new = '''find(|_| false)'''
+test = "-p ng-contract --test routes named_work_without_an_elastic_store_is_refused_instead_of_dropped"
+
+[[mutant]]
+name = "payer-check-reads-the-first-payer-alone"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(schema.payers.iter()).find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+new = '''(schema.payers.iter().take(1)).find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+test = "-p ng-contract --test routes every_payer_is_checked_for_heat_whichever_work_it_pays"
+
+
+[[mutant]]
+name = "payer-check-skips-the-first-payer"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(schema.payers.iter()).find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+new = '''(schema.payers.iter().skip(1)).find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+test = "-p ng-contract --test routes every_payer_is_checked_for_heat_whichever_work_it_pays"
+
+
+[[mutant]]
+name = "payers-kept-in-the-order-named"
+path = "crates/ng-contract/src/scope.rs"
+old = '''                self.payers.insert(at, (work, bed));'''
+new = '''                self.payers.push((work, bed));'''
+test = "-p ng-contract --test routes either_order_of_naming_the_payers_compiles_one_body"
+
+
+[[mutant]]
+name = "payers-kept-in-the-order-named-in-the-seal"
+path = "crates/ng-contract/src/scope.rs"
+old = '''                self.payers.insert(at, (work, bed));'''
+new = '''                self.payers.push((work, bed));'''
+test = "-p ng-contract --lib scope::tests::the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays"
+
+
+[[mutant]]
+name = "payer-tag-is-the-energy-tag"
+path = "crates/ng-contract/src/scope.rs"
+old = '''            out.number(u64::MAX - 1);'''
+new = '''            out.number(u64::MAX);'''
+test = "-p ng-contract --lib scope::tests::the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays"
+
+
+[[mutant]]
+name = "payers-seal-with-no-tag"
+path = "crates/ng-contract/src/scope.rs"
+old = '''            out.number(u64::MAX - 1);'''
+new = '''            let _ = u64::MAX;'''
+test = "-p ng-contract --lib scope::tests::the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays"
+
+
+[[mutant]]
+name = "payer-off-the-map-taken"
+path = "crates/ng-contract/src/scope.rs"
+old = '''        if !self.anatomy.sites().any(|known| known == bed) {'''
+new = '''        if false && !self.anatomy.sites().any(|known| known == bed) {'''
+test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+
+[[mutant]]
+name = "payer-not-a-bed-taken"
+path = "crates/ng-contract/src/scope.rs"
+old = '''        if bed.class() != Class::CapillaryBed {'''
+new = '''        if false && bed.class() != Class::CapillaryBed {'''
+test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+
+[[mutant]]
+name = "work-paid-twice-takes-the-second-bed"
+path = "crates/ng-contract/src/scope.rs"
+old = '''            Ok(_) => Err(AdmissionError::WorkPaidTwice { work }),'''
+new = '''            Ok(at) => {
+                self.payers[at].1 = bed;
+                Ok(())
+            }'''
+test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+[[mutant]]
+name = "edge-read-at-the-upstream-end"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Where::Down | Where::DownIn(_) => ends.map(|end| end.1),'''
+new = '''Where::Down => ends.map(|end| end.1), Where::DownIn(_) => ends.map(|end| end.0),'''
+test = "-p ng-contract --lib edge_read::each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero"
+
+[[mutant]]
+name = "edge-read-zero-at-a-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''&& landed.is_none_or(|site| !anatomy.in_set(set).contains(&site))'''
+new = '''&& landed.is_some()'''
+test = "-p ng-contract --lib edge_read::each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes"
+path = "crates/ng-contract/src/compile.rs"
+old = '''return Err(CompileDefect::EndOffSet { law });'''
+new = ''''''
+test = "-p ng-contract --lib edge_read::a_law_none_of_whose_edges_ends_in_the_set_is_refused_by_name"
+
+[[mutant]]
+name = "edge-read-seals-its-tag-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''                set.seal(out);'''
+new = '''                let _ = set;'''
+test = "-p ng-contract --lib edge_read::a_downstream_reads_set_is_in_its_program_seal"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes-for-guards"
+path = "crates/ng-contract/src/compile.rs"
+old = '''check_ends(law, zero, &contexts, anatomy)?;'''
+new = ''''''
+test = "-p ng-contract --lib edge_read::an_edge_guard_none_of_whose_edges_ends_in_the_set_is_refused_by_name"
+
+[[mutant]]
+name = "edge-read-end-off-set-checks-its-first-set-alone"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            return Err(CompileDefect::EndOffSet { law });
+        }
+    }'''
+new = '''            return Err(CompileDefect::EndOffSet { law });
+        }
+        return Ok(());
+    }'''
+test = "-p ng-contract --lib edge_read::a_kernel_that_reads_two_sets_is_refused_when_either_misses_in_either_order"
+
+[[mutant]]
+name = "edge-read-lands-tests-the-upstream-end"
+path = "crates/ng-contract/src/compile.rs"
+old = '''matches!(context, Context::Edge { to, .. } if anatomy.in_set(set).contains(to))'''
+new = '''matches!(context, Context::Edge { from, .. } if anatomy.in_set(set).contains(from))'''
+test = "-p ng-contract --lib edge_read::a_law_whose_edges_only_leave_the_set_is_refused"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes-a-law-with-no-edge"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        if !contexts.iter().any(lands) {'''
+new = '''        if !contexts.is_empty() && !contexts.iter().any(lands) {'''
+test = "-p ng-contract --lib edge_read::a_law_with_no_edge_at_all_is_refused_when_it_states_the_read"
+
+[[mutant]]
+name = "speciation-row-under-metabolism"
+path = "crates/ng-validate/src/body/holds/mt.rs"
+old = '''    let oxygen_pressure = &gases.oxygen_partial_pressure;'''
+new = '''    let (copy_out, copy) = laws.site_field::<CapillaryBed, Pressure>("oxygen partial pressure", Admissible::positive());
+    let stated = laws.site_kernel(|mut k| {
+        let value = k.at_site(&gases.oxygen_partial_pressure);
+        k.finish(value, laws.every_mode(), RateClass::new(RateBand::Reflex, 1_000_000_000).expect("a class"))
+    });
+    laws.define_at(&copy_out, stated);
+    let oxygen_pressure = &copy;'''
+test = "-p ng-validate --test gases blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops"
+
+[[mutant]]
+name = "reader-states-the-explicit-field"
+path = "crates/ng-validate/src/body/holds/mt.rs"
+old = '''    let carbon_dioxide_pressure = &gases.carbon_dioxide_partial_pressure;'''
+new = '''    let (copy_out, copy) = laws.site_field::<CapillaryBed, Pressure>("carbon dioxide partial pressure", Admissible::positive());
+    let stated = laws.site_kernel(|mut k| {
+        let value = k.at_site(&gases.carbon_dioxide_partial_pressure);
+        k.finish(value, laws.every_mode(), RateClass::new(RateBand::Reflex, 1_000_000_000).expect("a class"))
+    });
+    laws.define_at(&copy_out, stated);
+    let carbon_dioxide_pressure = &copy;'''
+test = "-p ng-validate --test gases blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops"
+
+[[mutant]]
+name = "edge-read-discarded-read-is-not-checked"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let &Input::Read(_, Where::DownIn(set)) = input else {'''
+new = '''        ;
+    for input in inputs {
+        let &Input::Read(_, Where::DownIn(set)) = input else {'''
+test = "-p ng-contract --lib edge_read::a_read_the_law_discards_is_still_checked"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes-a-guard-off-a-route"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            check_ends(law, zero, &contexts, anatomy)?;'''
+new = '''            if route.is_some() {
+                check_ends(law, zero, &contexts, anatomy)?;
+            }'''
+test = "-p ng-contract --lib edge_read::a_guard_on_a_body_wide_mode_that_states_the_read_is_refused"

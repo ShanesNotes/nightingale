@@ -1590,6 +1590,8 @@ mod chance;
 mod compensated;
 mod compile;
 mod conservation;
+#[cfg(test)]
+mod edge_read;
 mod elimination;
 mod evaluate;
 mod failure;

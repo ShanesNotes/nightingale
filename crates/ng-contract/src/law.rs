@@ -355,6 +355,7 @@ pub(crate) enum Where {
     Mark(Landmark),
     MarkOn(Sites, Landmark),
     Sensor(Landmark),
+    DownIn(Sites),
 }
 impl Op {
     pub(crate) fn operands(&self) -> &[usize] {
@@ -501,6 +502,10 @@ impl Seal for Where {
             Where::Sensor(landmark) => {
                 out.number(6);
                 out.number(landmark as u64);
+            }
+            Where::DownIn(set) => {
+                out.number(7);
+                set.seal(out);
             }
         }
     }
@@ -1355,6 +1360,43 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
         port: &ReadPort<'b, O, PerSite<E::To, U>>,
     ) -> Expr<'b, 'k, O, U> {
         self.read_at(port.source, Where::Down)
+    }
+    /// The downstream site's entry of a port over a narrower set, and zero with no slope where that site is outside
+    /// it. Only the card an arrow names as its receiving end holds that arrow's port:
+    /// ```compile_fail,E0308
+    /// use ng_contract::{catalog::*, *};
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Fluids, VascularEdge>, debt: OxygenDebtPerBed<Reads<'b, Cardiovascular>>) {
+    ///     let _ = k.downstream_if_in(&debt.oxygen_debt_per_bed);
+    /// }
+    /// ```
+    /// An end whose set cannot hold the port's sites does not compile: a blood end reading one tissue's beds,
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, tone: ReadPort<'b, Cardiovascular, PerSite<Beds<Muscle>, Dimensionless>>) {
+    ///     let _ = k.downstream_if_in(&tone);
+    /// }
+    /// ```
+    /// and a tubule's end reading every bed:
+    /// ```compile_fail,E0308
+    /// use ng_contract::{catalog::*, *};
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, TubuleEdge>, debt: OxygenDebtPerBed<Reads<'b, Cardiovascular>>) {
+    ///     let _ = k.downstream_if_in(&debt.oxygen_debt_per_bed);
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::{catalog::*, *};
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, debt: OxygenDebtPerBed<Reads<'b, Cardiovascular>>) {
+    ///     let _ = k.downstream_if_in(&debt.oxygen_debt_per_bed);
+    /// }
+    /// ```
+    pub fn downstream_if_in<D: SiteSet, U: Dimension>(
+        &mut self,
+        port: &ReadPort<'b, O, PerSite<D, U>>,
+    ) -> Expr<'b, 'k, O, U>
+    where
+        E::To: Includes<D>,
+    {
+        self.read_at(port.source, Where::DownIn(D::SET))
     }
     /// How far this edge falls in gravity under the drive frame's posture: the upstream height less the downstream.
     pub fn fall(&mut self) -> Expr<'b, 'k, O, Length> {

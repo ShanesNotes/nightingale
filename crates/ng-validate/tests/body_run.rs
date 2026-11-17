@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "66cae635363a2400d2e79bff042c37bf675158feca0c8f827b67fbc87112329c";
-const ADMITTED_SEAL: &str = "91167a0d29014b60a3d7651f8553ccfeafc74964cdc1d01fa634a568cbc1d72d";
+const PACKET: &str = "ed7490f48e5a43b51cb89dbda13bab725809459dab0c5d7ff1565b26e088e92a";
+const ADMITTED_SEAL: &str = "35ba56b9c1b264916af266b87d11643f6e557d09e673b16032df62a5adad10b7";
 
 struct Counted {
     core: ng_solver::Core,
@@ -356,7 +356,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11797, quantities 404, held routes 97
+        steps 11794, quantities 404, held routes 97
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -487,8 +487,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 66cae635363a2400d2e79bff042c37bf675158feca0c8f827b67fbc87112329c
-        seal 78087eed2a4e6debf1503f6ca90ed68e3665d7f9bb37a82db71f97c5eab196ae
+        packet ed7490f48e5a43b51cb89dbda13bab725809459dab0c5d7ff1565b26e088e92a
+        seal 98de0885696912b25351ac0cd980730eacbcb7da460c1c1884f551ac06c8f4d0
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
@@ -997,6 +997,108 @@ const AT_DEMAND: f64 = 2e-4;
 const AT_REST: f64 = 2e-4;
 const AT_REST_LACTATE: f64 = 1e-9;
 
+const SPECIATION_FORMS: f64 = 1e-9;
+const SOLUBILITY: f64 = 0.001;
+const HEME: f64 = 4.0;
+const P50: f64 = 25.0;
+const HILL: [f64; 3] = [2.5, 1.0, 10.0];
+const STANDARD_ACIDITY: f64 = 7.5;
+const BY_ACIDITY: [f64; 3] = [-1.0, 0.5, -0.25];
+const STANDARD_CARBON_DIOXIDE: [f64; 2] = [30.0, 10.0];
+const BY_CARBON_DIOXIDE: [f64; 2] = [0.1, 0.01];
+const CARBON_DIOXIDE_SOLUBILITY: f64 = 0.02;
+const PK: f64 = 6.0;
+const STRONG_ION_OFFSET: f64 = 50.0;
+const WEAK_ACIDS: [[f64; 3]; 2] = [[1.0, 10.0, 60.0], [1.0, 1.0, 6.0]];
+const HEMOGLOBIN_CHARGE: [f64; 2] = [5.0, 30.0];
+const CARBAMINO: [f64; 3] = [4.0, 10.0, 10.0];
+const CHARGES: [(Species, f64); 9] = [
+    (Species::Sodium, 1.0),
+    (Species::Potassium, 1.0),
+    (Species::Magnesium, 2.0),
+    (Species::Calcium, 2.0),
+    (Species::Chloride, -1.0),
+    (Species::Lactate, -1.0),
+    (Species::Ketones, -1.0),
+    (Species::DietBase, -1.0),
+    (Species::FixedAcid, -1.0),
+];
+
+fn ln(x: f64) -> f64 {
+    let mut y = 0.0;
+    for _ in 0..200 {
+        y -= 1.0 - x / exp(y);
+    }
+    y
+}
+
+/// Each bed's four speciation rows at the admitted state against blood chemistry's forms at the packet's synthetic
+/// values, read from the bed's plasma amounts and the other rows: bicarbonate from the charge balance, acidity from
+/// `10^(pH - pK) = HCO3 / (C_T - HCO3 - carbamino)`, and the oxygen partial pressure and saturation from the curve.
+fn each_beds_speciation_meets_its_forms_at_the_admitted_state(start: &Start) {
+    let admitted = start.session();
+    for (key, _) in DEMANDS {
+        let bed = site::<CapillaryBed>(key);
+        let row = |local| value(start, &admitted, field("BC", local, Context::Site(bed)));
+        let held = |species| {
+            let kind = RowKind::Amount {
+                site: bed,
+                species,
+                space: Space::Plasma,
+            };
+            value(start, &admitted, kind)
+        };
+        let water = held(Species::Water);
+        let per = |species| held(species) / water;
+        let (pressure, saturation) = (row("oxygen partial pressure"), row("oxygen saturation"));
+        let (bicarbonate, acidity) = (row("bicarbonate"), row("acidity"));
+        let carrier = per(Species::Hemoglobin);
+        let strong: f64 = CHARGES
+            .iter()
+            .map(|(species, charge)| charge * per(*species))
+            .sum();
+        let weak: f64 = (WEAK_ACIDS.iter())
+            .map(|[held, slope, offset]| held * (slope * acidity - offset))
+            .sum::<f64>()
+            + carrier * (HEMOGLOBIN_CHARGE[0] * acidity - HEMOGLOBIN_CHARGE[1]);
+        let dissolved = bicarbonate / exp((acidity - PK) * core::f64::consts::LN_10);
+        let reach = CARBAMINO[1] + CARBAMINO[2] * saturation;
+        let carbamino = CARBAMINO[0] * carrier * dissolved / (dissolved + reach);
+        let left = per(Species::CarbonDioxide) - bicarbonate - carbamino;
+        let d = acidity - STANDARD_ACIDITY;
+        let u =
+            (dissolved / CARBON_DIOXIDE_SOLUBILITY - STANDARD_CARBON_DIOXIDE[0]) / STANDARD_CARBON_DIOXIDE[1];
+        let shifted = P50 * (1.0 + BY_ACIDITY[0] * d + BY_ACIDITY[1] * d * d + BY_ACIDITY[2] * d * d * d);
+        let half = shifted * (1.0 + BY_CARBON_DIOXIDE[0] * u + BY_CARBON_DIOXIDE[1] * u * u);
+        let hill = HILL[0] - HILL[1] * exp(-pressure / HILL[2]);
+        let bound = (per(Species::Oxygen) - SOLUBILITY * pressure) / (HEME * carrier);
+        let forms = [
+            ("bicarbonate", bicarbonate, strong + STRONG_ION_OFFSET - weak),
+            (
+                "acidity",
+                exp((acidity - PK) * core::f64::consts::LN_10),
+                bicarbonate / left,
+            ),
+            (
+                "oxygen partial pressure",
+                pressure,
+                half * exp(ln(bound / (1.0 - bound)) / hill),
+            ),
+            (
+                "oxygen saturation",
+                saturation,
+                1.0 / (1.0 + exp(-hill * ln(pressure / half))),
+            ),
+        ];
+        for (local, held, form) in forms {
+            assert!(
+                (held - form).abs() <= SPECIATION_FORMS * form.abs(),
+                "the {key} admits its {local} at {held} against its form's {form}"
+            );
+        }
+    }
+}
+
 fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
     let body = &start.body;
     let columns = every_column(body);
@@ -1142,6 +1244,7 @@ fn the_whole_body_passes_every_replay_gate() {
 fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let start = Start::admitted();
     each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(&start);
+    each_beds_speciation_meets_its_forms_at_the_admitted_state(&start);
     the_body_admits_at_06_55(&start);
     the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
     let before = start.core.solves.get();
@@ -1164,7 +1267,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
     expect![[r#"
-        steps 11797, solves 14510: ordinary 12522, landing 1988
+        steps 11794, solves 15264: ordinary 12519, landing 2745
         refused 60 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
         refused 243 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
         refused 361 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })

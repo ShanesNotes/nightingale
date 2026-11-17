@@ -1009,11 +1009,12 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// start, rounded up to one significant figure. It is a synthetic target that scores a solver and judges no body. The
 /// body's measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set
 /// (record 0004). Energy's change is the walls' elastic store filling and the core's heat store emptying as the run
-/// settles from the admitted start, 4,946.6 in and 1,582.1 out over the first ten seconds, while the fuels and the beds'
-/// heat move under 0.003. Oxygen's and carbon's change is mostly the blood gases' swing within a beat, read across
-/// windows that hold no whole number of beats, and hydrogen's is a bed's cell water and fuels settling. The species
-/// are the held gut's and skin's water and salts and vasopressin's held secretion and clearance. Oxygen and carbon
-/// dioxide as species keep only held pools that never move, so the slice's bound for an unmoved species holds them.
+/// settles from the admitted start, 4,946.6 in and 1,582.1 out over the first ten seconds, while over the first minute
+/// a bed's fuels move under 1e-6 and its heat under 0.1. Oxygen's and carbon's change is mostly the blood gases' swing
+/// within a beat, read across windows that hold no whole number of beats, and hydrogen's is a bed's cell water and
+/// fuels settling. The species are the held gut's and skin's water and salts and vasopressin's held secretion and
+/// clearance. Oxygen and carbon dioxide as species keep only held pools that never move, so the slice's bound for an
+/// unmoved species holds them.
 const ENERGY_DRIFT: f64 = 7e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
     (Element::Carbon, 0.8),
