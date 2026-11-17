@@ -694,7 +694,7 @@ fn count(body: &CompiledBody, column: ColumnId, on: impl Fn(SiteId, Species, Spa
 
 fn burns(body: &CompiledBody, column: ColumnId) -> bool {
     let origin = body.columns()[column.index()].origin();
-    origin.owner == "MT" && ["glucose burn", "fatty acid burn"].contains(&origin.local)
+    origin.owner == "MT" && ["glucose burn", "fatty acid burn", "glycolysis", "lactate burn"].contains(&origin.local)
 }
 
 fn at_bed(body: &CompiledBody, column: ColumnId, bed: SiteId) -> bool {
@@ -994,6 +994,8 @@ const DEMANDS: [(&str, f64); 11] = [
 ];
 const AT_DEMAND: f64 = 2e-4;
 const AT_REST: f64 = 2e-4;
+/// The packet's reference amount of cell lactate, which no bed's cells split glucose to raise at rest.
+const AT_REST_LACTATE: f64 = 1e-9;
 
 fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
     let body = &start.body;
@@ -1038,6 +1040,19 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             assert!(
                 (held - rest).abs() <= AT_REST * rest.abs(),
                 "the {key} admits {held} of {species:?} in {space:?} against its rest of {rest}"
+            );
+        }
+        let lactate = RowKind::Amount {
+            site: bed,
+            species: Species::Lactate,
+            space: Space::Cells,
+        };
+        let debt = field("MT", "oxygen_debt_per_bed", Context::Site(bed));
+        for (when, session) in [("admitted", &admitted), ("a step on", &stepped)] {
+            let (held, owed) = (value(start, session, lactate), value(start, session, debt));
+            assert!(
+                held.abs() <= AT_REST_LACTATE && owed.abs() <= 3.0 * AT_REST_LACTATE,
+                "the {key} {when} holds {held} lactate in its cells and owes {owed} oxygen"
             );
         }
     }

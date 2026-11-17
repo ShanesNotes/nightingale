@@ -80,7 +80,9 @@ const INTERSTITIAL_BUFFER_RATIO: f64 = 15.0;
 const CELL_BUFFER_RATIO: f64 = 10.0;
 const GLUCOSE_SHARE: f64 = 5.0 / 28.0;
 const PER_OXYGEN: f64 = GLUCOSE_SHARE + 16.0 * (1.0 - GLUCOSE_SHARE) / 23.0;
-const CELL_PRESSURE_AT_DEMAND: f64 = 20.0;
+/// The reach meets the demand at this cell pressure, and the oxygen rate falls short of the demand only below twice it,
+/// so every bed's cells, at 38 mmHg or more at rest, split no glucose there and admit no lactate.
+const CELL_PRESSURE_AT_DEMAND: f64 = 10.0;
 const WIDTH_SHARE_OF_DEMAND: f64 = 0.02;
 const BED_HEAT_SPEED: f64 = 0.05;
 const FEED_SPEED: f64 = 0.1;
@@ -88,6 +90,11 @@ const GLUCOSE_SET: f64 = 3_000.0;
 const FAT_SET: f64 = 600.0;
 const CELL_WATER: f64 = 1_000.0;
 const WATER_SPEED: f64 = 10.0;
+const GLUCOSE_PER_OXYGEN_SHORT: f64 = 1.0 / 6.0;
+const LACTATE_BURN_SPEED: f64 = 0.02;
+const LACTATE_HALF_PRESSURE: f64 = 2.0;
+const OXYGEN_PER_LACTATE: f64 = 3.0;
+const CELL_LACTATE_AT_REST: f64 = 0.0;
 const ALVEOLAR_CARBON_DIOXIDE: f64 = 30.0;
 const CARBON_DIOXIDE_HEAD: f64 = 1.0;
 const VENOUS_CARBON_DIOXIDE_GUESS: f64 = 35.0;
@@ -244,6 +251,7 @@ fn start_guess(row: RowKind) -> f64 {
                 "bicarbonate" => blood.bicarbonate,
                 "acidity" => blood.acidity,
                 "pulmonary carbon dioxide partial pressure" => blood.carbon_dioxide_pressure,
+                "oxygen_debt_per_bed" => 0.0,
                 _ => 1.0,
             }
         }
@@ -260,6 +268,7 @@ fn burn_rest(site: &str, species: Species, space: Space) -> Option<f64> {
         (Species::FattyAcids, Space::Cells) => FAT_SET - fat / FEED_SPEED,
         (Species::Water, Space::Cells) => CELL_WATER + (6.0 * glucose + 16.0 * fat) / WATER_SPEED,
         (Species::Energy, Space::Thermal) => (glucose * GLUCOSE_ENERGY + fat * FAT_ENERGY) / BED_HEAT_SPEED,
+        (Species::Lactate, Space::Cells) => CELL_LACTATE_AT_REST,
         _ => return None,
     })
 }
@@ -922,7 +931,17 @@ fn burn(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionE
     set::<Glucose>(packet, "mt.cell-glucose-set", body, GLUCOSE_SET)?;
     set::<FattyAcids>(packet, "mt.cell-fatty-acid-set", body, FAT_SET)?;
     set::<Water>(packet, "mt.cell-water-set", body, CELL_WATER)?;
-    set::<Rate<Dimensionless>>(packet, "mt.cell-water-speed", body, WATER_SPEED)
+    set::<Rate<Dimensionless>>(packet, "mt.cell-water-speed", body, WATER_SPEED)?;
+    set::<Quotient<Glucose, Oxygen>>(
+        packet,
+        "mt.glucose-per-oxygen-short",
+        beds,
+        GLUCOSE_PER_OXYGEN_SHORT,
+    )?;
+    set::<Rate<Dimensionless>>(packet, "mt.lactate-burn-speed", beds, LACTATE_BURN_SPEED)?;
+    set::<Pressure>(packet, "mt.lactate-burn-half-pressure", beds, LACTATE_HALF_PRESSURE)?;
+    set::<Quotient<Oxygen, Lactate>>(packet, "mt.oxygen-per-lactate", beds, OXYGEN_PER_LACTATE)?;
+    set::<Lactate>(packet, "mt.cell-lactate-reference", beds, CELL_LACTATE_AT_REST)
 }
 
 fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {

@@ -107,6 +107,11 @@ const FEED_SPEED: f64 = 0.1;
 const GLUCOSE_SET: f64 = 3_000.0;
 const FAT_SET: f64 = 600.0;
 const CELL_WATER_SPEED: f64 = 10.0;
+const LACTATE_ENERGY: f64 = 450.0;
+const GLUCOSE_PER_OXYGEN_SHORT: f64 = 1.0 / 6.0;
+const OXYGEN_PER_LACTATE: f64 = 3.0;
+const LACTATE_BURN_SPEED: f64 = 0.02;
+const LACTATE_HALF_PRESSURE: f64 = 2.0;
 
 fn ten_to(power: f64) -> f64 {
     exp(power * LN_10)
@@ -255,6 +260,10 @@ fn compiled(cells: Cells) -> Result<CompiledBody, AdmissionError> {
         schema.pool::<Energy>(root, Space::Thermal)?;
         schema.energy_content::<Glucose>(Measure::new(GLUCOSE_ENERGY)?)?;
         schema.energy_content::<FattyAcids>(Measure::new(FAT_ENERGY)?)?;
+        if cells != Cells::OneMixedBurn {
+            schema.carry::<Lactate, CapillaryBed>(Space::Cells);
+            schema.energy_content::<Lactate>(Measure::new(LACTATE_ENERGY)?)?;
+        }
         schema.boundary::<Glucose>("glucose feed", into, bed, Space::Cells)?;
         schema.boundary::<FattyAcids>("fatty acid feed", into, bed, Space::Cells)?;
         schema.boundary::<Water>("cell water out", out, bed, Space::Cells)?;
@@ -507,8 +516,21 @@ struct Start {
     arterial: Speciated,
     renewal: f64,
     demand: f64,
+    oxygen_reach: f64,
     cell_conductance: f64,
+    lactate: Lactation,
 }
+
+/// The cells' lactate the packet starts from, and the reference amount the debt reads it against.
+#[derive(Clone, Copy, Debug)]
+struct Lactation {
+    reference: f64,
+    held: f64,
+}
+const LACTATION: Lactation = Lactation {
+    reference: 0.0,
+    held: 0.0,
+};
 impl Start {
     fn at(plasma: Speciated) -> Self {
         Self {
@@ -522,7 +544,9 @@ impl Start {
             arterial: speciated(ARTERIAL),
             renewal: RENEWAL,
             demand: DEMAND,
+            oxygen_reach: DEMAND / CELL_PRESSURE_AT_DEMAND,
             cell_conductance: used() / HEAD,
+            lactate: LACTATION,
         }
     }
     fn cold(plasma: Speciated) -> Self {
@@ -565,6 +589,11 @@ fn guess(row: RowKind, start: Start) -> f64 {
             ..
         } => 0.0,
         RowKind::Amount {
+            species: Species::Lactate,
+            space: Space::Cells,
+            ..
+        } => start.lactate.held,
+        RowKind::Amount {
             species, space: at, ..
         } => {
             let water = WATER[space(at)];
@@ -589,6 +618,7 @@ fn guess(row: RowKind, start: Start) -> f64 {
             "oxygen saturation" => start.guess.saturation,
             "bicarbonate" => start.guess.bicarbonate,
             "acidity" => start.guess.acidity,
+            "oxygen_debt_per_bed" => 0.0,
             _ => panic!("no start for {row:?}"),
         },
         other => panic!("no start for {other:?}"),
@@ -719,7 +749,7 @@ fn packet_from(
             &mut packet,
             "mt.oxygen-reach",
             beds,
-            DEMAND / CELL_PRESSURE_AT_DEMAND,
+            start.oxygen_reach,
         )?;
         set::<Dimensionless>(
             &mut packet,
@@ -729,6 +759,21 @@ fn packet_from(
         )?;
         set::<Dimensionless>(&mut packet, "mt.glucose-share", beds, GLUCOSE_SHARE)?;
         set::<Rate<Dimensionless>>(&mut packet, "mt.bed-heat-speed", beds, BED_HEAT_SPEED)?;
+        set::<Quotient<Glucose, Oxygen>>(
+            &mut packet,
+            "mt.glucose-per-oxygen-short",
+            beds,
+            GLUCOSE_PER_OXYGEN_SHORT,
+        )?;
+        set::<Rate<Dimensionless>>(&mut packet, "mt.lactate-burn-speed", beds, LACTATE_BURN_SPEED)?;
+        set::<Pressure>(
+            &mut packet,
+            "mt.lactate-burn-half-pressure",
+            beds,
+            LACTATE_HALF_PRESSURE,
+        )?;
+        set::<Lactate>(&mut packet, "mt.cell-lactate-reference", beds, start.lactate.reference)?;
+        set::<Quotient<Oxygen, Lactate>>(&mut packet, "mt.oxygen-per-lactate", beds, OXYGEN_PER_LACTATE)?;
         set::<Rate<Dimensionless>>(&mut packet, "fixture.feed-speed", body_wide, FEED_SPEED)?;
         set::<Glucose>(&mut packet, "fixture.glucose-set", body_wide, GLUCOSE_SET)?;
         set::<FattyAcids>(&mut packet, "fixture.fatty-acid-set", body_wide, FAT_SET)?;
@@ -1691,6 +1736,87 @@ fn zero_oxygen_demand_leaves_both_burns_idle() -> Result<(), InitializationFailu
     Ok(())
 }
 
+#[test]
+fn a_tiny_positive_oxygen_demand_never_runs_either_burn_backward() -> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled(Cells::Burning)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let rest = settling(&body, &core, &store)?;
+    let settled: Vec<(RowKind, f64)> = (body.rows().iter())
+        .map(|row| (row.kind(), value(&body, &rest, row.kind())))
+        .collect();
+    let start = Start {
+        demand: 1e-170,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let held = |row| {
+        let found = settled.iter().find(|(kind, _)| *kind == row);
+        found.unwrap_or_else(|| panic!("no settled {row:?}")).1
+    };
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let session = admit(&body, &core, &store, packet_from(&body, start, held)?)?;
+    let session = match session.step() {
+        Step::Accepted(next, _) => next,
+        Step::Refused(retrying) => panic!("tiny demand was refused: {:?}", retrying.refused().reason()),
+        Step::Faulted(faulted) => panic!("tiny demand faulted: {:?}", faulted.fault()),
+    };
+    for local in ["glucose burn", "fatty acid burn"] {
+        let measured = burned(&body, &session, local);
+        assert!(
+            [measured.oxygen, measured.carbon_dioxide, measured.heat]
+                .iter()
+                .all(|rate| rate.is_finite() && *rate >= 0.0),
+            "{local}: {measured:?} at a nonnegative demand of {}",
+            start.demand
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn an_abundant_oxygen_reach_preserves_the_beds_demand() -> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled(Cells::Burning)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let rest = settling(&body, &core, &store)?;
+    let settled: Vec<(RowKind, f64)> = (body.rows().iter())
+        .map(|row| (row.kind(), value(&body, &rest, row.kind())))
+        .collect();
+    let start = Start {
+        oxygen_reach: 1e20,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let held = |row| {
+        let found = settled.iter().find(|(kind, _)| *kind == row);
+        found.unwrap_or_else(|| panic!("no settled {row:?}")).1
+    };
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let session = admit(&body, &core, &store, packet_from(&body, start, held)?)?;
+    let session = match session.step() {
+        Step::Accepted(next, _) => next,
+        Step::Refused(retrying) => panic!("abundant reach was refused: {:?}", retrying.refused().reason()),
+        Step::Faulted(faulted) => panic!("abundant reach faulted: {:?}", faulted.fault()),
+    };
+    let pressure = tissue_oxygen(&body, &session, Space::Cells)?;
+    assert!(pressure > 1.0, "the cells lack oxygen: {pressure}");
+    let rate: f64 = ["glucose burn", "fatty acid burn"]
+        .map(|local| burned(&body, &session, local).oxygen)
+        .iter()
+        .sum();
+    assert!(
+        close(rate, start.demand, AT_DEMAND),
+        "the bed burns {rate} against a demand of {} at a reach of {} and cell pressure {pressure}",
+        start.demand,
+        start.oxygen_reach
+    );
+    Ok(())
+}
+
+
 fn refused(cells: Cells) -> CompileDefect {
     match compiled(cells) {
         Err(AdmissionError::Compile(defect)) => defect,
@@ -1726,5 +1852,423 @@ fn a_second_cards_glucose_burn_at_the_bed_is_refused_as_owned_twice() -> Result<
         "{laws:?}"
     );
     assert_eq!(at, site::<CapillaryBed>(BED)?);
+    Ok(())
+}
+
+fn extent(body: &CompiledBody, session: &Session<'_, Running>, local: &'static str) -> f64 {
+    let law = LawName {
+        owner: Metabolism::CARD,
+        local,
+    };
+    let column = (body.instances().iter())
+        .find_map(|instance| match instance.target() {
+            Target::Column(column) if body.columns()[column.index()].origin() == law => Some(column),
+            Target::Column(_) | Target::Row(_) => None,
+        })
+        .unwrap_or_else(|| panic!("no column for {local}"));
+    let view = session.conservation();
+    let head = view.head().expect("a step");
+    let interval = head.interval();
+    let (forward, reverse) = head.exchange(column);
+    let gained =
+        |curve: &[Compensated]| f64::from_bits(curve[1].bits()[0]) - f64::from_bits(curve[0].bits()[0]);
+    let extent = gained(&forward.on(interval).expect("the head's interval"))
+        - gained(&reverse.on(interval).expect("the head's interval"));
+    extent * SECOND as f64 / interval.length_ns() as f64
+}
+
+struct Marched {
+    steps: u64,
+    refusals: Vec<String>,
+    least: [f64; 3],
+    debts: Vec<(f64, f64)>,
+    least_rates: [f64; 2],
+}
+
+fn march<'m>(
+    body: &'m CompiledBody,
+    mut session: Session<'m, Running>,
+    seconds: u64,
+) -> Result<(Session<'m, Running>, Marched), InitializationFailure> {
+    let start = session.record().accepted().time().nanoseconds();
+    let mut seen = Marched {
+        steps: 0,
+        refusals: Vec::new(),
+        least: [f64::INFINITY; 3],
+        debts: Vec::new(),
+        least_rates: [f64::INFINITY; 2],
+    };
+    while session.record().accepted().time().nanoseconds() < start + seconds * SECOND {
+        let mut attempt = session.step();
+        loop {
+            match attempt {
+                Step::Accepted(next, _) => {
+                    session = next;
+                    seen.steps += 1;
+                    break;
+                }
+                Step::Refused(retrying) => {
+                    seen.refusals.push(format!("{:?}", retrying.refused().reason()));
+                    attempt = retrying.retry();
+                }
+                Step::Faulted(faulted) => panic!("{:?} after {:?}", faulted.fault(), seen.refusals),
+            }
+        }
+        let pressures = [
+            value(body, &session, field("oxygen partial pressure")?),
+            tissue_oxygen(body, &session, Space::Interstitium)?,
+            tissue_oxygen(body, &session, Space::Cells)?,
+        ];
+        for (least, pressure) in seen.least.iter_mut().zip(pressures) {
+            *least = least.min(pressure);
+        }
+        for (least, local) in seen.least_rates.iter_mut().zip(["glycolysis", "lactate burn"]) {
+            *least = least.min(extent(body, &session, local));
+        }
+        let now = (session.record().accepted().time().nanoseconds() - start) as f64 / SECOND as f64;
+        seen.debts
+            .push((now, value(body, &session, field("oxygen_debt_per_bed")?)));
+    }
+    Ok((session, seen))
+}
+
+fn rest_of(body: &CompiledBody, session: &Session<'_, Running>) -> Vec<(RowKind, f64)> {
+    (body.rows().iter())
+        .map(|row| (row.kind(), value(body, session, row.kind())))
+        .collect()
+}
+
+fn readmitted<'m>(
+    body: &'m CompiledBody,
+    core: &'m ng_solver::Core,
+    store: &'m MemoryStore,
+    start: Start,
+    from: &[(RowKind, f64)],
+) -> Result<Session<'m, Running>, InitializationFailure> {
+    let held = |row| {
+        let found = from.iter().find(|(kind, _)| *kind == row);
+        found.unwrap_or_else(|| panic!("no settled {row:?}")).1
+    };
+    admit(body, core, store, packet_from(body, start, held)?)
+}
+
+fn half_time(debts: &[(f64, f64)], reference: f64, share: f64) -> Option<f64> {
+    let first = debts.first()?.1 - reference;
+    debts
+        .iter()
+        .find(|(_, debt)| debt - reference <= share * first)
+        .map(|(time, _)| *time)
+}
+
+fn every_quantity_closes(
+    body: &CompiledBody,
+    session: &Session<'_, Running>,
+    coverage: u64,
+) -> Result<Certificate, String> {
+    let windows = SlidingWindows::new(NonZeroU64::MIN.saturating_add(10 * SECOND - 1), coverage * SECOND)
+        .map_err(|error| format!("{error:?}"))?;
+    struct Unbounded(QuantityId);
+    impl Visit for Unbounded {
+        type Output = Result<QuantityPolicy, AdmissionError>;
+        fn visit<Q: Substance>(self) -> Self::Output {
+            QuantityPolicy::new(
+                self.0,
+                Measure::<Q>::new(0.0)?,
+                Measure::new(CLOSURE)?,
+                Measure::new(1e9)?,
+            )
+        }
+    }
+    let basis = body.conserved_basis();
+    let quantities = (basis.ids())
+        .map(|quantity| match quantity.book() {
+            Book::Of(species) => species.visit(Unbounded(quantity)),
+            Book::Energy => Species::Energy.visit(Unbounded(quantity)),
+            Book::Element(_) => QuantityPolicy::element(
+                quantity,
+                Measure::new(0.0)?,
+                Measure::new(CLOSURE)?,
+                Measure::new(1e9)?,
+            ),
+            Book::Charge => QuantityPolicy::charge(quantity, Measure::new(0.0)?, Measure::new(CLOSURE)?),
+        })
+        .collect::<Result<Vec<_>, AdmissionError>>()
+        .map_err(|error| format!("{error:?}"))?;
+    let policy = CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)
+        .map_err(|error| format!("{error:?}"))?;
+    certify(&session.conservation(), &policy).map_err(|failed| {
+        format!(
+            "{:?} {:?} {:?} {:e}",
+            failed.check(),
+            failed.quantity(),
+            failed.window(),
+            f64::from_bits(failed.residual().bits()[0])
+        )
+    })
+}
+
+fn settled(body: &CompiledBody) -> Result<Vec<(RowKind, f64)>, InitializationFailure> {
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    Ok(rest_of(body, &settling(body, &core, &store)?))
+}
+
+/// One step from the settled bed with its cell membrane shut, the cells at a stated oxygen partial pressure and
+/// lactate, and the closed forms read at the step's two ends, whose mean the step's extent meets to its second order.
+struct AtPoint {
+    glycolysis: f64,
+    lactate_burn: f64,
+    expected_glycolysis: f64,
+    expected_lactate_burn: f64,
+    debt: f64,
+    held: f64,
+}
+
+fn split(demand: f64, cell_pressure: f64) -> f64 {
+    GLUCOSE_PER_OXYGEN_SHORT * (demand - oxygen_rate(demand, cell_pressure)).max(0.0)
+}
+
+fn lactate_burned(lactate: f64, cell_pressure: f64) -> f64 {
+    LACTATE_BURN_SPEED * lactate * cell_pressure / (cell_pressure + LACTATE_HALF_PRESSURE)
+}
+
+fn stepped_at(
+    body: &CompiledBody,
+    settled: &[(RowKind, f64)],
+    (demand, cell_pressure, lactate): (f64, f64, f64),
+    reference: f64,
+) -> Result<AtPoint, InitializationFailure> {
+    let start = Start {
+        demand,
+        cell_conductance: 0.0,
+        lactate: Lactation {
+            reference,
+            held: lactate,
+        },
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let (oxygen, held) = (
+        amount(Species::Oxygen, Space::Cells)?,
+        amount(Species::Lactate, Space::Cells)?,
+    );
+    let mut from = settled.to_vec();
+    for (row, value) in &mut from {
+        if *row == oxygen {
+            *value = SOLUBILITY * cell_pressure * WATER[2];
+        } else if *row == held {
+            *value = lactate;
+        }
+    }
+    let (core, store) = (ng_solver::Core::new(SECOND / 10_000), MemoryStore::default());
+    let session = readmitted(body, &core, &store, start, &from)?;
+    let ends = |session: &Session<'_, Running>| -> Result<(f64, f64), AdmissionError> {
+        Ok((
+            tissue_oxygen(body, session, Space::Cells)?,
+            value(body, session, held),
+        ))
+    };
+    let first = ends(&session)?;
+    let session = match session.step() {
+        Step::Accepted(next, _) => next,
+        Step::Refused(retrying) => panic!("the point was refused: {:?}", retrying.refused().reason()),
+        Step::Faulted(faulted) => panic!("the point faulted: {:?}", faulted.fault()),
+    };
+    let last = ends(&session)?;
+    let mean = |form: &dyn Fn((f64, f64)) -> f64| 0.5 * (form(first) + form(last));
+    Ok(AtPoint {
+        glycolysis: extent(body, &session, "glycolysis"),
+        lactate_burn: extent(body, &session, "lactate burn"),
+        expected_glycolysis: mean(&|(pressure, _)| split(demand, pressure)),
+        expected_lactate_burn: mean(&|(pressure, lactate)| lactate_burned(lactate, pressure)),
+        debt: value(body, &session, field("oxygen_debt_per_bed")?),
+        held: last.1,
+    })
+}
+
+fn column_terms(body: &CompiledBody, local: &'static str) -> Vec<(Species, i64)> {
+    let law = LawName {
+        owner: Metabolism::CARD,
+        local,
+    };
+    let column = (body.columns().iter())
+        .find(|column| column.origin() == law)
+        .unwrap_or_else(|| panic!("no column for {local}"));
+    let mut terms: Vec<(Species, i64)> = (column.terms().iter())
+        .map(|&(row, count)| match body.rows()[row.index()].kind() {
+            RowKind::Amount { species, .. } => (species, count),
+            other => panic!("a term on {other:?}"),
+        })
+        .collect();
+    terms.sort_by_key(|(species, _)| format!("{species:?}"));
+    terms
+}
+
+#[test]
+fn glycolysis_and_lactates_burn_carry_their_atoms_and_energy_into_the_cells_and_heat() -> Result<(), AdmissionError> {
+    let body = compiled(Cells::Burning)?;
+    assert_eq!(
+        column_terms(&body, "glycolysis"),
+        vec![(Species::Energy, 100), (Species::Glucose, -1), (Species::Lactate, 2)],
+        "glycolysis gives up a glucose's energy, {GLUCOSE_ENERGY}, less two lactates', {LACTATE_ENERGY} each"
+    );
+    assert_eq!(
+        column_terms(&body, "lactate burn"),
+        vec![
+            (Species::CarbonDioxide, 3),
+            (Species::Energy, 450),
+            (Species::Lactate, -1),
+            (Species::Oxygen, -3),
+            (Species::Water, 3)
+        ]
+    );
+    let burn = column_terms(&body, "lactate burn");
+    let per = |species| burn.iter().find(|(of, _)| *of == species).map(|(_, count)| *count as f64);
+    assert_eq!(
+        per(Species::Oxygen).zip(per(Species::Lactate)).map(|(o, l)| o / l),
+        Some(OXYGEN_PER_LACTATE),
+        "the debt's oxygen to each lactate is the burn's own"
+    );
+    Ok(())
+}
+
+/// Glycolysis is zero where the oxygen rate meets the demand, lactate's burn is zero with no lactate and with no cell
+/// oxygen, and the debt is three oxygen to each lactate above the reference.
+#[test]
+fn glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros() -> Result<(), InitializationFailure> {
+    let body = compiled(Cells::Burning)?;
+    let settled = settled(&body)?;
+    let reference = 50.0;
+    for (point, zero_split, zero_burn) in [
+        ((DEMAND, 10.0, 80.0), false, false),
+        ((DEMAND, 0.0, 80.0), false, true),
+        ((DEMAND, 60.0, 80.0), true, false),
+        ((DEMAND, 10.0, 0.0), false, true),
+        ((3.0 * DEMAND, 40.0, 200.0), false, false),
+    ] {
+        let measured = stepped_at(&body, &settled, point, reference)?;
+        let report = format!(
+            "at demand, cell pressure and lactate {point:?}: glycolysis {} against {}, lactate burn {} against {}",
+            measured.glycolysis,
+            measured.expected_glycolysis,
+            measured.lactate_burn,
+            measured.expected_lactate_burn
+        );
+        if zero_split {
+            assert_eq!(measured.glycolysis, 0.0, "{report}");
+        } else {
+            assert!(measured.glycolysis > 0.0, "{report}");
+            assert!(close(measured.glycolysis, measured.expected_glycolysis, 1e-6), "{report}");
+        }
+        if zero_burn {
+            assert_eq!(measured.lactate_burn, 0.0, "{report}");
+        } else {
+            assert!(measured.lactate_burn > 0.0, "{report}");
+            assert!(
+                close(measured.lactate_burn, measured.expected_lactate_burn, 1e-6),
+                "{report}"
+            );
+        }
+    }
+    for lactate in [reference, reference + 10.0, reference + 100.0] {
+        let measured = stepped_at(&body, &settled, (DEMAND, 0.0, lactate), reference)?;
+        let expected = OXYGEN_PER_LACTATE * (measured.held - reference);
+        assert!(
+            (measured.debt - expected).abs() <= 1e-9 * (1.0 + expected),
+            "the debt at {} lactate reads {} against {expected}",
+            measured.held,
+            measured.debt
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn the_bed_at_rest_splits_no_glucose_and_owes_no_oxygen() -> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled(Cells::Burning)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let session = settling(&body, &core, &store)?;
+    let held = value(&body, &session, amount(Species::Lactate, Space::Cells)?);
+    let debt = value(&body, &session, field("oxygen_debt_per_bed")?);
+    assert_eq!(extent(&body, &session, "glycolysis"), 0.0);
+    assert!(held >= 0.0 && held < 1e-5, "the settled cells hold {held} lactate");
+    assert!(
+        close(debt, OXYGEN_PER_LACTATE * held, 1e-12),
+        "the debt at rest reads {debt} for {held} lactate"
+    );
+    Ok(())
+}
+
+/// Each case runs two minutes from the settled bed, then five more back at rest. Every partial pressure stays above
+/// zero, no step is refused, the debt rises and the burn repays it.
+#[test]
+fn a_raised_demand_or_a_halved_flow_builds_a_debt_that_the_burn_repays() -> Result<(), InitializationFailure> {
+    let body = compiled(Cells::Burning)?;
+    let settled = settled(&body)?;
+    for (demand, renewal) in [
+        (1.5 * DEMAND, RENEWAL),
+        (3.0 * DEMAND, RENEWAL),
+        (DEMAND, 0.5 * RENEWAL),
+    ] {
+        let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+        let stressed = Start {
+            demand,
+            renewal,
+            ..Start::at(speciated(ARTERIAL))
+        };
+        let session = readmitted(&body, &core, &store, stressed, &settled)?;
+        let (end, stress) = march(&body, session, 120)?;
+        let built = value(&body, &end, field("oxygen_debt_per_bed")?);
+        let at_end = rest_of(&body, &end);
+        let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+        let back = Start::at(speciated(ARTERIAL));
+        let session = readmitted(&body, &core, &store, back, &at_end)?;
+        let (_, repay) = march(&body, session, 300)?;
+        let (half, tenth) = (half_time(&repay.debts, 0.0, 0.5), half_time(&repay.debts, 0.0, 0.1));
+        let report = format!(
+            "demand {demand}, renewal {renewal}: debt {built} after {} steps, least pressures {:?} and {:?}, half repaid at {half:?} s, a tenth left at {tenth:?} s, refused {:?} and {:?}",
+            stress.steps, stress.least, repay.least, stress.refusals, repay.refusals
+        );
+        println!("{report}");
+        assert!(stress.refusals.is_empty() && repay.refusals.is_empty(), "{report}");
+        assert!(
+            stress.least.iter().chain(&repay.least).all(|least| *least > 0.0),
+            "{report}"
+        );
+        assert!(built > 0.0, "{report}");
+        assert!(stress.least_rates.iter().chain(&repay.least_rates).all(|least| *least >= 0.0), "{report}");
+        assert!(tenth.is_some(), "{report}");
+    }
+    Ok(())
+}
+
+/// Glycolysis makes two lactates, a strong anion, from a glucose with no charge. No reaction moves a fixed charge,
+/// so the charge quantity counts none of it and closes, with every element and energy, while glycolysis runs.
+#[test]
+fn every_conserved_quantity_closes_while_glycolysis_runs() -> Result<(), InitializationFailure> {
+    let body = compiled(Cells::Burning)?;
+    let settled = settled(&body)?;
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let stressed = Start {
+        demand: 3.0 * DEMAND,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let session = readmitted(&body, &core, &store, stressed, &settled)?;
+    let (end, seen) = march(&body, session, 60)?;
+    assert!(seen.least_rates[0] > 0.0, "glycolysis ran the whole minute");
+    let certificate = every_quantity_closes(&body, &end, 60).unwrap_or_else(|failed| panic!("{failed}"));
+    let books: Vec<Book> = (certificate.results().iter())
+        .map(|result| result.quantity().book())
+        .collect();
+    for book in [
+        Book::Element(Element::Carbon),
+        Book::Element(Element::Hydrogen),
+        Book::Element(Element::Oxygen),
+        Book::Energy,
+        Book::Charge,
+    ] {
+        assert!(books.contains(&book), "{book:?} among {books:?}");
+    }
     Ok(())
 }
