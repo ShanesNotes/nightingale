@@ -535,14 +535,12 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         MT Pool(Glucose, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 533
         MT Pool(FattyAcids, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 536
         MT Pool(Lactate, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 540
-        MT Pool(Lactate, Cells, Besides(Liver)) Ticket(9, "MT") 01:194-196
         MT Pool(Triglyceride, Cells, Tissue(Fat)) Ticket(16, "MT") 01:199, 879
         MT Pool(Glycerol, Cells, Tissue(Fat)) Ticket(16, "MT") 01:199
         HP Route("insulin first pass") Ticket(15, "HP") 01:408, 605
         HP Route("albumin synthesis") Ticket(21, "HP") 01:312, 407, 884
         HP Route("albumin loss") Ticket(21, "HP") 01:314, 407, 884
         HP Route("fixed acid made") Ticket(18, "HP") 01:252, 406
-        HP Pool(Lactate, Cells, Tissue(Liver)) Ticket(14, "HP") 01:196
         HP Pool(Glycerol, Cells, Tissue(Liver)) Ticket(14, "HP") 01:204
         HP Pool(AminoAcids, Cells, Tissue(Liver)) Ticket(14, "HP") 01:208
         HP Pool(Urea, Cells, Tissue(Liver)) Ticket(14, "HP") 01:234, 877
@@ -610,9 +608,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 162: routes 97, pools 65
-        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 14, "MS": 15, "MT": 47, "RS": 12}
-        by ticket {"09": 4, "10": 14, "12": 7, "13": 16, "14": 7, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 160: routes 97, pools 63
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 15, "MT": 46, "RS": 12}
+        by ticket {"09": 3, "10": 14, "12": 7, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -871,10 +869,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1431 {"algebraic": 173, "amount": 1248, "memory": 10}, columns 1400, jacobian nonzeros 9625, blocks 447, parameter slots 631, conserved combinations 415, held pools 333, held route columns 97
-        model hash 402f829b2fb89e7aeba781d474c628e14610275429f550cb91db5ddbf8e1ed56
-        conserved basis 7b3616fb513a82fada3ed5c221f95b43c8940b425f1b354e80a9a35d87b5dad2
-        stated packet 5e5f6bb0201422c2ce19d3b552059c19d0b119df4611e9a62df9a24b22046b2c
+        rows 1442 {"algebraic": 184, "amount": 1248, "memory": 10}, columns 1422, jacobian nonzeros 9713, blocks 447, parameter slots 675, conserved combinations 404, held pools 322, held route columns 97
+        model hash 91b0b5b6c654d09d6f653b724d0a98949f4c97139ff53d19da2424d10275c73e
+        conserved basis 1723d7ed144b6a89f4f683fe2b1c8be1201694c8f3a1218dbddde3ceeca5a7d9
+        stated packet ccae17966ccd06ef6eb193aa38871e9eb585e82c0866b4b0648b84c63a989a5c
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -937,19 +935,16 @@ fn the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between
 fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError> {
     #[derive(Clone, Copy)]
     struct Stated {
-        energy: f64,
+        species: [(Species, f64); 6],
         elements: [(Element, f64); 3],
     }
     impl DriftTable for Stated {
         fn names(&self, species: Species) -> bool {
-            species == Species::Energy
+            self.species.iter().any(|(named, _)| *named == species)
         }
         fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
-            Measure::new(if Q::SPECIES == Species::Energy {
-                self.energy
-            } else {
-                f64::NAN
-            })
+            let named = self.species.iter().find(|(named, _)| *named == Q::SPECIES);
+            Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
         }
         fn element(&self, element: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
             let named = self.elements.iter().find(|(named, _)| *named == element);
@@ -963,32 +958,90 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
         Ok(certificate_with(&body, windows, table)?.digest())
     };
     let stated = Stated {
-        energy: 7e3,
+        species: [
+            (Species::Energy, 7e3),
+            (Species::Water, 0.04),
+            (Species::Sodium, 9e-4),
+            (Species::Chloride, 9e-4),
+            (Species::Potassium, 5e-5),
+            (Species::Vasopressin, 2e-3),
+        ],
         elements: [
             (Element::Carbon, 0.8),
-            (Element::Hydrogen, 3e-5),
+            (Element::Hydrogen, 6e-6),
             (Element::Oxygen, 5.0),
         ],
     };
     let policy = body_certificate(&body, windows)?.digest();
     assert_eq!(policy, digest(&stated)?);
     for by in [0.5, 2.0] {
-        let moved = Stated {
-            energy: stated.energy * by,
-            ..stated
-        };
-        assert_ne!(policy, digest(&moved)?, "energy times {by}");
-        for index in 0..3 {
+        for index in 0..stated.species.len() {
+            let mut moved = stated;
+            moved.species[index].1 *= by;
+            let named = moved.species[index].0;
+            assert_ne!(policy, digest(&moved)?, "{named:?} times {by}");
+        }
+        for index in 0..stated.elements.len() {
             let mut moved = stated;
             moved.elements[index].1 *= by;
-            assert_ne!(
-                policy,
-                digest(&moved)?,
-                "{:?} times {by}",
-                moved.elements[index].0
-            );
+            let named = moved.elements[index].0;
+            assert_ne!(policy, digest(&moved)?, "{named:?} times {by}");
         }
     }
+    Ok(())
+}
+
+#[test]
+fn each_beds_glycolysis_and_lactate_burn_carry_their_atoms_and_energy_into_its_cells_and_heat()
+-> Result<(), AdmissionError> {
+    let body = whole_body()?;
+    let mut seen = [0; 2];
+    for column in body.columns() {
+        let (which, expected): (usize, &[(Species, Space, i64)]) = match column.origin().local {
+            "glycolysis" => (
+                0,
+                &[
+                    (Species::Glucose, Space::Cells, -1),
+                    (Species::Lactate, Space::Cells, 2),
+                    (Species::Energy, Space::Thermal, 100),
+                ],
+            ),
+            "lactate burn" => (
+                1,
+                &[
+                    (Species::Lactate, Space::Cells, -1),
+                    (Species::Oxygen, Space::Cells, -3),
+                    (Species::CarbonDioxide, Space::Cells, 3),
+                    (Species::Water, Space::Cells, 3),
+                    (Species::Energy, Space::Thermal, 450),
+                ],
+            ),
+            _ => continue,
+        };
+        let Context::Site(bed) = column.context() else {
+            panic!("a reaction off a bed: {:?}", column.context());
+        };
+        let mut terms: Vec<(RowKind, i64)> = (column.terms().iter())
+            .map(|(row, count)| (body.rows()[row.index()].kind(), *count))
+            .collect();
+        let mut wanted: Vec<(RowKind, i64)> = (expected.iter())
+            .map(|&(species, space, count)| {
+                (
+                    RowKind::Amount {
+                        site: bed,
+                        species,
+                        space,
+                    },
+                    count,
+                )
+            })
+            .collect();
+        terms.sort_by_key(|term| format!("{term:?}"));
+        wanted.sort_by_key(|term| format!("{term:?}"));
+        assert_eq!(terms, wanted, "{:?} at {bed:?}", column.origin());
+        seen[which] += 1;
+    }
+    assert_eq!(seen, [11, 11]);
     Ok(())
 }
 

@@ -35,7 +35,6 @@ fn sinusoids<'b>(
 
 pub(super) fn hepatic(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Hepatic>::new(CONSTANT.to_vec(), Vec::new(), FIXED)
-        .pool::<Lactate, Beds<Liver>>(Space::Cells)
         .pool::<Glycerol, Beds<Liver>>(Space::Cells)
         .pool::<AminoAcids, Beds<Liver>>(Space::Cells)
         .pool::<Urea, Beds<Liver>>(Space::Cells)

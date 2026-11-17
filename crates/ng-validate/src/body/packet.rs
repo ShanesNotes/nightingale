@@ -80,7 +80,9 @@ const INTERSTITIAL_BUFFER_RATIO: f64 = 15.0;
 const CELL_BUFFER_RATIO: f64 = 10.0;
 const GLUCOSE_SHARE: f64 = 5.0 / 28.0;
 const PER_OXYGEN: f64 = GLUCOSE_SHARE + 16.0 * (1.0 - GLUCOSE_SHARE) / 23.0;
-const CELL_PRESSURE_AT_DEMAND: f64 = 20.0;
+/// The reach meets the demand at this cell pressure, and the oxygen rate falls short of the demand only below twice it,
+/// so every bed's cells, at 38 mmHg or more at rest, split no glucose there and admit no lactate.
+const CELL_PRESSURE_AT_DEMAND: f64 = 10.0;
 const WIDTH_SHARE_OF_DEMAND: f64 = 0.02;
 const BED_HEAT_SPEED: f64 = 0.05;
 const FEED_SPEED: f64 = 0.1;
@@ -88,6 +90,10 @@ const GLUCOSE_SET: f64 = 3_000.0;
 const FAT_SET: f64 = 600.0;
 const CELL_WATER: f64 = 1_000.0;
 const WATER_SPEED: f64 = 10.0;
+const GLUCOSE_PER_OXYGEN_SHORT: f64 = 1.0 / 6.0;
+const LACTATE_BURN_SPEED: f64 = 0.02;
+const LACTATE_HALF_PRESSURE: f64 = 2.0;
+const CELL_LACTATE_AT_REST: f64 = 0.0;
 const ALVEOLAR_CARBON_DIOXIDE: f64 = 30.0;
 const CARBON_DIOXIDE_HEAD: f64 = 1.0;
 const VENOUS_CARBON_DIOXIDE_GUESS: f64 = 35.0;
@@ -244,6 +250,7 @@ fn start_guess(row: RowKind) -> f64 {
                 "bicarbonate" => blood.bicarbonate,
                 "acidity" => blood.acidity,
                 "pulmonary carbon dioxide partial pressure" => blood.carbon_dioxide_pressure,
+                "oxygen_debt_per_bed" => 0.0,
                 _ => 1.0,
             }
         }
@@ -260,6 +267,7 @@ fn burn_rest(site: &str, species: Species, space: Space) -> Option<f64> {
         (Species::FattyAcids, Space::Cells) => FAT_SET - fat / FEED_SPEED,
         (Species::Water, Space::Cells) => CELL_WATER + (6.0 * glucose + 16.0 * fat) / WATER_SPEED,
         (Species::Energy, Space::Thermal) => (glucose * GLUCOSE_ENERGY + fat * FAT_ENERGY) / BED_HEAT_SPEED,
+        (Species::Lactate, Space::Cells) => CELL_LACTATE_AT_REST,
         _ => return None,
     })
 }
@@ -553,6 +561,7 @@ pub fn body_packet_at_viscosity_exponent(
     packet.start_mode(stirring, "still", NOTE)?;
 
     table(&mut packet, exponent)?;
+    oxygen_per_lactate(&mut packet, body)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -913,6 +922,29 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     Ok(())
 }
 
+/// The debt's oxygen to each lactate is the lactate burn's own counts, read from the compiled body.
+fn oxygen_per_lactate(
+    packet: &mut ParameterPacket<SyntheticFixture>,
+    body: &CompiledBody,
+) -> Result<(), AdmissionError> {
+    let burn = LawName {
+        owner: Metabolism::CARD,
+        local: "lactate burn",
+    };
+    let column = (body.columns().iter()).find(|column| column.origin() == burn);
+    let count = |species| {
+        (column.into_iter().flat_map(|column| column.terms()))
+            .filter(|(row, _)| {
+                matches!(body.rows()[row.index()].kind(), RowKind::Amount { species: of, .. } if of == species)
+            })
+            .map(|&(_, count)| count as f64)
+            .sum::<f64>()
+    };
+    let beds = Binding::Class(Class::CapillaryBed);
+    let per = count(Species::Oxygen) / count(Species::Lactate);
+    set::<Quotient<Oxygen, Lactate>>(packet, "mt.oxygen-per-lactate", beds, per)
+}
+
 fn burn(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
     let (body, beds) = (Binding::Body, Binding::Class(Class::CapillaryBed));
     set::<Dimensionless>(packet, "mt.glucose-share", beds, GLUCOSE_SHARE)?;
@@ -922,7 +954,20 @@ fn burn(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionE
     set::<Glucose>(packet, "mt.cell-glucose-set", body, GLUCOSE_SET)?;
     set::<FattyAcids>(packet, "mt.cell-fatty-acid-set", body, FAT_SET)?;
     set::<Water>(packet, "mt.cell-water-set", body, CELL_WATER)?;
-    set::<Rate<Dimensionless>>(packet, "mt.cell-water-speed", body, WATER_SPEED)
+    set::<Rate<Dimensionless>>(packet, "mt.cell-water-speed", body, WATER_SPEED)?;
+    set::<Quotient<Glucose, Oxygen>>(
+        packet,
+        "mt.glucose-per-oxygen-short",
+        beds,
+        GLUCOSE_PER_OXYGEN_SHORT,
+    )?;
+    set::<Rate<Dimensionless>>(packet, "mt.lactate-burn-speed", beds, LACTATE_BURN_SPEED)?;
+    set::<Pressure>(
+        packet,
+        "mt.lactate-burn-half-pressure",
+        beds,
+        LACTATE_HALF_PRESSURE,
+    )
 }
 
 fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
@@ -958,35 +1003,40 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
     set::<Concentration<CarbonDioxide>>(packet, "bc.carbamino-half-rise", body, CARBAMINO.half_rise)
 }
 
-/// The body's own drift bounds for energy and for the elements its burns join. As on the slice (solver contract,
-/// section 7), each is fixture data that stands in for 1.96 times a within-subject variation: twice the quantity's
-/// worst change over a ten-second window of this body's first minute from its admitted start, rounded up to one
-/// significant figure. It is a synthetic target that scores a solver and judges no body. The body's measured day
-/// (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set (record 0004).
-/// Energy's change is the walls' elastic store filling and the core's heat store emptying as the run settles from the
-/// admitted start, 4,946.6 in and 1,582.1 out over the first ten seconds, while the fuels and the beds' heat move
-/// under 0.003. Oxygen's and carbon's change is mostly the blood gases' swing within a beat, read across windows that
-/// hold no whole number of beats, and hydrogen's is a bed's cell water and fuels settling. Measured on the run of body
-/// 09's first PR: energy 3,364.5, oxygen 2.388, carbon 0.3864 and hydrogen 1.171e-5. Oxygen and carbon dioxide as
-/// species keep only held pools that never move, so the slice's bound for an unmoved species holds them.
+/// The body's own drift bounds for energy, for the elements its reactions join and for each species that moves on it.
+/// As on the slice (solver contract, section 7), each is fixture data that stands in for 1.96 times a within-subject
+/// variation: twice the quantity's worst change over a ten-second window of this body's first minute from its admitted
+/// start, rounded up to one significant figure. It is a synthetic target that scores a solver and judges no body. The
+/// body's measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set
+/// (record 0004). Energy's change is the walls' elastic store filling and the core's heat store emptying as the run
+/// settles from the admitted start, 4,946.6 in and 1,582.1 out over the first ten seconds, while the fuels and the beds'
+/// heat move under 0.003. Oxygen's and carbon's change is mostly the blood gases' swing within a beat, read across
+/// windows that hold no whole number of beats, and hydrogen's is a bed's cell water and fuels settling. The species
+/// are the held gut's and skin's water and salts and vasopressin's held secretion and clearance. Oxygen and carbon
+/// dioxide as species keep only held pools that never move, so the slice's bound for an unmoved species holds them.
 const ENERGY_DRIFT: f64 = 7e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
     (Element::Carbon, 0.8),
-    (Element::Hydrogen, 3e-5),
+    (Element::Hydrogen, 6e-6),
     (Element::Oxygen, 5.0),
+];
+const SPECIES_DRIFTS: [(Species, f64); 6] = [
+    (Species::Energy, ENERGY_DRIFT),
+    (Species::Water, 0.04),
+    (Species::Sodium, 9e-4),
+    (Species::Chloride, 9e-4),
+    (Species::Potassium, 5e-5),
+    (Species::Vasopressin, 2e-3),
 ];
 
 struct BodyDrifts;
 impl DriftTable for BodyDrifts {
     fn names(&self, species: Species) -> bool {
-        species == Species::Energy
+        SPECIES_DRIFTS.iter().any(|(named, _)| *named == species)
     }
     fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
-        Measure::new(if Q::SPECIES == Species::Energy {
-            ENERGY_DRIFT
-        } else {
-            f64::NAN
-        })
+        let named = SPECIES_DRIFTS.iter().find(|(named, _)| *named == Q::SPECIES);
+        Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
     }
     fn element(&self, element: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
         let named = ELEMENT_DRIFTS.iter().find(|(named, _)| *named == element);
