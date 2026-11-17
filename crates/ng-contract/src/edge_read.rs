@@ -1,5 +1,7 @@
 use crate::boundary::DriveFrame;
 use crate::evaluate::Inputs;
+use crate::identity::{Canonical, Seal};
+use crate::law::{Input, Source, Where};
 use crate::*;
 
 const DEBT: [f64; 2] = [0.375, 1.625];
@@ -171,4 +173,14 @@ fn a_law_none_of_whose_edges_ends_in_the_set_is_refused_by_name() {
         refused,
         Some(AdmissionError::Compile(CompileDefect::EndOffSet { law }))
     );
+}
+
+#[test]
+fn two_reads_of_one_field_over_two_sets_seal_apart() {
+    let sealed = |set: Sites| {
+        let mut out = Canonical::new("edge read");
+        Input::Read(Source::Field(cv("debt")), Where::DownIn(set)).seal(&mut out);
+        out.into_bytes()
+    };
+    assert_ne!(sealed(CapillaryBed::SET), sealed(Blood::SET));
 }

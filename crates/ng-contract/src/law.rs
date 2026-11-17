@@ -499,7 +499,10 @@ impl Seal for Where {
                 out.number(6);
                 out.number(landmark as u64);
             }
-            Where::DownIn(_) => out.number(7),
+            Where::DownIn(set) => {
+                out.number(7);
+                set.seal(out);
+            }
         }
     }
 }

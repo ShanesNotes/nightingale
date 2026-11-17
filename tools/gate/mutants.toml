@@ -4058,3 +4058,10 @@ path = "crates/ng-contract/src/compile.rs"
 old = '''return Err(CompileDefect::EndOffSet { law: law.name });'''
 new = ''''''
 test = "-p ng-contract --lib edge_read::a_law_none_of_whose_edges_ends_in_the_set_is_refused_by_name"
+
+[[mutant]]
+name = "edge-read-seals-its-tag-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''                set.seal(out);'''
+new = '''                let _ = set;'''
+test = "-p ng-contract --lib edge_read::two_reads_of_one_field_over_two_sets_seal_apart"
