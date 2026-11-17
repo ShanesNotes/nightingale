@@ -2478,7 +2478,7 @@ fn halving_the_flow_raises_extraction_then_the_debt_and_the_flow_with_the_debt()
         seen.flows[seen.flows.len() - 1],
         seen.refusals
     );
-    assert!(seen.refusals.is_empty() && widest < 1e-3, "{report}");
+    assert!(seen.refusals.is_empty() && widest < 1e-4, "{report}");
     assert!(halves[0] < started && started < halves[2], "{report}");
     assert!(halves[2] <= halves[1], "{report}");
     Ok(())
@@ -2511,11 +2511,13 @@ fn with_the_loop_closed_each_stress_settles_with_no_refusal_and_every_pressure_i
             .position(|(time, _)| *time >= 800.0)
             .unwrap_or(0);
         let still = [&seen.extractions, &debts, &seen.flows].map(|series| {
-            let (first, last) = (series[0], series[series.len() - 1]);
-            ((last - series[last_minutes]) / (last - first)).abs()
+            let first = series[0];
+            let widest = (series.iter().map(|value| (value - first).abs()))
+                .fold(0.0, |widest, off| if off > widest { off } else { widest });
+            ((series[series.len() - 1] - series[last_minutes]) / widest).abs()
         });
         let report = format!(
-            "demand {demand}, renewal {renewal}: debt {}, flow {}, extraction {}, moved over the last 100 s by {still:?} of each move, least pressures {:?}, least rates {:?}, refused {:?}",
+            "demand {demand}, renewal {renewal}: debt {}, flow {}, extraction {}, moved over the last 100 s by {still:?} of its widest move, least pressures {:?}, least rates {:?}, refused {:?}",
             debts[debts.len() - 1],
             seen.flows[seen.flows.len() - 1],
             seen.extractions[seen.extractions.len() - 1],
