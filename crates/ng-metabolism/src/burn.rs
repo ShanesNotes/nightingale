@@ -9,8 +9,8 @@ const BURN_NS: u64 = 1_000_000_000;
 
 /// The oxygen a bed's cells burn each second: `B = smooth_max(D, 0, s D) - smooth_max(D - k P, 0, s D)`, its demand
 /// until its cells' partial pressure can no longer pass that much. It is the smooth minimum `smooth_min(D, k P, s D)`
-/// less its value at no cell oxygen, written as two smooth maxima so that neither a reach far above the demand nor a
-/// demand whose square underflows loses the demand to rounding. Both terms read the same operands at `P = 0`, so the
+/// less its value at no cell oxygen, written as two smooth maxima so that a reach far above the demand cannot lose the
+/// demand to rounding. Both terms read the same operands at `P = 0`, so the
 /// rate is exactly zero there; it never runs a burn backward and passes the demand by at most
 /// `D (sqrt(1 + s^2) - 1) / 2`. The width is a share of the demand, so a zero demand burns nothing.
 struct OxygenRate<'a, 'b> {
@@ -101,8 +101,6 @@ fn lactate<'b>(
         laws.site_parameter(key("mt.lactate-burn-speed"), Admissible::nonnegative());
     let half: SiteKey<'b, Pressure> =
         laws.site_parameter(key("mt.lactate-burn-half-pressure"), Admissible::positive());
-    let reference: SiteKey<'b, Lactate> =
-        laws.site_parameter(key("mt.cell-lactate-reference"), Admissible::nonnegative());
     let per_lactate: SiteKey<'b, Quotient<Oxygen, Lactate>> =
         laws.site_parameter(key("mt.oxygen-per-lactate"), Admissible::positive());
     let at = Space::Cells;
@@ -146,10 +144,8 @@ fn lactate<'b>(
     let debt: OxygenDebtPerBed<Defines<'b, Metabolism>> = laws.emit();
     let held = burned.amount::<Lactate>();
     let owed = laws.site_kernel(|mut k| {
-        let (held, reference) = (k.at_site(&held), k.site_parameter(&reference));
-        let excess = k.subtract(held, reference);
-        let per = k.site_parameter(&per_lactate);
-        let oxygen = k.multiply(per, excess);
+        let (held, per) = (k.at_site(&held), k.site_parameter(&per_lactate));
+        let oxygen = k.multiply(per, held);
         let value = k.as_dimension(oxygen);
         k.finish(value, laws.every_mode(), class)
     });

@@ -945,8 +945,7 @@ fn burn(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionE
         beds,
         LACTATE_HALF_PRESSURE,
     )?;
-    set::<Quotient<Oxygen, Lactate>>(packet, "mt.oxygen-per-lactate", beds, OXYGEN_PER_LACTATE)?;
-    set::<Lactate>(packet, "mt.cell-lactate-reference", beds, CELL_LACTATE_AT_REST)
+    set::<Quotient<Oxygen, Lactate>>(packet, "mt.oxygen-per-lactate", beds, OXYGEN_PER_LACTATE)
 }
 
 fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {

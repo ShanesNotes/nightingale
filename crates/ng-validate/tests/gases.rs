@@ -518,18 +518,8 @@ struct Start {
     demand: f64,
     oxygen_reach: f64,
     cell_conductance: f64,
-    lactate: CellLactate,
+    cell_lactate: f64,
 }
-
-#[derive(Clone, Copy, Debug)]
-struct CellLactate {
-    reference: f64,
-    held: f64,
-}
-const CELL_LACTATE: CellLactate = CellLactate {
-    reference: 0.0,
-    held: 0.0,
-};
 impl Start {
     fn at(plasma: Speciated) -> Self {
         Self {
@@ -545,7 +535,7 @@ impl Start {
             demand: DEMAND,
             oxygen_reach: DEMAND / CELL_PRESSURE_AT_DEMAND,
             cell_conductance: used() / HEAD,
-            lactate: CELL_LACTATE,
+            cell_lactate: 0.0,
         }
     }
     fn cold(plasma: Speciated) -> Self {
@@ -591,7 +581,7 @@ fn guess(row: RowKind, start: Start) -> f64 {
             species: Species::Lactate,
             space: Space::Cells,
             ..
-        } => start.lactate.held,
+        } => start.cell_lactate,
         RowKind::Amount {
             species, space: at, ..
         } => {
@@ -765,12 +755,6 @@ fn packet_from(
             "mt.lactate-burn-half-pressure",
             beds,
             LACTATE_HALF_PRESSURE,
-        )?;
-        set::<Lactate>(
-            &mut packet,
-            "mt.cell-lactate-reference",
-            beds,
-            start.lactate.reference,
         )?;
         set::<Quotient<Oxygen, Lactate>>(&mut packet, "mt.oxygen-per-lactate", beds, OXYGEN_PER_LACTATE)?;
         set::<Rate<Dimensionless>>(&mut packet, "fixture.feed-speed", body_wide, FEED_SPEED)?;
@@ -2039,15 +2023,11 @@ fn stepped_at(
     body: &CompiledBody,
     settled: &[(RowKind, f64)],
     (demand, cell_pressure, lactate): (f64, f64, f64),
-    reference: f64,
 ) -> Result<ShutBedStep, InitializationFailure> {
     let start = Start {
         demand,
         cell_conductance: 0.0,
-        lactate: CellLactate {
-            reference,
-            held: lactate,
-        },
+        cell_lactate: lactate,
         ..Start::at(speciated(ARTERIAL))
     };
     let (oxygen, held) = (
@@ -2140,21 +2120,20 @@ fn glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros()
 -> Result<(), InitializationFailure> {
     let body = compiled(Cells::Burning)?;
     let settled = settled(&body)?;
-    let reference = 50.0;
     for (point, split_rate, burn_rate) in [
         ((DEMAND, 0.0, 80.0), GLUCOSE_PER_OXYGEN_SHORT * DEMAND, 0.0),
         ((DEMAND, 60.0, 0.0), 0.0, 0.0),
     ] {
-        let measured = stepped_at(&body, &settled, point, reference)?;
+        let measured = stepped_at(&body, &settled, point)?;
         assert_eq!(
             (measured.glycolysis, measured.lactate_burn),
             (split_rate, burn_rate),
             "at demand, cell pressure and lactate {point:?}"
         );
     }
-    for lactate in [reference, reference + 10.0, reference + 100.0] {
-        let measured = stepped_at(&body, &settled, (DEMAND, 0.0, lactate), reference)?;
-        let expected = OXYGEN_PER_LACTATE * (measured.held - reference);
+    for lactate in [0.0, 10.0, 100.0] {
+        let measured = stepped_at(&body, &settled, (DEMAND, 0.0, lactate))?;
+        let expected = OXYGEN_PER_LACTATE * measured.held;
         assert!(
             (measured.debt - expected).abs() <= 1e-9 * (1.0 + expected),
             "the debt at {} lactate reads {} against {expected}",
@@ -2285,6 +2264,28 @@ fn every_conserved_quantity_closes_while_glycolysis_runs() -> Result<(), Initial
         Book::Charge,
     ] {
         assert!(books.contains(&book), "{book:?} among {books:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn burning_lactate_never_makes_a_negative_oxygen_debt() -> Result<(), InitializationFailure> {
+    let body = compiled(Cells::Burning)?;
+    let settled = settled(&body)?;
+    for lactate in [50.0, 1e-9, 0.0] {
+        let measured = stepped_at(&body, &settled, (DEMAND, 60.0, lactate))?;
+        assert_eq!(measured.glycolysis, 0.0);
+        assert!(
+            measured.held <= lactate,
+            "{} lactate burned from {lactate}",
+            measured.held
+        );
+        assert!(
+            measured.debt >= 0.0 && close(measured.debt, OXYGEN_PER_LACTATE * measured.held, 1e-12),
+            "the cells hold {} lactate and owe {} oxygen",
+            measured.held,
+            measured.debt
+        );
     }
     Ok(())
 }

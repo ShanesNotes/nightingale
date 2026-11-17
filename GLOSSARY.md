@@ -403,7 +403,7 @@ The heat store at each bed that takes its reactions' energy and passes it to the
 The reaction in a bed's cells that splits one glucose into two lactate with no oxygen, its energy into the bed's heat. It runs at a share of what the oxygen rate falls short of the oxygen demand, and it is zero wherever the oxygen rate meets the demand.
 
 **Oxygen debt**:
-The oxygen a bed owes for burning less than its demand: three units of oxygen for each unit of its cells' lactate above the amount the bed admits with, the oxygen the lactate's burn takes. Arrow 90 carries it to the vessels.
+The oxygen a bed owes for burning less than its demand: three units of oxygen for each unit of lactate in its cells, the oxygen the lactate's burn takes. Arrow 90 carries it to the vessels.
 
 **Acidity**:
 A plasma's pH, which speciation sets from its strong ion difference, its weak acids and its carbon dioxide total. Each speciated site's blood has one; the interstitium and the cells have none, and a buffer line stands in for theirs.
