@@ -522,7 +522,9 @@ fn every_payer_is_checked_for_heat_whichever_work_it_pays() -> Result<(), Admiss
             body.add(cv.finish());
             body.compile()
         });
-        let refused = Err(AdmissionError::Compile(CompileDefect::PayerHoldsNoHeat { site: cold }));
+        let refused = Err(AdmissionError::Compile(CompileDefect::PayerHoldsNoHeat {
+            site: cold,
+        }));
         assert_eq!(compiled.map(|_| ()), refused);
     }
     Ok(())
@@ -552,7 +554,9 @@ fn a_named_work_on_a_map_whose_root_is_a_vessel_is_refused() -> Result<(), Admis
         body.add(cv.finish());
         body.compile()
     });
-    let refused = Err(AdmissionError::Compile(CompileDefect::PaidWorkHasNoStore { work: Work::Stroke }));
+    let refused = Err(AdmissionError::Compile(CompileDefect::PaidWorkHasNoStore {
+        work: Work::Stroke,
+    }));
     assert_eq!(compiled.map(|_| ()), refused);
     Ok(())
 }

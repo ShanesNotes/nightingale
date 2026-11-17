@@ -1025,7 +1025,9 @@ mod tests {
     use super::processes::TABLE;
     use super::{Schema, Work};
     use crate::identity::{Canonical, Seal};
-    use crate::{AnatomyBuilder, CapillaryBed, Measure, Network, Position, SiteId, TissueSite, VesselSegment};
+    use crate::{
+        AnatomyBuilder, CapillaryBed, Measure, Network, Position, SiteId, TissueSite, VesselSegment,
+    };
 
     fn schema() -> (Schema, SiteId, SiteId) {
         let zero = || Measure::new(0.0).expect("finite");
