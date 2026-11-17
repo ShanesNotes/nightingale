@@ -931,9 +931,6 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     let lung = Binding::Site(site::<CapillaryBed>("pulmonary bed")?);
     set::<Dimensionless>(packet, "mt.lung-share", lung, 1.0)?;
     burn(packet)?;
-    set::<Dimensionless>(packet, "mt.work-share", Binding::Class(Class::CapillaryBed), 0.0)?;
-    let payer = Binding::Site(site::<CapillaryBed>(STROKE_PAYER)?);
-    set::<Dimensionless>(packet, "mt.work-share", payer, 1.0)?;
     set::<Quotient<Oxygen, Energy>>(packet, "mt.oxygen-per-energy", body, 1.0 / ENERGY_PER_OXYGEN)?;
     set::<Rate<Dimensionless>>(packet, "cv.work-speed", body, WORK_SPEED)?;
     let blood = Binding::Network(Network::Vascular);

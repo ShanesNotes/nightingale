@@ -843,6 +843,14 @@ fn fl_crosses_each_wall_with_only_the_species_body_01_gives_it() -> Result<(), A
 #[test]
 fn the_coronary_bed_pays_the_stroke_work_and_the_muscle_bed_the_walls_so_none_ends_at_chemical_energy()
 -> Result<(), AdmissionError> {
+    let mut heart = Schema::new(body_anatomy()?)?;
+    heart.carry::<Ammonium, Beds<Heart>>(Space::Cells);
+    let beds: Vec<_> = heart.pools().map(|(site, _, _)| site.key()).collect();
+    assert_eq!(
+        beds,
+        ["coronary bed"],
+        "the heart's beds, where the stroke work's oxygen is read"
+    );
     let body = whole_body()?;
     let mut paid = BTreeMap::new();
     for column in body.columns() {

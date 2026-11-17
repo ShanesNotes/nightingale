@@ -388,7 +388,7 @@ _Avoid_: content alone
 A reaction in a bed's cells that turns one fuel and oxygen into carbon dioxide and water, its energy into the bed's heat. Rung 0 has one burn a fuel, glucose and fatty acids, each at a share of the bed's oxygen rate.
 
 **Oxygen demand**:
-The oxygen a bed's cells would burn each second with oxygen enough, a parameter of each bed. At the bed that pays the stroke work it is a basal value plus the oxygen of the heart's work, read from arrow 78.
+The oxygen a bed's cells would burn each second with oxygen enough, a parameter of each bed. At the heart's beds, which pay the stroke work, it is a basal value plus the oxygen of the heart's work, read from arrow 78; no other bed reads that work.
 
 **Oxygen rate**:
 The oxygen a bed's cells burn each second. It follows the oxygen demand until the cells' oxygen partial pressure can no longer pass that much, and then follows the partial pressure: a smooth minimum of the two, less that minimum's value at no cell oxygen. So it is zero when the cells hold no oxygen, never runs a burn backward and cannot draw a cell's oxygen below zero.

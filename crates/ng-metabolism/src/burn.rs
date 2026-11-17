@@ -18,30 +18,16 @@ struct OxygenRate<'a, 'b> {
     demand: SiteKey<'b, Rate<Oxygen>>,
     reach: SiteKey<'b, Conductance<Oxygen>>,
     width_share: SiteKey<'b, Dimensionless>,
-    work: Option<Work<'b>>,
-}
-
-struct Work<'b> {
-    line: MyocardialWorkAndBedFlow<Reads<'b, Metabolism>>,
-    share: SiteKey<'b, Dimensionless>,
-    oxygen_per_energy: Parameter<'b, Metabolism, Quotient<Oxygen, Energy>>,
+    work: Option<SiteTerm<'b, Metabolism, Beds<Heart>, Rate<Oxygen>>>,
 }
 
 impl<'b> OxygenRate<'_, 'b> {
     fn demand<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Rate<Oxygen>> {
         let basal = k.site_parameter(&self.demand);
-        let Some(work) = &self.work else {
-            return basal;
-        };
-        let (power, per) = (
-            k.read(&work.line.myocardial_work),
-            k.parameter(&work.oxygen_per_energy),
-        );
-        let product = k.multiply(power, per);
-        let oxygen = k.as_dimension(product);
-        let share = k.site_parameter(&work.share);
-        let paid = k.scale(oxygen, share);
-        k.add(basal, paid)
+        match &self.work {
+            Some(work) => k.add_from(basal, work),
+            None => basal,
+        }
     }
 
     fn at<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Rate<Oxygen>> {
@@ -61,7 +47,7 @@ impl<'b> OxygenRate<'_, 'b> {
 /// Each bed's cells burn glucose, `glucose + 6 O2 -> 6 CO2 + 6 H2O`, and fatty acids, `fatty acid + 23 O2 -> 16 CO2 +
 /// 16 H2O`, each releasing its energy into the bed's heat. The glucose burn takes a share `s` of the bed's oxygen rate
 /// and the fatty acid burn the rest, so the share fixes the respiratory quotient at `s + 16 (1 - s) / 23`. Given line
-/// 78, each bed's demand also carries its share of the heart's work.
+/// 78, the demand of the heart's beds also carries the oxygen of the heart's work, and no other bed reads it.
 pub fn burn<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     cells: &CellOxygen<'b>,
@@ -74,10 +60,14 @@ pub fn burn<'b>(
         demand: laws.site_parameter(key("mt.oxygen-demand"), Admissible::nonnegative()),
         reach: laws.site_parameter(key("mt.oxygen-reach"), Admissible::positive()),
         width_share: laws.site_parameter(key("mt.oxygen-rate-width-share"), Admissible::positive()),
-        work: work.map(|line| Work {
-            line,
-            share: laws.site_parameter(key("mt.work-share"), Admissible::unit_interval()),
-            oxygen_per_energy: laws.parameter(key("mt.oxygen-per-energy"), Admissible::positive()),
+        work: work.map(|line| {
+            let per = laws.parameter(key("mt.oxygen-per-energy"), Admissible::positive());
+            laws.site_term("heart's work oxygen", |mut k| {
+                let (power, per) = (k.read(&line.myocardial_work), k.parameter(&per));
+                let product = k.multiply(power, per);
+                let oxygen = k.as_dimension(product);
+                k.finish_term(oxygen)
+            })
         }),
     };
     let share: SiteKey<'b, Dimensionless> =
