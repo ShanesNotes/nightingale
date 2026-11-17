@@ -17,7 +17,7 @@ Blocked by: 02, 08, `.scratch/research/issues/11-law-forms-gas-loop.md`
 - [x] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved (09a)
 - [x] The body admits over a cycle with its reactions running, which [ticket 02](02-reactions.md) left unshown (09a)
 - [x] From [research 12](../../research/issues/12-law-forms-heat.md): every bed's heat, the skin bed's included, reaches the core heat store, which replaces the skin heat store for the skin bed above. A reaction's heat lands in its bed's own thermal pool, so each bed needs a transfer to the core store, first order in that pool at a declared speed (a model default). 09a
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget. Each PR of this ticket gives its lines (below)
+- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget. Each PR of this ticket gives its lines (below): 09a and 09b have, 09c and 09d will
 
 **Non-goals:** which fuel a bed burns (ticket 16), temperature's effect on rate, and heat exchange with the room (ticket 12).
 
@@ -52,6 +52,10 @@ The ticket lands as four PRs: 09a the burn, 09b lactate and the oxygen debt, 09c
 ## Cost
 
 The exception recorded for the burn is withdrawn. The budget restated in ticket 26 covers it: the burn took about 152 M of the 595.1 M at a fixed landing count.
+
+09b's lines on the beelink, base main at `a970e665c472` and head in this PR, both in the cheaper landing state (1,988 landing solves): rows 1,431 to 1,442, unknowns 1,431 to 1,442, columns 1,400 to 1,422, nonzeros 9,625 to 9,713, steps 11,797 at both, solves 14,510 at both (ordinary 12,522, landing 1,988), 4,865.9 to 4,927.8 M a simulated second, instructions a solve 20.121 to 20.377 M (+1.3%). That is 0.023 M a solve for each of the 11 rows added, under half the burn's 0.052. So 09b takes 61.9 M of the 443.1 M the burn left, and 381.2 M is left for 09c, 09d, 10 and 11. A profile by symbol at the head, admission included, puts the elimination's factoring and pivoted solve at 23% and 19% and the admission ring at 15%; no law's kernel reaches 6%.
+
+Accepted flag, for the coordinator to rule: admission rises by more than a tenth. Base and head back to back in one job, loads 4.5 to 8.6: 325.8 to 382.9 s (+17.5%), the march 73.7 to 73.5 s and the ring 252.1 to 309.4 s (+22.7%). The ring solves each bed's cell lactate with the cells' element totals now; the march and the first minute do not move.
 
 09a's lines on the beelink, base main at `020a4a403ffb` and head in this PR: rows 1,419 to 1,431, unknowns 1,419 to 1,431, columns 1,356 to 1,400, nonzeros 9,514 to 9,625, steps 11,794 to 11,797, solves 15,263 to 14,510 (ordinary 12,519 to 12,522, landing 2,744 to 1,988), 4,958.6 to 4,865.9 M a simulated second, instructions a solve 19.493 to 20.121 M (+3.2%). The base's landing count is in the dearer of its two states and the head's in the cheaper one (native-contract 64), so the line falls only by that. At a fixed landing count the burn adds about 152 M (inferred, at the head's 14,510 solves). The rise in instructions a solve, +0.628 M, is over this ticket's 2.5% flag. On main `e8e8bc0afc9f`, before the walk went, the same burn measured +0.465 M (+1.7%), so the walk's removal both shrank the base and left the burn's part larger: a profile by symbol is owed.
 
