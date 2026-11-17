@@ -207,4 +207,4 @@ mutants = ["speciated-takes-every-segment", "explicit-read-off-its-set"]
 [[row]]
 core = "An edge's law reads a narrower set at an end that can never be in it"
 mutants = ["edge-read-end-off-set-passes"]
-doctests = [{ path = "crates/ng-contract/src/law.rs", code = "E0277", text = "Kernel<'b, 'k, Cardiovascular, TubuleEdge>" }]
+doctests = [{ path = "crates/ng-contract/src/law.rs", code = "E0308", text = "Kernel<'b, 'k, Cardiovascular, TubuleEdge>" }]

@@ -445,7 +445,7 @@ A gate counts only if it rejects a core built to fail it. Each one below is part
 | An initializer returning a packet guess that violates a row or anchor | `InitializationSystem::admit` refuses and names the row. A guess that already solves the system is admitted |
 | A law reads speciation that no row of the readers' table wires to its card on a set holding the site | `Assembly::compile` refuses it (`UnwiredRead`) and names the law and the field |
 | A sensor reads arterial speciation at a segment the map does not sample | `Assembly::compile` refuses a row's read (`NoSuchRead`) and an explicit field's (`UnemittedField`) |
-| An edge's law reads a narrower set at an end that can never be in it | Does not compile where the end's set does not include it (E0277). `Assembly::compile` refuses a law none of whose edges ends in the set (`EndOffSet`) and names it |
+| An edge's law reads a narrower set at an end that can never be in it | Does not compile where the end's set does not include it (E0308). `Assembly::compile` refuses a law none of whose edges ends in the set (`EndOffSet`) and names it |
 
 ### 8. Diagram source
 

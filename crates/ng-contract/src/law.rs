@@ -1359,7 +1359,7 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     /// }
     /// ```
     /// An end whose set cannot hold the port's sites does not compile:
-    /// ```compile_fail,E0277
+    /// ```compile_fail,E0308
     /// use ng_contract::{catalog::*, *};
     /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, TubuleEdge>, debt: OxygenDebtPerBed<Reads<'b, Cardiovascular>>) {
     ///     let _ = k.downstream_if_in(&debt.oxygen_debt_per_bed);
