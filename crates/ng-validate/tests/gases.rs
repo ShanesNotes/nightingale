@@ -744,12 +744,7 @@ fn packet_from(
     )?;
     if declares(body, "mt.oxygen-demand") {
         set::<Rate<Oxygen>>(&mut packet, "mt.oxygen-demand", beds, start.demand)?;
-        set::<Conductance<Oxygen>>(
-            &mut packet,
-            "mt.oxygen-reach",
-            beds,
-            start.oxygen_reach,
-        )?;
+        set::<Conductance<Oxygen>>(&mut packet, "mt.oxygen-reach", beds, start.oxygen_reach)?;
         set::<Dimensionless>(
             &mut packet,
             "mt.oxygen-rate-width-share",
@@ -771,7 +766,12 @@ fn packet_from(
             beds,
             LACTATE_HALF_PRESSURE,
         )?;
-        set::<Lactate>(&mut packet, "mt.cell-lactate-reference", beds, start.lactate.reference)?;
+        set::<Lactate>(
+            &mut packet,
+            "mt.cell-lactate-reference",
+            beds,
+            start.lactate.reference,
+        )?;
         set::<Quotient<Oxygen, Lactate>>(&mut packet, "mt.oxygen-per-lactate", beds, OXYGEN_PER_LACTATE)?;
         set::<Rate<Dimensionless>>(&mut packet, "fixture.feed-speed", body_wide, FEED_SPEED)?;
         set::<Glucose>(&mut packet, "fixture.glucose-set", body_wide, GLUCOSE_SET)?;
@@ -1815,7 +1815,6 @@ fn an_abundant_oxygen_reach_preserves_the_beds_demand() -> Result<(), Initializa
     Ok(())
 }
 
-
 fn refused(cells: Cells) -> CompileDefect {
     match compiled(cells) {
         Err(AdmissionError::Compile(defect)) => defect,
@@ -1919,10 +1918,15 @@ fn march<'m>(
             tissue_oxygen(body, &session, Space::Cells)?,
         ];
         for (least, pressure) in seen.least.iter_mut().zip(pressures) {
-            *least = least.min(pressure);
+            if pressure < *least {
+                *least = pressure;
+            }
         }
         for (least, local) in seen.least_rates.iter_mut().zip(["glycolysis", "lactate burn"]) {
-            *least = least.min(extent(body, &session, local));
+            let rate = extent(body, &session, local);
+            if rate < *least {
+                *least = rate;
+            }
         }
         let now = (session.record().accepted().time().nanoseconds() - start) as f64 / SECOND as f64;
         seen.debts
@@ -2019,7 +2023,12 @@ struct ShutBedStep {
 }
 
 fn split(demand: f64, cell_pressure: f64) -> f64 {
-    GLUCOSE_PER_OXYGEN_SHORT * (demand - oxygen_rate(demand, cell_pressure)).max(0.0)
+    let gap = demand - oxygen_rate(demand, cell_pressure);
+    if gap > 0.0 {
+        GLUCOSE_PER_OXYGEN_SHORT * gap
+    } else {
+        0.0
+    }
 }
 
 fn lactate_burned(lactate: f64, cell_pressure: f64) -> f64 {
@@ -2087,11 +2096,16 @@ fn column_terms(body: &CompiledBody, local: &'static str) -> Vec<(Species, i64)>
 }
 
 #[test]
-fn glycolysis_and_lactates_burn_carry_their_atoms_and_energy_into_the_cells_and_heat() -> Result<(), AdmissionError> {
+fn glycolysis_and_lactates_burn_carry_their_atoms_and_energy_into_the_cells_and_heat()
+-> Result<(), AdmissionError> {
     let body = compiled(Cells::Burning)?;
     assert_eq!(
         column_terms(&body, "glycolysis"),
-        vec![(Species::Energy, 100), (Species::Glucose, -1), (Species::Lactate, 2)],
+        vec![
+            (Species::Energy, 100),
+            (Species::Glucose, -1),
+            (Species::Lactate, 2)
+        ],
         "glycolysis gives up a glucose's energy, {GLUCOSE_ENERGY}, less two lactates', {LACTATE_ENERGY} each"
     );
     assert_eq!(
@@ -2105,9 +2119,15 @@ fn glycolysis_and_lactates_burn_carry_their_atoms_and_energy_into_the_cells_and_
         ]
     );
     let burn = column_terms(&body, "lactate burn");
-    let per = |species| burn.iter().find(|(of, _)| *of == species).map(|(_, count)| *count as f64);
+    let per = |species| {
+        burn.iter()
+            .find(|(of, _)| *of == species)
+            .map(|(_, count)| *count as f64)
+    };
     assert_eq!(
-        per(Species::Oxygen).zip(per(Species::Lactate)).map(|(o, l)| o / l),
+        per(Species::Oxygen)
+            .zip(per(Species::Lactate))
+            .map(|(o, l)| o / l),
         Some(OXYGEN_PER_LACTATE),
         "the debt's oxygen to each lactate is the burn's own"
     );
@@ -2116,7 +2136,8 @@ fn glycolysis_and_lactates_burn_carry_their_atoms_and_energy_into_the_cells_and_
 
 /// Lactate still rising at the settled pressure moves a 10 ms step's mean from its end by about 2e-6.
 #[test]
-fn glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros() -> Result<(), InitializationFailure> {
+fn glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros()
+-> Result<(), InitializationFailure> {
     let body = compiled(Cells::Burning)?;
     let settled = settled(&body)?;
     let reference = 50.0;
@@ -2175,7 +2196,10 @@ fn the_bed_at_rest_splits_no_glucose_and_owes_no_oxygen() -> Result<(), Initiali
     let held = value(&body, &session, amount(Species::Lactate, Space::Cells)?);
     let debt = value(&body, &session, field("oxygen_debt_per_bed")?);
     assert_eq!(extent(&body, &session, "glycolysis"), 0.0);
-    assert!(held >= 0.0 && held < 1e-5, "the settled cells hold {held} lactate");
+    assert!(
+        (0.0..1e-5).contains(&held),
+        "the settled cells hold {held} lactate"
+    );
     assert!(
         close(debt, OXYGEN_PER_LACTATE * held, 1e-12),
         "the debt at rest reads {debt} for {held} lactate"
@@ -2184,7 +2208,8 @@ fn the_bed_at_rest_splits_no_glucose_and_owes_no_oxygen() -> Result<(), Initiali
 }
 
 #[test]
-fn a_raised_demand_or_a_halved_flow_builds_a_debt_that_the_burn_repays() -> Result<(), InitializationFailure> {
+fn a_raised_demand_or_a_halved_flow_builds_a_debt_that_the_burn_repays() -> Result<(), InitializationFailure>
+{
     let body = compiled(Cells::Burning)?;
     let settled = settled(&body)?;
     for (demand, renewal) in [
@@ -2206,19 +2231,31 @@ fn a_raised_demand_or_a_halved_flow_builds_a_debt_that_the_burn_repays() -> Resu
         let back = Start::at(speciated(ARTERIAL));
         let session = readmitted(&body, &core, &store, back, &at_end)?;
         let (_, repay) = march(&body, session, 300)?;
-        let (half, tenth) = (half_time(&repay.debts, 0.0, 0.5), half_time(&repay.debts, 0.0, 0.1));
+        let (half, tenth) = (
+            half_time(&repay.debts, 0.0, 0.5),
+            half_time(&repay.debts, 0.0, 0.1),
+        );
         let report = format!(
             "demand {demand}, renewal {renewal}: debt {built} after {} steps, least pressures {:?} and {:?}, half repaid at {half:?} s, a tenth left at {tenth:?} s, refused {:?} and {:?}",
             stress.steps, stress.least, repay.least, stress.refusals, repay.refusals
         );
-        println!("{report}");
-        assert!(stress.refusals.is_empty() && repay.refusals.is_empty(), "{report}");
+        assert!(
+            stress.refusals.is_empty() && repay.refusals.is_empty(),
+            "{report}"
+        );
         assert!(
             stress.least.iter().chain(&repay.least).all(|least| *least > 0.0),
             "{report}"
         );
         assert!(built > 0.0, "{report}");
-        assert!(stress.least_rates.iter().chain(&repay.least_rates).all(|least| *least >= 0.0), "{report}");
+        assert!(
+            stress
+                .least_rates
+                .iter()
+                .chain(&repay.least_rates)
+                .all(|least| *least >= 0.0),
+            "{report}"
+        );
         assert!(tenth.is_some(), "{report}");
     }
     Ok(())

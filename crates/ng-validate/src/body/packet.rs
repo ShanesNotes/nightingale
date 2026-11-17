@@ -939,7 +939,12 @@ fn burn(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionE
         GLUCOSE_PER_OXYGEN_SHORT,
     )?;
     set::<Rate<Dimensionless>>(packet, "mt.lactate-burn-speed", beds, LACTATE_BURN_SPEED)?;
-    set::<Pressure>(packet, "mt.lactate-burn-half-pressure", beds, LACTATE_HALF_PRESSURE)?;
+    set::<Pressure>(
+        packet,
+        "mt.lactate-burn-half-pressure",
+        beds,
+        LACTATE_HALF_PRESSURE,
+    )?;
     set::<Quotient<Oxygen, Lactate>>(packet, "mt.oxygen-per-lactate", beds, OXYGEN_PER_LACTATE)?;
     set::<Lactate>(packet, "mt.cell-lactate-reference", beds, CELL_LACTATE_AT_REST)
 }

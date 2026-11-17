@@ -694,7 +694,8 @@ fn count(body: &CompiledBody, column: ColumnId, on: impl Fn(SiteId, Species, Spa
 
 fn burns(body: &CompiledBody, column: ColumnId) -> bool {
     let origin = body.columns()[column.index()].origin();
-    origin.owner == "MT" && ["glucose burn", "fatty acid burn", "glycolysis", "lactate burn"].contains(&origin.local)
+    origin.owner == "MT"
+        && ["glucose burn", "fatty acid burn", "glycolysis", "lactate burn"].contains(&origin.local)
 }
 
 fn at_bed(body: &CompiledBody, column: ColumnId, bed: SiteId) -> bool {
