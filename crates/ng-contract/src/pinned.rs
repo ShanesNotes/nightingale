@@ -280,8 +280,7 @@ mod tests {
         }
     }
 
-    // Correctly rounded from the exact sum, at inputs where a port of this routine without the reduction's carried
-    // rounding misses that double.
+    // Correctly rounded from the series summed in exact rationals, never from the code under test.
     const EXPM1_CARRIED: [(u64, u64); 8] = [
         (0xBFF0A2B23F3BAB70, 0xBFE4AFB0CCC06217),
         (0xBFE02A23B932AFFF, 0xBFD9619699136743),
