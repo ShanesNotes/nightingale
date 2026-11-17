@@ -2,7 +2,9 @@ use crate::body::{Bound, Instance, Layout, ParameterId, ProgramId, RowKind, Targ
 use crate::boundary::DriveFrame;
 use crate::law::{Op, Validity};
 use crate::pinned;
-use crate::{Compensated, CompiledBody, Crossing, ExcursionSide, LawName, SimTime, ValidityExcursion};
+use crate::{
+    Compensated, CompiledBody, Context, Crossing, ExcursionSide, LawName, SimTime, ValidityExcursion,
+};
 use core::ops::Range;
 
 mod enclosure;
@@ -494,6 +496,30 @@ pub(crate) struct Inputs<'a> {
     pub(crate) factors: &'a [f64],
 }
 
+fn excursion(
+    law: LawName,
+    context: Context,
+    at: SimTime,
+    value: f64,
+    lower: u64,
+    upper: u64,
+) -> Option<ValidityExcursion> {
+    let side = if value < f64::from_bits(lower) {
+        ExcursionSide::Below
+    } else if value > f64::from_bits(upper) {
+        ExcursionSide::Above
+    } else {
+        return None;
+    };
+    Some(ValidityExcursion {
+        law,
+        context,
+        at,
+        side,
+        value: Compensated::exact(value),
+    })
+}
+
 /// A law's own value stays what a validity range judges.
 fn positive_part(instance: &Instance, value: f64) -> f64 {
     if instance.rectified && value <= 0.0 {
@@ -524,15 +550,22 @@ impl CompiledBody {
         let layout = &self.layout.guards[guard];
         let (arithmetic, reads) = self.tape.guard(guard);
         let mut values = vec![0.0; arithmetic.length];
-        let value =
-            forward(arithmetic, reads, inputs, self.partial_volume(), &mut values).map_err(|domain| {
-                let law = self.layout.modes[layout.variable].variable.law;
-                Undefined { law, domain }
-            })?;
+        let value = forward(arithmetic, reads, inputs, self.partial_volume(), &mut values)
+            .map_err(|domain| self.guard_undefined(guard, inputs, domain))?;
         Ok(match layout.crossing {
             Crossing::Rising => value,
             Crossing::Falling => -value,
         })
+    }
+    fn guard_undefined(&self, guard: usize, inputs: &Inputs<'_>, domain: OperatorDomain) -> Undefined {
+        let layout = &self.layout.guards[guard];
+        let mut law = self.layout.modes[layout.variable].variable.law;
+        if !layout.code.origins.is_empty() {
+            let (arithmetic, reads) = self.tape.guard(guard);
+            let op = refused_at(arithmetic, reads, inputs, self.partial_volume());
+            law = layout.code.origin(op).unwrap_or(law);
+        }
+        Undefined { law, domain }
     }
     fn guard_sign(&self, guard: usize) -> f64 {
         match self.layout.guards[guard].crossing {
@@ -545,22 +578,22 @@ impl CompiledBody {
         let (arithmetic, reads) = self.tape.guard(guard);
         let (mut values, mut slopes) = (vec![0.0; arithmetic.length], vec![0.0; arithmetic.length]);
         let partial_volume = self.partial_volume();
-        let undefined = |domain| Undefined {
-            law: self.layout.modes[layout.variable].variable.law,
-            domain,
-        };
-        forward(arithmetic, reads, inputs, partial_volume, &mut values).map_err(undefined)?;
+        forward(arithmetic, reads, inputs, partial_volume, &mut values)
+            .map_err(|domain| self.guard_undefined(guard, inputs, domain))?;
         backward(arithmetic, &values, partial_volume, &mut slopes);
         let sign = self.guard_sign(guard);
-        let finite = |(index, slope): (usize, f64)| {
-            if slope.is_finite() {
-                Ok((index, sign * slope))
+        let finite = |&(slot, index): &(usize, usize)| {
+            if slopes[slot].is_finite() {
+                Ok((index, sign * slopes[slot]))
             } else {
-                Err(undefined(OperatorDomain::NonFinite))
+                let law = self.layout.modes[layout.variable].variable.law;
+                let law = layout.code.origin(slot).unwrap_or(law);
+                let domain = OperatorDomain::NonFinite;
+                Err(Undefined { law, domain })
             }
         };
-        let unknowns = (reads.unknowns.iter()).map(|&(slot, index)| finite((index, slopes[slot])));
-        let parameters = (reads.parameters.iter()).map(|&(slot, index)| finite((index, slopes[slot])));
+        let unknowns = reads.unknowns.iter().map(finite);
+        let parameters = reads.parameters.iter().map(finite);
         Ok(GuardSlopes {
             unknowns: unknowns.collect::<Result<_, _>>()?,
             parameters: parameters.collect::<Result<_, _>>()?,
@@ -614,15 +647,20 @@ impl CompiledBody {
         let mut values = vec![0.0; self.tape.longest];
         let partial_volume = self.partial_volume();
         let mut out = Vec::with_capacity(self.layout.instances.len());
+        let mut judged = Vec::new();
         for (at, instance) in self.layout.instances.iter().enumerate() {
+            let program = &self.layout.programs[instance.program.index()];
             if !instance.holds(inputs.modes) {
                 out.push(None);
+                judged.extend(program.code.judged.iter().map(|_| None));
                 continue;
             }
             let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.instance(at));
             let value = forward(arithmetic, reads, inputs, partial_volume, &mut values);
             out.push(Some(value.map_err(|domain| self.undefined(at, inputs, domain))?));
+            judged.extend(program.code.judged.iter().map(|&(op, ..)| Some(values[op])));
         }
+        out.extend(judged);
         Ok(out)
     }
     fn slopes(
@@ -761,20 +799,21 @@ impl CompiledBody {
                 _ => value,
             };
             for &Validity { lower, upper, .. } in &program.code.validity {
-                let side = if value < f64::from_bits(lower) {
-                    ExcursionSide::Below
-                } else if value > f64::from_bits(upper) {
-                    ExcursionSide::Above
-                } else {
-                    continue;
-                };
-                excursions.push(ValidityExcursion {
-                    law: program.law,
-                    context: instance.context,
-                    at,
-                    side,
-                    value: Compensated::exact(value),
-                });
+                excursions.extend(excursion(program.law, instance.context, at, value, lower, upper));
+            }
+        }
+        let judged = (self.layout.instances.iter()).flat_map(|instance| {
+            let program = &self.layout.programs[instance.program.index()];
+            (program.code.judged.iter()).map(move |&(_, law, range)| (instance.context, law, range))
+        });
+        let tail = &values[self.layout.instances.len().min(values.len())..];
+        let mut reported: Vec<(LawName, Context, Validity)> = Vec::new();
+        for ((context, law, range), value) in judged.zip(tail) {
+            if let Some(value) = *value
+                && !reported.contains(&(law, context, range))
+            {
+                reported.push((law, context, range));
+                excursions.extend(excursion(law, context, at, value, range.lower, range.upper));
             }
         }
         excursions

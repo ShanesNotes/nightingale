@@ -118,6 +118,18 @@ Not drawn: MT posts tissue PO2 and oxygen debt to every card for injury integral
 
 **Where the substrates live.** In the solver contract ([solver-contract.md](../architecture/solver-contract.md) §1) the substrates sit on an anatomy. Its sites belong to a few classes (capillary bed, vessel segment, junction, enclosed space, tissue site, nerve segment), each site has a height, and containment, flow networks, enclosures and nerve edges join them. A system's laws are written once per site class, so "Starling at every capillary bed" is one law from the pleura to the ankles, and an organ card is a region of the anatomy, not a store. Three arrows above change form without changing the census. Pleural pressure (line 82) and intra-abdominal pressure (line 101) reach the beds as the pressure of the space that encloses them, and position and gravity (line 96) come from site positions under the boundary's posture. ICP (line 111) stays unresolved; once ownership follows mechanism rather than card, it becomes the intracranial enclosure's pressure.
 
+## Speciation's readers
+
+Blood chemistry speciates the blood at every capillary bed and at each vessel segment the map samples, and writes no inventory. It states each quantity once, so the cards that read it are a table of their own beside the arrows: one row for each reader and set, each quantity wired by the body ticket that builds the reading law or held by the reader with a reason. The crate's `SPECIATION_READERS` holds these rows, and `census-check.py` compares the two row by row.
+
+| Reader | Sites | Wired (body ticket) | Held |
+|---|---|---|---|
+| MT | `CapillaryBed` | oxygen partial pressure (08), carbon dioxide partial pressure (08) | none |
+| RS | `Beds<Lung>` | none | oxygen partial pressure, carbon dioxide partial pressure |
+| NS | `Beds<Brain>` | none | acidity |
+| NS | `Speciated` | none | oxygen partial pressure, carbon dioxide partial pressure |
+| RN | `Beds<Tubule>` | none | acidity |
+
 ## Tests the map implies
 
 From the arena atlas (line 1892), and enforced by the contract's ownership registry in both drafts:

@@ -1,6 +1,6 @@
 """Compare the crate's coupling catalog with the "Direct couplings" graph of
 docs/atlas/coupling-map.md, row by row, and hold the sketch's copy of the table to the crate's,
-byte for byte.
+byte for byte. Compare the crate's speciation readers with the map's "Speciation's readers" table, row by row.
 
 Run from solver-contract-sketch/:  python3 -I evidence/census-check.py
 tools/verify (verify.d/20-sketch.sh) runs this as a gate. A change to the crate's catalog or owner
@@ -13,6 +13,7 @@ MAP = "../../atlas/coupling-map.md"
 CATALOG = "../../../crates/ng-contract/src/catalog.rs"
 SKETCH_CATALOG = "src/ng_contract/catalog.rs"
 OWNERS = "../../../crates/ng-contract/src/system.rs"
+SPECIATION = "../../../crates/ng-contract/src/scope/blood_chemistry.rs"
 MAPPED = {"live", "input", "sink", "relation"}
 SLICE_KINDS = {"live", "input", "sink"}
 SLICE_REASONED = {"relation", "outside", "unresolved"}
@@ -316,13 +317,50 @@ for name, got, want in (
     if got != want:
         failures.append(f"whole body census: {name} are lines {got}, not {want}")
 
+QUANTITIES = dict(re.findall(r'^\s*(\w+) = "([^"]+)", [^;]+;$', open(SPECIATION, encoding="utf-8").read(), re.M))
+readers_source = open(CATALOG, encoding="utf-8").read()
+readers_body = readers_source[readers_source.index("speciation_readers! {\n"):]
+readers_body = readers_body[:readers_body.index("\n}\n")]
+READER_ROW = re.compile(r'(\w+) at ([\w<>]+), "(?:[^"\\]|\\.)*",\s*(?:wired \(\w+ \{([^}]*)\}\))?\s*(?:held \[([^\]]*)\])?;')
+crate_readers = []
+for reader, sites, wired, held in READER_ROW.findall(readers_body):
+    crate_readers.append((CARD.get(reader, reader), sites,
+                          [(QUANTITIES[q], int(t)) for _, q, t in re.findall(r'(\w+): (\w+) => (\d+)', wired)],
+                          [QUANTITIES[q] for q in re.findall(r'(\w+) "(?:[^"\\]|\\.)*"', held)]))
+if len(re.findall(r"^    \w+ at ", readers_body, re.M)) != len(crate_readers) or any(not w and not h for *_, w, h in crate_readers):
+    failures.append("the readers' table does not parse")
+
+
+def listed(cell):
+    return [] if cell == "none" else [item.strip() for item in cell.split(",")]
+
+
+map_readers = []
+in_readers = False
+for text in open(MAP, encoding="utf-8").read().splitlines():
+    if text.startswith("## Speciation's readers"):
+        in_readers = True
+    elif in_readers and text.startswith("## "):
+        break
+    cells = [cell.strip().strip("`") for cell in text.strip().strip("|").split("|")]
+    if in_readers and text.startswith("| ") and len(cells) == 4 and cells[0] not in ("Reader", "---"):
+        wired = [re.fullmatch(r"(.+) \((\d+)\)", item).groups() for item in listed(cells[2])]
+        map_readers.append((cells[0], cells[1], [(q, int(t)) for q, t in wired], listed(cells[3])))
+if not crate_readers or map_readers != crate_readers:
+    failures.append(f"speciation's readers differ: map {map_readers}, catalog {crate_readers}")
+for reader, sites, wired, held in crate_readers:
+    if any(ticket not in BODY_TICKETS for _, ticket in wired):
+        failures.append(f"reader {reader} at {sites}: a wired read names no body ticket from 06 to 25")
+
 print(f"map source: {MAP} (Direct couplings, lines {arrows[0][0]}-{arrows[-1][0]})")
 print(f"map edges = {len(arrows)}; catalog rows = {len(rows)}")
 print("slice census: " + "; ".join(f"{k} = {v}" for k, v in slice_census.items()))
 for kind in SLICE_LINES:
     print(f"  {kind:<10} {[r['line'] for r in rows if r['slice'] == kind]}")
 print("whole body census: " + "; ".join(f"{k} = {v}" for k, v in body_census.items()))
-print("parse, line, endpoints and label equality, order, uniqueness, reasons, holders, tickets and both censuses:",
+print(f"speciation's readers: map rows = {len(map_readers)}; catalog rows = {len(crate_readers)}")
+print("parse, line, endpoints and label equality, order, uniqueness, reasons, holders, tickets, both censuses and "
+      "speciation's readers:",
       "PASS" if not failures else "FAIL")
 for failure in failures:
     print("  " + failure)

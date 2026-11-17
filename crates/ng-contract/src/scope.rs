@@ -24,7 +24,10 @@ mod musculoskeletal;
 mod outside;
 mod processes;
 mod respiratory;
-pub use blood_chemistry::BloodChemistryPorts;
+pub use blood_chemistry::{
+    Acidity, Bicarbonate, BloodChemistryPorts, CarbonDioxidePartialPressure, OxygenPartialPressure,
+    OxygenSaturation, Speciation, SpeciationOutputs,
+};
 pub use cargo::*;
 pub use endocrine::EndocrinePorts;
 pub use gastrointestinal::GastrointestinalPorts;
@@ -477,7 +480,15 @@ impl<'b> Assembly<'b> {
     /// Checks the schema and every fragment into one hashed body. A scope issued here whose fragment
     /// was never added is refused, so dropping a builder never drops what it owed.
     pub fn compile(self) -> Result<CompiledBody, AdmissionError> {
-        compile(self.schema, self.issued, self.held, self.fragments)
+        let readers = &crate::catalog::SPECIATION_READERS;
+        compile(self.schema, self.issued, self.held, self.fragments, readers)
+    }
+    #[cfg(test)]
+    pub(crate) fn compile_reading(
+        self,
+        readers: &[crate::catalog::SpeciationReader],
+    ) -> Result<CompiledBody, AdmissionError> {
+        compile(self.schema, self.issued, self.held, self.fragments, readers)
     }
 }
 
@@ -1139,6 +1150,7 @@ mod tests {
             (Sites::Tissue(Tissue::Muscle), [5, 2]),
             (Sites::Besides(Tissue::Fat), [6, 8]),
             (Sites::Veins, [7, 0]),
+            (Sites::Speciated, [8, 0]),
         ];
         for (sites, words) in pinned {
             let mut sealed = Canonical::new("");
