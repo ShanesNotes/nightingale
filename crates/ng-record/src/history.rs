@@ -155,6 +155,39 @@ fn exchanged<R>(weight: impl Fn(R) -> i64, terms: impl Iterator<Item = (R, i64)>
     terms.map(|(row, coefficient)| coefficient * weight(row)).sum()
 }
 
+fn nonzero(dense: impl Iterator<Item = i64>) -> Vec<(usize, i64)> {
+    dense.enumerate().filter(|&(_, net)| net != 0).collect()
+}
+
+fn flowed(
+    gross: &[(Compensated, Compensated)],
+    nonzero: &[(usize, i64)],
+    (inflow, outflow): (Compensated, Compensated),
+) -> (Compensated, Compensated) {
+    let (mut into, mut out_of) = (inflow, outflow);
+    for &(column, net) in nonzero {
+        let (forward, reverse) = gross[column];
+        if net > 0 {
+            into = into.plus(forward.scaled(net));
+            out_of = out_of.plus(reverse.scaled(net));
+        } else {
+            out_of = out_of.plus(forward.scaled(-net));
+            into = into.plus(reverse.scaled(-net));
+        }
+    }
+    (into, out_of)
+}
+
+fn push_every_column(bytes: &mut Vec<u8>, incidence: &[Vec<(usize, i64)>], columns: usize) {
+    for row in incidence {
+        let mut row = row.iter().peekable();
+        for column in 0..columns {
+            let net = row.next_if(|&&(at, _)| at == column).map_or(0, |&(_, net)| net);
+            bytes.extend_from_slice(&net.to_be_bytes());
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct LedgerChunk {
     interval: Interval,
@@ -175,8 +208,9 @@ struct ColumnStep {
 impl LedgerChunk {
     pub(crate) fn after(history: &History, body: &CompiledBody, step: &VerifiedStep) -> Self {
         let previous = history.chain.head().map(|head| &head.chunk);
-        let columns: Vec<ColumnStep> = (step.gross().enumerate())
-            .map(|(column, (forward, reverse))| {
+        let gross: Vec<(Compensated, Compensated)> = step.gross().collect();
+        let columns: Vec<ColumnStep> = (gross.iter().enumerate())
+            .map(|(column, &(forward, reverse))| {
                 let (from_forward, from_reverse) = previous
                     .map_or((Compensated::ZERO, Compensated::ZERO), |chunk| {
                         (chunk.columns[column].forward[1], chunk.columns[column].reverse[1])
@@ -199,16 +233,7 @@ impl LedgerChunk {
                         (last.inventory[1], last.inflow[1], last.outflow[1])
                     },
                 );
-                let (mut into, mut out_of) = (inflow, outflow);
-                for ((forward, reverse), &net) in step.gross().zip(&history.incidence[at]) {
-                    if net > 0 {
-                        into = into.plus(forward.scaled(net));
-                        out_of = out_of.plus(reverse.scaled(net));
-                    } else if net < 0 {
-                        out_of = out_of.plus(forward.scaled(-net));
-                        into = into.plus(reverse.scaled(-net));
-                    }
-                }
+                let (into, out_of) = flowed(&gross, &history.incidence[at], (inflow, outflow));
                 QuantityStep {
                     inventory: [start, inventory],
                     inflow: [inflow, into],
@@ -449,7 +474,8 @@ struct Head {
 pub(crate) struct History {
     format: RecordFormat,
     opening: Vec<Compensated>,
-    incidence: Vec<Vec<i64>>,
+    incidence: Vec<Vec<(usize, i64)>>,
+    columns: usize,
     origin: Origin,
     chain: Chain,
     unkept: Vec<(Digest, Vec<u8>)>,
@@ -480,34 +506,32 @@ impl History {
         parameters: Digest,
     ) -> Self {
         let combinations = body.conserved_basis().combinations();
-        let incidence: Vec<Vec<i64>> = (combinations.iter())
+        let incidence: Vec<Vec<(usize, i64)>> = (combinations.iter())
             .map(|combination| {
                 let weight = |wanted| {
                     (combination.terms().iter())
                         .find(|term| term.0 == wanted)
                         .map_or(0, |term| term.1)
                 };
-                (body.columns().iter())
-                    .map(|column| {
-                        let terms = (column.terms().iter()).map(|&(row, coefficient)| (row, coefficient));
-                        exchanged(weight, terms, column.receipt().is_some())
-                    })
-                    .collect()
+                nonzero((body.columns().iter()).map(|column| {
+                    let terms = (column.terms().iter()).map(|&(row, coefficient)| (row, coefficient));
+                    exchanged(weight, terms, column.receipt().is_some())
+                }))
             })
             .collect();
         let mut bytes = b"ng-record ledger opening 1".to_vec();
         for value in &opening {
             push_bits(&mut bytes, *value);
         }
-        for coefficient in incidence.iter().flatten() {
-            bytes.extend_from_slice(&coefficient.to_be_bytes());
-        }
+        let columns = body.columns().len();
+        push_every_column(&mut bytes, &incidence, columns);
         bytes.extend_from_slice(parameters.as_bytes());
         let seal = linked(format.hash(), run, 0, image, &bytes);
         Self {
             format,
             opening,
             incidence,
+            columns,
             origin: Origin { image, seal },
             chain: Chain::Opening,
             unkept: Vec::new(),
@@ -683,6 +707,7 @@ impl History {
             format: _,
             opening,
             incidence,
+            columns,
             origin: _,
             chain,
             unkept: _,
@@ -691,9 +716,7 @@ impl History {
         for value in opening {
             push_bits(&mut bytes, *value);
         }
-        for coefficient in incidence.iter().flatten() {
-            bytes.extend_from_slice(&coefficient.to_be_bytes());
-        }
+        push_every_column(&mut bytes, incidence, *columns);
         if let Some(head) = chain.head() {
             head.chunk.write(&mut bytes);
         }
@@ -884,7 +907,7 @@ impl Curve<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExactSum, exact_total, exchanged};
+    use super::{ExactSum, exact_total, exchanged, flowed, nonzero, push_every_column};
     use ng_contract::{Compensated, Dimensionless, Measure};
 
     fn two_to(power: i32) -> f64 {
@@ -1190,5 +1213,61 @@ mod tests {
             (2, 1),
             "one unit of each: the supply crosses the boundary, the burn's extra carbon does not"
         );
+    }
+
+    #[test]
+    fn the_nonzero_columns_flow_and_seal_with_the_bits_of_every_column() {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut draw = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let columns = 48;
+        for _ in 0..64 {
+            let dense: Vec<i64> = (0..columns)
+                .map(|column| match draw() % 8 {
+                    _ if column == columns - 1 => [-2, -1, 1, 3][(draw() % 4) as usize],
+                    0 => -1,
+                    1 => 2,
+                    _ => 0,
+                })
+                .collect();
+            let sparse = nonzero(dense.iter().copied());
+            let mut bytes = Vec::new();
+            push_every_column(&mut bytes, core::slice::from_ref(&sparse), columns);
+            let every: Vec<u8> = dense.iter().flat_map(|net| net.to_be_bytes()).collect();
+            assert_eq!(bytes, every, "the seal reads every column's weight");
+            let (mut sparse_flow, mut dense_flow) = (
+                (Compensated::ZERO, Compensated::ZERO),
+                (Compensated::ZERO, Compensated::ZERO),
+            );
+            for _ in 0..4 {
+                let mut amount = || {
+                    let scale = two_to((draw() % 80) as i32 - 40);
+                    exact(scale * (1.0 + (draw() >> 12) as f64 / two_to(52)))
+                };
+                let gross: Vec<(Compensated, Compensated)> =
+                    (0..columns).map(|_| (amount(), amount())).collect();
+                sparse_flow = flowed(&gross, &sparse, sparse_flow);
+                let (mut into, mut out_of) = dense_flow;
+                for (&(forward, reverse), &net) in gross.iter().zip(&dense) {
+                    if net > 0 {
+                        into = into.plus(forward.scaled(net));
+                        out_of = out_of.plus(reverse.scaled(net));
+                    } else if net < 0 {
+                        out_of = out_of.plus(forward.scaled(-net));
+                        into = into.plus(reverse.scaled(-net));
+                    }
+                }
+                dense_flow = (into, out_of);
+                assert_eq!(
+                    (sparse_flow.0.bits(), sparse_flow.1.bits()),
+                    (dense_flow.0.bits(), dense_flow.1.bits()),
+                    "the walk over nonzero columns adds the dense walk's terms in its order"
+                );
+            }
+        }
     }
 }
