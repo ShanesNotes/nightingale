@@ -1477,16 +1477,8 @@ fn place(
             if reads.contains(&false) && !reads.contains(&true) {
                 return Err(CompileDefect::UnscaledInput { law: law.name });
             }
-            let narrowed = (kernel.code.iter()).filter_map(|op| match op {
-                Op::Input(Input::Read(_, Where::DownIn(set))) => Some(*set),
-                _ => None,
-            });
-            for set in narrowed {
-                let lands = |&(context, _): &(Context, Target)| matches!(context, Context::Edge { to, .. } if anatomy.in_set(set).contains(&to));
-                if !targets.iter().any(lands) {
-                    return Err(CompileDefect::EndOffSet { law: law.name });
-                }
-            }
+            let contexts: Vec<Context> = targets.iter().map(|&(context, _)| context).collect();
+            check_ends(law.name, kernel, &contexts, anatomy)?;
             let declared = ProgramId::at(placement.programs.len());
             let base = code(law.fragment, kernel);
             for &(context, target) in &targets {
@@ -1686,6 +1678,30 @@ fn check_wired(
         };
         if !places.readers.iter().any(wires) {
             return Err(CompileDefect::UnwiredRead { law, field });
+        }
+    }
+    Ok(())
+}
+
+fn check_ends(
+    law: LawName,
+    kernel: &KernelData,
+    contexts: &[Context],
+    anatomy: &Anatomy,
+) -> Result<(), CompileDefect> {
+    let inputs = (kernel.code.iter())
+        .filter_map(|op| match op {
+            Op::Input(input) => Some(input),
+            _ => None,
+        })
+        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let &Input::Read(_, Where::DownIn(set)) = input else {
+            continue;
+        };
+        let lands = |context: &Context| matches!(context, Context::Edge { to, .. } if anatomy.in_set(set).contains(to));
+        if !contexts.iter().any(lands) {
+            return Err(CompileDefect::EndOffSet { law });
         }
     }
     Ok(())
@@ -2445,7 +2461,9 @@ fn guards(
             }
             let written = written(law, zero, fields)?;
             let program = written.as_ref().unwrap_or(zero);
-            for at in places_of(anatomy, reaches, schema, fragment.owner, mode.over) {
+            let contexts = places_of(anatomy, reaches, schema, fragment.owner, mode.over);
+            check_ends(law, zero, &contexts, anatomy)?;
+            for at in contexts {
                 check_landing(law, zero, fields, at, anatomy)?;
                 let reset = resets.map(|local| {
                     let owner = fragment.owner;

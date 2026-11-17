@@ -4055,7 +4055,7 @@ test = "-p ng-contract --lib edge_read::each_beds_inflow_edge_reads_its_beds_val
 [[mutant]]
 name = "edge-read-end-off-set-passes"
 path = "crates/ng-contract/src/compile.rs"
-old = '''return Err(CompileDefect::EndOffSet { law: law.name });'''
+old = '''return Err(CompileDefect::EndOffSet { law });'''
 new = ''''''
 test = "-p ng-contract --lib edge_read::a_law_none_of_whose_edges_ends_in_the_set_is_refused_by_name"
 
@@ -4065,3 +4065,10 @@ path = "crates/ng-contract/src/law.rs"
 old = '''                set.seal(out);'''
 new = '''                let _ = set;'''
 test = "-p ng-contract --lib edge_read::a_downstream_reads_set_is_in_its_program_seal"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes-for-guards"
+path = "crates/ng-contract/src/compile.rs"
+old = '''check_ends(law, zero, &contexts, anatomy)?;'''
+new = ''''''
+test = "-p ng-contract --lib edge_read::an_edge_guard_none_of_whose_edges_ends_in_the_set_is_refused_by_name"
