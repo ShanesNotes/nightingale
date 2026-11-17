@@ -44,7 +44,8 @@ const BLOOD_PRESSURE: &str = "blood pressure";
 pub(crate) const BINARY64_EXACT: i64 = 1 << 53;
 
 /// The anatomy and the composition data laws never see: which species live in which spaces, where a route crosses
-/// the boundary, the partial-volume coefficient, each fuel's energy content and the spaces this body leaves out.
+/// the boundary, the partial-volume coefficient, each fuel's energy content, the bed that pays each named work and the
+/// spaces this body leaves out.
 pub struct Schema {
     pub(crate) anatomy: Anatomy,
     pub(crate) carried: Vec<(Sites, Space, Species)>,
@@ -92,7 +93,7 @@ impl Schema {
     }
 
     /// Names the capillary bed whose heat pays `work`. Refuses a site the map does not hold, a site that is no bed,
-    /// and a second bed for one work.
+    /// and a work already paid, by this bed or another.
     pub fn pay_work(&mut self, work: Work, bed: SiteId) -> Result<(), AdmissionError> {
         if !self.anatomy.sites().any(|known| known == bed) {
             return Err(AdmissionError::SiteOffTheMap { site: bed });
@@ -1022,6 +1023,55 @@ impl<'b, S> HeldPorts<'b, S> {
 #[cfg(test)]
 mod tests {
     use super::processes::TABLE;
+    use super::{Schema, Work};
+    use crate::identity::{Canonical, Seal};
+    use crate::{AnatomyBuilder, CapillaryBed, Measure, Network, Position, SiteId, TissueSite, VesselSegment};
+
+    fn schema() -> (Schema, SiteId, SiteId) {
+        let zero = || Measure::new(0.0).expect("finite");
+        let at = || Position::new(zero(), zero(), zero());
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at());
+        let vessel = map.site::<VesselSegment>("vessel", at());
+        map.contain(root.id(), vessel.id());
+        let beds = [
+            map.site::<CapillaryBed>("first bed", at()).id(),
+            map.site::<CapillaryBed>("second bed", at()).id(),
+        ];
+        for bed in beds {
+            map.contain(root.id(), bed);
+            map.connect(Network::Vascular, vessel.id(), bed);
+            map.connect(Network::Vascular, bed, vessel.id());
+        }
+        let schema = Schema::new(map.finish().expect("a map")).expect("a schema");
+        (schema, beds[0], beds[1])
+    }
+
+    fn sealed(schema: &Schema) -> Vec<u8> {
+        let mut out = Canonical::new("schema");
+        schema.seal(&mut out);
+        out.into_bytes()
+    }
+
+    #[test]
+    fn the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays() {
+        let (mut named, first, second) = schema();
+        named.pay_work(Work::Walls, second).expect("a bed");
+        named.pay_work(Work::Stroke, first).expect("a bed");
+        let (bare, ..) = schema();
+        let mut expected = Canonical::new("schema");
+        bare.seal(&mut expected);
+        assert_eq!(expected.into_bytes(), sealed(&bare));
+        let mut expected = Canonical::new("schema");
+        bare.seal(&mut expected);
+        expected.number(u64::MAX - 1);
+        expected.length(2);
+        for (work, bed) in [(Work::Stroke, first), (Work::Walls, second)] {
+            expected.number(work as u64);
+            bed.seal(&mut expected);
+        }
+        assert_eq!(sealed(&named), expected.into_bytes());
+    }
 
     #[test]
     fn every_boundary_process_has_a_name_of_its_own() {

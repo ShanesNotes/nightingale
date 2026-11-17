@@ -491,3 +491,68 @@ fn named_work_without_an_elastic_store_is_refused_instead_of_dropped() -> Result
         ),
     }
 }
+
+#[test]
+fn either_order_of_naming_the_payers_compiles_one_body() -> Result<(), AdmissionError> {
+    let forward = paid_work(&[(Work::Stroke, "liver bed"), (Work::Walls, "gut bed")], true)?;
+    let backward = paid_work(&[(Work::Walls, "gut bed"), (Work::Stroke, "liver bed")], true)?;
+    assert_eq!(forward.model_hash(), backward.model_hash());
+    Ok(())
+}
+
+#[test]
+fn every_payer_is_checked_for_heat_whichever_work_it_pays() -> Result<(), AdmissionError> {
+    let (liver, gut) = (site::<CapillaryBed>("liver bed"), site::<CapillaryBed>("gut bed"));
+    for (stroke, walls, cold) in [(liver, gut, gut), (gut, liver, gut)] {
+        let mut schema = Schema::new(whole_body()?)?;
+        watery_spaces_left_out(&mut schema);
+        schema.pool::<Energy>(liver, Space::Thermal)?;
+        schema.pool::<Energy>(site::<TissueSite>("body"), Space::Elastic)?;
+        schema.pay_work(Work::Stroke, stroke)?;
+        schema.pay_work(Work::Walls, walls)?;
+        let class = wave()?;
+        let compiled = assemble(schema, |mut body| {
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let walls = ports.wall_work(&mut cv);
+            let none = cv.kernel(|mut k| {
+                let zero = k.zero::<Rate<Energy>>();
+                k.finish(zero, cv.every_mode(), class)
+            });
+            cv.transfer(Transfer::new(&walls, none));
+            body.add(cv.finish());
+            body.compile()
+        });
+        let refused = Err(AdmissionError::Compile(CompileDefect::PayerHoldsNoHeat { site: cold }));
+        assert_eq!(compiled.map(|_| ()), refused);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_named_work_on_a_map_whose_root_is_a_vessel_is_refused() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let aorta = map.site::<VesselSegment>("aorta", at()?);
+    let bed = map.site::<CapillaryBed>("bed", at()?).id();
+    map.contain(aorta.id(), bed);
+    map.connect(Network::Vascular, aorta.id(), bed);
+    map.connect(Network::Vascular, bed, aorta.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    watery_spaces_left_out(&mut schema);
+    schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+    schema.pay_work(Work::Stroke, bed)?;
+    let class = wave()?;
+    let compiled = assemble(schema, |mut body| {
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let stroke = ports.stroke_work(&mut cv);
+        let still = cv.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_at(&stroke, still);
+        body.add(cv.finish());
+        body.compile()
+    });
+    let refused = Err(AdmissionError::Compile(CompileDefect::PaidWorkHasNoStore { work: Work::Stroke }));
+    assert_eq!(compiled.map(|_| ()), refused);
+    Ok(())
+}

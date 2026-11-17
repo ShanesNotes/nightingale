@@ -253,7 +253,7 @@ pub enum AdmissionError {
     PayerNotABed {
         site: SiteId,
     },
-    /// A second bed named to pay one work.
+    /// A work named a payer twice, the same bed or another.
     WorkPaidTwice {
         work: crate::Work,
     },
