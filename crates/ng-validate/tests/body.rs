@@ -870,9 +870,9 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
     );
     expect![[r#"
         rows 1442 {"algebraic": 184, "amount": 1248, "memory": 10}, columns 1422, jacobian nonzeros 9713, blocks 447, parameter slots 675, conserved combinations 404, held pools 322, held route columns 97
-        model hash 91b0b5b6c654d09d6f653b724d0a98949f4c97139ff53d19da2424d10275c73e
-        conserved basis 1723d7ed144b6a89f4f683fe2b1c8be1201694c8f3a1218dbddde3ceeca5a7d9
-        stated packet ccae17966ccd06ef6eb193aa38871e9eb585e82c0866b4b0648b84c63a989a5c
+        model hash 2bc84d2ed06b81c5b228d548b86a66b775de8ee88279578095e8058b8623790b
+        conserved basis 0209c7dba8840f794a98530d6d858db650508068452df255358f61d1f0c2eaef
+        stated packet 8f3ea727b48d54add9b0236bf1bc2a0d5e7404580a4fc3a6d1dcd4568ba1506a
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -1003,7 +1003,7 @@ fn each_beds_glycolysis_and_lactate_burn_carry_their_atoms_and_energy_into_its_c
                 &[
                     (Species::Glucose, Space::Cells, -1),
                     (Species::Lactate, Space::Cells, 2),
-                    (Species::Energy, Space::Thermal, 100),
+                    (Species::Energy, Space::Thermal, 10_000),
                 ],
             ),
             "lactate burn" => (
@@ -1013,7 +1013,7 @@ fn each_beds_glycolysis_and_lactate_burn_carry_their_atoms_and_energy_into_its_c
                     (Species::Oxygen, Space::Cells, -3),
                     (Species::CarbonDioxide, Space::Cells, 3),
                     (Species::Water, Space::Cells, 3),
-                    (Species::Energy, Space::Thermal, 450),
+                    (Species::Energy, Space::Thermal, 45_000),
                 ],
             ),
             _ => continue,
@@ -1052,8 +1052,8 @@ fn each_beds_burns_carry_their_fuels_atoms_and_energy_into_its_cells_and_heat() 
     let mut seen = [0; 2];
     for column in body.columns() {
         let (which, fuel, expected) = match column.origin().local {
-            "glucose burn" => (0, Species::Glucose, [-1, -6, 6, 6, 1_000]),
-            "fatty acid burn" => (1, Species::FattyAcids, [-1, -23, 16, 16, 3_000]),
+            "glucose burn" => (0, Species::Glucose, [-1, -6, 6, 6, 100_000]),
+            "fatty acid burn" => (1, Species::FattyAcids, [-1, -23, 16, 16, 300_000]),
             _ => continue,
         };
         let Context::Site(bed) = column.context() else {

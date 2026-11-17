@@ -100,14 +100,14 @@ const CELL_PRESSURE_AT_DEMAND: f64 = 20.0;
 const WIDTH_SHARE_OF_DEMAND: f64 = 0.02;
 const GLUCOSE_SHARE: f64 = 5.0 / 28.0;
 const QUOTIENT: f64 = 0.75;
-const GLUCOSE_ENERGY: f64 = 1_000.0;
-const FAT_ENERGY: f64 = 3_000.0;
+const GLUCOSE_ENERGY: f64 = 100_000.0;
+const FAT_ENERGY: f64 = 300_000.0;
 const BED_HEAT_SPEED: f64 = 0.05;
 const FEED_SPEED: f64 = 0.1;
 const GLUCOSE_SET: f64 = 3_000.0;
 const FAT_SET: f64 = 600.0;
 const CELL_WATER_SPEED: f64 = 10.0;
-const LACTATE_ENERGY: f64 = 450.0;
+const LACTATE_ENERGY: f64 = 45_000.0;
 const GLUCOSE_PER_OXYGEN_SHORT: f64 = 1.0 / 6.0;
 const OXYGEN_PER_LACTATE: f64 = 3.0;
 const LACTATE_BURN_SPEED: f64 = 0.02;
@@ -2082,7 +2082,7 @@ fn glycolysis_and_lactates_burn_carry_their_atoms_and_energy_into_the_cells_and_
     assert_eq!(
         column_terms(&body, "glycolysis"),
         vec![
-            (Species::Energy, 100),
+            (Species::Energy, 10_000),
             (Species::Glucose, -1),
             (Species::Lactate, 2)
         ],
@@ -2092,7 +2092,7 @@ fn glycolysis_and_lactates_burn_carry_their_atoms_and_energy_into_the_cells_and_
         column_terms(&body, "lactate burn"),
         vec![
             (Species::CarbonDioxide, 3),
-            (Species::Energy, 450),
+            (Species::Energy, 45_000),
             (Species::Lactate, -1),
             (Species::Oxygen, -3),
             (Species::Water, 3)

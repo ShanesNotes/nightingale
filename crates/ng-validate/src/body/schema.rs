@@ -17,9 +17,9 @@ macro_rules! processes {
 }
 
 /// Each fuel's energy content, plainly synthetic.
-pub(super) const GLUCOSE_ENERGY: f64 = 1_000.0;
-pub(super) const FAT_ENERGY: f64 = 3_000.0;
-pub(super) const LACTATE_ENERGY: f64 = 450.0;
+pub(super) const GLUCOSE_ENERGY: f64 = 100_000.0;
+pub(super) const FAT_ENERGY: f64 = 300_000.0;
+pub(super) const LACTATE_ENERGY: f64 = 45_000.0;
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())
