@@ -441,6 +441,7 @@ enum Serves<'f> {
     Family(Family),
     Boundary(&'f RouteBoundary),
     Sum(Sites),
+    Only(Sites),
     Reaction(&'f ReactionDeclaration),
     Explicit(Sites),
 }
@@ -524,11 +525,15 @@ fn obligations<'f>(
             ));
         }
         for law in &fragment.laws {
-            if let Obligation::Sum(name, set) = law.serves
-                && !(owed.iter())
-                    .any(|known| known.name.owner == fragment.owner && known.obligation == law.serves)
+            let serves = match law.serves {
+                Obligation::Sum(_, set) => Serves::Sum(set),
+                Obligation::Only(_, set) => Serves::Only(set),
+                _ => continue,
+            };
+            if !(owed.iter())
+                .any(|known| known.name.owner == fragment.owner && known.obligation == law.serves)
             {
-                owed.push(Owed::gather(fragment, name, Serves::Sum(set), law.serves));
+                owed.push(Owed::gather(fragment, law.serves.local(), serves, law.serves));
             }
         }
     }
@@ -1414,6 +1419,13 @@ fn place(
                 sites
                     .map(|site| (Context::Site(site), Target::Row(row)))
                     .collect()
+            }
+            Serves::Only(set) => {
+                let row = RowId::at(rows.declared(law.name, Context::Body));
+                let [site] = anatomy.in_set(set)[..] else {
+                    return Err(CompileDefect::NotOneSite { law: law.name, set });
+                };
+                vec![(Context::Site(site), Target::Row(row))]
             }
             Serves::Boundary(water) if water.drains => {
                 let row = RowId::at(rows.declared(law.name, Context::Body));

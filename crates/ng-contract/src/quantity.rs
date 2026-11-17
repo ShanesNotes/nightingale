@@ -226,6 +226,7 @@ same_dimension! {
     Product<Elastance, Volume> => Pressure;
     Quotient<Pressure, Elastance> => Volume;
     Quotient<Pressure, Pressure> => Dimensionless;
+    Quotient<Viscosity, Viscosity> => Dimensionless;
     Quotient<Volume, Volume> => Dimensionless;
     Quotient<Pressure, Resistance> => Rate<Water>;
     Product<Resistance, Rate<Water>> => Pressure;

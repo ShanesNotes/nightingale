@@ -8,6 +8,8 @@ const SQRT_2: f64 = f64::from_bits(0x3FF6_A09E_667F_3BCD);
 const TWO_54: f64 = f64::from_bits(0x4350_0000_0000_0000);
 const EXP_OVERFLOW: f64 = f64::from_bits(0x4086_2E42_FEFA_39EF);
 const EXP_UNDERFLOW: f64 = f64::from_bits(0xC087_4910_D52D_3051);
+const EXPM1_FLOOR: f64 = f64::from_bits(0xC043_687A_9F1A_F2B1);
+const TWO_NEG_54: f64 = f64::from_bits(0x3C90_0000_0000_0000);
 const MANTISSA: u64 = 0x000F_FFFF_FFFF_FFFF;
 const ONE_BITS: u64 = 0x3FF0_0000_0000_0000;
 
@@ -96,6 +98,42 @@ pub fn exp(x: f64) -> f64 {
     y * power_of_two(half) * power_of_two(k - half)
 }
 
+/// `e^x - 1` within one unit in the last place, by `exp`'s reduction and polynomial with the reduction's rounding
+/// carried, and fdlibm's rebuild by `k`, so it keeps its digits as `x` nears zero. `expm1(0)` is exactly 0, below
+/// `2^-54` it is `x`, below `-56 ln 2` it is `-1`, past `exp`'s overflow threshold it is `+inf`, and `NaN` returns
+/// `NaN`.
+pub(crate) fn expm1(x: f64) -> f64 {
+    if x.is_nan() || (x > -TWO_NEG_54 && x < TWO_NEG_54) {
+        return x;
+    }
+    if x > EXP_OVERFLOW {
+        return f64::INFINITY;
+    }
+    if x < EXPM1_FLOOR {
+        return -1.0;
+    }
+    let k = (x * INV_LN2).round();
+    let high = x - k * LN2_HI;
+    let low = k * LN2_LO;
+    let r = high - low;
+    let carried = (high - r) - low;
+    let tail = r * r * (0.5 + r * horner(&EXP_SERIES, r));
+    let s = tail + carried * (1.0 + r);
+    let k = k as i32;
+    match k {
+        0 => r + s,
+        -1 => 0.5 * (r + s) - 0.5,
+        1 if r < -0.25 => 2.0 * ((r + 0.5) + s),
+        1 => 1.0 + 2.0 * (r + s),
+        ..0 | 57.. => {
+            let half = k / 2;
+            ((r + s) + 1.0) * power_of_two(half) * power_of_two(k - half) - 1.0
+        }
+        ..20 => ((r + s) + (1.0 - power_of_two(-k))) * power_of_two(k),
+        _ => (r - (power_of_two(-k) - s) + 1.0) * power_of_two(k),
+    }
+}
+
 pub(crate) fn ln(x: f64) -> Option<f64> {
     if x.is_nan() || x <= 0.0 {
         return None;
@@ -150,7 +188,7 @@ fn octant(steps: u64, eighth: u64) -> (f64, f64) {
 
 #[cfg(test)]
 mod tests {
-    use super::{exp, ln, turn};
+    use super::{exp, expm1, ln, turn};
     use core::num::NonZeroU64;
 
     fn ulps(a: f64, b: f64) -> u64 {
@@ -187,6 +225,92 @@ mod tests {
         (0x0010000000000000, 0xC086232BDD7ABCD2),
         (0x3FF000000006DF38, 0x3DDB7CDFFFFA18D8),
     ];
+
+    // Correctly rounded values from Python's `decimal` at 1000 digits, never from the code under test: tiny inputs,
+    // each side of the reduction's k = 0, 1 and 2, the far side of -1, and the last binade before overflow.
+    const EXPM1_VECTORS: [(u64, u64); 37] = [
+        (0x3C30000000000000, 0x3C30000000000000),
+        (0xBC30000000000000, 0xBC30000000000000),
+        (0x01A56E1FC2F8F359, 0x01A56E1FC2F8F359),
+        (0x81A56E1FC2F8F359, 0x81A56E1FC2F8F359),
+        (0x3DDB7CDFD9D7BDBB, 0x3DDB7CDFD9DDA4E3),
+        (0xBDDB7CDFD9D7BDBB, 0xBDDB7CDFD9D1D693),
+        (0x3EE4F8B588E368F1, 0x3EE4F8BC681CDFB6),
+        (0xBEE4F8B588E368F1, 0xBEE4F8AEA9ACF2C9),
+        (0x3FB999999999999A, 0x3FBAEC7B35A00D3A),
+        (0xBFB999999999999A, 0xBFB85C933156A62C),
+        (0x3FD0000000000000, 0x3FD22D78F0FA061A),
+        (0xBFD0000000000000, 0xBFCC5041854DF7D4),
+        (0x3FD5C28F5C28F5C3, 0x3FD9EAA94C8422F5),
+        (0xBFD5C28F5C28F5C3, 0xBFD2725AE35E2895),
+        (0x3FD6666666666666, 0x3FDAD200B20177B2),
+        (0xBFD6666666666666, 0xBFD2E663ED31C11E),
+        (0x3FE0000000000000, 0x3FE4C2531C3C0D38),
+        (0xBFE0000000000000, 0xBFD92E9A0720D3EC),
+        (0x3FF0000000000000, 0x3FFB7E151628AED3),
+        (0xBFF0000000000000, 0xBFE43A54E4E98864),
+        (0x3FF0A3D70A3D70A4, 0x3FFD44790F5ED3CF),
+        (0xBFF0A3D70A3D70A4, 0xBFE4B07FCE8BCE81),
+        (0x4000000000000000, 0x40198E64B8D4DDAE),
+        (0xC000000000000000, 0xBFEBAB5557101F8D),
+        (0x4008000000000000, 0x403315E5BF6FB106),
+        (0xC008000000000000, 0xBFEE6824F33314F5),
+        (0x4024000000000000, 0x40D5825DCF950560),
+        (0xC024000000000000, 0xBFEFFFA0CA192A6E),
+        (0x403E000000000000, 0x42A370470AEC26ED),
+        (0xC03E000000000000, 0xBFEFFFFFFFFFFCB5),
+        (0x4042800000000000, 0x4344D13FBB1A0019),
+        (0xC042800000000000, 0xBFEFFFFFFFFFFFFF),
+        (0x4044000000000000, 0x438A220D397972EB),
+        (0xC044000000000000, 0xBFF0000000000000),
+        (0x4049000000000000, 0x44719103E4080B45),
+        (0x4085E00000000000, 0x7F0D945DF4F8EC8E),
+        (0x40862D999999999A, 0x7FED75AE7A50EE14),
+    ];
+
+    #[test]
+    fn expm1_is_within_one_ulp_of_the_correctly_rounded_value() {
+        for (x, want) in EXPM1_VECTORS {
+            let got = expm1(f64::from_bits(x));
+            assert!(
+                ulps(got, f64::from_bits(want)) <= 1,
+                "expm1({x:#x}) = {:#x}",
+                got.to_bits()
+            );
+        }
+    }
+
+    // Correctly rounded from the series summed in exact rationals, never from the code under test.
+    const EXPM1_CARRIED: [(u64, u64); 8] = [
+        (0xBFF0A2B23F3BAB70, 0xBFE4AFB0CCC06217),
+        (0xBFE02A23B932AFFF, 0xBFD9619699136743),
+        (0xBFD99AAB2BEBDE68, 0xBFD51A3152FC0739),
+        (0xBFD7D4FA53463BC2, 0xBFD3E5D84D1C1CD7),
+        (0x3FD62E42FEFA39F0, 0x3FDA827999FCEF33),
+        (0x3FF0A322353303E9, 0x3FFD42797D9AD3DA),
+        (0x3FF12187226FD68A, 0x3FFEAD954F64E869),
+        (0x4001CE285E575B60, 0x402084ECD1C995A3),
+    ];
+
+    #[test]
+    fn expm1_carries_the_reductions_rounding_to_the_correctly_rounded_value() {
+        for (x, want) in EXPM1_CARRIED {
+            let got = expm1(f64::from_bits(x));
+            assert_eq!(got.to_bits(), want, "expm1({x:#x}) = {:#x}", got.to_bits());
+        }
+    }
+
+    #[test]
+    fn expm1_is_exact_at_zero_and_saturates_past_its_thresholds() {
+        assert_eq!(expm1(0.0).to_bits(), 0.0_f64.to_bits());
+        assert_eq!(expm1(-0.0).to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(expm1(709.79), f64::INFINITY);
+        assert_eq!(expm1(f64::INFINITY), f64::INFINITY);
+        assert_eq!(expm1(709.78).classify(), core::num::FpCategory::Normal);
+        assert_eq!(expm1(-745.2).to_bits(), (-1.0_f64).to_bits());
+        assert_eq!(expm1(f64::NEG_INFINITY).to_bits(), (-1.0_f64).to_bits());
+        assert!(expm1(f64::NAN).is_nan());
+    }
 
     #[test]
     fn exp_is_within_one_ulp_of_the_correctly_rounded_value() {

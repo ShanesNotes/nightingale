@@ -326,6 +326,7 @@ pub(crate) enum Op {
     ConductanceFlow([usize; 2]),
     Volume([usize; 1]),
     Upwind([usize; 5]),
+    Expm1([usize; 1]),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Input {
@@ -372,7 +373,8 @@ impl Op {
             | Op::Exp(operands)
             | Op::Logistic(operands)
             | Op::Ln(operands)
-            | Op::Volume(operands) => operands,
+            | Op::Volume(operands)
+            | Op::Expm1(operands) => operands,
             Op::Upwind(operands) => operands,
         }
     }
@@ -396,6 +398,7 @@ impl Op {
             Op::ConductanceFlow(operands) => Op::ConductanceFlow(operands.map(f)),
             Op::Volume(operands) => Op::Volume(operands.map(f)),
             Op::Upwind(operands) => Op::Upwind(operands.map(f)),
+            Op::Expm1(operands) => Op::Expm1(operands.map(f)),
         }
     }
 }
@@ -426,6 +429,7 @@ impl Seal for Op {
             Op::ConductanceFlow(operands) => (15, operands),
             Op::Volume(operands) => (16, operands),
             Op::Upwind(operands) => (17, operands),
+            Op::Expm1(operands) => (18, operands),
         };
         out.number(tag);
         for &operand in operands {
@@ -1173,6 +1177,10 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     /// The contract's own exponential, identical on every host.
     pub fn exp(&mut self, x: Expr<'b, 'k, O, Dimensionless>) -> Expr<'b, 'k, O, Dimensionless> {
         self.push(Op::Exp([x.at]))
+    }
+    /// `e^x - 1`, which keeps its digits as `x` nears zero, where `exp(x) - 1` loses them.
+    pub fn expm1(&mut self, x: Expr<'b, 'k, O, Dimensionless>) -> Expr<'b, 'k, O, Dimensionless> {
+        self.push(Op::Expm1([x.at]))
     }
     /// `1 / (1 + exp(-x))`, from the contract's own exponential.
     pub fn logistic(&mut self, x: Expr<'b, 'k, O, Dimensionless>) -> Expr<'b, 'k, O, Dimensionless> {
@@ -2483,6 +2491,17 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         self.attach(Obligation::Slot(slot.name), row.data);
         self.attach(Obligation::Sum(slot.name, C::SET), value.data.summing());
     }
+    /// A body row that is one site kernel at the only site of its set. Compile refuses the row where the map gives the
+    /// set no site or more than one.
+    pub fn only_at<C: SiteSet, U: Dimension>(
+        &mut self,
+        slot: &AlgebraicSlot<'b, O, U>,
+        row: PureKernel<'b, O, U>,
+        value: PureKernel<'b, O, U, C>,
+    ) {
+        self.attach(Obligation::Slot(slot.name), row.data);
+        self.attach(Obligation::Only(slot.name, C::SET), value.data.summing());
+    }
     /// An unknown no row of its own defines: `residual` is zero by way of an amount `slot`'s rate moves, as a store is
     /// held to a sum by the flow out of it. Compile matches the row to `slot` by this declaration, and a stage's
     /// tangent is what lets the solve reach it, so a body with no cycle refuses it at the rank report.
@@ -2775,6 +2794,7 @@ pub(crate) enum Obligation {
     Family(Family),
     Boundary(&'static str),
     Sum(&'static str, Sites),
+    Only(&'static str, Sites),
     Reaction(&'static str),
     Explicit(&'static str),
 }
@@ -2785,6 +2805,7 @@ impl Obligation {
             | Obligation::Defined(name)
             | Obligation::Boundary(name)
             | Obligation::Sum(name, _)
+            | Obligation::Only(name, _)
             | Obligation::Reaction(name)
             | Obligation::Explicit(name) => name,
             Obligation::Family(family) => family.name(),
