@@ -4055,6 +4055,13 @@ test = "-p ng-validate --test paying with_the_burn_raised_by_the_work_the_beds_h
 [[mutant]]
 name = "a-payer-without-heat-compiles"
 path = "crates/ng-contract/src/compile.rs"
-old = '''find(|&&(_, bed)| !held(bed))'''
+old = '''find(|&&(_, bed)| !held(bed, Space::Thermal))'''
 new = '''find(|_| false)'''
 test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+[[mutant]]
+name = "paid-work-without-a-store-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''find(|&&(work, _)| !stored && requested(work))'''
+new = '''find(|_| false)'''
+test = "-p ng-contract --test routes named_work_without_an_elastic_store_is_refused_instead_of_dropped"

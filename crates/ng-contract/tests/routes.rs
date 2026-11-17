@@ -479,7 +479,10 @@ fn named_work_without_an_elastic_store_is_refused_instead_of_dropped() -> Result
         body.compile()
     });
     match compiled {
-        Err(AdmissionError::Compile(_)) => Ok(()),
+        Err(AdmissionError::Compile(defect)) => {
+            assert_eq!(defect, CompileDefect::PaidWorkHasNoStore { work: Work::Stroke });
+            Ok(())
+        }
         Err(other) => Err(other),
         Ok(body) => panic!(
             "named work without an elastic store compiled: {} stroke work columns and {} wall work columns",

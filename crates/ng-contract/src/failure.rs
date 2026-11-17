@@ -444,6 +444,8 @@ pub enum CompileDefect {
     ReactionNowhere { law: LawName },
     /// A bed named to pay work whose heat the schema holds no pool for.
     PayerHoldsNoHeat { site: SiteId },
+    /// A work a law requests and a bed is named to pay, with no elastic store at the root for it to end at.
+    PaidWorkHasNoStore { work: crate::Work },
     /// A site where a reaction stands without the energy pool its energy goes to.
     ReactionEndpoint {
         law: LawName,

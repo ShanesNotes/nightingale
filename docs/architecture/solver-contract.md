@@ -446,6 +446,7 @@ A gate counts only if it rejects a core built to fail it. Each one below is part
 | A law reads speciation that no row of the readers' table wires to its card on a set holding the site | `Assembly::compile` refuses it (`UnwiredRead`) and names the law and the field |
 | A sensor reads arterial speciation at a segment the map does not sample | `Assembly::compile` refuses a row's read (`NoSuchRead`) and an explicit field's (`UnemittedField`) |
 | A body that names a bed to pay its work while compile still ends the work at the receipt | `Assembly::compile` starts the work at the named bed's thermal pool, so the receipt takes nothing |
+| A body that names a bed to pay a work its laws request while the schema holds no elastic store for the work to end at | `Assembly::compile` refuses it (`PaidWorkHasNoStore`) and names the work, where the work's route would otherwise drop out unseen |
 
 ### 8. Diagram source
 

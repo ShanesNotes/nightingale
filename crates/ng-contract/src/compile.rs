@@ -36,7 +36,7 @@ pub(crate) fn compile(
     check_fragments(&issued, &fragments, &schema, &held)?;
     check_boundaries(&schema)?;
     check_places(&schema)?;
-    check_payers(&schema)?;
+    check_payers(&schema, &fragments)?;
     check_reactions(&fragments, &schema)?;
     let declarations = declarations(&fragments)?;
     let unissued = FragmentData::empty(Boundary::CARD);
@@ -254,11 +254,23 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
-fn check_payers(schema: &Schema) -> Result<(), CompileDefect> {
+fn check_payers(schema: &Schema, fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     let pools: Vec<(SiteId, Space, Species)> = schema.pools().collect();
-    let held = |bed| pools.contains(&(bed, Space::Thermal, Species::Energy));
-    match (schema.payers.iter()).find(|&&(_, bed)| !held(bed)) {
-        Some(&(_, site)) => Err(CompileDefect::PayerHoldsNoHeat { site }),
+    let held = |site, space| pools.contains(&(site, space, Species::Energy));
+    if let Some(&(_, site)) = (schema.payers.iter()).find(|&&(_, bed)| !held(bed, Space::Thermal)) {
+        return Err(CompileDefect::PayerHoldsNoHeat { site });
+    }
+    let root = (schema.anatomy.root()).filter(|root| root.class() == Class::TissueSite);
+    let stored = root.is_some_and(|root| held(root, Space::Elastic));
+    let requested = |work| {
+        let family = match work {
+            Work::Stroke => Family::StrokeWork,
+            Work::Walls => Family::WallWork,
+        };
+        (fragments.iter()).any(|fragment| fragment.families.contains(&family))
+    };
+    match (schema.payers.iter()).find(|&&(work, _)| !stored && requested(work)) {
+        Some(&(work, _)) => Err(CompileDefect::PaidWorkHasNoStore { work }),
         None => Ok(()),
     }
 }

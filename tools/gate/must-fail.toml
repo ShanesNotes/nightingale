@@ -207,3 +207,7 @@ mutants = ["speciated-takes-every-segment", "explicit-read-off-its-set"]
 [[row]]
 core = "A body that names a bed to pay its work while compile still ends the work at the receipt"
 mutants = ["work-paid-from-outside", "work-paid-from-outside-in-the-run"]
+
+[[row]]
+core = "A body that names a bed to pay a work its laws request while the schema holds no elastic store for the work to end at"
+mutants = ["paid-work-without-a-store-compiles"]
