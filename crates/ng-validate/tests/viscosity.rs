@@ -287,7 +287,11 @@ fn a_beds_inflow_resistance_falls_with_its_debt_by_its_form() -> Result<(), Init
             (law - closed).abs() <= 1e-12 * closed,
             "at a debt of {d}: {law} against {closed}"
         );
-        assert_eq!(away.to_bits(), out[0].to_bits(), "the edge out of the bed at a debt of {d}");
+        assert_eq!(
+            away.to_bits(),
+            out[0].to_bits(),
+            "the edge out of the bed at a debt of {d}"
+        );
     }
     Ok(())
 }
@@ -295,7 +299,8 @@ fn a_beds_inflow_resistance_falls_with_its_debt_by_its_form() -> Result<(), Init
 /// With every bed owing, only the plain edges into a bed move, and no other law: the liver's inflows are the hepatic
 /// sinusoids', and the edge from the glomerular bed into the peritubular bed keeps its resistance at a share of zero.
 #[test]
-fn every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt() -> Result<(), InitializationFailure> {
+fn every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt()
+-> Result<(), InitializationFailure> {
     let body = whole_body()?;
     let rows: Vec<RowKind> = body.rows().iter().map(Row::kind).collect();
     let owed: Vec<usize> = (0..rows.len())
@@ -311,7 +316,11 @@ fn every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt(
     start.push((field, 1.0));
     let each: Vec<_> = [0.0, 1.0]
         .iter()
-        .map(|d| (start.iter().copied()).chain(owed.iter().map(|&at| (at, *d))).collect::<Vec<_>>())
+        .map(|d| {
+            (start.iter().copied())
+                .chain(owed.iter().map(|&at| (at, *d)))
+                .collect::<Vec<_>>()
+        })
         .collect();
     let staged = staged(&body, &each)?;
     let mut moved: Vec<RowKind> = (0..rows.len())
@@ -319,14 +328,23 @@ fn every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt(
         .map(|at| rows[at])
         .collect();
     let arteries = site::<VesselSegment>("systemic arteries");
-    let mut fed: Vec<RowKind> = ["gut bed", "muscle bed", "glomerular bed", "brain bed", "coronary bed", "fat bed", "skin bed", "bone bed"]
-        .into_iter()
-        .map(|bed| circulation(arteries, site::<CapillaryBed>(bed)))
-        .chain([circulation(
-            site::<VesselSegment>("pulmonary artery"),
-            site::<CapillaryBed>("pulmonary bed"),
-        )])
-        .collect();
+    let mut fed: Vec<RowKind> = [
+        "gut bed",
+        "muscle bed",
+        "glomerular bed",
+        "brain bed",
+        "coronary bed",
+        "fat bed",
+        "skin bed",
+        "bone bed",
+    ]
+    .into_iter()
+    .map(|bed| circulation(arteries, site::<CapillaryBed>(bed)))
+    .chain([circulation(
+        site::<VesselSegment>("pulmonary artery"),
+        site::<CapillaryBed>("pulmonary bed"),
+    )])
+    .collect();
     moved.sort_unstable();
     fed.sort_unstable();
     assert_eq!(owed.len(), 11);

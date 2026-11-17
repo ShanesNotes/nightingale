@@ -1159,7 +1159,11 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             );
             let whole = owed + half;
             let kept = (whole - share * owed) / whole;
-            assert_eq!(kept.to_bits(), 1f64.to_bits(), "the {key}'s inflow {when} keeps {kept} of its resistance at a debt of {owed}");
+            assert_eq!(
+                kept.to_bits(),
+                1f64.to_bits(),
+                "the {key}'s inflow {when} keeps {kept} of its resistance at a debt of {owed}"
+            );
         }
     }
 }

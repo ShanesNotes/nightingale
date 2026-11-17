@@ -259,7 +259,10 @@ fn compiled(cells: Cells) -> Result<CompiledBody, AdmissionError> {
     schema.carry::<DietBase, CapillaryBed>(Space::Plasma);
     schema.carry::<FixedAcid, CapillaryBed>(Space::Plasma);
     let (into, out) = (BoundaryDirection::IntoBody, BoundaryDirection::OutOfBody);
-    let burns = !matches!(cells, Cells::HeldUse | Cells::HeldUseAtAStatedDebt | Cells::SecondReader);
+    let burns = !matches!(
+        cells,
+        Cells::HeldUse | Cells::HeldUseAtAStatedDebt | Cells::SecondReader
+    );
     schema.boundary::<Oxygen>("artery oxygen", into, bed, Space::Plasma)?;
     schema.boundary::<Oxygen>("vein oxygen", out, bed, Space::Plasma)?;
     schema.boundary::<CarbonDioxide>("artery carbon dioxide", into, bed, Space::Plasma)?;
@@ -386,7 +389,11 @@ fn compiled(cells: Cells) -> Result<CompiledBody, AdmissionError> {
             Cells::HeldUseAtAStatedDebt => Some(Debt::Stated(
                 laws.parameter(key("fixture.stated-debt"), Admissible::finite()),
             )),
-            Cells::HeldUse | Cells::Burning | Cells::OneMixedBurn | Cells::BurningUnderTwoCards => None,
+            Cells::HeldUse
+            | Cells::Burning
+            | Cells::OneMixedBurn
+            | Cells::BurningUnderTwoCards
+            | Cells::SecondReader => None,
         };
         let answer = debt.map(|debt| Answer {
             debt,

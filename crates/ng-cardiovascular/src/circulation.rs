@@ -31,8 +31,8 @@ pub(crate) fn plain_edges<'b>(
     });
     let debt = whole_body.then(|| {
         let line: OxygenDebtPerBed<Reads<'b, Cardiovascular>> = cv.receive();
-        let share =
-            cv.end_parameter::<Dimensionless>(ParameterKey::new("cv.debt-share"), Admissible::unit_interval());
+        let share = cv
+            .end_parameter::<Dimensionless>(ParameterKey::new("cv.debt-share"), Admissible::unit_interval());
         let half = cv.end_parameter::<Oxygen>(ParameterKey::new("cv.debt-half"), Admissible::positive());
         (line.oxygen_debt_per_bed, share, half)
     });
