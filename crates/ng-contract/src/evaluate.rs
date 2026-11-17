@@ -464,7 +464,7 @@ fn backward(arithmetic: Arithmetic<'_>, values: &[f64], partial_volume: f64, slo
                 slopes[width] += slope * 0.5 * sign * across;
             }
             Instr::Exp([x]) => slopes[x] += slope * values[at],
-            Instr::Expm1([x]) => slopes[x] += slope * (values[at] + 1.0),
+            Instr::Expm1([x]) => slopes[x] += slope * pinned::exp(values[x]),
             Instr::Logistic([x]) => slopes[x] += slope * values[at] * (1.0 - values[at]),
             Instr::Ln([x]) => slopes[x] += slope / values[x],
             Instr::Relax([target, current, speed]) => {

@@ -199,7 +199,7 @@ fn step(instr: Instr, jets: &[Jet], partial_volume: f64) -> Option<Jet> {
             let value = at(x).value.monotone(|x| Some(pinned::expm1(x)))?;
             Jet {
                 value,
-                slope: value.plus(Bounds::exact(1.0))?.times(at(x).slope)?,
+                slope: at(x).value.monotone(|x| Some(pinned::exp(x)))?.times(at(x).slope)?,
             }
         }
         Instr::Logistic([x]) => {

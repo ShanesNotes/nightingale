@@ -4055,6 +4055,13 @@ new = '''        0 => exp(x) - 1.0,'''
 test = "-p ng-contract --lib pinned::tests::expm1_is_within_one_ulp_of_the_correctly_rounded_value"
 
 [[mutant]]
+name = "expm1-slope-from-its-output"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''            Instr::Expm1([x]) => slopes[x] += slope * pinned::exp(values[x]),'''
+new = '''            Instr::Expm1([x]) => slopes[x] += slope * (values[at] + 1.0),'''
+test = "-p ng-contract --test expm1 a_laws_slope_of_expm1_is_e_to_its_argument"
+
+[[mutant]]
 name = "ledger-walk-drops-the-last-nonzero-column"
 path = "crates/ng-record/src/history.rs"
 old = '''    for &(column, net) in nonzero {'''

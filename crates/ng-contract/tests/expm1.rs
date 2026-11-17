@@ -126,11 +126,15 @@ fn ulps(a: f64, b: f64) -> u64 {
 }
 
 /// `e^a` correctly rounded, from Python's 80-digit `decimal`, never from the code under test.
-const SLOPES: [(f64, u64); 4] = [
+const SLOPES: [(f64, u64); 8] = [
     (0.5, 0x3FFA61298E1E069C),
     (-1.0, 0x3FD78B56362CEF38),
     (1.0, 0x4005BF0A8B145769),
     (1e-10, 0x3FF000000006DF38),
+    (-1e-3, 0x3FEFF7CFE56F1A9E),
+    (-20.0, 0x3E21B48655F37267),
+    (-40.0, 0x3C539792499B1A24),
+    (-700.0, 0x00D14F2B0FB9307F),
 ];
 
 #[test]
