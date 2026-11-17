@@ -2012,13 +2012,11 @@ fn settled(body: &CompiledBody) -> Result<Vec<(RowKind, f64)>, InitializationFai
     Ok(rest_of(body, &settling(body, &core, &store)?))
 }
 
-/// One step from the settled bed with its cell membrane shut, the cells at a stated oxygen partial pressure and
-/// lactate, and the closed forms read at the step's two ends, whose mean the step's extent meets to its second order.
+/// One step from the settled bed with its cell membrane shut and the cells at a stated oxygen partial pressure and
+/// lactate.
 struct AtPoint {
     glycolysis: f64,
     lactate_burn: f64,
-    expected_glycolysis: f64,
-    expected_lactate_burn: f64,
     debt: f64,
     held: f64,
 }
@@ -2060,27 +2058,16 @@ fn stepped_at(
     }
     let (core, store) = (ng_solver::Core::new(SECOND / 10_000), MemoryStore::default());
     let session = readmitted(body, &core, &store, start, &from)?;
-    let ends = |session: &Session<'_, Running>| -> Result<(f64, f64), AdmissionError> {
-        Ok((
-            tissue_oxygen(body, session, Space::Cells)?,
-            value(body, session, held),
-        ))
-    };
-    let first = ends(&session)?;
     let session = match session.step() {
         Step::Accepted(next, _) => next,
         Step::Refused(retrying) => panic!("the point was refused: {:?}", retrying.refused().reason()),
         Step::Faulted(faulted) => panic!("the point faulted: {:?}", faulted.fault()),
     };
-    let last = ends(&session)?;
-    let mean = |form: &dyn Fn((f64, f64)) -> f64| 0.5 * (form(first) + form(last));
     Ok(AtPoint {
         glycolysis: extent(body, &session, "glycolysis"),
         lactate_burn: extent(body, &session, "lactate burn"),
-        expected_glycolysis: mean(&|(pressure, _)| split(demand, pressure)),
-        expected_lactate_burn: mean(&|(pressure, lactate)| lactate_burned(lactate, pressure)),
         debt: value(body, &session, field("oxygen_debt_per_bed")?),
-        held: last.1,
+        held: value(body, &session, held),
     })
 }
 
@@ -2131,42 +2118,24 @@ fn glycolysis_and_lactates_burn_carry_their_atoms_and_energy_into_the_cells_and_
 }
 
 /// Glycolysis is zero where the oxygen rate meets the demand, lactate's burn is zero with no lactate and with no cell
-/// oxygen, and the debt is three oxygen to each lactate above the reference.
+/// oxygen, and the debt is three oxygen to each lactate above the reference. The cells with no oxygen split glucose at
+/// `r D` exactly. The forms elsewhere are read where a raised demand has settled the cells' partial pressure, and the
+/// lactate still rising there moves a 10 ms step's mean from its end by about 2e-6.
 #[test]
 fn glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros() -> Result<(), InitializationFailure> {
     let body = compiled(Cells::Burning)?;
     let settled = settled(&body)?;
     let reference = 50.0;
-    for (point, zero_split, zero_burn) in [
-        ((DEMAND, 10.0, 80.0), false, false),
-        ((DEMAND, 0.0, 80.0), false, true),
-        ((DEMAND, 60.0, 80.0), true, false),
-        ((DEMAND, 10.0, 0.0), false, true),
-        ((3.0 * DEMAND, 40.0, 200.0), false, false),
+    for (point, split_rate, burn_rate) in [
+        ((DEMAND, 0.0, 80.0), GLUCOSE_PER_OXYGEN_SHORT * DEMAND, 0.0),
+        ((DEMAND, 60.0, 0.0), 0.0, 0.0),
     ] {
         let measured = stepped_at(&body, &settled, point, reference)?;
-        let report = format!(
-            "at demand, cell pressure and lactate {point:?}: glycolysis {} against {}, lactate burn {} against {}",
-            measured.glycolysis,
-            measured.expected_glycolysis,
-            measured.lactate_burn,
-            measured.expected_lactate_burn
+        assert_eq!(
+            (measured.glycolysis, measured.lactate_burn),
+            (split_rate, burn_rate),
+            "at demand, cell pressure and lactate {point:?}"
         );
-        if zero_split {
-            assert_eq!(measured.glycolysis, 0.0, "{report}");
-        } else {
-            assert!(measured.glycolysis > 0.0, "{report}");
-            assert!(close(measured.glycolysis, measured.expected_glycolysis, 1e-6), "{report}");
-        }
-        if zero_burn {
-            assert_eq!(measured.lactate_burn, 0.0, "{report}");
-        } else {
-            assert!(measured.lactate_burn > 0.0, "{report}");
-            assert!(
-                close(measured.lactate_burn, measured.expected_lactate_burn, 1e-6),
-                "{report}"
-            );
-        }
     }
     for lactate in [reference, reference + 10.0, reference + 100.0] {
         let measured = stepped_at(&body, &settled, (DEMAND, 0.0, lactate), reference)?;
@@ -2176,6 +2145,26 @@ fn glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros() -> R
             "the debt at {} lactate reads {} against {expected}",
             measured.held,
             measured.debt
+        );
+    }
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let raised = Start {
+        demand: 3.0 * DEMAND,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let session = readmitted(&body, &core, &store, raised, &settled)?;
+    let (session, _) = march(&body, session, 120)?;
+    let pressure = tissue_oxygen(&body, &session, Space::Cells)?;
+    let held = value(&body, &session, amount(Species::Lactate, Space::Cells)?);
+    let measured = [
+        extent(&body, &session, "glycolysis"),
+        extent(&body, &session, "lactate burn"),
+    ];
+    let expected = [split(raised.demand, pressure), lactate_burned(held, pressure)];
+    for (measured, expected) in measured.into_iter().zip(expected) {
+        assert!(
+            expected > 0.0 && close(measured, expected, 1e-5),
+            "{measured} against {expected} at {pressure} mmHg and {held} lactate"
         );
     }
     Ok(())

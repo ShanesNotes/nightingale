@@ -3544,34 +3544,86 @@ test = "-p ng-validate --test gases the_bed_settles_where_the_fick_identity_puts
 name = "burn-reads-no-demand"
 path = "crates/ng-metabolism/src/burn.rs"
 old = '''
-        let bent = k.smooth_min(demand, allowed, width);
-        let none = k.zero();
-        let offset = k.smooth_min(demand, none, width);
-        k.subtract(bent, offset)'''
+        let shortfall = k.smooth_max(short, none, width);
+        k.subtract(ceiling, shortfall)'''
 new = '''
-        let bent = k.smooth_min(demand, allowed, width);
-        let none = k.subtract(bent, bent);
+        let shortfall = k.smooth_max(short, none, width);
+        let unused = k.subtract(ceiling, shortfall);
+        let none = k.subtract(unused, unused);
         k.add(demand, none)'''
 test = "-p ng-validate --test gases the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_refused"
 
 [[mutant]]
 name = "oxygen-rate-is-a-smooth-max"
 path = "crates/ng-metabolism/src/burn.rs"
-old = '''let bent = k.smooth_min(demand, allowed, width);'''
-new = '''let bent = k.smooth_max(demand, allowed, width);'''
+old = '''let shortfall = k.smooth_max(short, none, width);'''
+new = '''let shortfall = k.smooth_min(short, none, width);'''
 test = "-p ng-validate --test gases the_bed_at_rest_burns_its_demand"
 
 [[mutant]]
 name = "oxygen-rate-keeps-its-offset"
 path = "crates/ng-metabolism/src/burn.rs"
+old = '''let ceiling = k.smooth_max(demand, none, width);'''
+new = '''let ceiling = k.add(demand, none);'''
+test = "-p ng-validate --test gases the_oxygen_rate_is_zero_with_no_cell_oxygen_and_never_runs_a_burn_backward"
+
+[[mutant]]
+name = "oxygen-rate-is-two-smooth-minima"
+path = "crates/ng-metabolism/src/burn.rs"
 old = '''
-        let bent = k.smooth_min(demand, allowed, width);
         let none = k.zero();
+        let ceiling = k.smooth_max(demand, none, width);
+        let short = k.subtract(demand, allowed);
+        let shortfall = k.smooth_max(short, none, width);
+        k.subtract(ceiling, shortfall)'''
+new = '''
+        let none = k.zero();
+        let bent = k.smooth_min(demand, allowed, width);
         let offset = k.smooth_min(demand, none, width);
         k.subtract(bent, offset)'''
+test = "-p ng-validate --test gases an_abundant_oxygen_reach_preserves_the_beds_demand"
+
+[[mutant]]
+name = "glycolysis-off"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''
+        let glucose = k.multiply(short, per);
+        let value = k.as_dimension(glucose);'''
 new = '''
-        k.smooth_min(demand, allowed, width)'''
-test = "-p ng-validate --test gases the_oxygen_rate_is_zero_with_no_cell_oxygen_and_never_runs_a_burn_backward"
+        let glucose = k.multiply(short, per);
+        let value = k.as_dimension(glucose);
+        let value = k.subtract(value, value);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
+
+[[mutant]]
+name = "glycolysis-splits-at-rest"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let short = k.smooth_max(gap, none, none);'''
+new = '''let short = k.smooth_max(gap, none, oxygen);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
+
+[[mutant]]
+name = "lactate-burns-with-no-lactate"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let first_order = k.relax(held, none, speed);'''
+new = '''let floor = k.site_parameter(&reference);
+        let held = k.add(held, floor);
+        let first_order = k.relax(held, none, speed);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
+
+[[mutant]]
+name = "lactate-burns-with-no-cell-oxygen"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let share = k.divide(pressure, reach);'''
+new = '''let share = k.divide(reach, reach);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
+
+[[mutant]]
+name = "debt-reads-no-lactate"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let excess = k.subtract(held, reference);'''
+new = '''let excess = k.subtract(reference, reference);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
 
 [[mutant]]
 name = "p50-acidity-shift-reversed"

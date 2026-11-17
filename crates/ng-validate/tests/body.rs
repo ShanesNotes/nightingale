@@ -535,14 +535,12 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         MT Pool(Glucose, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 533
         MT Pool(FattyAcids, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 536
         MT Pool(Lactate, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 540
-        MT Pool(Lactate, Cells, Besides(Liver)) Ticket(9, "MT") 01:194-196
         MT Pool(Triglyceride, Cells, Tissue(Fat)) Ticket(16, "MT") 01:199, 879
         MT Pool(Glycerol, Cells, Tissue(Fat)) Ticket(16, "MT") 01:199
         HP Route("insulin first pass") Ticket(15, "HP") 01:408, 605
         HP Route("albumin synthesis") Ticket(21, "HP") 01:312, 407, 884
         HP Route("albumin loss") Ticket(21, "HP") 01:314, 407, 884
         HP Route("fixed acid made") Ticket(18, "HP") 01:252, 406
-        HP Pool(Lactate, Cells, Tissue(Liver)) Ticket(14, "HP") 01:196
         HP Pool(Glycerol, Cells, Tissue(Liver)) Ticket(14, "HP") 01:204
         HP Pool(AminoAcids, Cells, Tissue(Liver)) Ticket(14, "HP") 01:208
         HP Pool(Urea, Cells, Tissue(Liver)) Ticket(14, "HP") 01:234, 877
@@ -610,9 +608,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 162: routes 97, pools 65
-        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 14, "MS": 15, "MT": 47, "RS": 12}
-        by ticket {"09": 4, "10": 14, "12": 7, "13": 16, "14": 7, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 160: routes 97, pools 63
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 15, "MT": 46, "RS": 12}
+        by ticket {"09": 3, "10": 14, "12": 7, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -871,10 +869,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1431 {"algebraic": 173, "amount": 1248, "memory": 10}, columns 1400, jacobian nonzeros 9625, blocks 447, parameter slots 631, conserved combinations 415, held pools 333, held route columns 97
-        model hash 402f829b2fb89e7aeba781d474c628e14610275429f550cb91db5ddbf8e1ed56
-        conserved basis 7b3616fb513a82fada3ed5c221f95b43c8940b425f1b354e80a9a35d87b5dad2
-        stated packet 5e5f6bb0201422c2ce19d3b552059c19d0b119df4611e9a62df9a24b22046b2c
+        rows 1442 {"algebraic": 184, "amount": 1248, "memory": 10}, columns 1422, jacobian nonzeros 9713, blocks 447, parameter slots 686, conserved combinations 404, held pools 322, held route columns 97
+        model hash 164241ea4c600217497064daf09a35f607bce4a9ec7dc4aaf53ccde837c98f36
+        conserved basis 1723d7ed144b6a89f4f683fe2b1c8be1201694c8f3a1218dbddde3ceeca5a7d9
+        stated packet 59682162f135eb83aa8315e88b07a668eb06012448483d1034f5049cef88610a
     "#]].assert_eq(&pin);
     Ok(())
 }

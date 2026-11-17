@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "cb439bb8b1525e9b8bc86ef20275aae820c40f2daef9b4bb9d54e4955e05bf42";
-const ADMITTED_SEAL: &str = "020537da74bf27e34c116e3b001d008a9b4078dd1e671c48bf441b87da113162";
+const PACKET: &str = "24e1386e3c3e257284164684f1698acf72d79985a4a7dea01cf95a800375821d";
+const ADMITTED_SEAL: &str = "a4e343f0256310ffc0eb66ceee4b58259bb35c8bd223b01791bbf6de7b398297";
 
 struct Counted {
     core: ng_solver::Core,
@@ -306,7 +306,7 @@ fn counted_until<'s>(
 
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (Session<'_, Running>, Minute) {
     let pools = start.held_pools();
-    assert_eq!(pools.len(), 333);
+    assert_eq!(pools.len(), 322);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
         let view = session.record().accepted();
         pools.iter().map(|(row, _)| view.value(*row).bits()).collect()
@@ -487,8 +487,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet cb439bb8b1525e9b8bc86ef20275aae820c40f2daef9b4bb9d54e4955e05bf42
-        seal 0529b29e15bcd7c633bdfc233ea0192caf876e1ecbf1096fce93ab7da4ca215b
+        packet 24e1386e3c3e257284164684f1698acf72d79985a4a7dea01cf95a800375821d
+        seal 26681b019681a0ba32318ba2cf2c732943282b024cf51717082d16f3791a1d47
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
