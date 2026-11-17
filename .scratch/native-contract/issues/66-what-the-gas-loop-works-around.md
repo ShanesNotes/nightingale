@@ -4,7 +4,7 @@ Spec: `crates/ng-contract/`
 
 Type: task
 
-Status: claimed
+Status: resolved
 Claimed by: nc66
 
 Blocked by: none
