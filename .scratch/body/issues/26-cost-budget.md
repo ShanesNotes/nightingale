@@ -83,6 +83,8 @@ The day's figure is 86,400 s times the wall time of a simulated second, at rest.
 
 Since nightingale#172 the body takes 6,257.2 M, 5.0% over 5,960.2 M. The rise is not the laws' work. The pulmonary vein's mark makes the guard landing re-solve on the one step a beat that crosses the end of systole: 754 more core solves over the first minute, 15,264 against 14,510, while a solve takes 24.6 M as before ([native-contract 64](../../native-contract/issues/64-the-landing-reads-a-guard-that-did-not-cross.md)). With nightingale#174 the landing's count fell back to 1,988 landing solves and the line read 5,987.2 M, so the line moves with the landing and not with the laws. The ceiling after pass 1 stands at 11,920 M. From 6,257.2 M six loops of 12% reach 12,351 M, so without the landing's fix each loop has 11.3%, and the fix is due before pass 1 is checked. The gas loop's 12% stays 750.9 M, 12% of the 6,257.2 M it starts from, and its shares among tickets 08 to 11 are set after ticket 08's three PRs have measured lines. A model default of the oversight seat, open to the developer reviewer.
 
+The gas loop straddles the removal of the ledger's walk (native-contract 69), which lowered the body's line from 6,964.4 M to 4,958.9 M with no law changed. The oversight seat restates its budget on that line: tickets 09 to 11 may add 12% of 4,958.9 M, which is 595.1 M, in place of the 73.2 M that was left, and ticket 08's share stays as it was measured. Pass 1's ceiling of 11,920 M stands.
+
 ### Not measured
 
 - A full `tools/verify` alone takes 34 to 67 minutes, and none ran beyond this ticket's proof.
