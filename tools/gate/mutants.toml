@@ -2686,31 +2686,60 @@ new = '''
 '''
 test = "-p ng-validate --test arena_certificate energy_drifts_up_to_4e6_over_the_milestones_windows_and_no_further"
 
-# This row changes the species and element arms together, and the water test sees only the species arm: the slice
-# has no reaction, so no element is a quantity of its own there, and a change to the element arm alone would survive.
-# The element arm gets its own row with the first body that has a reaction.
+# This row changes the species and element arms together, and the water test sees only the species arm: its body,
+# the steady inflows of arena_certificate.rs, has no reaction, so no element is a quantity of its own there. The row
+# after it changes the element arm alone, on the burning beds.
 [[mutant]]
 name = "every-quantity-takes-energys-drift-limit"
 path = "crates/ng-validate/src/slice.rs"
 old = '''
         Book::Of(species) => species.visit(Limits(quantity, species_drift(species))),
-        Book::Element(_) => QuantityPolicy::element(
+        Book::Element(element) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
-            Measure::new(SYNTHETIC_DRIFT)?,
+            drifts
+                .element(element)?
+                .map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,
         ),
 '''
 new = '''
         Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_ENERGY_DRIFT)),
-        Book::Element(_) => QuantityPolicy::element(
+        Book::Element(element) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
-            Measure::new(SYNTHETIC_ENERGY_DRIFT)?,
+            drifts
+                .element(element)?
+                .map_or_else(|| Measure::new(SYNTHETIC_ENERGY_DRIFT), Ok)?,
         ),
 '''
 test = "-p ng-validate --test arena_certificate water_drifts_up_to_5e2_twice_the_slices_measured_day"
+
+[[mutant]]
+name = "element-drift-takes-energys-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''
+        Book::Element(element) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            drifts
+                .element(element)?
+                .map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,
+        ),
+'''
+new = '''
+        Book::Element(element) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            drifts
+                .element(element)?
+                .map_or_else(|| Measure::new(SYNTHETIC_ENERGY_DRIFT), Ok)?,
+        ),
+'''
+test = "-p ng-validate --test arena_elements an_element_drifts_up_to_1e4_a_window_and_no_further"
 
 [[mutant]]
 name = "sodium-and-chloride-drift-fall-back-to-the-common-limit"
@@ -2811,10 +2840,10 @@ test = "-p ng-validate --test body fl_crosses_each_wall_with_only_the_species_bo
 [[mutant]]
 name = "body-hold-release-swap"
 path = "crates/ng-validate/src/body/table.rs"
-old = '''    pool::<FattyAcids, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:202"),
-    pool::<Glycerol, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:204"),'''
-new = '''    pool::<FattyAcids, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:202"),
-    pool::<Glycerol, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:204"),'''
+old = '''    pool::<Glycogen, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:188, 877"),
+    pool::<Ketones, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:38, 201-202, 879"),'''
+new = '''    pool::<Glycogen, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:188, 877"),
+    pool::<Ketones, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:38, 201-202, 879"),'''
 test = "-p ng-validate --test body each_hold_names_the_ticket_that_releases_it_and_its_body_01_line"
 
 [[mutant]]
@@ -3512,6 +3541,39 @@ new = '''        let doubled = k.add(head, head);
 test = "-p ng-validate --test gases the_bed_settles_where_the_fick_identity_puts_it"
 
 [[mutant]]
+name = "burn-reads-no-demand"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''
+        let bent = k.smooth_min(demand, allowed, width);
+        let none = k.zero();
+        let offset = k.smooth_min(demand, none, width);
+        k.subtract(bent, offset)'''
+new = '''
+        let bent = k.smooth_min(demand, allowed, width);
+        let none = k.subtract(bent, bent);
+        k.add(demand, none)'''
+test = "-p ng-validate --test gases the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_refused"
+
+[[mutant]]
+name = "oxygen-rate-is-a-smooth-max"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let bent = k.smooth_min(demand, allowed, width);'''
+new = '''let bent = k.smooth_max(demand, allowed, width);'''
+test = "-p ng-validate --test gases the_bed_at_rest_burns_its_demand"
+
+[[mutant]]
+name = "oxygen-rate-keeps-its-offset"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''
+        let bent = k.smooth_min(demand, allowed, width);
+        let none = k.zero();
+        let offset = k.smooth_min(demand, none, width);
+        k.subtract(bent, offset)'''
+new = '''
+        k.smooth_min(demand, allowed, width)'''
+test = "-p ng-validate --test gases the_oxygen_rate_is_zero_with_no_cell_oxygen_and_never_runs_a_burn_backward"
+
+[[mutant]]
 name = "p50-acidity-shift-reversed"
 path = "crates/ng-blood-chemistry/src/oxygen.rs"
 old = '''        let d = k.subtract(acidity, standard);'''
@@ -3526,11 +3588,11 @@ new = '''        let apart = k.subtract(standard, read);'''
 test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
 
 [[mutant]]
-name = "oxygen-drift-bound-loosened"
+name = "oxygen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''const OXYGEN_DRIFT: f64 = 3.0;'''
-new = '''const OXYGEN_DRIFT: f64 = 6.0;'''
-test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones"
+old = '''(Element::Oxygen, 5.0),'''
+new = '''(Element::Oxygen, 10.0),'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
 name = "packet-one-bed-use-doubled"
@@ -3540,11 +3602,39 @@ new = '''const USES: [f64; 11] = [1.0, 20.0, 25.0, 3.0, 10.0, 8.0, 8.0, 15.0, 2.
 test = "-p ng-validate --test body the_whole_body_holds_its_rows_columns_and_digests"
 
 [[mutant]]
-name = "carbon-dioxide-drift-bound-tightened"
+name = "energy-ignores-the-bodys-own-bound"
+path = "crates/ng-validate/src/slice.rs"
+old = '''        Book::Of(Species::Energy) | Book::Energy if drifts.names(Species::Energy) => {'''
+new = '''        Book::Of(Species::Energy) | Book::Energy if false && drifts.names(Species::Energy) => {'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
+
+[[mutant]]
+name = "element-ignores-the-bodys-own-bound"
+path = "crates/ng-validate/src/slice.rs"
+old = '''.map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,'''
+new = '''.map_or_else(|| Measure::new(SYNTHETIC_DRIFT), |_| Measure::new(SYNTHETIC_DRIFT))?,'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
+
+[[mutant]]
+name = "fatty-acid-energy-2800"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''pub(super) const FAT_ENERGY: f64 = 3_000.0;'''
+new = '''pub(super) const FAT_ENERGY: f64 = 2_800.0;'''
+test = "-p ng-validate --test body each_beds_burns_carry_their_fuels_atoms_and_energy_into_its_cells_and_heat"
+
+[[mutant]]
+name = "carbon-element-drift-bound-tightened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''const CARBON_DIOXIDE_DRIFT: f64 = 0.8;'''
-new = '''const CARBON_DIOXIDE_DRIFT: f64 = 0.4;'''
-test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones"
+old = '''(Element::Carbon, 0.8),'''
+new = '''(Element::Carbon, 0.4),'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
+
+[[mutant]]
+name = "hydrogen-element-drift-bound-loosened"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''(Element::Hydrogen, 3e-5),'''
+new = '''(Element::Hydrogen, 6e-5),'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
 name = "saturation-set-finite"
@@ -3865,3 +3955,10 @@ path = "crates/ng-contract/src/evaluate.rs"
 old = '''                && !reported.contains(&(law, context, range))'''
 new = ''''''
 test = "-p ng-contract --lib written::a_fields_range_is_judged_under_the_field_in_each_program_it_is_written_into"
+
+[[mutant]]
+name = "ledger-walk-drops-the-last-nonzero-column"
+path = "crates/ng-record/src/history.rs"
+old = '''    for &(column, net) in nonzero {'''
+new = '''    for &(column, net) in nonzero.split_last().map_or(nonzero, |(_, rest)| rest) {'''
+test = "-p ng-record --lib history::tests::the_nonzero_columns_flow_and_seal_with_the_bits_of_every_column"

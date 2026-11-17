@@ -1,8 +1,8 @@
-use super::super::schema::{CARBON_DIOXIDE_MADE, LUNG_CARBON_DIOXIDE, LUNG_OXYGEN, OXYGEN_USE};
-use super::{FIXED, hours};
+use super::super::schema::{CELL_WATER_OUT, FAT_FEED, GLUCOSE_FEED, LUNG_CARBON_DIOXIDE, LUNG_OXYGEN};
+use super::FIXED;
 use ng_blood_chemistry::{Plasma, StrongIons, speciate};
 use ng_contract::*;
-use ng_metabolism::{GasRoutes, PlasmaPressure, carbon_dioxide_diffusion, oxygen_diffusion};
+use ng_metabolism::{GasRoutes, PlasmaPressure, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
 
 constant_routes! {Metabolism;
     SkinEvaporation => "mt.skin-evaporation",
@@ -15,22 +15,21 @@ constant_routes! {Metabolism;
 
 pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let mut supplies = CONSTANT.to_vec();
-    supplies.extend(OXYGEN_USE.map(|(_, name, _)| name));
-    supplies.extend(CARBON_DIOXIDE_MADE);
+    supplies.extend(GLUCOSE_FEED);
+    supplies.extend(FAT_FEED);
+    supplies.extend(CELL_WATER_OUT);
     supplies.extend([LUNG_OXYGEN, LUNG_CARBON_DIOXIDE]);
     let declaration = HeldDeclaration::<Metabolism>::new(supplies, Vec::new(), FIXED)
         .pool::<Glucose, CapillaryBed>(Space::Interstitium)
         .pool::<FattyAcids, CapillaryBed>(Space::Interstitium)
         .pool::<Lactate, CapillaryBed>(Space::Interstitium)
-        .pool::<Glucose, Besides<Liver>>(Space::Cells)
-        .pool::<FattyAcids, Besides<Liver>>(Space::Cells)
         .pool::<Lactate, Besides<Liver>>(Space::Cells)
         .pool::<Triglyceride, Beds<Fat>>(Space::Cells)
         .pool::<Glycerol, Beds<Fat>>(Space::Cells);
     let mut held = body.hold(declaration)?;
     let (laws, ports) = held.stand_ins();
     constants(laws, ports)?;
-    respiration(laws, ports)?;
+    feeds(laws, ports)?;
     let lungs = (
         ports.route::<Oxygen>(LUNG_OXYGEN)?.route,
         ports.route::<CarbonDioxide>(LUNG_CARBON_DIOXIDE)?.route,
@@ -59,39 +58,65 @@ pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
     let speciated = speciate(&mut laws, &plasma)?;
     let oxygen_pressure: PlasmaPressure<'_, '_> = &|k| k.at_site(&speciated.oxygen_partial_pressure);
     let carbon_dioxide_pressure: PlasmaPressure<'_, '_> = &|k| speciated.carbon_dioxide_partial_pressure(k);
-    oxygen_diffusion(&mut laws, &oxygen, oxygen_pressure)?;
+    let cells = oxygen_diffusion(&mut laws, &oxygen, oxygen_pressure)?;
     carbon_dioxide_diffusion(&mut laws, &carbon_dioxide, carbon_dioxide_pressure)?;
+    burn(&mut laws, &cells)?;
+    bed_heat(&mut laws, &ports)?;
     lung_exchange(&mut laws, &lungs, [oxygen_pressure, carbon_dioxide_pressure])?;
     body.add(laws.finish());
     Ok(())
 }
 
-fn respiration<'b>(
+/// The held feeds of glucose and fatty acids into each bed's cells, `k (N_set - N)`, and the held drain of their
+/// water, `k_w (W - W_set)`, until the cells take fuel across their membranes (ticket 16) and the fluids move cell
+/// water (ticket 17).
+fn feeds<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     ports: &HeldPorts<'b, Metabolism>,
 ) -> Result<(), AdmissionError> {
-    let class = hours()?;
-    let quotient = laws.parameter::<Quotient<CarbonDioxide, Oxygen>>(
-        ParameterKey::new("mt.carbon-dioxide-per-oxygen"),
-        Admissible::nonnegative(),
-    );
-    for ((_, name, key), made) in OXYGEN_USE.into_iter().zip(CARBON_DIOXIDE_MADE) {
-        let route = ports.route::<Oxygen>(name)?.route;
-        let used = laws.parameter::<Rate<Oxygen>>(ParameterKey::new(key), Admissible::nonnegative());
-        let rate = laws.kernel(|mut k| {
-            let value = k.parameter(&used);
-            k.finish(value, laws.every_mode(), class)
-        });
-        laws.transfer(Transfer::new(&route, rate));
-        let route = ports.route::<CarbonDioxide>(made)?.route;
-        let rate = laws.kernel(|mut k| {
-            let (used, quotient) = (k.parameter(&used), k.parameter(&quotient));
-            let product = k.multiply(used, quotient);
-            let value: Expr<'_, '_, Metabolism, Rate<CarbonDioxide>> = k.as_dimension(product);
-            k.finish(value, laws.every_mode(), class)
-        });
-        laws.transfer(Transfer::new(&route, rate));
+    let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+    let key = ParameterKey::new;
+    let speed = laws.parameter::<Rate<Dimensionless>>(key("mt.feed-speed"), Admissible::nonnegative());
+    let water_speed =
+        laws.parameter::<Rate<Dimensionless>>(key("mt.cell-water-speed"), Admissible::nonnegative());
+    let glucose = laws.parameter::<Glucose>(key("mt.cell-glucose-set"), Admissible::nonnegative());
+    let fat = laws.parameter::<FattyAcids>(key("mt.cell-fatty-acid-set"), Admissible::nonnegative());
+    let water = laws.parameter::<Water>(key("mt.cell-water-set"), Admissible::positive());
+    for ((glucose_feed, fat_feed), water_out) in GLUCOSE_FEED.into_iter().zip(FAT_FEED).zip(CELL_WATER_OUT) {
+        restore(laws, ports, glucose_feed, (&glucose, &speed), class, Toward::Into)?;
+        restore(laws, ports, fat_feed, (&fat, &speed), class, Toward::Into)?;
+        restore(laws, ports, water_out, (&water, &water_speed), class, Toward::Out)?;
     }
+    Ok(())
+}
+
+enum Toward {
+    Into,
+    Out,
+}
+
+fn restore<'b, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, Metabolism>,
+    ports: &HeldPorts<'b, Metabolism>,
+    name: &'static str,
+    (set, speed): (
+        &Parameter<'b, Metabolism, Q>,
+        &Parameter<'b, Metabolism, Rate<Dimensionless>>,
+    ),
+    class: RateClass,
+    toward: Toward,
+) -> Result<(), AdmissionError> {
+    let route = ports.route::<Q>(name)?.route;
+    let held = route.amount::<Q>();
+    let rate = laws.kernel(|mut k| {
+        let (set, held, speed) = (k.parameter(set), k.read(&held), k.parameter(speed));
+        let value = match toward {
+            Toward::Into => k.relax(set, held, speed),
+            Toward::Out => k.relax(held, set, speed),
+        };
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.transfer(Transfer::new(&route, rate));
     Ok(())
 }
 

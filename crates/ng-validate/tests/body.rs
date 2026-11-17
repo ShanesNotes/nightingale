@@ -122,23 +122,9 @@ fn body_01() -> Vec<Row> {
             ],
         ),
         row(
-            "01:536 fatty acids, plan row 7: no brain cells",
+            "01:536 fatty acids, in every bed's cells: the brain burns at the body's share until ticket 16",
             &[FattyAcids],
-            &[
-                OUTSIDE_CELLS,
-                &[cells(&[
-                    "pulmonary bed",
-                    "gut bed",
-                    "muscle bed",
-                    "glomerular bed",
-                    "peritubular bed",
-                    "coronary bed",
-                    "liver bed",
-                    "fat bed",
-                    "skin bed",
-                    "bone bed",
-                ])],
-            ],
+            &[EVERY_WATERY_SPACE],
         ),
         row(
             "01:537 glycerol, plan row 7: fat and liver cells",
@@ -247,11 +233,12 @@ fn body_01() -> Vec<Row> {
             ]],
         ),
         row(
-            "the slice's body stores, 01:568 skin heat store, 06:31 the airway's heat store",
+            "the slice's body stores, 01:568 skin heat store, 06:31 the airway's heat store, 01:165 each bed's heat",
             &[Energy],
             &[&[
                 (&["body"], Space::Elastic),
                 (&["body", "skin heat site", "conducting airway"], Space::Thermal),
+                (BEDS, Space::Thermal),
             ]],
         ),
     ]
@@ -351,9 +338,7 @@ fn the_whole_body_holds_its_sites_and_pools() -> Result<(), AdmissionError> {
         pooled.len(),
         pools.len()
     );
-    expect![[
-        "sites 43, sites with a pool 38, pools 1236, by space {Plasma: 352, Interstitium: 300, Cells: 159, Lumen: 386, Fluid: 2, Vesicle: 8, Cleft: 8, Bound: 9, Elastic: 1, Thermal: 3, Gas: 8}"
-    ]]
+    expect!["sites 43, sites with a pool 38, pools 1248, by space {Plasma: 352, Interstitium: 300, Cells: 160, Lumen: 386, Fluid: 2, Vesicle: 8, Cleft: 8, Bound: 9, Elastic: 1, Thermal: 14, Gas: 8}"]
     .assert_eq(&pin);
     Ok(())
 }
@@ -488,7 +473,6 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         MS Pool(Calcium, Interstitium, Class(CapillaryBed)) Ticket(19, "FL") 01:276, 293
         MS Pool(Magnesium, Interstitium, Class(CapillaryBed)) Ticket(19, "FL") 01:276, 293
         MS Pool(Phosphate, Interstitium, Class(CapillaryBed)) Ticket(19, "FL") 01:276, 293
-        BC Pool(Water, Cells, Class(CapillaryBed)) Ticket(17, "FL") 01:58, 880
         BC Pool(Sodium, Cells, Class(CapillaryBed)) Ticket(17, "FL") 01:79
         BC Pool(Potassium, Cells, Tissue(Muscle)) Ticket(15, "FL") 01:96, 878
         BC Pool(Potassium, Cells, Tissue(Fat)) Ticket(15, "FL") 01:96, 878
@@ -513,35 +497,44 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         MT Route("sweat chloride") Ticket(12, "MT") 01:115
         MT Route("dry heat loss") Ticket(12, "MT") 01:170
         MT Route("skin evaporative heat") Ticket(12, "MT") 01:171
-        MT Route("pulmonary bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("gut bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("muscle bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("glomerular bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("peritubular bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("brain bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("coronary bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("liver bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("fat bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("skin bed oxygen use") Ticket(9, "MT") 01:132, 872
-        MT Route("bone bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("pulmonary bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("pulmonary bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("pulmonary bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("gut bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("gut bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("gut bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("muscle bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("muscle bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("muscle bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("glomerular bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("glomerular bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("glomerular bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("peritubular bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("peritubular bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("peritubular bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("brain bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("brain bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("brain bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("coronary bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("coronary bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("coronary bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("liver bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("liver bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("liver bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("fat bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("fat bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("fat bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("skin bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("skin bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("skin bed cell water out") Ticket(17, "FL") 01:58, 880
+        MT Route("bone bed glucose feed") Ticket(16, "MT") 01:190
+        MT Route("bone bed fatty acid feed") Ticket(16, "MT") 01:200
+        MT Route("bone bed cell water out") Ticket(17, "FL") 01:58, 880
         MT Route("lung oxygen") Ticket(10, "RS") 01:129, 873
-        MT Route("pulmonary bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("gut bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("muscle bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("glomerular bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("peritubular bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("brain bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("coronary bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("liver bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("fat bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("skin bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
-        MT Route("bone bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
         MT Route("lung carbon dioxide") Ticket(10, "RS") 01:148, 873
         MT Pool(Glucose, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 533
         MT Pool(FattyAcids, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 536
         MT Pool(Lactate, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 540
-        MT Pool(Glucose, Cells, Besides(Liver)) Ticket(9, "MT") 01:190
-        MT Pool(FattyAcids, Cells, Besides(Liver)) Ticket(9, "MT") 01:200
         MT Pool(Lactate, Cells, Besides(Liver)) Ticket(9, "MT") 01:194-196
         MT Pool(Triglyceride, Cells, Tissue(Fat)) Ticket(16, "MT") 01:199, 879
         MT Pool(Glycerol, Cells, Tissue(Fat)) Ticket(16, "MT") 01:199
@@ -549,9 +542,7 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         HP Route("albumin synthesis") Ticket(21, "HP") 01:312, 407, 884
         HP Route("albumin loss") Ticket(21, "HP") 01:314, 407, 884
         HP Route("fixed acid made") Ticket(18, "HP") 01:252, 406
-        HP Pool(Glucose, Cells, Tissue(Liver)) Ticket(14, "HP") 01:189, 877
         HP Pool(Lactate, Cells, Tissue(Liver)) Ticket(14, "HP") 01:196
-        HP Pool(FattyAcids, Cells, Tissue(Liver)) Ticket(16, "HP") 01:202
         HP Pool(Glycerol, Cells, Tissue(Liver)) Ticket(14, "HP") 01:204
         HP Pool(AminoAcids, Cells, Tissue(Liver)) Ticket(14, "HP") 01:208
         HP Pool(Urea, Cells, Tissue(Liver)) Ticket(14, "HP") 01:234, 877
@@ -619,9 +610,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 156: routes 86, pools 70
-        by card {"BC": 19, "EN": 25, "GI": 25, "HC": 6, "HP": 16, "MS": 15, "MT": 38, "RS": 12}
-        by ticket {"09": 28, "10": 14, "12": 7, "13": 16, "14": 8, "15": 9, "16": 12, "17": 24, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 162: routes 97, pools 65
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 14, "MS": 15, "MT": 47, "RS": 12}
+        by ticket {"09": 4, "10": 14, "12": 7, "13": 16, "14": 7, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -880,10 +871,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1419 {"algebraic": 173, "amount": 1236, "memory": 10}, columns 1356, jacobian nonzeros 9514, blocks 446, parameter slots 583, conserved combinations 436, held pools 365, held route columns 86
-        model hash 15b4411445eba027ee8ad396d13fc92a04291e623394facf48d284e1af9dd9fe
-        conserved basis 842e23ef989077823835f65f1e0ab8fc77e6ce2d99931db729da415b83269934
-        stated packet 4851ee170367b2ee54419c11f7c6b4a6bcf47f6b3d97be0b64894a39c48ca7d5
+        rows 1431 {"algebraic": 173, "amount": 1248, "memory": 10}, columns 1400, jacobian nonzeros 9625, blocks 447, parameter slots 631, conserved combinations 415, held pools 333, held route columns 97
+        model hash 402f829b2fb89e7aeba781d474c628e14610275429f550cb91db5ddbf8e1ed56
+        conserved basis 7b3616fb513a82fada3ed5c221f95b43c8940b425f1b354e80a9a35d87b5dad2
+        stated packet 5e5f6bb0201422c2ce19d3b552059c19d0b119df4611e9a62df9a24b22046b2c
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -943,15 +934,26 @@ fn the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between
 }
 
 #[test]
-fn the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones() -> Result<(), AdmissionError> {
-    struct Stated([(Species, f64); 2]);
+fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError> {
+    #[derive(Clone, Copy)]
+    struct Stated {
+        energy: f64,
+        elements: [(Element, f64); 3],
+    }
     impl DriftTable for Stated {
         fn names(&self, species: Species) -> bool {
-            self.0.iter().any(|(named, _)| *named == species)
+            species == Species::Energy
         }
         fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
-            let named = self.0.iter().find(|(species, _)| *species == Q::SPECIES);
-            Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
+            Measure::new(if Q::SPECIES == Species::Energy {
+                self.energy
+            } else {
+                f64::NAN
+            })
+        }
+        fn element(&self, element: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+            let named = self.elements.iter().find(|(named, _)| *named == element);
+            named.map(|(_, drift)| Measure::new(*drift)).transpose()
         }
     }
     let body = whole_body()?;
@@ -960,13 +962,81 @@ fn the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones() -> R
     let digest = |table: &Stated| -> Result<Digest, AdmissionError> {
         Ok(certificate_with(&body, windows, table)?.digest())
     };
-    let stated = [(Species::Oxygen, 3.0), (Species::CarbonDioxide, 0.8)];
+    let stated = Stated {
+        energy: 7e3,
+        elements: [
+            (Element::Carbon, 0.8),
+            (Element::Hydrogen, 3e-5),
+            (Element::Oxygen, 5.0),
+        ],
+    };
     let policy = body_certificate(&body, windows)?.digest();
-    assert_eq!(policy, digest(&Stated(stated))?);
-    for (index, by) in [(0, 0.5), (0, 2.0), (1, 0.5), (1, 2.0)] {
-        let mut moved = stated;
-        moved[index].1 *= by;
-        assert_ne!(policy, digest(&Stated(moved))?, "{moved:?}");
+    assert_eq!(policy, digest(&stated)?);
+    for by in [0.5, 2.0] {
+        let moved = Stated {
+            energy: stated.energy * by,
+            ..stated
+        };
+        assert_ne!(policy, digest(&moved)?, "energy times {by}");
+        for index in 0..3 {
+            let mut moved = stated;
+            moved.elements[index].1 *= by;
+            assert_ne!(
+                policy,
+                digest(&moved)?,
+                "{:?} times {by}",
+                moved.elements[index].0
+            );
+        }
     }
+    Ok(())
+}
+
+#[test]
+fn each_beds_burns_carry_their_fuels_atoms_and_energy_into_its_cells_and_heat() -> Result<(), AdmissionError>
+{
+    let body = whole_body()?;
+    let mut seen = [0; 2];
+    for column in body.columns() {
+        let (which, fuel, expected) = match column.origin().local {
+            "glucose burn" => (0, Species::Glucose, [-1, -6, 6, 6, 1_000]),
+            "fatty acid burn" => (1, Species::FattyAcids, [-1, -23, 16, 16, 3_000]),
+            _ => continue,
+        };
+        let Context::Site(bed) = column.context() else {
+            panic!("a burn off a bed: {:?}", column.context());
+        };
+        let at = |species, space| RowKind::Amount {
+            site: bed,
+            species,
+            space,
+        };
+        let rows = [
+            at(fuel, Space::Cells),
+            at(Species::Oxygen, Space::Cells),
+            at(Species::CarbonDioxide, Space::Cells),
+            at(Species::Water, Space::Cells),
+            at(Species::Energy, Space::Thermal),
+        ];
+        let terms: Vec<(RowKind, i64)> = (column.terms().iter())
+            .map(|(row, count)| (body.rows()[row.index()].kind(), *count))
+            .collect();
+        let wanted: Vec<(RowKind, i64)> = rows.into_iter().zip(expected).collect();
+        assert_eq!(
+            terms.len(),
+            wanted.len(),
+            "{:?} at {bed:?}: {terms:?}",
+            column.origin()
+        );
+        for term in &wanted {
+            assert!(
+                terms.contains(term),
+                "{:?} at {bed:?} lacks {term:?}: {terms:?}",
+                column.origin()
+            );
+        }
+        seen[which] += 1;
+    }
+    assert_eq!(seen, [11, 11]);
     Ok(())
 }

@@ -562,10 +562,14 @@ pub fn arena_certificate(
     certificate_with(body, windows, &SliceDrifts)
 }
 
-/// A body's own drift bounds, each in its species' unit, for the species it `names` in place of the slice's table.
+/// A body's own drift bounds, each in its species' unit, for the species it `names` in place of the slice's table,
+/// and in atoms for each element it bounds in place of `SYNTHETIC_DRIFT`.
 pub trait DriftTable {
     fn names(&self, species: Species) -> bool;
     fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError>;
+    fn element(&self, _: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+        Ok(None)
+    }
 }
 
 struct SliceDrifts;
@@ -605,6 +609,9 @@ pub fn certificate_with(
     }
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
+        Book::Of(Species::Energy) | Book::Energy if drifts.names(Species::Energy) => {
+            Species::Energy.visit(Bounded(quantity, drifts))
+        }
         Book::Of(Species::Energy) | Book::Energy => {
             let sliding = windows.coverage_ns() > windows.window_ns().get();
             let drift = if sliding {
@@ -616,11 +623,13 @@ pub fn certificate_with(
         }
         Book::Of(species) if drifts.names(species) => species.visit(Bounded(quantity, drifts)),
         Book::Of(species) => species.visit(Limits(quantity, species_drift(species))),
-        Book::Element(_) => QuantityPolicy::element(
+        Book::Element(element) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
-            Measure::new(SYNTHETIC_DRIFT)?,
+            drifts
+                .element(element)?
+                .map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,
         ),
         Book::Charge => QuantityPolicy::charge(quantity, Measure::new(0.0)?, Measure::new(CLOSURE_RELATIVE)?),
     });

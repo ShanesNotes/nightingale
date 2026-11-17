@@ -5,9 +5,11 @@
 //! use ng_metabolism::diffusion::Side;
 //! ```
 //! ```
-//! use ng_metabolism::{GasRoutes, carbon_dioxide_diffusion, oxygen_diffusion};
+//! use ng_metabolism::{CellOxygen, GasRoutes, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
 //! ```
 
+mod burn;
 mod diffusion;
 
-pub use diffusion::{GasRoutes, PlasmaPressure, carbon_dioxide_diffusion, oxygen_diffusion};
+pub use burn::{bed_heat, burn};
+pub use diffusion::{CellOxygen, GasRoutes, PlasmaPressure, carbon_dioxide_diffusion, oxygen_diffusion};

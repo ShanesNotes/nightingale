@@ -1,15 +1,18 @@
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
 use core::cell::Cell;
 use core::fmt::Write;
 use core::num::NonZeroU64;
 use expect_test::expect;
 use ng_contract::*;
-use ng_record::{AuthorizedInput, Checkpoint, Running, Session};
+use ng_record::{AuthorizedInput, Checkpoint, Curve, Running, Session, Step};
 use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "e9943a87f779d37f8514aa50f1017961ccab29f66400152357e8b617b7af8e40";
-const ADMITTED_SEAL: &str = "05f7ad106481da6115a56e9a34b78a0c2cf803473240159d8afec90fa6e60d6e";
+const PACKET: &str = "cb439bb8b1525e9b8bc86ef20275aae820c40f2daef9b4bb9d54e4955e05bf42";
+const ADMITTED_SEAL: &str = "020537da74bf27e34c116e3b001d008a9b4078dd1e671c48bf441b87da113162";
 
 struct Counted {
     core: ng_solver::Core,
@@ -265,9 +268,45 @@ fn the_body_admits_at_06_55(start: &Start) {
     assert_eq!(hex(start.session().record().seal().digest()), ADMITTED_SEAL);
 }
 
-fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> Session<'_, Running> {
+#[derive(Default)]
+struct Minute {
+    attempts: u64,
+    refused: BTreeMap<String, u64>,
+}
+
+fn counted_until<'s>(
+    start: &Start,
+    mut session: Session<'s, Running>,
+    after: u64,
+    minute: &mut Minute,
+) -> Session<'s, Running> {
+    let row = |row: RowId| format!("{:?}", start.body.rows()[row.index()].kind());
+    while session.record().accepted().time().nanoseconds() < anchor_moment().nanoseconds() + after {
+        let mut attempt = session.step();
+        minute.attempts += 1;
+        session = loop {
+            match attempt {
+                Step::Accepted(next, _) => break next,
+                Step::Refused(retrying) => {
+                    let reason = match retrying.refused().reason() {
+                        NumericalRefusal::Accuracy { row: at } => format!("Accuracy {}", row(at)),
+                        NumericalRefusal::StageResidual { row: at } => format!("StageResidual {}", row(at)),
+                        other => format!("{other:?}"),
+                    };
+                    *minute.refused.entry(reason).or_default() += 1;
+                    attempt = retrying.retry();
+                    minute.attempts += 1;
+                }
+                Step::Faulted(faulted) => panic!("{:?}", faulted.fault()),
+            }
+        };
+    }
+    session
+}
+
+fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (Session<'_, Running>, Minute) {
     let pools = start.held_pools();
-    assert_eq!(pools.len(), 365);
+    assert_eq!(pools.len(), 333);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
         let view = session.record().accepted();
         pools.iter().map(|(row, _)| view.value(*row).bits()).collect()
@@ -278,13 +317,14 @@ fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> Se
         let guess = body_start_guess(*kind).expect("a finite guess");
         assert_eq!(*amount, guess.bits(), "{kind:?} moved at admission");
     }
+    let mut minute = Minute::default();
     for mark in 1..=6 {
-        session = until(session, 10 * mark * SECOND);
+        session = counted_until(start, session, 10 * mark * SECOND, &mut minute);
         for ((_, kind), (now, then)) in pools.iter().zip(amounts(&session).iter().zip(&admitted)) {
             assert_eq!(now, then, "{kind:?} moved by {} s", 10 * mark);
         }
     }
-    session
+    (session, minute)
 }
 
 fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
@@ -316,7 +356,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11794, quantities 436, held routes 86
+        steps 11797, quantities 415, held routes 97
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -324,30 +364,41 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         GI gut sodium moved
         GI gut water moved
         MS skin water moved
-        MT bone bed carbon dioxide made moved
-        MT bone bed oxygen use moved
-        MT brain bed carbon dioxide made moved
-        MT brain bed oxygen use moved
-        MT coronary bed carbon dioxide made moved
-        MT coronary bed oxygen use moved
-        MT fat bed carbon dioxide made moved
-        MT fat bed oxygen use moved
-        MT glomerular bed carbon dioxide made moved
-        MT glomerular bed oxygen use moved
-        MT gut bed carbon dioxide made moved
-        MT gut bed oxygen use moved
-        MT liver bed carbon dioxide made moved
-        MT liver bed oxygen use moved
+        MT bone bed cell water out moved
+        MT bone bed fatty acid feed moved
+        MT bone bed glucose feed moved
+        MT brain bed cell water out moved
+        MT brain bed fatty acid feed moved
+        MT brain bed glucose feed moved
+        MT coronary bed cell water out moved
+        MT coronary bed fatty acid feed moved
+        MT coronary bed glucose feed moved
+        MT fat bed cell water out moved
+        MT fat bed fatty acid feed moved
+        MT fat bed glucose feed moved
+        MT glomerular bed cell water out moved
+        MT glomerular bed fatty acid feed moved
+        MT glomerular bed glucose feed moved
+        MT gut bed cell water out moved
+        MT gut bed fatty acid feed moved
+        MT gut bed glucose feed moved
+        MT liver bed cell water out moved
+        MT liver bed fatty acid feed moved
+        MT liver bed glucose feed moved
         MT lung carbon dioxide moved
         MT lung oxygen moved
-        MT muscle bed carbon dioxide made moved
-        MT muscle bed oxygen use moved
-        MT peritubular bed carbon dioxide made moved
-        MT peritubular bed oxygen use moved
-        MT pulmonary bed carbon dioxide made moved
-        MT pulmonary bed oxygen use moved
-        MT skin bed carbon dioxide made moved
-        MT skin bed oxygen use moved
+        MT muscle bed cell water out moved
+        MT muscle bed fatty acid feed moved
+        MT muscle bed glucose feed moved
+        MT peritubular bed cell water out moved
+        MT peritubular bed fatty acid feed moved
+        MT peritubular bed glucose feed moved
+        MT pulmonary bed cell water out moved
+        MT pulmonary bed fatty acid feed moved
+        MT pulmonary bed glucose feed moved
+        MT skin bed cell water out moved
+        MT skin bed fatty acid feed moved
+        MT skin bed glucose feed moved
     "#]]
     .assert_eq(&report);
 }
@@ -436,8 +487,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet e9943a87f779d37f8514aa50f1017961ccab29f66400152357e8b617b7af8e40
-        seal 7e30e7a5df836cc73bf6e338f34e8d530f8b3e5aa690b44f36fecd4c688de52f
+        packet cb439bb8b1525e9b8bc86ef20275aae820c40f2daef9b4bb9d54e4955e05bf42
+        seal 0529b29e15bcd7c633bdfc233ea0192caf876e1ecbf1096fce93ab7da4ca215b
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
@@ -598,38 +649,167 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &
     );
 }
 
-const USE: f64 = 96.0;
-const MADE: f64 = 0.75 * USE;
-/// The lung's own bed takes its use from its plasma before the pulmonary vein, so the arteries carry the rest.
-const LUNG_BED_USE: f64 = 1.0;
-const SYSTEMIC: f64 = (USE - LUNG_BED_USE) / USE;
+const QUOTIENT: f64 = 0.75;
 
-fn exchanged(session: &Session<'_, Running>, quantity: QuantityId, at: u64, outflow: bool) -> f64 {
+fn every_column(body: &CompiledBody) -> Vec<ColumnId> {
+    let mut columns: Vec<ColumnId> = (body.instances().iter())
+        .filter_map(|instance| match instance.target() {
+            Target::Column(column) => Some(column),
+            Target::Row(_) => None,
+        })
+        .collect();
+    columns.sort();
+    columns.dedup();
+    assert_eq!(columns.len(), body.columns().len(), "a column no law moves");
+    columns
+}
+
+fn extents(session: &Session<'_, Running>, columns: &[ColumnId], at: u64) -> Vec<f64> {
     for segment in session.conservation().newest_first() {
         let segment = segment.expect("a segment");
         let interval = segment.interval();
-        let (from, to) = (interval.start().nanoseconds(), interval.end().nanoseconds());
-        if from < at && at <= to {
-            let curve = if outflow {
-                segment.outflow(quantity)
-            } else {
-                segment.inflow(quantity)
-            };
+        if interval.start().nanoseconds() < at && at <= interval.end().nanoseconds() {
             let piece = Interval::new(interval.start(), SimTime::from_ns(at)).expect("a piece");
-            return lead(curve.on(piece).expect("inside its segment")[1]);
+            let mut extent = vec![0.0; columns.len()];
+            for column in columns {
+                let (forward, reverse) = segment.exchange(*column);
+                let reached = |curve: Curve<'_>| lead(curve.on(piece).expect("inside its segment")[1]);
+                extent[column.index()] = reached(forward) - reached(reverse);
+            }
+            return extent;
         }
     }
     panic!("no segment holds {at}")
 }
 
-/// The flow is the water the left ventricle loses while its valve stands open, because the trapezoid of the valve's
-/// flow at the ends of steps reads it 0.6% high. The lung's lymph takes water and no gas from the pulmonary bed to the
-/// central veins, so the pulmonary artery carries that water too. Both gases then meet their held rates to LEDGER, the
+fn count(body: &CompiledBody, column: ColumnId, on: impl Fn(SiteId, Species, Space) -> bool) -> f64 {
+    (body.columns()[column.index()].terms().iter())
+        .filter(|(row, _)| match body.rows()[row.index()].kind() {
+            RowKind::Amount { site, species, space } => on(site, species, space),
+            RowKind::Memory(_) | RowKind::Algebraic(_) => false,
+        })
+        .map(|&(_, count)| count as f64)
+        .sum()
+}
+
+fn burns(body: &CompiledBody, column: ColumnId) -> bool {
+    let origin = body.columns()[column.index()].origin();
+    origin.owner == "MT" && ["glucose burn", "fatty acid burn"].contains(&origin.local)
+}
+
+fn at_bed(body: &CompiledBody, column: ColumnId, bed: SiteId) -> bool {
+    body.columns()[column.index()].context() == Context::Site(bed)
+}
+
+fn held_at(start: &Start, session: &Session<'_, Running>, bed: SiteId, gas: Species) -> f64 {
+    let view = session.record().accepted();
+    (start.body.rows().iter())
+        .filter(|row| matches!(row.kind(), RowKind::Amount { site, species, .. } if site == bed && species == gas))
+        .map(|row| lead(view.value(row.id())))
+        .sum()
+}
+
+fn bed_heat(start: &Start, session: &Session<'_, Running>) -> f64 {
+    let view = session.record().accepted();
+    (start.body.rows().iter())
+        .filter(|row| match row.kind() {
+            RowKind::Amount {
+                site,
+                species: Species::Energy,
+                space: Space::Thermal,
+            } => site.key().ends_with(" bed"),
+            _ => false,
+        })
+        .map(|row| lead(view.value(row.id())))
+        .sum()
+}
+
+#[derive(Debug)]
+struct Burned {
+    oxygen: f64,
+    lung_bed_oxygen: f64,
+    carbon_dioxide: f64,
+    lung_bed_carbon_dioxide: f64,
+    energy: f64,
+    heat_out: f64,
+}
+
+fn burned(body: &CompiledBody, columns: &[ColumnId], from: &[f64], to: &[f64]) -> Burned {
+    let lung = site::<CapillaryBed>("pulmonary bed");
+    let bed_thermal = |site: SiteId, species, space| {
+        species == Species::Energy && space == Space::Thermal && site.key().ends_with(" bed")
+    };
+    let mut burned = Burned {
+        oxygen: 0.0,
+        lung_bed_oxygen: 0.0,
+        carbon_dioxide: 0.0,
+        lung_bed_carbon_dioxide: 0.0,
+        energy: 0.0,
+        heat_out: 0.0,
+    };
+    for column in columns {
+        let moved = to[column.index()] - from[column.index()];
+        let of = |gas: Species| count(body, *column, |_, species, _| species == gas);
+        if burns(body, *column) {
+            let (oxygen, made) = (-of(Species::Oxygen) * moved, of(Species::CarbonDioxide) * moved);
+            burned.oxygen += oxygen;
+            burned.carbon_dioxide += made;
+            burned.energy += of(Species::Energy) * moved;
+            if at_bed(body, *column, lung) {
+                burned.lung_bed_oxygen += oxygen;
+                burned.lung_bed_carbon_dioxide += made;
+            }
+        } else {
+            burned.heat_out -= count(body, *column, bed_thermal) * moved;
+        }
+    }
+    burned
+}
+
+/// No fuel pays work yet, so every column that takes heat from a bed's thermal pool, but the burns that fill it, ends
+/// at the core store and nowhere else.
+fn only_the_core_store_takes_the_beds_heat(body: &CompiledBody, columns: &[ColumnId]) {
+    let core = site::<TissueSite>("body");
+    for column in columns.iter().filter(|column| !burns(body, **column)) {
+        let thermal = |at: &dyn Fn(SiteId) -> bool| {
+            count(body, *column, |site, species, space| {
+                species == Species::Energy && space == Space::Thermal && at(site)
+            })
+        };
+        let from_beds = thermal(&|site| site.key().ends_with(" bed"));
+        if from_beds != 0.0 {
+            let terms = body.columns()[column.index()].terms().len();
+            assert_eq!(
+                (terms, thermal(&|site| site == core)),
+                (2, -from_beds),
+                "{:?} takes a bed's heat elsewhere",
+                body.columns()[column.index()].origin()
+            );
+        }
+    }
+}
+
+/// Over whole beats the flow is the water the left ventricle loses while its valve stands open, because the
+/// trapezoid of the valve's flow at the ends of steps reads it 0.6% high. The lung's lymph takes water and no gas from
+/// the pulmonary bed to the central veins, so the pulmonary artery carries that water too, and the lung's own bed
+/// takes its oxygen from its plasma before the pulmonary vein, so the arteries carry the other beds' burn. The flow
+/// times each gas's content difference then meets what the ledger says the beds' burns used and made, to LEDGER, the
 /// body's settling over nine beats.
-fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_held_rates_over_whole_beats(
+fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned_over_whole_beats(
     start: &Start,
 ) {
-    let mut samples: Vec<(u64, [f64; 5], bool, f64)> = Vec::new();
+    let (muscle, lung_bed) = (
+        site::<CapillaryBed>("muscle bed"),
+        site::<CapillaryBed>("pulmonary bed"),
+    );
+    let inflow = field(
+        "CV",
+        "circulation",
+        Context::Edge {
+            from: site::<VesselSegment>("systemic arteries"),
+            to: muscle,
+        },
+    );
     let lymph = field(
         "FL",
         "lymph",
@@ -643,6 +823,16 @@ fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_
         species: Species::Water,
         space: Space::Lumen,
     };
+    struct Sample {
+        at: u64,
+        contents: [f64; 5],
+        ejecting: bool,
+        ventricle: f64,
+        inflow: f64,
+        stored: f64,
+        heat: f64,
+    }
+    let mut samples: Vec<Sample> = Vec::new();
     let mut openings: Vec<(u64, u64)> = Vec::new();
     let session = until(start.session(), 50 * SECOND);
     let session = beats(start, session, 60 * SECOND, |session, opened| {
@@ -651,32 +841,35 @@ fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_
             openings.push((at, closed));
         }
         let read = |key, gas| concentration(start, session, key, gas);
-        samples.push((
+        samples.push(Sample {
             at,
-            [
+            contents: [
                 read("systemic arteries", Species::Oxygen),
                 read("pulmonary artery", Species::Oxygen),
                 read("systemic arteries", Species::CarbonDioxide),
                 read("pulmonary artery", Species::CarbonDioxide),
                 value(start, session, lymph),
             ],
-            aortic_flow(start, session) > 0.0,
-            value(start, session, ventricle),
-        ));
+            ejecting: aortic_flow(start, session) > 0.0,
+            ventricle: value(start, session, ventricle),
+            inflow: value(start, session, inflow),
+            stored: held_at(start, session, muscle, Species::Oxygen),
+            heat: bed_heat(start, session),
+        });
     });
     let onsets = onsets(&openings);
     let (first, last) = (onsets[0], onsets[onsets.len() - 1]);
     let held = (last - first) as f64 / 1e9;
     let (mut means, mut ejected) = ([0.0; 5], 0.0);
     for pair in samples.windows(2) {
-        let ((from, then, was_ejecting, before), (to, now, ejecting, after)) = (pair[0], pair[1]);
-        if from >= first && to <= last {
-            let length = (to - from) as f64 / 1e9;
-            for (mean, (then, now)) in means.iter_mut().zip(then.iter().zip(&now)) {
+        let (then, now) = (&pair[0], &pair[1]);
+        if then.at >= first && now.at <= last {
+            let length = (now.at - then.at) as f64 / 1e9;
+            for (mean, (then, now)) in means.iter_mut().zip(then.contents.iter().zip(&now.contents)) {
                 *mean += 0.5 * length * (then + now) / held;
             }
-            if was_ejecting || ejecting {
-                ejected += before - after;
+            if then.ejecting || now.ejecting {
+                ejected += then.ventricle - now.ventricle;
             }
         }
     }
@@ -688,18 +881,56 @@ fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_
         lymph,
     ] = means;
     let (flow, returned) = (ejected / held, ejected / held + lymph);
+    let body = &start.body;
+    let columns = every_column(body);
+    let sample = |at: u64| samples.iter().find(|sample| sample.at == at).expect("a sample");
+    let (beginning, end) = (
+        extents(&session, &columns, first),
+        extents(&session, &columns, last),
+    );
+    let beats = burned(body, &columns, &beginning, &end);
+    let (oxygen, carbon_dioxide) = (beats.oxygen / held, beats.carbon_dioxide / held);
+    let systemic = (
+        (beats.oxygen - beats.lung_bed_oxygen) / held,
+        (beats.carbon_dioxide - beats.lung_bed_carbon_dioxide) / held,
+    );
     let fick = [
         (
             "oxygen",
             flow * arterial_oxygen - returned * venous_oxygen,
-            SYSTEMIC * USE,
+            systemic.0,
         ),
         (
             "carbon dioxide",
             returned * venous_carbon_dioxide - flow * arterial_carbon_dioxide,
-            SYSTEMIC * MADE,
+            systemic.1,
         ),
     ];
+    let quotient = beats.carbon_dioxide / beats.oxygen;
+    let stored = sample(last).heat - sample(first).heat;
+    let at_onset = sample(first).inflow;
+    let moved = (samples.iter())
+        .filter(|sample| first < sample.at && sample.at <= onsets[1])
+        .max_by(|a, b| {
+            (a.inflow - at_onset)
+                .abs()
+                .total_cmp(&(b.inflow - at_onset).abs())
+        })
+        .expect("a step inside the first beat");
+    let (mut used, mut net) = (0.0, 0.0);
+    let after = extents(&session, &columns, moved.at);
+    for column in &columns {
+        let crossed = after[column.index()] - beginning[column.index()];
+        let oxygen = count(body, *column, |site, species, _| {
+            site == muscle && species == Species::Oxygen
+        });
+        if burns(body, *column) {
+            used -= oxygen * crossed;
+        } else {
+            net += oxygen * crossed;
+        }
+    }
+    let change = moved.stored - sample(first).stored;
     for (gas, taken, rate) in fick {
         assert!(
             (taken - rate).abs() <= LEDGER * rate,
@@ -707,26 +938,110 @@ fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_
             onsets.len() - 1
         );
     }
-    let basis = start.body.conserved_basis();
-    for (gas, outflow, rate) in [
-        (Species::Oxygen, false, USE),
-        (Species::CarbonDioxide, true, MADE),
+    assert!(
+        (quotient - QUOTIENT).abs() <= 1e-12,
+        "the burns made {quotient} carbon dioxide an oxygen"
+    );
+    for (gas, rate) in [
+        (Species::Oxygen, oxygen),
+        (Species::CarbonDioxide, carbon_dioxide),
     ] {
-        let lung = (basis.ids())
-            .filter(|quantity| quantity.book() == Book::Of(gas))
-            .map(|quantity| {
-                let moved = exchanged(&session, quantity, last, outflow)
-                    - exchanged(&session, quantity, first, outflow);
-                moved / held
+        let lung: f64 = (columns.iter())
+            .filter(|column| body.columns()[column.index()].receipt().is_some())
+            .map(|column| {
+                let at_lung = count(body, *column, |site, species, _| {
+                    site == lung_bed && species == gas
+                });
+                ((end[column.index()] - beginning[column.index()]) * at_lung).abs() / held
             })
-            .fold(0.0, |most, moved| if moved > most { moved } else { most });
+            .sum();
         assert!(
             (lung - rate).abs() <= LEDGER * rate,
             "the ledger's {gas:?} exchange at the lung over the beats is {lung} a second against {rate}"
         );
     }
+    assert!(
+        (moved.inflow - at_onset).abs() > 0.01 * at_onset.abs(),
+        "the muscle bed's inflow held at {} over its window",
+        moved.inflow
+    );
+    assert!(
+        (net - (used + change)).abs() <= 1e-9 * (net.abs() + used.abs()),
+        "the muscle bed took {net} of oxygen against {used} used and {change} stored"
+    );
+    only_the_core_store_takes_the_beds_heat(body, &columns);
+    assert!(
+        (beats.heat_out - (beats.energy - stored)).abs() <= 1e-9 * beats.energy,
+        "the core store took {} of heat against {} of fuel energy less {stored} the beds kept",
+        beats.heat_out,
+        beats.energy
+    );
 }
 const LEDGER: f64 = 1e-4;
+
+const DEMANDS: [(&str, f64); 11] = [
+    ("pulmonary bed", 1.0),
+    ("gut bed", 20.0),
+    ("muscle bed", 25.0),
+    ("glomerular bed", 3.0),
+    ("peritubular bed", 10.0),
+    ("brain bed", 8.0),
+    ("coronary bed", 8.0),
+    ("liver bed", 15.0),
+    ("fat bed", 2.0),
+    ("skin bed", 2.0),
+    ("bone bed", 2.0),
+];
+const AT_DEMAND: f64 = 2e-4;
+const AT_REST: f64 = 2e-4;
+
+fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
+    let body = &start.body;
+    let columns = every_column(body);
+    let stepped = until(start.session(), 1);
+    let view = stepped.conservation();
+    let head = view.head().expect("a step");
+    let interval = head.interval();
+    let seconds = interval.length_ns() as f64 / 1e9;
+    let gained = |curve: Curve<'_>| {
+        let ends = curve.on(interval).expect("the head's interval");
+        lead(ends[1]) - lead(ends[0])
+    };
+    let admitted = start.session();
+    for (key, demand) in DEMANDS {
+        let bed = site::<CapillaryBed>(key);
+        let used: f64 = (columns.iter())
+            .filter(|column| burns(body, **column) && at_bed(body, **column, bed))
+            .map(|column| {
+                let (forward, reverse) = head.exchange(*column);
+                let oxygen = count(body, *column, |_, species, _| species == Species::Oxygen);
+                -oxygen * (gained(forward) - gained(reverse)) / seconds
+            })
+            .sum();
+        assert!(
+            (used - demand).abs() <= AT_DEMAND * demand,
+            "the {key} burns {used} oxygen a second against its demand of {demand}"
+        );
+        for (species, space) in [
+            (Species::Glucose, Space::Cells),
+            (Species::FattyAcids, Space::Cells),
+            (Species::Water, Space::Cells),
+            (Species::Energy, Space::Thermal),
+        ] {
+            let kind = RowKind::Amount {
+                site: bed,
+                species,
+                space,
+            };
+            let held = value(start, &admitted, kind);
+            let rest = lead(body_start_guess(kind).expect("a finite guess"));
+            assert!(
+                (held - rest).abs() <= AT_REST * rest.abs(),
+                "the {key} admits {held} of {species:?} in {space:?} against its rest of {rest}"
+            );
+        }
+    }
+}
 
 struct Ticks(Cell<u64>);
 impl WallClock for Ticks {
@@ -811,10 +1126,11 @@ fn the_whole_body_passes_every_replay_gate() {
 #[test]
 fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let start = Start::admitted();
+    each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(&start);
     the_body_admits_at_06_55(&start);
     the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
     let before = start.core.solves.get();
-    let minute = no_held_pool_moves_at_admission_or_over_the_first_minute(&start);
+    let (minute, counted) = no_held_pool_moves_at_admission_or_over_the_first_minute(&start);
     the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(&start, &minute);
     let counts = Counts {
         rows: start.body.rows().len(),
@@ -822,9 +1138,25 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         steps: minute.record().revision(),
         solves: start.core.solves.get() - before,
     };
+    let mut minute = format!(
+        "steps {}, solves {}: ordinary {}, landing {}\n",
+        counts.steps,
+        counts.solves,
+        counted.attempts,
+        counts.solves - counted.attempts
+    );
+    for (reason, refusals) in &counted.refused {
+        writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
+    }
+    expect![[r#"
+        steps 11797, solves 14510: ordinary 12522, landing 1988
+        refused 60 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
+        refused 243 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
+        refused 361 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
+        refused 61 IterationLimit
+    "#]]
+    .assert_eq(&minute);
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");
     a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(&start);
-    the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_held_rates_over_whole_beats(
-        &start,
-    );
+    the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned_over_whole_beats(&start);
 }
