@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "ed7490f48e5a43b51cb89dbda13bab725809459dab0c5d7ff1565b26e088e92a";
-const ADMITTED_SEAL: &str = "35ba56b9c1b264916af266b87d11643f6e557d09e673b16032df62a5adad10b7";
+const PACKET: &str = "c275ac4e5a654ab465c4459137309074fc3577728f1642f5f225c7e561de003c";
+const ADMITTED_SEAL: &str = "e0bcb8b8fcad54ce4308ac30d5b881bc262a4719a13b38f7bd08a7a391d0810d";
 
 struct Counted {
     core: ng_solver::Core,
@@ -487,8 +487,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet ed7490f48e5a43b51cb89dbda13bab725809459dab0c5d7ff1565b26e088e92a
-        seal 98de0885696912b25351ac0cd980730eacbcb7da460c1c1884f551ac06c8f4d0
+        packet c275ac4e5a654ab465c4459137309074fc3577728f1642f5f225c7e561de003c
+        seal a29a098d48689089c560b90d48c4cf545716ff93213525a9d03890adc18f8d3e
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
