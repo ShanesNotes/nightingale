@@ -245,9 +245,6 @@ fn circulation(from: SiteId, to: SiteId) -> RowKind {
     algebraic("CV", "circulation", Context::Edge { from, to })
 }
 
-/// The coronary bed's inflow edge scales its resistance by `(d + K - S d) / (d + K)` with `S` 0.5 and `K` its demand of 8
-/// times 1 ms, so its flow at a debt `d` is its flow at none times `(d + K) / (d + K - S d)`. A debt a hair under zero
-/// leaves it one to the bit, and the edge out of the bed reads no debt.
 #[test]
 fn a_beds_inflow_resistance_falls_with_its_debt_by_its_form() -> Result<(), InitializationFailure> {
     let body = whole_body()?;
@@ -296,8 +293,6 @@ fn a_beds_inflow_resistance_falls_with_its_debt_by_its_form() -> Result<(), Init
     Ok(())
 }
 
-/// With every bed owing, only the plain edges into a bed move, and no other law: the liver's inflows are the hepatic
-/// sinusoids', and the edge from the glomerular bed into the peritubular bed keeps its resistance at a share of zero.
 #[test]
 fn every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt()
 -> Result<(), InitializationFailure> {

@@ -12,7 +12,7 @@ const BURN_NS: u64 = 1_000_000_000;
 /// less its value at no cell oxygen, written as two smooth maxima so that a reach far above the demand cannot lose the
 /// demand to rounding. Both terms read the same operands at `P = 0`, so the rate is exactly zero there; it never runs a
 /// burn backward and passes the demand by at most `D (sqrt(1 + s^2) - 1) / 2`. The width is a share of the demand, so a
-/// zero demand burns nothing. These hold from a demand of 1e-150 up, where no square underflows.
+/// zero demand burns nothing. These hold while `(s D)^2` stays a normal float: from a demand of 1e-150 up at `s` = 0.02.
 struct OxygenRate<'a, 'b> {
     cells: &'a CellOxygen<'b>,
     demand: SiteKey<'b, Rate<Oxygen>>,

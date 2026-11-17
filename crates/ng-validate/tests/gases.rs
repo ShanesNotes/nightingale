@@ -118,7 +118,6 @@ const OXYGEN_PER_LACTATE: f64 = 3.0;
 const LACTATE_BURN_SPEED: f64 = 0.02;
 const LACTATE_HALF_PRESSURE: f64 = 2.0;
 const DEBT_SHARE: f64 = 0.5;
-/// A bed's demand over one millisecond, as the body states it.
 const DEBT_HALF: f64 = DEMAND * 1e-3;
 
 fn ten_to(power: f64) -> f64 {
@@ -462,8 +461,6 @@ enum Debt<'b> {
     Stated(Parameter<'b, Boundary, Oxygen>),
 }
 
-/// The bed's flow is its reference over the circulation's resistance share at the bed's debt, so the fixture's loop
-/// runs the cardiovascular form itself.
 struct Answer<'b> {
     debt: Debt<'b>,
     share: Parameter<'b, Boundary, Dimensionless>,
@@ -2509,8 +2506,6 @@ fn the_bed_at_rest_splits_no_glucose_and_owes_no_oxygen() -> Result<(), Initiali
 }
 
 const BODY_REACH: f64 = DEMAND / BODY_CELL_PRESSURE_AT_DEMAND;
-/// The reach that meets the demand at 10 mmHg, where the bed holds its demand up to half again its demand and down to
-/// three tenths of its flow, so halving its flow raises no debt: the contrast to the body's reach.
 const REACH_AT_TEN: f64 = DEMAND / 10.0;
 
 struct Repaid {
@@ -2603,8 +2598,7 @@ fn at_a_reach_meeting_the_demand_at_ten_mmhg_half_again_the_demand_or_half_the_f
     Ok(())
 }
 
-/// `R / R_a = (d + K - S d) / (d + K)`. With the cells' use held, the plasma settles where the arterial delivery and the
-/// renewal, each its reference over that share, leave the use: `W C_a - f U / k`.
+/// With the cells' use held, the plasma settles at the arterial content less the use over the widened flow (Fick).
 #[test]
 fn the_beds_resistance_meets_its_form_at_no_debt_a_hair_under_none_and_its_half()
 -> Result<(), InitializationFailure> {
@@ -2649,8 +2643,6 @@ fn half_move(times: &[f64], series: &[f64]) -> f64 {
     found.map_or(f64::NAN, |(time, _)| *time)
 }
 
-/// A debt past this level has begun to move the bed's resistance, a quarter of a percent of where it settles at half
-/// the flow.
 const DEBT_STARTED: f64 = 1e-4;
 
 /// The flow follows the debt with no lag, because a lag needs memory at a site, which the contract has not: the bed's
