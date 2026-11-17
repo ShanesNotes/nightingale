@@ -10,9 +10,9 @@ const BURN_NS: u64 = 1_000_000_000;
 /// The oxygen a bed's cells burn each second: `B = smooth_max(D, 0, s D) - smooth_max(D - k P, 0, s D)`, its demand
 /// until its cells' partial pressure can no longer pass that much. It is the smooth minimum `smooth_min(D, k P, s D)`
 /// less its value at no cell oxygen, written as two smooth maxima so that a reach far above the demand cannot lose the
-/// demand to rounding. Both terms read the same operands at `P = 0`, so the
-/// rate is exactly zero there; it never runs a burn backward and passes the demand by at most
-/// `D (sqrt(1 + s^2) - 1) / 2`. The width is a share of the demand, so a zero demand burns nothing.
+/// demand to rounding. Both terms read the same operands at `P = 0`, so the rate is exactly zero there; it never runs a
+/// burn backward and passes the demand by at most `D (sqrt(1 + s^2) - 1) / 2`. The width is a share of the demand, so a
+/// zero demand burns nothing. These hold from a demand of 1e-150 up, where no square underflows.
 struct OxygenRate<'a, 'b> {
     cells: &'a CellOxygen<'b>,
     demand: SiteKey<'b, Rate<Oxygen>>,

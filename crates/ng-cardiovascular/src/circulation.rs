@@ -63,3 +63,19 @@ pub(crate) fn plain_edges<'b>(
     cv.transfer_along(route, flow);
     Ok(())
 }
+
+/// A bed's resistance over its resistance with no oxygen debt, `1 - S d / (d + K)`, written as `(d + K - S d) / (d + K)` so
+/// that it is one to the bit at no debt. `S` is the greatest share of its resistance a bed can lose and `K` the debt at
+/// which it has lost half of that. A debt at `-K` or under leaves no positive divisor, and the step is refused.
+pub fn resistance_share_at_debt<'b, 'k, O, At>(
+    k: &mut Kernel<'b, 'k, O, At>,
+    debt: Expr<'b, 'k, O, Oxygen>,
+    share: Expr<'b, 'k, O, Dimensionless>,
+    half: Expr<'b, 'k, O, Oxygen>,
+) -> Expr<'b, 'k, O, Dimensionless> {
+    let whole = k.add(debt, half);
+    let lost = k.scale(debt, share);
+    let kept = k.subtract(whole, lost);
+    let share = k.divide(kept, whole);
+    k.as_dimension(share)
+}

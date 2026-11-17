@@ -3611,6 +3611,32 @@ new = '''let first_order = k.relax(none, held, speed);'''
 test = "-p ng-validate --test gases burning_lactate_never_makes_a_negative_oxygen_debt"
 
 [[mutant]]
+name = "lactate-burns-with-no-lactate"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let first_order = k.relax(held, none, speed);'''
+new = '''let extra = k.at_site(&burned.amount::<Oxygen>());
+        let per = k.site_parameter(&per_lactate);
+        let extra = k.divide(extra, per);
+        let extra = k.as_dimension(extra);
+        let held = k.add(held, extra);
+        let first_order = k.relax(held, none, speed);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
+
+[[mutant]]
+name = "resistance-reads-no-debt"
+path = "crates/ng-cardiovascular/src/circulation.rs"
+old = '''let lost = k.scale(debt, share);'''
+new = '''let lost = k.subtract(debt, debt);'''
+test = "-p ng-validate --test gases the_beds_resistance_meets_its_form_at_no_debt_a_hair_under_none_and_its_half"
+
+[[mutant]]
+name = "resistance-rises-with-the-debt"
+path = "crates/ng-cardiovascular/src/circulation.rs"
+old = '''let kept = k.subtract(whole, lost);'''
+new = '''let kept = k.add(whole, lost);'''
+test = "-p ng-validate --test gases the_beds_resistance_meets_its_form_at_no_debt_a_hair_under_none_and_its_half"
+
+[[mutant]]
 name = "lactate-burns-with-no-cell-oxygen"
 path = "crates/ng-metabolism/src/burn.rs"
 old = '''let share = k.divide(pressure, reach);'''

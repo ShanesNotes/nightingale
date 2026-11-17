@@ -81,8 +81,9 @@ const CELL_BUFFER_RATIO: f64 = 10.0;
 const GLUCOSE_SHARE: f64 = 5.0 / 28.0;
 const PER_OXYGEN: f64 = GLUCOSE_SHARE + 16.0 * (1.0 - GLUCOSE_SHARE) / 23.0;
 /// The reach meets the demand at this cell pressure, and the oxygen rate falls short of the demand only below twice it,
-/// so every bed's cells, at 38 mmHg or more at rest, split no glucose there and admit no lactate.
-const CELL_PRESSURE_AT_DEMAND: f64 = 10.0;
+/// 34 mmHg. Every bed's cells sit at 38 mmHg or more at rest, so none splits glucose there or admits lactate, and
+/// halving a bed's flow takes the cells under it.
+pub const BODY_CELL_PRESSURE_AT_DEMAND: f64 = 17.0;
 const WIDTH_SHARE_OF_DEMAND: f64 = 0.02;
 const BED_HEAT_SPEED: f64 = 0.05;
 const FEED_SPEED: f64 = 0.1;
@@ -911,7 +912,7 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     for (bed, used) in BEDS.into_iter().zip(USES) {
         let at = Binding::Site(site::<CapillaryBed>(bed)?);
         set::<Rate<Oxygen>>(packet, "mt.oxygen-demand", at, used)?;
-        set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / CELL_PRESSURE_AT_DEMAND)?;
+        set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / BODY_CELL_PRESSURE_AT_DEMAND)?;
         set::<Conductance<Oxygen>>(packet, "mt.wall-oxygen-conductance", at, used / HEAD)?;
         set::<Conductance<Oxygen>>(packet, "mt.cell-oxygen-conductance", at, used / HEAD)?;
         let made = PER_OXYGEN * used / CARBON_DIOXIDE_HEAD;

@@ -25,6 +25,7 @@ mod walls;
 use afferents::afferents;
 use capillary_fields::capillary_fields;
 use circulation::plain_edges;
+pub use circulation::resistance_share_at_debt;
 use valves::valves;
 
 const WAVE_NS: u64 = 10_000_000;
