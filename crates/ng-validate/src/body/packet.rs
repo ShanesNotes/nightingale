@@ -1046,11 +1046,10 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// variation: twice the quantity's worst change over a ten-second window of this body's first minute from its admitted
 /// start, rounded up to one significant figure. It is a synthetic target that scores a solver and judges no body. The
 /// body's measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set
-/// (record 0004). Energy's worst change is 1,355, in the window from 47 s, with the work paid inside the body. Oxygen's
-/// and carbon's change is mostly the blood gases' swing within a beat, read across windows that hold no whole number of
-/// beats, and hydrogen's is a bed's cell fuels and water settling. At the stroke work's payer they settle by 0.077 over
-/// the first ten seconds, at the feeds' speed, and admission solves them whatever their start, so its cells take a
-/// bound of their own; every other bed's cells change by under 7.5e-6. The species are the held gut's and skin's
+/// (record 0004). Energy's worst change is 1,355, in the window from 47 s. Oxygen's and carbon's change is mostly the
+/// blood gases' swing within a beat, read across windows that hold no whole number of beats, and hydrogen's is a bed's
+/// cell fuels and water settling, under 7.5e-6 at every bed but the stroke work's payer, whose cells settle by 0.077
+/// over the first ten seconds whatever their start, so they take a bound of their own. The species are the held gut's and skin's
 /// water and salts and vasopressin's held secretion and clearance. Oxygen and carbon dioxide as species keep only held
 /// pools that never move, so the slice's bound for an unmoved species holds them.
 const ENERGY_DRIFT: f64 = 3e3;

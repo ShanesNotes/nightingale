@@ -507,8 +507,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
     "#]].assert_eq(&trace);
 }
 
-/// The coronary bed's inflow edge has no tone and no fall, so its pressure drop over its flow, over the share of its
-/// resistance the bed's debt keeps, is the packet's resistance times viscosity over its reference.
+/// The coronary bed's inflow edge has no tone and no fall, so only viscosity and its bed's debt move its resistance
+/// from the packet's.
 const CORONARY_RESISTANCE: f64 = 1.4 / 0.1;
 const CORONARY_DEBT: (f64, f64) = (0.5, 8e-3);
 
@@ -565,11 +565,8 @@ impl Edge {
     }
 }
 
-/// A 400 mL water bolus into the gut lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is
-/// its drop over the packet's resistance times viscosity's ratio and the share its bed's debt keeps, so the run tells
-/// viscosity's part of the flow from the drop's. By 30 s the coronary bed owes a little oxygen, its burn rippling with
-/// the heart's work. The body's gases are read at the start of a beat before the bolus and after it, so the beat's swing in
-/// them does not enter.
+/// Dividing out the drop and the share the bed's debt keeps leaves viscosity's part of the edge's flow. The body's gases
+/// are read at the start of a beat before the bolus and after it, so the beat's swing in them does not enter.
 fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
