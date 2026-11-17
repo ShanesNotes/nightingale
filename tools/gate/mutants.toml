@@ -4064,4 +4064,4 @@ name = "edge-read-seals-its-tag-alone"
 path = "crates/ng-contract/src/law.rs"
 old = '''                set.seal(out);'''
 new = '''                let _ = set;'''
-test = "-p ng-contract --lib edge_read::two_reads_of_one_field_over_two_sets_seal_apart"
+test = "-p ng-contract --lib edge_read::a_downstream_reads_set_is_in_its_program_seal"

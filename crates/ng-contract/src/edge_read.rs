@@ -1,7 +1,5 @@
 use crate::boundary::DriveFrame;
 use crate::evaluate::Inputs;
-use crate::identity::{Canonical, Seal};
-use crate::law::{Input, Source, Where};
 use crate::*;
 
 const DEBT: [f64; 2] = [0.375, 1.625];
@@ -166,6 +164,52 @@ fn each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero() 
 }
 
 #[test]
+fn a_downstream_reads_set_is_in_its_program_seal() {
+    use crate::body::{Code, Program};
+    use crate::identity::{Canonical, Seal};
+    use crate::law::{Input, Op, Where};
+
+    let (body, _) = compiled(true).unwrap_or_else(|refused| panic!("{refused:?}"));
+    let program = body
+        .programs()
+        .iter()
+        .find(|program| program.law == cv("circulation"))
+        .expect("the edge law");
+    let code = &program.code;
+    let mut ops = code.ops.clone();
+    let mut changed = 0;
+    for op in &mut ops {
+        if let Op::Input(Input::Read(_, Where::DownIn(set))) = op {
+            assert_eq!(*set, CapillaryBed::SET);
+            *set = Speciated::SET;
+            changed += 1;
+        }
+    }
+    assert_eq!(changed, 1);
+    let changed = Program {
+        id: program.id,
+        law: program.law,
+        code: Code {
+            ops,
+            dimension: code.dimension.clone(),
+            predicate: code.predicate,
+            rate: code.rate,
+            validity: code.validity.clone(),
+            defines: code.defines,
+            origins: code.origins.clone(),
+            judged: code.judged.clone(),
+        },
+    };
+    let seal = |program: &Program| {
+        let mut out = Canonical::new("program");
+        program.seal(&mut out);
+        out.digest()
+    };
+    assert_ne!(program, &changed);
+    assert_ne!(seal(program), seal(&changed));
+}
+
+#[test]
 fn a_law_none_of_whose_edges_ends_in_the_set_is_refused_by_name() {
     let refused = compiled(false).map(|_| ()).err();
     let law = cv("circulation");
@@ -176,11 +220,64 @@ fn a_law_none_of_whose_edges_ends_in_the_set_is_refused_by_name() {
 }
 
 #[test]
-fn two_reads_of_one_field_over_two_sets_seal_apart() {
-    let sealed = |set: Sites| {
-        let mut out = Canonical::new("edge read");
-        Input::Read(Source::Field(cv("debt")), Where::DownIn(set)).seal(&mut out);
-        out.into_bytes()
-    };
-    assert_ne!(sealed(CapillaryBed::SET), sealed(Blood::SET));
+fn an_edge_guard_none_of_whose_edges_ends_in_the_set_is_refused_by_name() {
+    fn compiled(with_beds: bool) -> Result<(CompiledBody, Vec<SiteId>), AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at());
+        let artery = map.site::<VesselSegment>("artery", at());
+        let vein = map.site::<VesselSegment>("vein", at());
+        let sites = if with_beds {
+            let first = map.site::<CapillaryBed>("first bed", at());
+            let second = map.site::<CapillaryBed>("second bed", at());
+            vec![artery.id(), first.id(), vein.id(), second.id()]
+        } else {
+            vec![artery.id(), vein.id()]
+        };
+        for (at, &site) in sites.iter().enumerate() {
+            map.contain(root.id(), site);
+            map.connect(Network::Vascular, site, sites[(at + 1) % sites.len()]);
+        }
+        map.unsupplied(&sites);
+        let mut schema = Schema::new(map.finish()?)?;
+        schema.partial_volume(Measure::new(1.0)?)?;
+        schema.leave_out(Space::Interstitium, "a bench with no tissue");
+        schema.leave_out(Space::Cells, "a bench with no tissue");
+        let body = assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let route = ports.circulation(&mut cv);
+            let key = ParameterKey::new;
+            let g = cv.edge_parameter::<VascularEdge, Rate<Water>>(key("cv.g"), Admissible::finite());
+            let per_bed =
+                cv.site_parameter::<CapillaryBed, Dimensionless>(key("cv.debt"), Admissible::finite());
+            let (out, debt) = cv.site_field::<CapillaryBed, Dimensionless>("debt", Admissible::finite());
+            let value = cv.site_kernel(|mut k| {
+                let value = k.site_parameter(&per_bed);
+                k.finish(value, cv.every_mode(), class)
+            });
+            cv.define_at(&out, value);
+            let flow = cv.edge_kernel(|mut k| {
+                let g = k.edge_parameter(&g);
+                k.finish(g, cv.every_mode(), class)
+            });
+            cv.transfer_along(&route, flow);
+            let [on, off] = cv.modes_along(&route, "switch", ["on", "off"]);
+            let gap = cv.edge_kernel::<VascularEdge, _, _>(|mut k| {
+                let d = k.downstream_if_in(&debt);
+                k.finish(d, on.only(), class)
+            });
+            cv.event(Guard::new(gap, Crossing::Rising, on.to(&off)?));
+            body.add(cv.finish());
+            body.compile()
+        })?;
+        Ok((body, sites))
+    }
+
+    compiled(true).unwrap_or_else(|refused| panic!("{refused:?}"));
+    let refused = compiled(false).map(|_| ()).err();
+    let law = cv("switch");
+    assert_eq!(
+        refused,
+        Some(AdmissionError::Compile(CompileDefect::EndOffSet { law }))
+    );
 }
