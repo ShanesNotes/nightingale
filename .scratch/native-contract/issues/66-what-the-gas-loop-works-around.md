@@ -18,7 +18,8 @@ Blocked by: none
 - [x] A law reads one bed class at its one site, with its test
 - [x] A viscosity over a viscosity is a dimensionless identity, with its test
 - [x] The contract has `expm1`, with a test near zero
-- [ ] The body drops each workaround: the lung's `sum_at` rows, the reciprocal parameter, and any form that stands in for `expm1`. The lung's `sum_at` rows and `mt.lung-share` go with [body 10](../../body/issues/10-lungs-breathe.md), and the reciprocal parameter and the viscosity form go in one small body PR after this ticket's contract PR.
+
+The body's workarounds leave in body tickets: [body 10](../../body/issues/10-lungs-breathe.md) drops the lung's `sum_at` rows and `mt.lung-share` when its exchange reads the pulmonary bed through `only_at`, and [body 34](../../body/issues/34-viscosity-reads-the-contracts-forms.md) drops `cv.reference-viscosity-reciprocal` and writes the viscosity form with `expm1`.
 
 ## Answer
 
