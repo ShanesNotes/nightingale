@@ -67,7 +67,11 @@ struct Weak<'b, Q> {
 }
 
 impl<'b, Q: Substance + Plain> Weak<'b, Q> {
-    fn declare(laws: &mut FragmentBuilder<'b, BloodChemistry>, slope: &'static str, offset: &'static str) -> Self {
+    fn declare(
+        laws: &mut FragmentBuilder<'b, BloodChemistry>,
+        slope: &'static str,
+        offset: &'static str,
+    ) -> Self {
         Self {
             slope: laws.parameter(ParameterKey::new(slope), Admissible::finite()),
             offset: laws.parameter(ParameterKey::new(offset), Admissible::finite()),
@@ -95,8 +99,14 @@ impl<'b, Q: Substance + Plain> Weak<'b, Q> {
 /// deoxygenated blood holds more (research 11's carbamino row, with its oxygen dependence a line in saturation).
 struct Acid<'b> {
     offset: Parameter<'b, BloodChemistry, Charges>,
-    albumin: (Parameter<'b, BloodChemistry, Concentration<Albumin>>, Weak<'b, Albumin>),
-    phosphate: (Parameter<'b, BloodChemistry, Concentration<Phosphate>>, Weak<'b, Phosphate>),
+    albumin: (
+        Parameter<'b, BloodChemistry, Concentration<Albumin>>,
+        Weak<'b, Albumin>,
+    ),
+    phosphate: (
+        Parameter<'b, BloodChemistry, Concentration<Phosphate>>,
+        Weak<'b, Phosphate>,
+    ),
     hemoglobin: Weak<'b, Hemoglobin>,
     per_charge: Parameter<'b, BloodChemistry, Quotient<Concentration<CarbonDioxide>, Charges>>,
     sites: Parameter<'b, BloodChemistry, Quotient<Concentration<CarbonDioxide>, Concentration<Hemoglobin>>>,
@@ -164,11 +174,7 @@ fn charge<'b, 'k, Q: Substance + SameDimension<Charge>>(
 }
 
 impl<'b> StrongIons<'b> {
-    fn difference<'k>(
-        &self,
-        k: &mut Bed<'b, 'k>,
-        volume: Value<'b, 'k, Volume>,
-    ) -> Value<'b, 'k, Charges> {
+    fn difference<'k>(&self, k: &mut Bed<'b, 'k>, volume: Value<'b, 'k, Volume>) -> Value<'b, 'k, Charges> {
         let (sodium, potassium) = (charge(k, &self.sodium), charge(k, &self.potassium));
         let (magnesium, calcium) = (charge(k, &self.magnesium), charge(k, &self.calcium));
         let mut net = k.add(sodium, potassium);

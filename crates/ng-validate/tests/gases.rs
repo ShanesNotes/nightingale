@@ -1953,8 +1953,7 @@ fn speciation_readers(body: &CompiledBody) -> BTreeSet<(String, &'static str)> {
 }
 
 #[test]
-fn blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops()
--> Result<(), AdmissionError> {
+fn blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops() -> Result<(), AdmissionError> {
     for (body, beds) in [(compiled(Cells::HeldUse)?, 1), (whole_body()?, 11)] {
         for quantity in SPECIATION {
             let owners: Vec<&str> = (body.rows().iter())
@@ -1963,17 +1962,35 @@ fn blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops()
                     _ => None,
                 })
                 .collect();
-            let rows = if quantity == CarbonDioxidePartialPressure::NAME { 0 } else { beds };
+            let rows = if quantity == CarbonDioxidePartialPressure::NAME {
+                0
+            } else {
+                beds
+            };
             assert_eq!(owners, vec![BloodChemistry::CARD; rows], "{quantity}");
         }
-        let listings: Vec<String> = body.programs().iter().map(|program| format!("{program:?}")).collect();
+        let listings: Vec<String> = body
+            .programs()
+            .iter()
+            .map(|program| format!("{program:?}"))
+            .collect();
         let field = named(BloodChemistry::CARD, CarbonDioxidePartialPressure::NAME);
         let written = listings.iter().filter(|listing| listing.contains(&field)).count();
-        assert!(written >= 3, "the explicit field's ops stand in {written} programs");
-        assert!(!listings.iter().any(|listing| listing.contains(&format!("Field({field})"))));
+        assert!(
+            written >= 3,
+            "the explicit field's ops stand in {written} programs"
+        );
+        assert!(
+            !listings
+                .iter()
+                .any(|listing| listing.contains(&format!("Field({field})")))
+        );
         for quantity in SPECIATION {
             let stand_in = named(Metabolism::CARD, quantity);
-            assert!(!listings.iter().any(|listing| listing.contains(&stand_in)), "{stand_in}");
+            assert!(
+                !listings.iter().any(|listing| listing.contains(&stand_in)),
+                "{stand_in}"
+            );
         }
     }
     Ok(())
@@ -1990,9 +2007,14 @@ fn only_metabolism_reads_speciation_and_only_what_its_wired_row_lists() -> Resul
 }
 
 #[test]
-fn a_second_reader_adds_no_row_and_a_refusal_in_its_own_arithmetic_names_it() -> Result<(), InitializationFailure> {
+fn a_second_reader_adds_no_row_and_a_refusal_in_its_own_arithmetic_names_it()
+-> Result<(), InitializationFailure> {
     let (once, twice) = (compiled(Cells::HeldUse)?, compiled(Cells::SecondReader)?);
-    assert_eq!(twice.rows().len(), once.rows().len() + 1, "the second reader's own row only");
+    assert_eq!(
+        twice.rows().len(),
+        once.rows().len() + 1,
+        "the second reader's own row only"
+    );
     let low = speciated(Point {
         ln_over_p50: 0.1,
         carbon_dioxide_pressure: 50.0,
@@ -2007,8 +2029,14 @@ fn a_second_reader_adds_no_row_and_a_refusal_in_its_own_arithmetic_names_it() ->
         local: "gas gap",
     };
     let renewed = renewed(Cells::SecondReader, start, law)?;
-    assert!(renewed.refused > 0, "no step was refused by the second reader: {renewed:?}");
-    assert!(renewed.refused_again > 0, "no retry was refused by the second reader again: {renewed:?}");
+    assert!(
+        renewed.refused > 0,
+        "no step was refused by the second reader: {renewed:?}"
+    );
+    assert!(
+        renewed.refused_again > 0,
+        "no retry was refused by the second reader again: {renewed:?}"
+    );
     Ok(())
 }
 
