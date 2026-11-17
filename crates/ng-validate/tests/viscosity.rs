@@ -236,3 +236,113 @@ fn viscosity_scales_every_circulation_edge_and_no_other_law() -> Result<(), Init
     }
     Ok(())
 }
+
+fn debt(bed: SiteId) -> RowKind {
+    algebraic("MT", "oxygen_debt_per_bed", Context::Site(bed))
+}
+
+fn circulation(from: SiteId, to: SiteId) -> RowKind {
+    algebraic("CV", "circulation", Context::Edge { from, to })
+}
+
+#[test]
+fn a_beds_inflow_resistance_falls_with_its_debt_by_its_form() -> Result<(), InitializationFailure> {
+    let body = whole_body()?;
+    let (arteries, coronary, veins) = (
+        site::<VesselSegment>("systemic arteries"),
+        site::<CapillaryBed>("coronary bed"),
+        site::<VesselSegment>("central veins"),
+    );
+    let pressure = |at| index(&body, algebraic("CV", "blood pressure", Context::Site(at)));
+    let (inflow, outflow) = (
+        index(&body, circulation(arteries, coronary)),
+        index(&body, circulation(coronary, veins)),
+    );
+    let (owed, field) = (index(&body, debt(coronary)), index(&body, viscosity()));
+    let (share, half) = (0.5, 8e-3);
+    let debts = [0.0, -1e-29, half, 3.0 * half];
+    let each: Vec<_> = (debts.iter())
+        .map(|d| {
+            vec![
+                (pressure(arteries), PRESSURES.0),
+                (pressure(coronary), 50.0),
+                (pressure(veins), PRESSURES.1),
+                (inflow, 0.0),
+                (outflow, 0.0),
+                (field, 1.0),
+                (owed, *d),
+            ]
+        })
+        .collect();
+    let staged = staged(&body, &each)?;
+    let (into, out): (Vec<f64>, Vec<f64>) = staged.iter().map(|r| (-r[inflow], -r[outflow])).unzip();
+    assert!(into[0] > 0.0 && out[0] > 0.0, "{into:?} {out:?}");
+    assert_eq!(into[1].to_bits(), into[0].to_bits(), "a debt a hair under zero");
+    for ((d, law), away) in debts.iter().zip(&into).zip(&out) {
+        let closed = into[0] * (d + half) / (d + half - share * d);
+        assert!(
+            (law - closed).abs() <= 1e-12 * closed,
+            "at a debt of {d}: {law} against {closed}"
+        );
+        assert_eq!(
+            away.to_bits(),
+            out[0].to_bits(),
+            "the edge out of the bed at a debt of {d}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt()
+-> Result<(), InitializationFailure> {
+    let body = whole_body()?;
+    let rows: Vec<RowKind> = body.rows().iter().map(Row::kind).collect();
+    let owed: Vec<usize> = (0..rows.len())
+        .filter(|&at| matches!(rows[at], RowKind::Algebraic(slot) if slot.law.local == "oxygen_debt_per_bed"))
+        .collect();
+    let field = index(&body, viscosity());
+    let pressures: Vec<usize> = (0..rows.len())
+        .filter(|&at| matches!(rows[at], RowKind::Algebraic(slot) if slot.law.owner == "CV" && slot.law.local.contains("pressure")))
+        .collect();
+    let mut start: Vec<(usize, f64)> = (pressures.iter().enumerate())
+        .map(|(n, &at)| (at, 10.0 + 7.0 * n as f64))
+        .collect();
+    start.push((field, 1.0));
+    let each: Vec<_> = [0.0, 1.0]
+        .iter()
+        .map(|d| {
+            (start.iter().copied())
+                .chain(owed.iter().map(|&at| (at, *d)))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let staged = staged(&body, &each)?;
+    let mut moved: Vec<RowKind> = (0..rows.len())
+        .filter(|&at| staged[0][at] != staged[1][at] && !owed.contains(&at))
+        .map(|at| rows[at])
+        .collect();
+    let arteries = site::<VesselSegment>("systemic arteries");
+    let mut fed: Vec<RowKind> = [
+        "gut bed",
+        "muscle bed",
+        "glomerular bed",
+        "brain bed",
+        "coronary bed",
+        "fat bed",
+        "skin bed",
+        "bone bed",
+    ]
+    .into_iter()
+    .map(|bed| circulation(arteries, site::<CapillaryBed>(bed)))
+    .chain([circulation(
+        site::<VesselSegment>("pulmonary artery"),
+        site::<CapillaryBed>("pulmonary bed"),
+    )])
+    .collect();
+    moved.sort_unstable();
+    fed.sort_unstable();
+    assert_eq!(owed.len(), 11);
+    assert_eq!(moved, fed);
+    Ok(())
+}

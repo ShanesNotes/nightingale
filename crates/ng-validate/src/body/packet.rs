@@ -80,9 +80,12 @@ const INTERSTITIAL_BUFFER_RATIO: f64 = 15.0;
 const CELL_BUFFER_RATIO: f64 = 10.0;
 const GLUCOSE_SHARE: f64 = 5.0 / 28.0;
 const PER_OXYGEN: f64 = GLUCOSE_SHARE + 16.0 * (1.0 - GLUCOSE_SHARE) / 23.0;
-/// The reach meets the demand at this cell pressure, and the oxygen rate falls short of the demand only below twice it,
-/// so every bed's cells, at 38 mmHg or more at rest, split no glucose there and admit no lactate.
-const CELL_PRESSURE_AT_DEMAND: f64 = 10.0;
+/// The oxygen reach meets the demand at this cell pressure, and the oxygen rate falls short of the demand only below
+/// twice it, 34 mmHg. Every bed's cells sit at 38 mmHg or more at rest, so none splits glucose there or admits lactate,
+/// and halving the one-bed fixture's flow takes its cells under it.
+const BODY_CELL_PRESSURE_AT_DEMAND: f64 = 17.0;
+const DEBT_SHARE: f64 = 0.5;
+const DEBT_HALF_TIME: f64 = 1e-3;
 const WIDTH_SHARE_OF_DEMAND: f64 = 0.02;
 const BED_HEAT_SPEED: f64 = 0.05;
 const FEED_SPEED: f64 = 0.1;
@@ -908,10 +911,20 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     let lung = Binding::Site(site::<CapillaryBed>("pulmonary bed")?);
     set::<Dimensionless>(packet, "mt.lung-share", lung, 1.0)?;
     burn(packet)?;
+    let blood = Binding::Network(Network::Vascular);
+    set::<Dimensionless>(packet, "cv.debt-share", blood, 0.0)?;
+    set::<Oxygen>(packet, "cv.debt-half", blood, 1.0)?;
     for (bed, used) in BEDS.into_iter().zip(USES) {
         let at = Binding::Site(site::<CapillaryBed>(bed)?);
+        // The liver's inflows are the hepatic sinusoids', which read no debt; the peritubular inflow leaves
+        // the glomerular bed, whose tone is the kidney's.
+        if bed != "liver bed" {
+            let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };
+            set::<Dimensionless>(packet, "cv.debt-share", at, share)?;
+            set::<Oxygen>(packet, "cv.debt-half", at, used * DEBT_HALF_TIME)?;
+        }
         set::<Rate<Oxygen>>(packet, "mt.oxygen-demand", at, used)?;
-        set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / CELL_PRESSURE_AT_DEMAND)?;
+        set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / BODY_CELL_PRESSURE_AT_DEMAND)?;
         set::<Conductance<Oxygen>>(packet, "mt.wall-oxygen-conductance", at, used / HEAD)?;
         set::<Conductance<Oxygen>>(packet, "mt.cell-oxygen-conductance", at, used / HEAD)?;
         let made = PER_OXYGEN * used / CARBON_DIOXIDE_HEAD;
@@ -1009,7 +1022,7 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// start, rounded up to one significant figure. It is a synthetic target that scores a solver and judges no body. The
 /// body's measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set
 /// (record 0004). Energy's change is the walls' elastic store filling and the core's heat store emptying as the run
-/// settles from the admitted start, 4,946.6 in and 1,582.1 out over the first ten seconds, while over the first minute
+/// settles from the admitted start, 4,970.7 in and 1,583.6 out over the first ten seconds, while over the first minute
 /// a bed's fuels move under 1e-6 and its heat under 0.1. Oxygen's and carbon's change is mostly the blood gases' swing
 /// within a beat, read across windows that hold no whole number of beats, and hydrogen's is a bed's cell water and
 /// fuels settling. The species are the held gut's and skin's water and salts and vasopressin's held secretion and
@@ -1018,15 +1031,15 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 const ENERGY_DRIFT: f64 = 7e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
     (Element::Carbon, 0.8),
-    (Element::Hydrogen, 6e-6),
+    (Element::Hydrogen, 2e-5),
     (Element::Oxygen, 5.0),
 ];
 const SPECIES_DRIFTS: [(Species, f64); 6] = [
     (Species::Energy, ENERGY_DRIFT),
     (Species::Water, 0.04),
-    (Species::Sodium, 9e-4),
+    (Species::Sodium, 8e-4),
     (Species::Chloride, 9e-4),
-    (Species::Potassium, 5e-5),
+    (Species::Potassium, 4e-5),
     (Species::Vasopressin, 2e-3),
 ];
 

@@ -402,11 +402,19 @@ The heat store at each bed that takes its reactions' energy and passes it to the
 **Paying bed**:
 The capillary bed whose heat pays the heart's stroke work or the walls' work, named in the schema for each work. With none named, the work starts at the receipt `chemical energy`.
 
+**Oxygen reach**:
+A bed's conductance from its cells' oxygen partial pressure to the oxygen they can burn, a parameter of each bed. The oxygen rate follows the reach times that pressure until it nears the demand.
+_Avoid_: reach alone
+
+**Critical cell pressure**:
+The cells' oxygen partial pressure at and above which a bed's glycolysis is zero: twice its oxygen demand over its oxygen reach. Below it the oxygen rate falls short of the demand and an oxygen debt builds.
+_Avoid_: edge, threshold
+
 **Glycolysis**:
 The reaction in a bed's cells that splits one glucose into two lactate with no oxygen, its energy into the bed's heat. It runs at a share of what the oxygen rate falls short of the oxygen demand, and it is zero wherever the oxygen rate meets the demand.
 
 **Oxygen debt**:
-The oxygen a bed owes for burning less than its demand: three units of oxygen for each unit of lactate in its cells, the oxygen the lactate's burn takes. Arrow 90 carries it to the vessels.
+The oxygen a bed owes for burning less than its demand: three units of oxygen for each unit of lactate in its cells, the oxygen the lactate's burn takes. Arrow 90 carries it to the vessels, where the plain vascular edge into the bed loses resistance as the debt rises, up to a share the bed states.
 
 **Acidity**:
 A plasma's pH, which speciation sets from its strong ion difference, its weak acids and its carbon dioxide total. Each speciated site's blood has one; the interstitium and the cells have none, and a buffer line stands in for theirs.

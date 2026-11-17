@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "ed7490f48e5a43b51cb89dbda13bab725809459dab0c5d7ff1565b26e088e92a";
-const ADMITTED_SEAL: &str = "35ba56b9c1b264916af266b87d11643f6e557d09e673b16032df62a5adad10b7";
+const PACKET: &str = "b4cdd5039bd7898d742ea99e414a53e981894ae78a227ad885885034724230f6";
+const ADMITTED_SEAL: &str = "26bd65588f1346d4a8e0e964e6793c6be60e50707a0a20396beee6d95b45f3a9";
 
 struct Counted {
     core: ng_solver::Core,
@@ -487,8 +487,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet ed7490f48e5a43b51cb89dbda13bab725809459dab0c5d7ff1565b26e088e92a
-        seal 98de0885696912b25351ac0cd980730eacbcb7da460c1c1884f551ac06c8f4d0
+        packet b4cdd5039bd7898d742ea99e414a53e981894ae78a227ad885885034724230f6
+        seal 25aa4c562c32628864eaf3efc8dae3f23ddac96b2dbf7cfc979cd75f9ed016b7
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
@@ -1150,11 +1150,19 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             space: Space::Cells,
         };
         let debt = field("MT", "oxygen_debt_per_bed", Context::Site(bed));
+        let (share, half) = (if key == "peritubular bed" { 0.0 } else { 0.5 }, demand * 1e-3);
         for (when, session) in [("admitted", &admitted), ("a step on", &stepped)] {
             let (held, owed) = (value(start, session, lactate), value(start, session, debt));
             assert!(
                 held.abs() <= AT_REST_LACTATE && owed.abs() <= 3.0 * AT_REST_LACTATE,
                 "the {key} {when} holds {held} lactate in its cells and owes {owed} oxygen"
+            );
+            let whole = owed + half;
+            let kept = (half + (owed - share * owed)) / whole;
+            assert_eq!(
+                kept.to_bits(),
+                1f64.to_bits(),
+                "the {key}'s inflow {when} keeps {kept} of its resistance at a debt of {owed}"
             );
         }
     }

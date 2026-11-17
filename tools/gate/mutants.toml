@@ -3611,6 +3611,62 @@ new = '''let first_order = k.relax(none, held, speed);'''
 test = "-p ng-validate --test gases burning_lactate_never_makes_a_negative_oxygen_debt"
 
 [[mutant]]
+name = "lactate-burns-with-no-lactate"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let first_order = k.relax(held, none, speed);'''
+new = '''let extra = k.at_site(&burned.amount::<Oxygen>());
+        let per = k.site_parameter(&per_lactate);
+        let extra = k.divide(extra, per);
+        let extra = k.as_dimension(extra);
+        let held = k.add(held, extra);
+        let first_order = k.relax(held, none, speed);'''
+test = "-p ng-validate --test gases glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros"
+
+[[mutant]]
+name = "resistance-reads-no-debt"
+path = "crates/ng-cardiovascular/src/circulation.rs"
+old = '''let lost = k.scale(debt, share);'''
+new = '''let lost = k.subtract(debt, debt);'''
+test = "-p ng-validate --test gases the_beds_resistance_meets_its_form_at_no_debt_a_hair_under_none_and_its_half"
+
+[[mutant]]
+name = "resistance-rises-with-the-debt"
+path = "crates/ng-cardiovascular/src/circulation.rs"
+old = '''let rest = k.subtract(debt, lost);'''
+new = '''let rest = k.add(debt, lost);'''
+test = "-p ng-validate --test gases the_beds_resistance_meets_its_form_at_no_debt_a_hair_under_none_and_its_half"
+
+[[mutant]]
+name = "debt-form-cancels-at-a-full-share"
+path = "crates/ng-cardiovascular/src/circulation.rs"
+old = '''    let rest = k.subtract(debt, lost);
+    let kept = k.add(half, rest);'''
+new = '''    let kept = k.subtract(whole, lost);'''
+test = "-p ng-validate --test gases a_full_debt_share_keeps_a_positive_resistance_at_finite_debt"
+
+[[mutant]]
+name = "fixture-debt-half-at-the-base-demand"
+path = "crates/ng-validate/tests/gases.rs"
+old = '''            start.demand * DEBT_HALF_TIME,'''
+new = '''            DEBT_HALF,'''
+test = "-p ng-validate --test gases the_closed_loops_half_response_uses_the_beds_stated_demand"
+
+[[mutant]]
+name = "debt-read-at-the-edges-upstream-end"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        Where::Down | Where::DownIn(_) => ends.map(|end| end.1),'''
+new = '''        Where::Down => ends.map(|end| end.1),
+        Where::DownIn(_) => ends.map(|end| end.0),'''
+test = "-p ng-validate --test viscosity a_beds_inflow_resistance_falls_with_its_debt_by_its_form"
+
+[[mutant]]
+name = "peritubular-inflow-widens-with-its-debt"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };'''
+new = '''let share = DEBT_SHARE;'''
+test = "-p ng-validate --test viscosity every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt"
+
+[[mutant]]
 name = "lactate-burns-with-no-cell-oxygen"
 path = "crates/ng-metabolism/src/burn.rs"
 old = '''let share = k.divide(pressure, reach);'''
@@ -3707,8 +3763,8 @@ test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_one
 [[mutant]]
 name = "hydrogen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Hydrogen, 6e-6),'''
-new = '''(Element::Hydrogen, 1.2e-5),'''
+old = '''(Element::Hydrogen, 2e-5),'''
+new = '''(Element::Hydrogen, 4e-5),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]

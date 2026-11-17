@@ -25,6 +25,7 @@ mod walls;
 use afferents::afferents;
 use capillary_fields::capillary_fields;
 use circulation::plain_edges;
+pub use circulation::resistance_share_at_debt;
 use valves::valves;
 
 const WAVE_NS: u64 = 10_000_000;
@@ -35,9 +36,9 @@ pub fn declare<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardio
     declare_with(scope, false)
 }
 
-/// As `declare`, and each plain edge's resistance also scales by viscosity (line 114) over a reference. Only a root
-/// that declares hematology's law calls it, so the slice keeps its model.
-pub fn declare_reading_viscosity<'b>(
+/// As `declare`, and each plain edge's resistance also scales by viscosity (line 114) over a reference and by the oxygen
+/// debt of the bed it feeds (line 90). Only the whole body's root calls it, so the slice keeps its model.
+pub fn declare_in_the_whole_body<'b>(
     scope: CardiovascularScope<'b>,
 ) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
     declare_with(scope, true)
@@ -45,7 +46,7 @@ pub fn declare_reading_viscosity<'b>(
 
 fn declare_with<'b>(
     scope: CardiovascularScope<'b>,
-    reads_viscosity: bool,
+    whole_body: bool,
 ) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
     let (mut cv, ports) = scope.parts();
     let wave = RateClass::new(RateBand::Wave, WAVE_NS)?;
@@ -59,15 +60,7 @@ fn declare_with<'b>(
     blood_pressure::declare(&mut cv, pressure_row, &walls, wave);
 
     let circulation = ports.circulation(&mut cv);
-    plain_edges(
-        &mut cv,
-        &ports,
-        &circulation,
-        &pressure,
-        &head,
-        wave,
-        reads_viscosity,
-    )?;
+    plain_edges(&mut cv, &ports, &circulation, &pressure, &head, wave, whole_body)?;
     valves(&mut cv, &ports, &pressure, &head, wave)?;
     afferents(&mut cv, &pressure, &head, wave)?;
     capillary_fields(&mut cv, &pressure, wave);

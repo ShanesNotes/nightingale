@@ -11,8 +11,8 @@ pub type PlasmaPressure<'b> = Port<'b, Pressure>;
 const DIFFUSION_NS: u64 = 1_000_000_000;
 
 pub struct GasRoutes<'b, Q> {
-    pub wall: SiteRoute<'b, Metabolism, CapillaryBed, Q>,
-    pub membrane: SiteRoute<'b, Metabolism, CapillaryBed, Q>,
+    wall: SiteRoute<'b, Metabolism, CapillaryBed, Q>,
+    membrane: SiteRoute<'b, Metabolism, CapillaryBed, Q>,
 }
 
 impl<'b, Q: Respired> GasRoutes<'b, Q> {

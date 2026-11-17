@@ -68,7 +68,7 @@ pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
     assemble(body_schema()?, |mut body| {
         holds::hold_every_card(&mut body)?;
         exits(&mut body)?;
-        let fragment = ng_cardiovascular::declare_reading_viscosity(body.cardiovascular()?)?;
+        let fragment = ng_cardiovascular::declare_in_the_whole_body(body.cardiovascular()?)?;
         body.add(fragment);
         let fragment = ng_fluids::declare(body.fluids()?)?;
         body.add(fragment);
