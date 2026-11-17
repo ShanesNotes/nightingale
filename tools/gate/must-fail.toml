@@ -211,3 +211,19 @@ mutants = ["work-paid-from-outside", "work-paid-from-outside-in-the-run"]
 [[row]]
 core = "A body that names a bed to pay a work its laws request while the schema holds no elastic store for the work to end at"
 mutants = ["paid-work-without-a-store-compiles"]
+
+[[row]]
+core = "An edge's law reads a narrower set at an end that can never be in it"
+mutants = [
+  "edge-read-end-off-set-passes",
+  "edge-read-end-off-set-passes-for-guards",
+  "edge-read-end-off-set-checks-its-first-set-alone",
+  "edge-read-lands-tests-the-upstream-end",
+  "edge-read-end-off-set-passes-a-law-with-no-edge",
+  "edge-read-discarded-read-is-not-checked",
+  "edge-read-end-off-set-passes-a-guard-off-a-route",
+]
+doctests = [
+  { path = "crates/ng-contract/src/law.rs", code = "E0277", text = "PerSite<Beds<Muscle>, Dimensionless>" },
+  { path = "crates/ng-contract/src/law.rs", code = "E0308", text = "Kernel<'b, 'k, Cardiovascular, TubuleEdge>" },
+]

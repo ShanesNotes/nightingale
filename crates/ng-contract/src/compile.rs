@@ -1500,6 +1500,8 @@ fn place(
             if reads.contains(&false) && !reads.contains(&true) {
                 return Err(CompileDefect::UnscaledInput { law: law.name });
             }
+            let contexts: Vec<Context> = targets.iter().map(|&(context, _)| context).collect();
+            check_ends(law.name, kernel, &contexts, anatomy)?;
             let declared = ProgramId::at(placement.programs.len());
             let base = code(law.fragment, kernel);
             for &(context, target) in &targets {
@@ -1699,6 +1701,30 @@ fn check_wired(
         };
         if !places.readers.iter().any(wires) {
             return Err(CompileDefect::UnwiredRead { law, field });
+        }
+    }
+    Ok(())
+}
+
+fn check_ends(
+    law: LawName,
+    kernel: &KernelData,
+    contexts: &[Context],
+    anatomy: &Anatomy,
+) -> Result<(), CompileDefect> {
+    let inputs = (kernel.code.iter())
+        .filter_map(|op| match op {
+            Op::Input(input) => Some(input),
+            _ => None,
+        })
+        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let &Input::Read(_, Where::DownIn(set)) = input else {
+            continue;
+        };
+        let lands = |context: &Context| matches!(context, Context::Edge { to, .. } if anatomy.in_set(set).contains(to));
+        if !contexts.iter().any(lands) {
+            return Err(CompileDefect::EndOffSet { law });
         }
     }
     Ok(())
@@ -2077,7 +2103,7 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
     match place {
         Where::Here => here,
         Where::Up => ends.map(|end| end.0),
-        Where::Down => ends.map(|end| end.1),
+        Where::Down | Where::DownIn(_) => ends.map(|end| end.1),
         Where::Junction => anatomy.junction(here.or(ends.map(|end| end.1))?),
         Where::Drain => anatomy.drain(here?),
         Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.0),
@@ -2128,6 +2154,11 @@ fn addresses(
             && !landed.is_some_and(|site| anatomy.in_set(set).contains(&site))
         {
             return Err(CompileDefect::NoSuchRead { law });
+        }
+        if let Where::DownIn(set) = place
+            && landed.is_none_or(|site| !anatomy.in_set(set).contains(&site))
+        {
+            return Ok(Address::Gauge);
         }
         let at = landed.map_or(context, Context::Site);
         Ok(match source {
@@ -2453,7 +2484,9 @@ fn guards(
             }
             let written = written(law, zero, fields)?;
             let program = written.as_ref().unwrap_or(zero);
-            for at in places_of(anatomy, reaches, schema, fragment.owner, mode.over) {
+            let contexts = places_of(anatomy, reaches, schema, fragment.owner, mode.over);
+            check_ends(law, zero, &contexts, anatomy)?;
+            for at in contexts {
                 check_landing(law, zero, fields, at, anatomy)?;
                 let reset = resets.map(|local| {
                     let owner = fragment.owner;

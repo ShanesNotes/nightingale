@@ -1,7 +1,6 @@
-//! Blood chemistry's speciation: each bed's plasma oxygen partial pressure and saturation, and its bicarbonate and
-//! acidity, from the plasma's oxygen, carbon dioxide, hemoglobin, strong ions and water. Blood chemistry's ports read
-//! no amount yet, so the forms are written over any owner, and the body's root hands this crate the builder of the
-//! system that reads those amounts.
+//! Blood chemistry's speciation: at every speciated site, the blood's oxygen partial pressure and saturation, its
+//! bicarbonate and acidity, and its carbon dioxide partial pressure, from the blood's oxygen, carbon dioxide,
+//! hemoglobin, strong ions and water, read through blood chemistry's own port.
 //!
 //! # Type rules
 //!
@@ -13,72 +12,84 @@
 //! use ng_blood_chemistry::acidity::Henry;
 //! ```
 //! ```
-//! use ng_blood_chemistry::{Speciated, speciate};
+//! use ng_blood_chemistry::speciate;
 //! ```
 
 mod acidity;
 mod oxygen;
 
-pub use acidity::StrongIons;
+use acidity::StrongIons;
 use ng_contract::*;
 
-type Port<'b, O, U> = ReadPort<'b, O, PerSite<CapillaryBed, U>>;
-type Bed<'b, 'k, O> = Kernel<'b, 'k, O, CapillaryBed>;
-type Value<'b, 'k, O, U> = Expr<'b, 'k, O, U>;
-type Field<'b, O, U> = Output<'b, O, PerSite<CapillaryBed, U>>;
+type Port<'b, U> = ReadPort<'b, BloodChemistry, PerSite<Speciated, U>>;
+type Bed<'b, 'k> = Kernel<'b, 'k, BloodChemistry, Speciated>;
+type Value<'b, 'k, U> = Expr<'b, 'k, BloodChemistry, U>;
+type Field<'b, U> = Output<'b, BloodChemistry, PerSite<Speciated, U>>;
 
 const SPECIATION_NS: u64 = 1_000_000_000;
 
-pub struct Plasma<'b, O> {
-    pub water: Port<'b, O, Water>,
-    pub oxygen: Port<'b, O, Oxygen>,
-    pub carbon_dioxide: Port<'b, O, CarbonDioxide>,
-    pub hemoglobin: Port<'b, O, Hemoglobin>,
-    pub ions: StrongIons<'b, O>,
+struct Plasma<'b> {
+    water: Port<'b, Water>,
+    oxygen: Port<'b, Oxygen>,
+    carbon_dioxide: Port<'b, CarbonDioxide>,
+    hemoglobin: Port<'b, Hemoglobin>,
+    ions: StrongIons<'b>,
 }
 
-/// What speciation states at each bed's plasma: four fields, and the carbon dioxide partial pressure they give.
-pub struct Speciated<'b, O> {
-    pub oxygen_partial_pressure: Port<'b, O, Pressure>,
-    pub saturation: Port<'b, O, Dimensionless>,
-    pub bicarbonate: Port<'b, O, Concentration<CarbonDioxide>>,
-    pub acidity: Port<'b, O, Dimensionless>,
-    henry: acidity::Henry<'b, O>,
+struct Stated<'b> {
+    oxygen_partial_pressure: Port<'b, Pressure>,
+    saturation: Port<'b, Dimensionless>,
+    bicarbonate: Port<'b, Concentration<CarbonDioxide>>,
+    acidity: Port<'b, Dimensionless>,
+    carbon_dioxide_partial_pressure: Port<'b, Pressure>,
+    henry: acidity::Henry<'b>,
 }
 
-impl<'b, O: Owner> Speciated<'b, O> {
-    /// `P = HCO3 / (alpha 10^(pH - pK))`, explicit from the two acid fields, so it is no unknown of its own.
-    pub fn carbon_dioxide_partial_pressure<'k>(&self, k: &mut Bed<'b, 'k, O>) -> Value<'b, 'k, O, Pressure> {
-        let (bicarbonate, acidity) = (k.at_site(&self.bicarbonate), k.at_site(&self.acidity));
-        let dissolved = self.henry.dissolved(k, bicarbonate, acidity);
-        self.henry.pressure(k, dissolved)
-    }
-}
-
-/// States each bed's plasma speciation as four fields that read each other: the oxygen partial pressure and
-/// saturation, whose half-saturation pressure reads the plasma's acidity and carbon dioxide, and the bicarbonate and
-/// acidity, whose carbamino term reads the saturation.
-pub fn speciate<'b, O: Owner>(
-    laws: &mut FragmentBuilder<'b, O>,
-    plasma: &Plasma<'b, O>,
-) -> Result<Speciated<'b, O>, AdmissionError> {
+/// States speciation at every speciated site: four rows that read each other, the oxygen partial pressure and
+/// saturation, whose half-saturation pressure reads the blood's acidity and carbon dioxide, and the bicarbonate and
+/// acidity, whose carbamino term reads the saturation; and the carbon dioxide partial pressure,
+/// `P = HCO3 / (alpha 10^(pH - pK))`, explicit from the two acid rows, so it is no unknown of its own.
+pub fn speciate<'b>(
+    laws: &mut FragmentBuilder<'b, BloodChemistry>,
+    ports: &BloodChemistryPorts<'b>,
+) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, SPECIATION_NS)?;
-    let (pressure_out, oxygen_partial_pressure) =
-        laws.site_field::<CapillaryBed, Pressure>("oxygen partial pressure", Admissible::positive());
-    let (saturation_out, saturation) =
-        laws.site_field::<CapillaryBed, Dimensionless>("oxygen saturation", Admissible::unit_interval());
-    let (bicarbonate_out, bicarbonate) =
-        laws.site_field::<CapillaryBed, Concentration<CarbonDioxide>>("bicarbonate", Admissible::positive());
-    let (acidity_out, acidity) =
-        laws.site_field::<CapillaryBed, Dimensionless>("acidity", Admissible::finite());
-    let speciated = Speciated {
-        oxygen_partial_pressure,
-        saturation,
-        bicarbonate,
-        acidity,
+    let plasma = Plasma {
+        water: ports.blood(),
+        oxygen: ports.blood(),
+        carbon_dioxide: ports.blood(),
+        hemoglobin: ports.blood(),
+        ions: StrongIons {
+            sodium: ports.blood(),
+            potassium: ports.blood(),
+            magnesium: ports.blood(),
+            calcium: ports.blood(),
+            chloride: ports.blood(),
+            lactate: ports.blood(),
+            ketones: ports.blood(),
+            diet_base: ports.blood(),
+            fixed_acid: ports.blood(),
+        },
+    };
+    let outputs = ports.speciation(laws);
+    let speciated = Stated {
+        oxygen_partial_pressure: outputs.oxygen_partial_pressure.1,
+        saturation: outputs.oxygen_saturation.1,
+        bicarbonate: outputs.bicarbonate.1,
+        acidity: outputs.acidity.1,
+        carbon_dioxide_partial_pressure: outputs.carbon_dioxide_partial_pressure.1,
         henry: acidity::Henry::declare(laws),
     };
-    oxygen::define(laws, plasma, &speciated, (&pressure_out, &saturation_out), class);
-    acidity::define(laws, plasma, &speciated, (&bicarbonate_out, &acidity_out), class);
-    Ok(speciated)
+    let henry = &speciated.henry;
+    laws.express_at(&outputs.carbon_dioxide_partial_pressure.0, |mut k| {
+        let (bicarbonate, acidity) = (k.at_site(&speciated.bicarbonate), k.at_site(&speciated.acidity));
+        let dissolved = henry.dissolved(&mut k, bicarbonate, acidity);
+        let value = henry.pressure(&mut k, dissolved);
+        k.finish_term(value)
+    });
+    let pressure = (&outputs.oxygen_partial_pressure.0, &outputs.oxygen_saturation.0);
+    oxygen::define(laws, &plasma, &speciated, pressure, class);
+    let acid = (&outputs.bicarbonate.0, &outputs.acidity.0);
+    acidity::define(laws, &plasma, &speciated, acid, class);
+    Ok(())
 }

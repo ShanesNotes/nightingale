@@ -368,6 +368,9 @@ pub enum CompileDefect {
     UnclaimedLaw { law: LawName },
     /// A read of a coupling field no owner emits. An omitted law is not zero.
     UnemittedField { law: LawName, field: LawName },
+    /// An edge's read of a narrower set at an end that no edge the law holds on has in that set, so it would read zero
+    /// everywhere.
+    EndOffSet { law: LawName },
     /// A segment the map samples where no law of another card reads blood chemistry's speciation, so the mark would
     /// keep rows nothing uses.
     UnreadSample { site: SiteId },
