@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Claimed by: b09b-lactate-debt
+Claimed by: b09c-arrow-90
 Blocked by: 02, 08, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
 **What to build:** Each bed burns fuel with oxygen into carbon dioxide, water and heat, as a reaction at the bed ([ticket 02](02-reactions.md)). Rung 0 burns glucose and fatty acids in a fixed proportion, which fixes the respiratory quotient, and oxidizes lactate, until [ticket 16](16-fuel-stores.md) splits the mix. Research 11 gives no form for burning lactate, so that form is still to find. The heat joins the core heat store, or the skin heat store for the skin bed, because only tissue sites hold heat, and the water joins the bed's water. Tissue carbon dioxide has a store, because blood alone settles too fast when breathing changes. When supply falls short of demand, an oxygen debt and lactate build, and the debt reaches the vessels as the signal for local flow. The work of the heart and the vessel walls, which the slice books against metabolism, is charged once.
