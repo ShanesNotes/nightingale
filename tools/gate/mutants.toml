@@ -3713,9 +3713,9 @@ test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_one
 
 [[mutant]]
 name = "saturation-set-finite"
-path = "crates/ng-blood-chemistry/src/lib.rs"
-old = '''("oxygen saturation", Admissible::unit_interval())'''
-new = '''("oxygen saturation", Admissible::finite())'''
+path = "crates/ng-contract/src/scope/blood_chemistry.rs"
+old = '''row::<OxygenSaturation>(laws, Admissible::unit_interval())'''
+new = '''row::<OxygenSaturation>(laws, Admissible::finite())'''
 test = "-p ng-validate --test gases a_saturation_outside_zero_to_one_is_refused_before_carbamino_reads_it"
 
 [[mutant]]
@@ -4037,3 +4037,29 @@ path = "crates/ng-record/src/history.rs"
 old = '''    for &(column, net) in nonzero {'''
 new = '''    for &(column, net) in nonzero.split_last().map_or(nonzero, |(_, rest)| rest) {'''
 test = "-p ng-record --lib history::tests::the_nonzero_columns_flow_and_seal_with_the_bits_of_every_column"
+
+[[mutant]]
+name = "speciation-row-under-metabolism"
+path = "crates/ng-validate/src/body/holds/mt.rs"
+old = '''    let oxygen_pressure = &gases.oxygen_partial_pressure;'''
+new = '''    let (copy_out, copy) = laws.site_field::<CapillaryBed, Pressure>("oxygen partial pressure", Admissible::positive());
+    let stated = laws.site_kernel(|mut k| {
+        let value = k.at_site(&gases.oxygen_partial_pressure);
+        k.finish(value, laws.every_mode(), RateClass::new(RateBand::Reflex, 1_000_000_000).expect("a class"))
+    });
+    laws.define_at(&copy_out, stated);
+    let oxygen_pressure = &copy;'''
+test = "-p ng-validate --test gases blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops"
+
+[[mutant]]
+name = "reader-states-the-explicit-field"
+path = "crates/ng-validate/src/body/holds/mt.rs"
+old = '''    let carbon_dioxide_pressure = &gases.carbon_dioxide_partial_pressure;'''
+new = '''    let (copy_out, copy) = laws.site_field::<CapillaryBed, Pressure>("carbon dioxide partial pressure", Admissible::positive());
+    let stated = laws.site_kernel(|mut k| {
+        let value = k.at_site(&gases.carbon_dioxide_partial_pressure);
+        k.finish(value, laws.every_mode(), RateClass::new(RateBand::Reflex, 1_000_000_000).expect("a class"))
+    });
+    laws.define_at(&copy_out, stated);
+    let carbon_dioxide_pressure = &copy;'''
+test = "-p ng-validate --test gases blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops"
