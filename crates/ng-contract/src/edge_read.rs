@@ -308,8 +308,7 @@ where
     read
 }
 
-/// The ring with the given edges valved and no vein marked, so the set of veins is empty.
-fn valved(valves: &[usize], reads: Reads) -> Result<CompiledBody, AdmissionError> {
+fn ring_without_veins(valves: &[usize], reads: Reads) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at());
     let sites = [
@@ -388,18 +387,27 @@ fn end_off_set(local: &'static str) -> Option<AdmissionError> {
 #[test]
 fn a_kernel_that_reads_two_sets_is_refused_when_either_misses_in_either_order() {
     for reads in [Reads::DebtThenTone, Reads::ToneThenDebt] {
-        assert_eq!(valved(&[], reads).err(), end_off_set("circulation"));
+        assert_eq!(ring_without_veins(&[], reads).err(), end_off_set("circulation"));
     }
 }
 
 #[test]
 fn a_law_whose_edges_only_leave_the_set_is_refused() {
-    assert_eq!(valved(&[0, 2], Reads::ValveRate).map(|_| ()).err(), None);
-    assert_eq!(valved(&[0, 2], Reads::Plain).err(), end_off_set("circulation"));
+    assert_eq!(
+        ring_without_veins(&[0, 2], Reads::ValveRate).map(|_| ()).err(),
+        None
+    );
+    assert_eq!(
+        ring_without_veins(&[0, 2], Reads::Plain).err(),
+        end_off_set("circulation")
+    );
 }
 
 #[test]
 fn a_law_with_no_edge_at_all_is_refused_when_it_states_the_read() {
-    assert_eq!(valved(&[], Reads::Plain).map(|_| ()).err(), None);
-    assert_eq!(valved(&[], Reads::ValveRate).err(), end_off_set("valves"));
+    assert_eq!(ring_without_veins(&[], Reads::Plain).map(|_| ()).err(), None);
+    assert_eq!(
+        ring_without_veins(&[], Reads::ValveRate).err(),
+        end_off_set("valves")
+    );
 }
