@@ -1545,6 +1545,8 @@ mod chance;
 mod compensated;
 mod compile;
 mod conservation;
+#[cfg(test)]
+mod edge_read;
 mod elimination;
 mod evaluate;
 mod failure;
@@ -1574,8 +1576,6 @@ mod split;
 mod state;
 mod system;
 mod time;
-#[cfg(test)]
-mod edge_read;
 #[cfg(test)]
 mod written;
 

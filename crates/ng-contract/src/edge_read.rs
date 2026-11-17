@@ -78,7 +78,12 @@ fn bound(body: &CompiledBody, beds: [SiteId; 2]) -> BoundParameters {
     }
     let vascular = Binding::Network(Network::Vascular);
     packet
-        .synthetic(ParameterKey::new("cv.g"), vascular, measure::<Rate<Water>>(G), note)
+        .synthetic(
+            ParameterKey::new("cv.g"),
+            vascular,
+            measure::<Rate<Water>>(G),
+            note,
+        )
         .expect("once");
     let start = |row: RowKind| match row {
         RowKind::Algebraic(slot) => (beds.iter())
@@ -112,7 +117,12 @@ fn each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero() 
         from: sites[from],
         to: sites[to],
     };
-    let fed = [(edge(0, 1), Some(0)), (edge(1, 2), None), (edge(2, 3), Some(1)), (edge(3, 0), None)];
+    let fed = [
+        (edge(0, 1), Some(0)),
+        (edge(1, 2), None),
+        (edge(2, 3), Some(1)),
+        (edge(3, 0), None),
+    ];
     let values = body.instance_values(&inputs).expect("finite");
     let instances = body.layout.instances.iter().zip(&values);
     let mut found: Vec<(Context, u64)> = instances
@@ -135,7 +145,10 @@ fn each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero() 
         };
         for entry in sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1] {
             let column = rows[sparsity.unknowns()[entry].index()].kind();
-            if let RowKind::Algebraic(Slot { law, at: Context::Site(bed) }) = column
+            if let RowKind::Algebraic(Slot {
+                law,
+                at: Context::Site(bed),
+            }) = column
                 && law == cv("debt")
             {
                 slopes.push((site, bed, jacobian[entry].to_bits()));
@@ -156,5 +169,8 @@ fn each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero() 
 fn a_law_none_of_whose_edges_ends_in_the_set_is_refused_by_name() {
     let refused = compiled(false).map(|_| ()).err();
     let law = cv("circulation");
-    assert_eq!(refused, Some(AdmissionError::Compile(CompileDefect::EndOffSet { law })));
+    assert_eq!(
+        refused,
+        Some(AdmissionError::Compile(CompileDefect::EndOffSet { law }))
+    );
 }

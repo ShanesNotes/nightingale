@@ -1482,9 +1482,7 @@ fn place(
                 _ => None,
             });
             for set in narrowed {
-                let lands = |&(context, _): &(Context, Target)| {
-                    matches!(context, Context::Edge { to, .. } if anatomy.in_set(set).contains(&to))
-                };
+                let lands = |&(context, _): &(Context, Target)| matches!(context, Context::Edge { to, .. } if anatomy.in_set(set).contains(&to));
                 if !targets.iter().any(lands) {
                     return Err(CompileDefect::EndOffSet { law: law.name });
                 }
