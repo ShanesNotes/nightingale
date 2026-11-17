@@ -14,7 +14,7 @@ Consider norepinephrine. Patients who receive it are often critically ill, and s
 
 Timing makes this harder. A clinician changes treatment in response to a deteriorating patient; treatment changes the physiology that informs the next decision. Which observations are collected, and when, also reflects clinical concern. A model can learn the pattern of care without learning the effect of care. The question becomes counterfactual: what might have happened to this same patient, from this same state, under a different intervention? The chart contains the path taken. It does not contain every path that could have been taken.
 
-## Start with the patient
+## Building the physiology engine
 
 For Nightingale, we are taking a zoomed-out approach to this problem. We want AI to elevate the quality of care given to the patient, not simply offload tedious work while leaving the foundations unchanged. That has brought us to the first-principles engineering of a physiology simulation engine in native Rust. Huge credit goes to the [Pulse Physiology Engine team](https://pulse.kitware.com/) for making their work open source. It gave us a foundation to learn from and a reference to question, rather than a ceiling on what we could build.
 
