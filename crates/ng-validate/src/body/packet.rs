@@ -977,35 +977,42 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
     set::<Concentration<CarbonDioxide>>(packet, "bc.carbamino-half-rise", body, CARBAMINO.half_rise)
 }
 
-/// The body's own drift bounds for energy and for the elements its burns join. As on the slice (solver contract,
-/// section 7), each is fixture data that stands in for 1.96 times a within-subject variation: twice the quantity's
-/// worst change over a ten-second window of this body's first minute from its admitted start, rounded up to one
-/// significant figure. It is a synthetic target that scores a solver and judges no body. The body's measured day
-/// (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set (record 0004).
-/// Energy's change is the walls' elastic store filling and the core's heat store emptying as the run settles from the
-/// admitted start, 4,946.6 in and 1,582.1 out over the first ten seconds, while the fuels and the beds' heat move
-/// under 0.003. Oxygen's and carbon's change is mostly the blood gases' swing within a beat, read across windows that
-/// hold no whole number of beats, and hydrogen's is a bed's cell water and fuels settling. Measured on the run of body
-/// 09's first PR: energy 3,364.5, oxygen 2.388, carbon 0.3864 and hydrogen 1.171e-5. Oxygen and carbon dioxide as
-/// species keep only held pools that never move, so the slice's bound for an unmoved species holds them.
+/// The body's own drift bounds for energy, for the elements its reactions join and for each species that moves on it.
+/// As on the slice (solver contract, section 7), each is fixture data that stands in for 1.96 times a within-subject
+/// variation: twice the quantity's worst change over a ten-second window of this body's first minute from its admitted
+/// start, rounded up to one significant figure. It is a synthetic target that scores a solver and judges no body. The
+/// body's measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set
+/// (record 0004). Energy's change is the walls' elastic store filling and the core's heat store emptying as the run
+/// settles from the admitted start, 4,946.6 in and 1,582.1 out over the first ten seconds, while the fuels and the beds'
+/// heat move under 0.003. Oxygen's and carbon's change is mostly the blood gases' swing within a beat, read across
+/// windows that hold no whole number of beats, and hydrogen's is a bed's cell water and fuels settling. The species
+/// are the held gut's and skin's water and salts and vasopressin's held secretion and clearance. Measured on the run of
+/// body 09's second PR: energy 3,364.5, oxygen 2.388, carbon 0.3864, hydrogen 2.583e-6, water 0.01513, sodium
+/// 4.008e-4, chloride 4.208e-4, potassium 2.004e-5 and vasopressin 9.657e-4. Oxygen and carbon dioxide as species keep
+/// only held pools that never move, so the slice's bound for an unmoved species holds them.
 const ENERGY_DRIFT: f64 = 7e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
     (Element::Carbon, 0.8),
-    (Element::Hydrogen, 3e-5),
+    (Element::Hydrogen, 6e-6),
     (Element::Oxygen, 5.0),
+];
+const SPECIES_DRIFTS: [(Species, f64); 6] = [
+    (Species::Energy, ENERGY_DRIFT),
+    (Species::Water, 0.04),
+    (Species::Sodium, 9e-4),
+    (Species::Chloride, 9e-4),
+    (Species::Potassium, 5e-5),
+    (Species::Vasopressin, 2e-3),
 ];
 
 struct BodyDrifts;
 impl DriftTable for BodyDrifts {
     fn names(&self, species: Species) -> bool {
-        species == Species::Energy
+        SPECIES_DRIFTS.iter().any(|(named, _)| *named == species)
     }
     fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
-        Measure::new(if Q::SPECIES == Species::Energy {
-            ENERGY_DRIFT
-        } else {
-            f64::NAN
-        })
+        let named = SPECIES_DRIFTS.iter().find(|(named, _)| *named == Q::SPECIES);
+        Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
     }
     fn element(&self, element: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
         let named = ELEMENT_DRIFTS.iter().find(|(named, _)| *named == element);

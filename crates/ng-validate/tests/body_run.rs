@@ -356,7 +356,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11797, quantities 415, held routes 97
+        steps 11797, quantities 404, held routes 97
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved

@@ -935,19 +935,16 @@ fn the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between
 fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError> {
     #[derive(Clone, Copy)]
     struct Stated {
-        energy: f64,
+        species: [(Species, f64); 6],
         elements: [(Element, f64); 3],
     }
     impl DriftTable for Stated {
         fn names(&self, species: Species) -> bool {
-            species == Species::Energy
+            self.species.iter().any(|(named, _)| *named == species)
         }
         fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
-            Measure::new(if Q::SPECIES == Species::Energy {
-                self.energy
-            } else {
-                f64::NAN
-            })
+            let named = self.species.iter().find(|(named, _)| *named == Q::SPECIES);
+            Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
         }
         fn element(&self, element: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
             let named = self.elements.iter().find(|(named, _)| *named == element);
@@ -961,30 +958,34 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
         Ok(certificate_with(&body, windows, table)?.digest())
     };
     let stated = Stated {
-        energy: 7e3,
+        species: [
+            (Species::Energy, 7e3),
+            (Species::Water, 0.04),
+            (Species::Sodium, 9e-4),
+            (Species::Chloride, 9e-4),
+            (Species::Potassium, 5e-5),
+            (Species::Vasopressin, 2e-3),
+        ],
         elements: [
             (Element::Carbon, 0.8),
-            (Element::Hydrogen, 3e-5),
+            (Element::Hydrogen, 6e-6),
             (Element::Oxygen, 5.0),
         ],
     };
     let policy = body_certificate(&body, windows)?.digest();
     assert_eq!(policy, digest(&stated)?);
     for by in [0.5, 2.0] {
-        let moved = Stated {
-            energy: stated.energy * by,
-            ..stated
-        };
-        assert_ne!(policy, digest(&moved)?, "energy times {by}");
-        for index in 0..3 {
+        for index in 0..stated.species.len() {
+            let mut moved = stated;
+            moved.species[index].1 *= by;
+            let named = moved.species[index].0;
+            assert_ne!(policy, digest(&moved)?, "{named:?} times {by}");
+        }
+        for index in 0..stated.elements.len() {
             let mut moved = stated;
             moved.elements[index].1 *= by;
-            assert_ne!(
-                policy,
-                digest(&moved)?,
-                "{:?} times {by}",
-                moved.elements[index].0
-            );
+            let named = moved.elements[index].0;
+            assert_ne!(policy, digest(&moved)?, "{named:?} times {by}");
         }
     }
     Ok(())

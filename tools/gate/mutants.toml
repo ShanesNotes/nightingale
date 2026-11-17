@@ -3640,6 +3640,13 @@ new = '''        let apart = k.subtract(standard, read);'''
 test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
 
 [[mutant]]
+name = "water-drift-bound-loosened"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''(Species::Water, 0.04),'''
+new = '''(Species::Water, 0.08),'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
+
+[[mutant]]
 name = "oxygen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
 old = '''(Element::Oxygen, 5.0),'''
