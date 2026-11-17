@@ -1361,7 +1361,14 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     ///     let _ = k.downstream_if_in(&debt.oxygen_debt_per_bed);
     /// }
     /// ```
-    /// An end whose set cannot hold the port's sites does not compile:
+    /// An end whose set cannot hold the port's sites does not compile: a blood end reading one tissue's beds,
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, tone: ReadPort<'b, Cardiovascular, PerSite<Beds<Muscle>, Dimensionless>>) {
+    ///     let _ = k.downstream_if_in(&tone);
+    /// }
+    /// ```
+    /// and a tubule's end reading every bed:
     /// ```compile_fail,E0308
     /// use ng_contract::{catalog::*, *};
     /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, TubuleEdge>, debt: OxygenDebtPerBed<Reads<'b, Cardiovascular>>) {

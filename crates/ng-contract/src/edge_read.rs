@@ -281,3 +281,125 @@ fn an_edge_guard_none_of_whose_edges_ends_in_the_set_is_refused_by_name() {
         Some(AdmissionError::Compile(CompileDefect::EndOffSet { law }))
     );
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum Reads {
+    DebtThenTone,
+    ToneThenDebt,
+    Plain,
+    ValveRate,
+}
+
+fn stated<'b, D: SiteSet>(
+    cv: &mut FragmentBuilder<'b, Cardiovascular>,
+    name: &'static str,
+    class: RateClass,
+) -> ReadPort<'b, Cardiovascular, PerSite<D, Dimensionless>>
+where
+    Blood: Includes<D>,
+{
+    let held = cv.site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.held"), Admissible::finite());
+    let (out, read) = cv.site_field::<D, Dimensionless>(name, Admissible::finite());
+    let value = cv.site_kernel::<D, _, _>(|mut k| {
+        let value = k.site_parameter_in(&held);
+        k.finish(value, cv.every_mode(), class)
+    });
+    cv.define_at(&out, value);
+    read
+}
+
+/// The ring with the given edges valved and no vein marked, so the set of veins is empty.
+fn valved(valves: &[usize], reads: Reads) -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at());
+    let sites = [
+        map.site::<VesselSegment>("artery", at()).id(),
+        map.site::<CapillaryBed>("first bed", at()).id(),
+        map.site::<VesselSegment>("vein", at()).id(),
+        map.site::<CapillaryBed>("second bed", at()).id(),
+    ];
+    for (edge, &site) in sites.iter().enumerate() {
+        map.contain(root.id(), site);
+        let to = sites[(edge + 1) % sites.len()];
+        if valves.contains(&edge) {
+            map.valve(site, to);
+        } else {
+            map.connect(Network::Vascular, site, to);
+        }
+    }
+    map.unsupplied(&sites);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    schema.leave_out(Space::Interstitium, "a bench with no tissue");
+    schema.leave_out(Space::Cells, "a bench with no tissue");
+    assemble(schema, |mut body| {
+        let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let key = ParameterKey::new;
+        let g = cv.edge_parameter::<VascularEdge, Rate<Water>>(key("cv.g"), Admissible::finite());
+        let debt = stated::<CapillaryBed>(&mut cv, "debt", class);
+        let tone = (reads == Reads::DebtThenTone || reads == Reads::ToneThenDebt)
+            .then(|| stated::<Veins>(&mut cv, "tone", class));
+        let flow = cv.edge_kernel::<VascularEdge, _, _>(|mut k| {
+            let g = k.edge_parameter(&g);
+            let value = match (reads, &tone) {
+                (Reads::DebtThenTone | Reads::ToneThenDebt, Some(tone)) => {
+                    let (d, t) = (k.downstream_if_in(&debt), k.downstream_if_in(tone));
+                    let (by_debt, by_tone) = (k.scale(g, d), k.scale(g, t));
+                    match reads {
+                        Reads::DebtThenTone => k.add(by_debt, by_tone),
+                        _ => k.add(by_tone, by_debt),
+                    }
+                }
+                (Reads::Plain, _) => {
+                    let d = k.downstream_if_in(&debt);
+                    k.scale(g, d)
+                }
+                _ => g,
+            };
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, flow);
+        let gates = ports.valves(&mut cv);
+        let memory = gates.flow_memory();
+        let r = cv.edge_parameter::<ValveEdge, Rate<Rate<Water>>>(key("cv.r"), Admissible::finite());
+        let rate = cv.edge_kernel::<ValveEdge, _, _>(|mut k| {
+            let r = k.edge_parameter(&r);
+            let value = if reads == Reads::ValveRate {
+                let d = k.downstream_if_in(&debt);
+                k.scale(r, d)
+            } else {
+                r
+            };
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.memory_rate(&memory, rate);
+        body.add(cv.finish());
+        body.compile()
+    })
+}
+
+fn end_off_set(local: &'static str) -> Option<AdmissionError> {
+    let law = cv(local);
+    Some(AdmissionError::Compile(CompileDefect::EndOffSet { law }))
+}
+
+#[test]
+fn a_kernel_that_reads_two_sets_is_refused_when_either_misses_in_either_order() {
+    for reads in [Reads::DebtThenTone, Reads::ToneThenDebt] {
+        assert_eq!(valved(&[], reads).err(), end_off_set("circulation"));
+    }
+}
+
+#[test]
+fn a_law_whose_edges_only_leave_the_set_is_refused() {
+    assert_eq!(valved(&[0, 2], Reads::ValveRate).map(|_| ()).err(), None);
+    assert_eq!(valved(&[0, 2], Reads::Plain).err(), end_off_set("circulation"));
+}
+
+#[test]
+fn a_law_with_no_edge_at_all_is_refused_when_it_states_the_read() {
+    assert_eq!(valved(&[], Reads::Plain).map(|_| ()).err(), None);
+    assert_eq!(valved(&[], Reads::ValveRate).err(), end_off_set("valves"));
+}

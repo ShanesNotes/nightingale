@@ -4072,3 +4072,29 @@ path = "crates/ng-contract/src/compile.rs"
 old = '''check_ends(law, zero, &contexts, anatomy)?;'''
 new = ''''''
 test = "-p ng-contract --lib edge_read::an_edge_guard_none_of_whose_edges_ends_in_the_set_is_refused_by_name"
+
+[[mutant]]
+name = "edge-read-end-off-set-checks-its-first-set-alone"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            return Err(CompileDefect::EndOffSet { law });
+        }
+    }'''
+new = '''            return Err(CompileDefect::EndOffSet { law });
+        }
+        return Ok(());
+    }'''
+test = "-p ng-contract --lib edge_read::a_kernel_that_reads_two_sets_is_refused_when_either_misses_in_either_order"
+
+[[mutant]]
+name = "edge-read-lands-tests-the-upstream-end"
+path = "crates/ng-contract/src/compile.rs"
+old = '''matches!(context, Context::Edge { to, .. } if anatomy.in_set(set).contains(to))'''
+new = '''matches!(context, Context::Edge { from, .. } if anatomy.in_set(set).contains(from))'''
+test = "-p ng-contract --lib edge_read::a_law_whose_edges_only_leave_the_set_is_refused"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes-a-law-with-no-edge"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        if !contexts.iter().any(lands) {'''
+new = '''        if !contexts.is_empty() && !contexts.iter().any(lands) {'''
+test = "-p ng-contract --lib edge_read::a_law_with_no_edge_at_all_is_refused_when_it_states_the_read"
