@@ -994,7 +994,6 @@ const DEMANDS: [(&str, f64); 11] = [
 ];
 const AT_DEMAND: f64 = 2e-4;
 const AT_REST: f64 = 2e-4;
-/// The packet's reference amount of cell lactate, which no bed's cells split glucose to raise at rest.
 const AT_REST_LACTATE: f64 = 1e-9;
 
 fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {

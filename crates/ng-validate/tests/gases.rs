@@ -518,16 +518,15 @@ struct Start {
     demand: f64,
     oxygen_reach: f64,
     cell_conductance: f64,
-    lactate: Lactation,
+    lactate: CellLactate,
 }
 
-/// The cells' lactate the packet starts from, and the reference amount the debt reads it against.
 #[derive(Clone, Copy, Debug)]
-struct Lactation {
+struct CellLactate {
     reference: f64,
     held: f64,
 }
-const LACTATION: Lactation = Lactation {
+const CELL_LACTATE: CellLactate = CellLactate {
     reference: 0.0,
     held: 0.0,
 };
@@ -546,7 +545,7 @@ impl Start {
             demand: DEMAND,
             oxygen_reach: DEMAND / CELL_PRESSURE_AT_DEMAND,
             cell_conductance: used() / HEAD,
-            lactate: LACTATION,
+            lactate: CELL_LACTATE,
         }
     }
     fn cold(plasma: Speciated) -> Self {
@@ -2012,9 +2011,7 @@ fn settled(body: &CompiledBody) -> Result<Vec<(RowKind, f64)>, InitializationFai
     Ok(rest_of(body, &settling(body, &core, &store)?))
 }
 
-/// One step from the settled bed with its cell membrane shut and the cells at a stated oxygen partial pressure and
-/// lactate.
-struct AtPoint {
+struct ShutBedStep {
     glycolysis: f64,
     lactate_burn: f64,
     debt: f64,
@@ -2034,11 +2031,11 @@ fn stepped_at(
     settled: &[(RowKind, f64)],
     (demand, cell_pressure, lactate): (f64, f64, f64),
     reference: f64,
-) -> Result<AtPoint, InitializationFailure> {
+) -> Result<ShutBedStep, InitializationFailure> {
     let start = Start {
         demand,
         cell_conductance: 0.0,
-        lactate: Lactation {
+        lactate: CellLactate {
             reference,
             held: lactate,
         },
@@ -2063,7 +2060,7 @@ fn stepped_at(
         Step::Refused(retrying) => panic!("the point was refused: {:?}", retrying.refused().reason()),
         Step::Faulted(faulted) => panic!("the point faulted: {:?}", faulted.fault()),
     };
-    Ok(AtPoint {
+    Ok(ShutBedStep {
         glycolysis: extent(body, &session, "glycolysis"),
         lactate_burn: extent(body, &session, "lactate burn"),
         debt: value(body, &session, field("oxygen_debt_per_bed")?),
@@ -2117,10 +2114,7 @@ fn glycolysis_and_lactates_burn_carry_their_atoms_and_energy_into_the_cells_and_
     Ok(())
 }
 
-/// Glycolysis is zero where the oxygen rate meets the demand, lactate's burn is zero with no lactate and with no cell
-/// oxygen, and the debt is three oxygen to each lactate above the reference. The cells with no oxygen split glucose at
-/// `r D` exactly. The forms elsewhere are read where a raised demand has settled the cells' partial pressure, and the
-/// lactate still rising there moves a 10 ms step's mean from its end by about 2e-6.
+/// Lactate still rising at the settled pressure moves a 10 ms step's mean from its end by about 2e-6.
 #[test]
 fn glycolysis_lactates_burn_and_the_debt_meet_their_forms_and_their_zeros() -> Result<(), InitializationFailure> {
     let body = compiled(Cells::Burning)?;
@@ -2189,8 +2183,6 @@ fn the_bed_at_rest_splits_no_glucose_and_owes_no_oxygen() -> Result<(), Initiali
     Ok(())
 }
 
-/// Each case runs two minutes from the settled bed, then five more back at rest. Every partial pressure stays above
-/// zero, no step is refused, the debt rises and the burn repays it.
 #[test]
 fn a_raised_demand_or_a_halved_flow_builds_a_debt_that_the_burn_repays() -> Result<(), InitializationFailure> {
     let body = compiled(Cells::Burning)?;
@@ -2232,8 +2224,6 @@ fn a_raised_demand_or_a_halved_flow_builds_a_debt_that_the_burn_repays() -> Resu
     Ok(())
 }
 
-/// Glycolysis makes two lactates, a strong anion, from a glucose with no charge. No reaction moves a fixed charge,
-/// so the charge quantity counts none of it and closes, with every element and energy, while glycolysis runs.
 #[test]
 fn every_conserved_quantity_closes_while_glycolysis_runs() -> Result<(), InitializationFailure> {
     let body = compiled(Cells::Burning)?;

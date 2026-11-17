@@ -986,10 +986,8 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// settles from the admitted start, 4,946.6 in and 1,582.1 out over the first ten seconds, while the fuels and the beds'
 /// heat move under 0.003. Oxygen's and carbon's change is mostly the blood gases' swing within a beat, read across
 /// windows that hold no whole number of beats, and hydrogen's is a bed's cell water and fuels settling. The species
-/// are the held gut's and skin's water and salts and vasopressin's held secretion and clearance. Measured on the run of
-/// body 09's second PR: energy 3,364.5, oxygen 2.388, carbon 0.3864, hydrogen 2.583e-6, water 0.01513, sodium
-/// 4.008e-4, chloride 4.208e-4, potassium 2.004e-5 and vasopressin 9.657e-4. Oxygen and carbon dioxide as species keep
-/// only held pools that never move, so the slice's bound for an unmoved species holds them.
+/// are the held gut's and skin's water and salts and vasopressin's held secretion and clearance. Oxygen and carbon
+/// dioxide as species keep only held pools that never move, so the slice's bound for an unmoved species holds them.
 const ENERGY_DRIFT: f64 = 7e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
     (Element::Carbon, 0.8),

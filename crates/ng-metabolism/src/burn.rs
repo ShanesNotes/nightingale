@@ -40,9 +40,7 @@ impl<'b> OxygenRate<'_, 'b> {
 
 /// Each bed's cells burn glucose, `glucose + 6 O2 -> 6 CO2 + 6 H2O`, and fatty acids, `fatty acid + 23 O2 -> 16 CO2 +
 /// 16 H2O`, each releasing its energy into the bed's heat. The glucose burn takes a share `s` of the bed's oxygen rate
-/// and the fatty acid burn the rest, so the share fixes the respiratory quotient at `s + 16 (1 - s) / 23`. What the
-/// oxygen rate falls short of the demand the cells split from glucose into lactate, `glucose -> 2 lactate`, and they
-/// burn lactate back with oxygen, `lactate + 3 O2 -> 3 CO2 + 3 H2O`; each bed's oxygen debt is read from that lactate.
+/// and the fatty acid burn the rest, so the share fixes the respiratory quotient at `s + 16 (1 - s) / 23`.
 pub fn burn<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     cells: &CellOxygen<'b>,
@@ -90,10 +88,7 @@ pub fn burn<'b>(
     lactate(laws, &rate, class)
 }
 
-/// Glycolysis splits glucose at `g = r max(D - B, 0)`, a share of what the oxygen rate falls short of the demand. A
-/// smooth maximum of any width would split glucose at rest, so the maximum is exact and `g` is zero wherever `B`
-/// meets `D`. Lactate burns at `l = k N P / (P + K)`, zero with no lactate and with no cell oxygen. The debt is
-/// `d = q (N - N_ref)`, the oxygen the burn of the lactate above the bed's reference amount would take.
+/// A smooth maximum of any width would split glucose at rest, so the split's maximum has no width and is exact.
 fn lactate<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     rate: &OxygenRate<'_, 'b>,
