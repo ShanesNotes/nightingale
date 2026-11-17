@@ -423,7 +423,7 @@ fn skin(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
 
 /// RS and GI hold their enclosures' pressure, packet values under `rs.pleural-pressure` and
 /// `gi.abdominal-pressure`. GI, EN and MS hold the routes no slice system owns. BC holds cell water, while cell-water
-/// shifts stay an open conflict with FL. MT stands behind the chemical energy the heart's work draws on.
+/// shifts stay an open conflict with FL. MT stands behind the chemical energy the heart's work draws on, since the slice names no bed to pay it.
 pub fn hold_outside_slice(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let lungs = HeldDeclaration::<Respiratory>::new(Vec::new(), Vec::new(), FIXED);
     let (mut laws, ports) = body.hold(lungs)?.parts();

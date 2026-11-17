@@ -4037,3 +4037,24 @@ path = "crates/ng-record/src/history.rs"
 old = '''    for &(column, net) in nonzero {'''
 new = '''    for &(column, net) in nonzero.split_last().map_or(nonzero, |(_, rest)| rest) {'''
 test = "-p ng-record --lib history::tests::the_nonzero_columns_flow_and_seal_with_the_bits_of_every_column"
+
+[[mutant]]
+name = "work-paid-from-outside"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        Some(&(_, bed)) => Terminal::Pool(heat(bed)),'''
+new = '''        Some(_) => Terminal::Exterior("chemical energy"),'''
+test = "-p ng-contract --test routes a_named_bed_pays_the_heart_and_the_walls_from_its_heat_and_the_pumps_keep_their_receipt"
+
+[[mutant]]
+name = "work-paid-from-outside-in-the-run"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        Some(&(_, bed)) => Terminal::Pool(heat(bed)),'''
+new = '''        Some(_) => Terminal::Exterior("chemical energy"),'''
+test = "-p ng-validate --test paying"
+
+[[mutant]]
+name = "a-payer-without-heat-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''find(|&&(_, bed)| !held(bed))'''
+new = '''find(|_| false)'''
+test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"

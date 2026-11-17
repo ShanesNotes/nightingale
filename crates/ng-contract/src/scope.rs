@@ -53,6 +53,15 @@ pub struct Schema {
     pub(crate) partial_volume: Option<Measure<PartialVolume<Water>>>,
     pub(crate) left_out: Vec<(Space, &'static str)>,
     pub(crate) energy: Vec<(Species, i64)>,
+    pub(crate) payers: Vec<(Work, SiteId)>,
+}
+
+/// Work into the elastic store that a bed's heat pays once the schema names that bed, and the receipt
+/// `chemical energy` pays otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Work {
+    Stroke,
+    Walls,
 }
 #[derive(Clone, Copy)]
 pub(crate) struct RouteBoundary {
@@ -78,7 +87,26 @@ impl Schema {
             partial_volume: None,
             left_out: Vec::new(),
             energy: Vec::new(),
+            payers: Vec::new(),
         })
+    }
+
+    /// Names the capillary bed whose heat pays `work`. Refuses a site the map does not hold, a site that is no bed,
+    /// and a second bed for one work.
+    pub fn pay_work(&mut self, work: Work, bed: SiteId) -> Result<(), AdmissionError> {
+        if !self.anatomy.sites().any(|known| known == bed) {
+            return Err(AdmissionError::SiteOffTheMap { site: bed });
+        }
+        if bed.class() != Class::CapillaryBed {
+            return Err(AdmissionError::PayerNotABed { site: bed });
+        }
+        match self.payers.binary_search_by_key(&work, |known| known.0) {
+            Ok(_) => Err(AdmissionError::WorkPaidTwice { work }),
+            Err(at) => {
+                self.payers.insert(at, (work, bed));
+                Ok(())
+            }
+        }
     }
 
     /// `Q` lives in this space of every site of a set, so blood and urine can hold different things in a lumen.
@@ -252,6 +280,7 @@ impl Seal for Schema {
             partial_volume,
             left_out,
             energy,
+            payers,
         } = self;
         anatomy.digest().seal(out);
         let mut pools: Vec<(SiteId, Space, Species)> = self.pools().collect();
@@ -300,6 +329,15 @@ impl Seal for Schema {
             for &(species, content) in energy {
                 out.number(species as u64);
                 out.number(content as u64);
+            }
+        }
+        // Only a body that names a payer writes these, after a tag that neither a row count nor the energy tag equals.
+        if !payers.is_empty() {
+            out.number(u64::MAX - 1);
+            out.length(payers.len());
+            for &(work, bed) in payers {
+                out.number(work as u64);
+                bed.seal(out);
             }
         }
     }
@@ -612,7 +650,8 @@ impl<'b> CardiovascularPorts<'b> {
     pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>> {
         effect::<_, _, Q>()
     }
-    /// Work into the elastic store at each blood site. The far end is a receipt: the chemical energy MT stands behind.
+    /// Work into the elastic store at each blood site. The far end is the heat of the bed the schema names to pay it,
+    /// or else a receipt: the chemical energy MT stands behind.
     pub fn stroke_work(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,
@@ -629,7 +668,8 @@ impl<'b> CardiovascularPorts<'b> {
         laws.request(Family::GravityWork);
         EdgeRoute::requested(Family::GravityWork)
     }
-    /// Work into the elastic store past what the heart and gravity pay, from the chemical energy MT stands behind.
+    /// Work into the elastic store past what the heart and gravity pay. The far end is the heat of the bed the schema
+    /// names to pay it, or else the chemical energy MT stands behind.
     pub fn wall_work(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,
@@ -694,7 +734,7 @@ impl<'b> FluidsPorts<'b> {
         SiteRoute::requested(family)
     }
     /// Metabolism's chemical energy into each bed's heat: the work of its cells' pumps. The far end is a receipt, as
-    /// the heart's stroke work's is.
+    /// the heart's stroke work's is while the schema names no bed to pay it.
     pub fn pump_work(
         &self,
         laws: &mut FragmentBuilder<'b, Fluids>,

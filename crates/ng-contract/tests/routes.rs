@@ -303,3 +303,138 @@ fn one_owner_crossing_one_wall_for_one_species_at_two_sets_is_named_twice() -> R
     );
     Ok(())
 }
+
+fn paid_work(payers: &[(Work, &'static str)], requested: bool) -> Result<CompiledBody, AdmissionError> {
+    let mut schema = Schema::new(whole_body()?)?;
+    watery_spaces_left_out(&mut schema);
+    schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+    if requested {
+        schema.pool::<Energy>(site::<TissueSite>("body"), Space::Elastic)?;
+    }
+    for &(work, bed) in payers {
+        schema.pay_work(work, site::<CapillaryBed>(bed))?;
+    }
+    let class = wave()?;
+    assemble(schema, |mut body| {
+        if requested {
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let stroke = ports.stroke_work(&mut cv);
+            let still = cv.site_kernel(|mut k| {
+                let zero = k.zero::<Rate<Energy>>();
+                k.finish(zero, cv.every_mode(), class)
+            });
+            cv.transfer_at(&stroke, still);
+            let walls = ports.wall_work(&mut cv);
+            let none = cv.kernel(|mut k| {
+                let zero = k.zero::<Rate<Energy>>();
+                k.finish(zero, cv.every_mode(), class)
+            });
+            cv.transfer(Transfer::new(&walls, none));
+            body.add(cv.finish());
+        }
+        let (mut fl, ports) = body.fluids()?.parts();
+        let pumps = ports.pump_work(&mut fl);
+        let still = fl.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, fl.every_mode(), class)
+        });
+        fl.transfer_at(&pumps, still);
+        body.add(fl.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_named_bed_pays_the_heart_and_the_walls_from_its_heat_and_the_pumps_keep_their_receipt()
+-> Result<(), AdmissionError> {
+    let unnamed = paid_work(&[], true)?;
+    let named = paid_work(&[(Work::Stroke, "liver bed"), (Work::Walls, "gut bed")], true)?;
+    let elastic = ("body", Space::Elastic, 1);
+    let receipt = Some("chemical energy");
+    let stroke = columns(&unnamed, "stroke work");
+    assert!(!stroke.is_empty());
+    for (context, paid, ends) in &stroke {
+        assert!(matches!(context, Context::Site(_)));
+        assert_eq!((*paid, ends.as_slice()), (receipt, [elastic].as_slice()));
+    }
+    let from_liver = (stroke.iter())
+        .map(|(context, ..)| (*context, None, vec![("liver bed", Space::Thermal, -1), elastic]))
+        .collect::<Vec<_>>();
+    assert_eq!(columns(&named, "stroke work"), from_liver);
+    assert_eq!(
+        columns(&unnamed, "wall work"),
+        [(Context::Body, receipt, vec![elastic])]
+    );
+    let from_gut = (
+        Context::Body,
+        None,
+        vec![("gut bed", Space::Thermal, -1), elastic],
+    );
+    assert_eq!(columns(&named, "wall work"), [from_gut]);
+    assert_eq!(columns(&named, "pump work"), columns(&unnamed, "pump work"));
+    assert_eq!(columns(&named, "pump work").len(), BEDS.len());
+    Ok(())
+}
+
+#[test]
+fn a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat() -> Result<(), AdmissionError> {
+    let mut schema = Schema::new(whole_body()?)?;
+    let (off, vessel) = (
+        site::<CapillaryBed>("no such bed"),
+        site::<VesselSegment>("vessel"),
+    );
+    let (liver, gut) = (site::<CapillaryBed>("liver bed"), site::<CapillaryBed>("gut bed"));
+    assert_eq!(
+        schema.pay_work(Work::Stroke, off),
+        Err(AdmissionError::SiteOffTheMap { site: off })
+    );
+    assert_eq!(
+        schema.pay_work(Work::Stroke, vessel),
+        Err(AdmissionError::PayerNotABed { site: vessel })
+    );
+    schema.pay_work(Work::Stroke, liver)?;
+    let twice = Err(AdmissionError::WorkPaidTwice { work: Work::Stroke });
+    assert_eq!(schema.pay_work(Work::Stroke, gut), twice);
+    schema.pay_work(Work::Walls, liver)?;
+    watery_spaces_left_out(&mut schema);
+    schema.pool::<Energy>(site::<TissueSite>("body"), Space::Elastic)?;
+    let class = wave()?;
+    let compiled = assemble(schema, |mut body| {
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let walls = ports.wall_work(&mut cv);
+        let none = cv.kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer(Transfer::new(&walls, none));
+        body.add(cv.finish());
+        body.compile()
+    });
+    let refused = Err(AdmissionError::Compile(CompileDefect::PayerHoldsNoHeat {
+        site: liver,
+    }));
+    assert_eq!(compiled.map(|_| ()), refused);
+    Ok(())
+}
+
+#[test]
+fn a_named_payer_reaches_the_model_hash_where_it_moves_no_column() -> Result<(), AdmissionError> {
+    let unnamed = paid_work(&[], false)?;
+    let hashes = [
+        unnamed.model_hash(),
+        paid_work(&[(Work::Stroke, "liver bed")], false)?.model_hash(),
+        paid_work(&[(Work::Stroke, "gut bed")], false)?.model_hash(),
+        paid_work(&[(Work::Walls, "liver bed")], false)?.model_hash(),
+    ];
+    let named = paid_work(&[(Work::Stroke, "liver bed")], false)?;
+    assert_eq!(named.rows().len(), unnamed.rows().len());
+    assert_eq!(columns(&named, "pump work"), columns(&unnamed, "pump work"));
+    assert_eq!(named.columns().len(), unnamed.columns().len());
+    for (at, hash) in hashes.iter().enumerate() {
+        assert!(
+            hashes[at + 1..].iter().all(|other| other != hash),
+            "payers {at} share a hash"
+        );
+    }
+    Ok(())
+}
