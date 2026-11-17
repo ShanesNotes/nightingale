@@ -1575,6 +1575,8 @@ mod state;
 mod system;
 mod time;
 #[cfg(test)]
+mod edge_read;
+#[cfg(test)]
 mod written;
 
 pub use admission::*;

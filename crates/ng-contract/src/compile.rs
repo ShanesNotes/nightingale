@@ -1477,6 +1477,18 @@ fn place(
             if reads.contains(&false) && !reads.contains(&true) {
                 return Err(CompileDefect::UnscaledInput { law: law.name });
             }
+            let narrowed = (kernel.code.iter()).filter_map(|op| match op {
+                Op::Input(Input::Read(_, Where::DownIn(set))) => Some(*set),
+                _ => None,
+            });
+            for set in narrowed {
+                let lands = |&(context, _): &(Context, Target)| {
+                    matches!(context, Context::Edge { to, .. } if anatomy.in_set(set).contains(&to))
+                };
+                if !targets.iter().any(lands) {
+                    return Err(CompileDefect::EndOffSet { law: law.name });
+                }
+            }
             let declared = ProgramId::at(placement.programs.len());
             let base = code(law.fragment, kernel);
             for &(context, target) in &targets {
@@ -2054,7 +2066,7 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
     match place {
         Where::Here => here,
         Where::Up => ends.map(|end| end.0),
-        Where::Down => ends.map(|end| end.1),
+        Where::Down | Where::DownIn(_) => ends.map(|end| end.1),
         Where::Junction => anatomy.junction(here.or(ends.map(|end| end.1))?),
         Where::Drain => anatomy.drain(here?),
         Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.0),
@@ -2105,6 +2117,11 @@ fn addresses(
             && !landed.is_some_and(|site| anatomy.in_set(set).contains(&site))
         {
             return Err(CompileDefect::NoSuchRead { law });
+        }
+        if let Where::DownIn(set) = place
+            && landed.is_none_or(|site| !anatomy.in_set(set).contains(&site))
+        {
+            return Ok(Address::Gauge);
         }
         let at = landed.map_or(context, Context::Site);
         Ok(match source {

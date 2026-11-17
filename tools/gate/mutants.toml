@@ -4037,3 +4037,24 @@ path = "crates/ng-record/src/history.rs"
 old = '''    for &(column, net) in nonzero {'''
 new = '''    for &(column, net) in nonzero.split_last().map_or(nonzero, |(_, rest)| rest) {'''
 test = "-p ng-record --lib history::tests::the_nonzero_columns_flow_and_seal_with_the_bits_of_every_column"
+
+[[mutant]]
+name = "edge-read-at-the-upstream-end"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Where::Down | Where::DownIn(_) => ends.map(|end| end.1),'''
+new = '''Where::Down => ends.map(|end| end.1), Where::DownIn(_) => ends.map(|end| end.0),'''
+test = "-p ng-contract --lib edge_read::each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero"
+
+[[mutant]]
+name = "edge-read-zero-at-a-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''&& landed.is_none_or(|site| !anatomy.in_set(set).contains(&site))'''
+new = '''&& landed.is_some()'''
+test = "-p ng-contract --lib edge_read::each_beds_inflow_edge_reads_its_beds_value_and_every_other_edge_reads_zero"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes"
+path = "crates/ng-contract/src/compile.rs"
+old = '''return Err(CompileDefect::EndOffSet { law: law.name });'''
+new = ''''''
+test = "-p ng-contract --lib edge_read::a_law_none_of_whose_edges_ends_in_the_set_is_refused_by_name"

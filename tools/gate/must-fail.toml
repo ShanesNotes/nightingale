@@ -203,3 +203,8 @@ mutants = ["unwired-read-passes", "unwired-read-off-the-rows-set"]
 [[row]]
 core = "A sensor reads arterial speciation at a segment the map does not sample"
 mutants = ["speciated-takes-every-segment", "explicit-read-off-its-set"]
+
+[[row]]
+core = "An edge's law reads a narrower set at an end that can never be in it"
+mutants = ["edge-read-end-off-set-passes"]
+doctests = [{ path = "crates/ng-contract/src/law.rs", code = "E0277", text = "Kernel<'b, 'k, Cardiovascular, TubuleEdge>" }]
