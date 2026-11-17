@@ -1,4 +1,5 @@
 use super::FIXED;
+use ng_blood_chemistry::speciate;
 use ng_contract::*;
 
 pub(super) fn blood_chemistry(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
@@ -21,7 +22,9 @@ pub(super) fn blood_chemistry(body: &mut Assembly<'_>) -> Result<(), AdmissionEr
         .pool::<AminoAcids, Beds<Tubule>>(Space::Cells)
         .pool::<DietBase, CapillaryBed>(Space::Interstitium)
         .pool::<FixedAcid, CapillaryBed>(Space::Interstitium);
-    let (laws, _) = body.hold(declaration)?.parts();
+    let held = body.hold(declaration)?;
+    let (mut laws, ports) = body.blood_chemistry(Some(held))?.parts();
+    speciate(&mut laws, &ports)?;
     body.add(laws.finish());
     Ok(())
 }
