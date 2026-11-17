@@ -3649,6 +3649,13 @@ new = '''        let apart = k.subtract(standard, read);'''
 test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
 
 [[mutant]]
+name = "lactate-energy-500"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''pub(super) const LACTATE_ENERGY: f64 = 450.0;'''
+new = '''pub(super) const LACTATE_ENERGY: f64 = 500.0;'''
+test = "-p ng-validate --test body each_beds_glycolysis_and_lactate_burn_carry_their_atoms_and_energy_into_its_cells_and_heat"
+
+[[mutant]]
 name = "water-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
 old = '''(Species::Water, 0.04),'''
