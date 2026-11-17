@@ -477,7 +477,7 @@ struct Answer<'b> {
 }
 
 impl<'b> Answer<'b> {
-    fn widened<'k, U>(
+    fn widened<'k, U: Dimension>(
         &self,
         k: &mut Kernel<'b, 'k, Boundary>,
         reference: Expr<'b, 'k, Boundary, U>,
@@ -492,12 +492,8 @@ impl<'b> Answer<'b> {
         };
         let (share, half) = (k.parameter(&self.share), k.parameter(&self.half));
         let resistance = resistance_share_at_debt(k, debt, share, half);
-        // A kernel states no literal one.
-        let one = k.divide(resistance, resistance);
-        let one = k.as_dimension(one);
-        let widening = k.divide(one, resistance);
-        let widening = k.as_dimension(widening);
-        k.scale(reference, widening)
+        let widened = k.divide(reference, resistance);
+        k.as_dimension(widened)
     }
 }
 
@@ -2468,7 +2464,7 @@ fn halving_the_flow_raises_extraction_then_the_debt_and_the_flow_with_the_debt()
             let share = (debt + DEBT_HALF - DEBT_SHARE * debt) / (debt + DEBT_HALF);
             (flow * RENEWAL / start.renewal * share - 1.0).abs()
         })
-        .fold(0.0, f64::max);
+        .fold(0.0, |widest, off| if off > widest { off } else { widest });
     let halves = [
         half_move(&times, &seen.extractions),
         half_move(&times, &debts),

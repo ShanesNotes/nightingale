@@ -1018,7 +1018,7 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 const ENERGY_DRIFT: f64 = 7e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
     (Element::Carbon, 0.8),
-    (Element::Hydrogen, 6e-6),
+    (Element::Hydrogen, 2e-5),
     (Element::Oxygen, 5.0),
 ];
 const SPECIES_DRIFTS: [(Species, f64); 6] = [
