@@ -1640,7 +1640,7 @@ pub use image::*;
 pub use law::*;
 pub use lens::{Channel, ChannelSpec, ObservationLens};
 pub use packet::*;
-pub use pinned::{exp, expm1};
+pub use pinned::exp;
 pub use problem::*;
 pub use provenance::*;
 pub use quadrature::*;

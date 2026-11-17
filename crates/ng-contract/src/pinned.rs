@@ -102,7 +102,7 @@ pub fn exp(x: f64) -> f64 {
 /// carried, and fdlibm's rebuild by `k`, so it keeps its digits as `x` nears zero. `expm1(0)` is exactly 0, below
 /// `2^-54` it is `x`, below `-56 ln 2` it is `-1`, past `exp`'s overflow threshold it is `+inf`, and `NaN` returns
 /// `NaN`.
-pub fn expm1(x: f64) -> f64 {
+pub(crate) fn expm1(x: f64) -> f64 {
     if x.is_nan() || (x > -TWO_NEG_54 && x < TWO_NEG_54) {
         return x;
     }
