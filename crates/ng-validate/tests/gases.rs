@@ -2192,8 +2192,6 @@ const BODY_REACH: f64 = DEMAND / 10.0;
 
 struct Repaid {
     built: f64,
-    least: f64,
-    half: Option<f64>,
     tenth: Option<f64>,
     report: String,
 }
@@ -2245,13 +2243,7 @@ fn stressed_and_repaid(
             .all(|least| *least >= 0.0),
         "{report}"
     );
-    Ok(Repaid {
-        built,
-        least: stress.least[2],
-        half,
-        tenth,
-        report,
-    })
+    Ok(Repaid { built, tenth, report })
 }
 
 #[test]
