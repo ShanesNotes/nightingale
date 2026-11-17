@@ -4,7 +4,8 @@ Spec: `crates/ng-contract/`
 
 Type: task
 
-Status: open
+Status: claimed
+Claimed by: nc66
 
 Blocked by: none
 
