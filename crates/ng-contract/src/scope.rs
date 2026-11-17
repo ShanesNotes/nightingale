@@ -331,7 +331,8 @@ impl Seal for Schema {
                 out.number(content as u64);
             }
         }
-        // Only a body that names a payer writes these, after a tag that neither a row count nor the energy tag equals.
+        // Written only when a payer is named, so no other body's bytes move, after a tag that neither a row count nor
+        // the energy tag equals.
         if !payers.is_empty() {
             out.number(u64::MAX - 1);
             out.length(payers.len());
@@ -650,8 +651,8 @@ impl<'b> CardiovascularPorts<'b> {
     pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>> {
         effect::<_, _, Q>()
     }
-    /// Work into the elastic store at each blood site. The far end is the heat of the bed the schema names to pay it,
-    /// or else a receipt: the chemical energy MT stands behind.
+    /// Work into the elastic store at each blood site. The far end is the heat of the bed `Schema::pay_work` names for
+    /// `Work::Stroke`, or else a receipt: the chemical energy MT stands behind.
     pub fn stroke_work(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,
@@ -668,8 +669,8 @@ impl<'b> CardiovascularPorts<'b> {
         laws.request(Family::GravityWork);
         EdgeRoute::requested(Family::GravityWork)
     }
-    /// Work into the elastic store past what the heart and gravity pay. The far end is the heat of the bed the schema
-    /// names to pay it, or else the chemical energy MT stands behind.
+    /// Work into the elastic store past what the heart and gravity pay. The far end is the heat of the bed
+    /// `Schema::pay_work` names for `Work::Walls`, or else the chemical energy MT stands behind.
     pub fn wall_work(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,
@@ -733,8 +734,8 @@ impl<'b> FluidsPorts<'b> {
         laws.request(family);
         SiteRoute::requested(family)
     }
-    /// Metabolism's chemical energy into each bed's heat: the work of its cells' pumps. The far end is a receipt, as
-    /// the heart's stroke work's is while the schema names no bed to pay it.
+    /// Metabolism's chemical energy into each bed's heat: the work of its cells' pumps. The far end is always a
+    /// receipt, whatever `Schema::pay_work` names for the heart and the walls.
     pub fn pump_work(
         &self,
         laws: &mut FragmentBuilder<'b, Fluids>,

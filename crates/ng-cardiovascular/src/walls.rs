@@ -255,8 +255,8 @@ impl<'b, 'h> Walls<'b, 'h> {
     /// stay on the sum: no law's choice, so closure sits in the stage residual and `verify` judges it with the rest.
     /// What the walls shed leaves as heat, and heat never comes back. What they gain past those receipts, as a vein's
     /// muscle tightens or water enters, is muscle work, paid by the heat of the bed the schema names to pay it or else
-    /// by the chemical energy the heart draws on. So the account can run no pool dry. The moving blood's energy and the stretch of tissue and tubule are not in the sum, so what they
-    /// hold passes through this rate.
+    /// by the chemical energy the heart draws on. So the account can run no pool dry. The moving blood's energy and
+    /// the stretch of tissue and tubule are not in the sum, so what they hold passes through this rate.
     pub(crate) fn energy(
         &self,
         cv: &mut FragmentBuilder<'b, Cardiovascular>,

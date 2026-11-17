@@ -131,8 +131,7 @@ fn built(variant: Variant) -> Result<Built, AdmissionError> {
     })
 }
 
-/// A test law, not the body's burn: glucose burns in the bed's interstitium at `(D + R) O2 / (O2 + K)`, where `R`
-/// stands in for metabolism's read of the work.
+/// Not the body's burn: `mt.test-work-read` stands in for metabolism's read of the work.
 fn test_burn<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, class: RateClass) {
     let burn = mt.reaction::<CapillaryBed, Glucose, _>(
         "test burn",
@@ -363,10 +362,10 @@ fn column(body: &CompiledBody, local: &str) -> usize {
 
 #[derive(Debug)]
 struct Settled {
-    burn_energy: f64,
-    to_core: f64,
-    bed_heat: f64,
-    receipt: f64,
+    mean_burn_energy: f64,
+    mean_to_core: f64,
+    bed_heat_at_end: f64,
+    receipt_over_run: f64,
 }
 
 #[derive(Debug)]
@@ -376,7 +375,6 @@ struct Faulted {
     lowest: f64,
 }
 
-/// Mean rates over the settled window, the bed's heat at its end, and what the receipt took over the whole run.
 fn ran(variant: Variant) -> Result<Settled, Faulted> {
     let built = built(variant).unwrap_or_else(|refused| panic!("{variant:?} refused: {refused:?}"));
     let body = &built.body;
@@ -406,7 +404,7 @@ fn ran(variant: Variant) -> Result<Settled, Faulted> {
             let view = faulted.record().accepted();
             let lowest = amounts()
                 .map(|row| lead(view.value(row.id())))
-                .fold(f64::INFINITY, f64::min);
+                .fold(f64::INFINITY, |low, held| if held < low { held } else { low });
             return Err(Faulted {
                 kind: faulted.fault().kind(),
                 refused,
@@ -429,7 +427,7 @@ fn ran(variant: Variant) -> Result<Settled, Faulted> {
         let at = column(body, local);
         (to[at] - from[at]) / (END_S - FROM_S) as f64
     };
-    let receipt = (body.columns().iter().enumerate())
+    let receipt_over_run = (body.columns().iter().enumerate())
         .filter(|(_, column)| {
             column
                 .receipt()
@@ -438,7 +436,7 @@ fn ran(variant: Variant) -> Result<Settled, Faulted> {
         .map(|(at, _)| to[at])
         .sum();
     let view = session.record().accepted();
-    let bed_heat = amounts()
+    let bed_heat_at_end = amounts()
         .find(|row| {
             row.kind()
                 == RowKind::Amount {
@@ -450,17 +448,15 @@ fn ran(variant: Variant) -> Result<Settled, Faulted> {
         .map(|row| lead(view.value(row.id())))
         .expect("the bed's heat");
     Ok(Settled {
-        burn_energy: rate("test burn") * GLUCOSE_ENERGY,
-        to_core: rate("bed heat"),
-        bed_heat,
-        receipt,
+        mean_burn_energy: rate("test burn") * GLUCOSE_ENERGY,
+        mean_to_core: rate("bed heat"),
+        bed_heat_at_end,
+        receipt_over_run,
     })
 }
 
 fn settled(variant: Variant) -> Settled {
-    let settled = ran(variant).unwrap_or_else(|faulted| panic!("{variant:?} faulted: {faulted:?}"));
-    println!("{variant:?}: {settled:?}");
-    settled
+    ran(variant).unwrap_or_else(|faulted| panic!("{variant:?} faulted: {faulted:?}"))
 }
 
 #[test]
@@ -471,13 +467,9 @@ fn with_the_burn_raised_by_the_work_the_beds_heat_passes_the_burn_less_the_work_
             work,
             raised: true,
         });
-        let less = paid.burn_energy - work;
-        assert!(
-            (paid.to_core - less).abs() <= 1e-6 * less,
-            "{work}: {} against {less}",
-            paid.to_core
-        );
-        assert_eq!(paid.receipt, 0.0);
+        let less = paid.mean_burn_energy - work;
+        assert!((paid.mean_to_core - less).abs() <= 1e-6 * less, "{work}: {paid:?}");
+        assert_eq!(paid.receipt_over_run, 0.0, "{work}: {paid:?}");
     }
 }
 
@@ -488,20 +480,17 @@ fn with_the_burn_not_raised_the_beds_heat_settles_lower_by_the_work_over_the_hea
         work: WORK,
         raised: false,
     });
-    assert!((receipt.receipt - WORK * END_S as f64).abs() <= 1e-9 * receipt.receipt);
+    let taken = receipt.receipt_over_run;
+    assert!((taken - WORK * END_S as f64).abs() <= 1e-9 * taken, "{receipt:?}");
     for work in [WORK, 2.0 * WORK] {
         let paid = settled(Variant {
             paid: true,
             work,
             raised: false,
         });
-        let lower = receipt.bed_heat - work / BED_HEAT_SPEED;
-        assert!(
-            (paid.bed_heat - lower).abs() <= 1e-6 * lower,
-            "{work}: {} against {lower}",
-            paid.bed_heat
-        );
-        assert_eq!(paid.receipt, 0.0);
+        let lower = receipt.bed_heat_at_end - work / BED_HEAT_SPEED;
+        assert!((paid.bed_heat_at_end - lower).abs() <= 1e-6 * lower, "{work}: {paid:?} against {lower}");
+        assert_eq!(paid.receipt_over_run, 0.0, "{work}: {paid:?}");
     }
 }
 
@@ -516,14 +505,13 @@ fn work_past_what_the_bed_can_burn_is_refused_at_the_beds_heat_with_no_store_bel
         Err(faulted) => faulted,
         Ok(settled) => panic!("{variant:?} settled: {settled:?}"),
     };
-    println!("{variant:?}: {faulted:?}");
     let bed = built(variant).expect("a body").bed;
-    assert_eq!(faulted.kind, EngineFaultKind::NoAdmissibleStep);
+    assert_eq!(faulted.kind, EngineFaultKind::NoAdmissibleStep, "{faulted:?}");
     let heat = RowKind::Amount {
         site: bed,
         space: Space::Thermal,
         species: Species::Energy,
     };
-    assert_eq!(faulted.refused, Some(heat));
+    assert_eq!(faulted.refused, Some(heat), "{faulted:?}");
     assert!(faulted.lowest >= 0.0, "a store at {}", faulted.lowest);
 }
