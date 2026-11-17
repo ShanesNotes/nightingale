@@ -73,6 +73,8 @@ pub enum Sites {
     Besides(Tissue),
     /// The vessel segments the map marks as veins.
     Veins,
+    /// Every capillary bed, and the vessel segments the map samples: where speciation stands.
+    Speciated,
 }
 mod sets {
     pub trait Sealed {}
@@ -129,6 +131,17 @@ pub trait Includes<Inner: SiteSet>: SiteSet {}
 impl<C: SiteSet> Includes<C> for C {}
 impl Includes<Veins> for Blood {}
 impl Includes<CapillaryBed> for Blood {}
+/// Every capillary bed and every vessel segment `AnatomyBuilder::sample` marks. A segment joins the set only when the
+/// map samples it, so a sampled segment's speciation costs its rows only in a body that samples it.
+pub enum Speciated {}
+impl sets::Sealed for Speciated {}
+impl SiteSet for Speciated {
+    const SET: Sites = Sites::Speciated;
+}
+impl Includes<CapillaryBed> for Speciated {}
+impl<T: TissueKind> Includes<Beds<T>> for Speciated {}
+impl<T: TissueKind> Includes<Besides<T>> for Speciated {}
+impl Includes<Speciated> for Blood {}
 
 site_classes!(
     CapillaryBed,
@@ -187,6 +200,7 @@ impl Seal for Sites {
             Sites::Tissue(tissue) => (5, tissue as u64),
             Sites::Besides(tissue) => (6, tissue as u64),
             Sites::Veins => (7, 0),
+            Sites::Speciated => (8, 0),
         };
         out.number(set);
         out.number(argument);
@@ -353,6 +367,10 @@ pub enum AnatomyDefect {
     VeinOffVascularNetwork {
         site: &'static str,
     },
+    /// A sampled segment no vascular edge reaches, which would put speciation outside the blood.
+    SampledOffVascularNetwork {
+        site: &'static str,
+    },
 }
 
 struct Declared {
@@ -377,6 +395,7 @@ pub struct AnatomyBuilder {
     regions: Vec<(&'static str, SiteId)>,
     tissues: Vec<(SiteId, Tissue)>,
     veins: Vec<SiteId>,
+    sampled: Vec<SiteId>,
 }
 impl AnatomyBuilder {
     pub fn new() -> Self {
@@ -443,6 +462,23 @@ impl AnatomyBuilder {
     pub fn vein(&mut self, segment: &Site<VesselSegment>) {
         self.veins.push(segment.id());
     }
+    /// Blood chemistry speciates this vessel segment's lumen, as it does every capillary bed's plasma. A repeat is one
+    /// fact, a segment off the vascular network is refused at `finish`, and compile refuses one no other card reads.
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn sampled(map: &mut AnatomyBuilder, bed: &Site<CapillaryBed>) {
+    ///     map.sample(bed);
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn sampled(map: &mut AnatomyBuilder, segment: &Site<VesselSegment>) {
+    ///     map.sample(segment);
+    /// }
+    /// ```
+    pub fn sample(&mut self, segment: &Site<VesselSegment>) {
+        self.sampled.push(segment.id());
+    }
     /// Runs every check and refuses at the first that fails. An identical repeat of a relation is one
     /// fact, so neither repeats nor declaration order change the result.
     pub fn finish(self) -> Result<Anatomy, AdmissionError> {
@@ -471,6 +507,7 @@ struct Facts {
     regions: Vec<(&'static str, usize)>,
     tissues: Vec<(SiteId, Tissue)>,
     veins: Vec<SiteId>,
+    sampled: Vec<SiteId>,
 }
 impl Facts {
     fn resolve(builder: AnatomyBuilder) -> Result<Self, AnatomyDefect> {
@@ -507,6 +544,7 @@ impl Facts {
         .chain(builder.unsupplied.iter().copied())
         .chain(builder.tissues.iter().map(|&(site, _)| site))
         .chain(builder.veins.iter().copied())
+        .chain(builder.sampled.iter().copied())
         .chain(
             builder
                 .landmarks
@@ -529,6 +567,7 @@ impl Facts {
             landmarks: relation(builder.landmarks, same)?,
             tissues: relation(builder.tissues, same)?,
             veins: relation(builder.veins, same)?,
+            sampled: relation(builder.sampled, same)?,
             contains: relation(builder.contains, pair)?,
             vascular: relation(builder.vascular, pair)?,
             encloses: relation(builder.encloses, pair)?,
@@ -589,6 +628,10 @@ impl Facts {
         let ends = || self.vascular.iter().flat_map(|&(from, to)| [from, to]);
         if let Some(site) = ends().filter(|&site| !carries_blood(site)).min() {
             return Err(AnatomyDefect::WrongRelation { site: self.key(site) });
+        }
+        let sampled = (self.sampled.iter()).find(|segment| !ends().any(|site| self.key(site) == segment.key));
+        if let Some(segment) = sampled {
+            return Err(AnatomyDefect::SampledOffVascularNetwork { site: segment.key });
         }
         match (self.veins.iter()).find(|vein| !ends().any(|site| self.key(site) == vein.key)) {
             Some(vein) => Err(AnatomyDefect::VeinOffVascularNetwork { site: vein.key }),
@@ -832,6 +875,7 @@ pub struct Anatomy {
     regions: Vec<(&'static str, usize)>,
     tissues: Vec<(SiteId, Tissue)>,
     veins: Vec<SiteId>,
+    sampled: Vec<SiteId>,
 }
 impl Anatomy {
     fn lay_out(facts: Facts, tree: Tree, enclosure: Enclosure) -> Self {
@@ -868,6 +912,7 @@ impl Anatomy {
             regions: facts.regions,
             tissues: facts.tissues,
             veins: facts.veins,
+            sampled: facts.sampled,
         }
     }
 
@@ -886,6 +931,7 @@ impl Anatomy {
             regions,
             tissues,
             veins,
+            sampled,
         } = self;
         let mut bytes = Canonical::new("ng-contract anatomy 1");
         let index = |bytes: &mut Canonical, site: usize| bytes.number(site as u64);
@@ -989,6 +1035,13 @@ impl Anatomy {
                 vein.seal(&mut bytes);
             }
         }
+        if !sampled.is_empty() {
+            bytes.number(u64::MAX - 2);
+            bytes.length(sampled.len());
+            for segment in sampled {
+                segment.seal(&mut bytes);
+            }
+        }
         bytes.digest()
     }
 
@@ -1049,6 +1102,10 @@ impl Anatomy {
         first.filter(|_| out.next().is_none())
     }
 
+    pub(crate) fn sampled(&self) -> &[SiteId] {
+        &self.sampled
+    }
+
     pub(crate) fn in_set(&self, set: Sites) -> Vec<SiteId> {
         let vascular: Vec<(SiteId, SiteId)> = self.vascular().collect();
         let on_network = |site: SiteId| vascular.iter().any(|edge| edge.0 == site || edge.1 == site);
@@ -1065,6 +1122,7 @@ impl Anatomy {
                 Sites::Tissue(tissue) => self.tissue(site) == Some(tissue),
                 Sites::Besides(tissue) => bed(site) && self.tissue(site) != Some(tissue),
                 Sites::Veins => self.veins.binary_search(&site).is_ok(),
+                Sites::Speciated => bed(site) || self.sampled.binary_search(&site).is_ok(),
             })
             .collect()
     }

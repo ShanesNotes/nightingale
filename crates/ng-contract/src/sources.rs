@@ -36,7 +36,15 @@ pub(crate) fn refusal_sources(layout: &Layout) -> Vec<RefusalSource> {
             laws.push(program.law);
         }
     }
-    for &(_, term) in layout.programs.iter().flat_map(|program| &program.code.origins) {
+    let guards = layout.guards.iter().map(|guard| &guard.code);
+    let codes = || {
+        layout
+            .programs
+            .iter()
+            .map(|program| &program.code)
+            .chain(guards.clone())
+    };
+    for &(_, term) in codes().flat_map(|code| &code.origins) {
         if !laws.contains(&term) {
             laws.push(term);
         }
@@ -52,6 +60,14 @@ pub(crate) fn refusal_sources(layout: &Layout) -> Vec<RefusalSource> {
                     ops.filter(of_law).any(|(_, op)| wanted(op))
                 })
         };
+        let written = |wanted: fn(&Op) -> bool| {
+            (layout.guards.iter()).any(|guard| {
+                let ops = guard.code.ops.iter().enumerate();
+                ops.filter(|&(at, _)| guard.code.origin(at) == Some(law))
+                    .any(|(_, op)| wanted(op))
+            })
+        };
+        let reads = |wanted: fn(&Op) -> bool| reads(wanted) || written(wanted);
         if reads(|op| matches!(op, Op::Divide(_))) {
             sources.push(RefusalSource::Divisor { law });
         }

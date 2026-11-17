@@ -206,6 +206,9 @@ A conducting segment of a flow network between two branch points.
 **Vein**:
 A vessel segment on the vascular network that the map marks as a vein, such as the central veins, the femoral veins or the portal vein. The marked veins are a site set, and every vein is a blood site.
 
+**Sampled segment**:
+A vessel segment on the vascular network that the map marks for speciation, such as the systemic arteries where the peripheral chemoreceptor stands. Blood chemistry speciates its lumen as it does a capillary bed's plasma, and compile refuses one no other card reads.
+
 **Junction**:
 A neuroeffector junction, where a nerve releases a transmitter that is then cleared. A branch point of a network is not a junction.
 
@@ -256,7 +259,10 @@ One of the 13 body systems in the atlas, such as cardiovascular, fluids, renal o
 What a capillary bed serves: lung, gut, muscle, glomerulus, tubule, brain, heart, liver, fat, skin or bone. The map states it, so a site set can name one tissue's beds, and a split bed keeps its tissue.
 
 **Site set**:
-A site class, or the sites a relation picks across classes: those of one network (blood, the urinary tract, the gut, the airway), the veins the map marks, or the capillary beds that serve one tissue or any other. A set includes another when every site of the other is one of its own: blood includes the veins and the capillary beds. This is not containment, the part-of tree. A law on a set is still one law.
+A site class, or the sites a relation picks across classes: those of one network (blood, the urinary tract, the gut, the airway), the veins the map marks, the speciated sites, or the capillary beds that serve one tissue or any other. A set includes another when every site of the other is one of its own: blood includes the veins, the speciated sites and the capillary beds. This is not containment, the part-of tree. A law on a set is still one law.
+
+**Speciated site**:
+A capillary bed or a sampled segment: where speciation stands. The speciated sites are a site set.
 
 **Landmark**:
 A place a whole-body law reads by what it is, such as the carotid sinus or the macula densa. The map says where it stands, so the law names no site.
@@ -364,7 +370,7 @@ The volume one unit amount of a species takes up. A space's volume derives from 
 The share of a blood space's volume that red cells take: the space's hemoglobin amount over its volume, over the red cells' own hemoglobin concentration. Hematology reads it at the central veins, and blood viscosity follows from it.
 
 **Partial pressure**:
-The pressure a dissolved gas would hold in a gas at equilibrium with its space, whose difference wall diffusion follows. Speciation sets oxygen's in a blood space from the space's oxygen, and carbon dioxide's from its bicarbonate and acidity. In a tissue space it is the dissolved gas over its solubility, and carbon dioxide's sits on a buffer line.
+The pressure a dissolved gas would hold in a gas at equilibrium with its space, whose difference wall diffusion follows. Speciation sets oxygen's in a blood space from the space's oxygen, and carbon dioxide's from its bicarbonate and acidity as an explicit field. In a tissue space it is the dissolved gas over its solubility, and carbon dioxide's sits on a buffer line.
 _Avoid_: tension
 
 **Saturation**:
@@ -394,7 +400,7 @@ The carbon dioxide a bed makes over the oxygen it burns. At rung 0 the glucose s
 The heat store at each bed that takes its reactions' energy and passes it to the core store, first order at one declared speed.
 
 **Acidity**:
-A plasma's pH, which speciation sets from its strong ion difference, its weak acids and its carbon dioxide total. Each bed's plasma has one; the interstitium and the cells have none, and a buffer line stands in for theirs.
+A plasma's pH, which speciation sets from its strong ion difference, its weak acids and its carbon dioxide total. Each speciated site's blood has one; the interstitium and the cells have none, and a buffer line stands in for theirs.
 
 **Strong ion difference**:
 The charge of a space's strong and fixed ions, cations less anions, over its volume, which bicarbonate and the weak acids' charge balance. A bed's plasma counts its ions' charge plus one stated offset.
@@ -409,7 +415,10 @@ The carbon dioxide hemoglobin binds in a blood space, which speciation sets from
 A tissue space's carbon dioxide partial pressure as its total over its solubility times one plus a stated ratio of bicarbonate to dissolved carbon dioxide, which stands in for the space's acidity, since the space has none.
 
 **Speciation**:
-The algebraic rows that split a space's total of a gas or a weak acid into its forms and its partial pressure. They read amounts and move none, so the total closes through them.
+The algebraic rows that split a space's total of a gas or a weak acid into its forms and its partial pressure. They read amounts and move none, so the total closes through them. Blood chemistry states the blood's at each speciated site.
+
+**Speciation reader**:
+A card whose laws read what blood chemistry states at the sites of one set: a row of a table of its own beside the coupling map's arrows, with each quantity wired by the body ticket that builds the reading law or held by the reader with a reason. Compile refuses a read no row wires.
 
 **Wall diffusion**:
 A transfer of a dissolved gas across a capillary wall or a cell membrane, at a conductance times the difference of its partial pressures either side.
@@ -653,6 +662,9 @@ _Avoid_: callback
 
 **Site term**:
 A named part of a kernel's graph, declared once on a site set and holding no row, that a law on a set that includes its set adds to one of its values. Compilation writes it into the law's program at each site of its set and leaves the program as it was at every other site. A refused step names the site term when the op that failed is the term's alone.
+
+**Explicit field**:
+A field with no row. Compilation writes its expression into each program that reads it, where the read stood, and names each op it writes for the field's law, so a refused step there names the field. Blood chemistry's port issues carbon dioxide's partial pressure in blood as one.
 
 **Compiled body**:
 The checked, immutable result of compiling the map and every fragment. A solver core sees only this, through the solver interface.

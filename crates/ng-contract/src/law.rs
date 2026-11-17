@@ -816,6 +816,8 @@ pub(crate) struct KernelData {
     pub(crate) defines: bool,
     pub(crate) placing: Option<Box<Placing>>,
     pub(crate) origins: Vec<(usize, LawName)>,
+    /// A written explicit field's value, by its op, judged by that field's validity ranges.
+    pub(crate) judged: Vec<(usize, LawName, Validity)>,
 }
 impl KernelData {
     pub(crate) fn at(&self, inside: impl Fn(Sites) -> bool) -> Option<KernelData> {
@@ -861,6 +863,137 @@ impl KernelData {
             placing.closing.push(Op::Input(Input::Algebraic(row)));
         }
         self
+    }
+    /// Shares no op with the host's own: a shared op would take the host's name and change the order its slopes add in.
+    pub(crate) fn written_in(&self, fields: &[ExplicitLaw]) -> Result<Option<KernelData>, Unwritable> {
+        let field_of = |input: &Input| match input {
+            Input::Read(Source::Field(name), place) => {
+                (fields.iter().find(|field| field.name == *name)).map(|field| (field, *place))
+            }
+            _ => None,
+        };
+        let stands = |place: Where| match place {
+            Where::Here | Where::Mark(_) | Where::MarkOn(..) => Ok(()),
+            _ => Err(Unwritable::NoSuchRead),
+        };
+        let inputs = (self.code.iter()).filter_map(|op| match op {
+            Op::Input(input) => Some(input),
+            _ => None,
+        });
+        let written: Vec<Where> = (inputs.chain(self.unreached.iter().map(|read| &read.input)))
+            .filter_map(|input| field_of(input).map(|(_, place)| place))
+            .collect();
+        if written.is_empty() {
+            return Ok(None);
+        }
+        for &place in &written {
+            stands(place)?;
+        }
+        let mut code = self.code.clone();
+        let mut origins: Vec<Option<LawName>> = vec![None; code.len()];
+        for &(at, law) in &self.origins {
+            origins[at] = Some(law);
+        }
+        let (mut accepting, mut reads) = (self.accepts_no_nerve.clone(), self.fields.clone());
+        let mut moved_unreached = Vec::new();
+        let mut results: Vec<(usize, &ExplicitLaw)> = Vec::new();
+        let mut redirect: Vec<usize> = (0..code.len()).collect();
+        for (at, op) in self.code.iter().enumerate() {
+            let Some((field, place)) = (match op {
+                Op::Input(input) => field_of(input),
+                _ => None,
+            }) else {
+                continue;
+            };
+            if (reads.iter()).any(|read| read.at == at && read.expects != field.kernel.dimension) {
+                return Err(Unwritable::Dimension(field.name));
+            }
+            let moved = |input: Input| match (input, place) {
+                (input, Where::Here) | (input @ Input::Parameter(_), _) => Ok(input),
+                (Input::Read(source, Where::Here), _) => Ok(Input::Read(source, place)),
+                (Input::Height(Where::Here), _) => Ok(Input::Height(place)),
+                _ => Err(Unwritable::NoSuchRead),
+            };
+            let offset = code.len();
+            for op in &field.kernel.code {
+                code.push(match op {
+                    Op::Input(input) => Op::Input(moved(*input)?),
+                    op => op.map(|operand| operand + offset),
+                });
+                origins.push(Some(field.name));
+                redirect.push(redirect.len());
+            }
+            accepting.extend(field.kernel.accepts_no_nerve.iter().map(|at| at + offset));
+            reads.extend(field.kernel.fields.iter().map(|read| FieldRead {
+                at: read.at + offset,
+                expects: read.expects.clone(),
+            }));
+            for read in &field.kernel.unreached {
+                let input = moved(read.input)?;
+                moved_unreached.push(UnreachedRead {
+                    input,
+                    ..read.clone()
+                });
+            }
+            redirect[at] = code.len() - 1;
+            results.push((code.len() - 1, field));
+        }
+        let follow = |at: usize| redirect[at];
+        let code: Vec<Op> = code.iter().map(|op| op.map(follow)).collect();
+        let last = self.code.len() - 1;
+        let closing = match (self.code.get(last.wrapping_sub(1)), &self.code[last]) {
+            (Some(row @ Op::Input(Input::Algebraic(_))), Op::Subtract([at, value]))
+                if self.defines && *at == last - 1 =>
+            {
+                Some((row.clone(), *value))
+            }
+            (Some(row @ Op::Zero(_)), Op::Subtract([at, value])) if *at == last - 1 => {
+                Some((row.clone(), *value))
+            }
+            _ => None,
+        };
+        let result = follow(closing.as_ref().map_or(last, |&(_, value)| value));
+        let (pruned, placed) = reachable_placed(&code, result, &accepting, &reads);
+        let closing_row = closing.as_ref().map(|(row, _)| row);
+        let unreached = (pruned.unreached.into_iter())
+            .filter(|read| field_of(&read.input).is_none() && closing_row != Some(&Op::Input(read.input)))
+            .chain(
+                self.unreached
+                    .iter()
+                    .filter(|read| field_of(&read.input).is_none())
+                    .cloned(),
+            )
+            .chain(moved_unreached)
+            .collect();
+        let mut kept = vec![None; pruned.code.len()];
+        for (at, place) in placed.iter().enumerate() {
+            if let Some(place) = place {
+                kept[*place] = origins[at];
+            }
+        }
+        let mut judged: Vec<(usize, LawName, Validity)> = (results.iter())
+            .filter_map(|&(at, field)| Some((placed[at]?, field)))
+            .flat_map(|(at, field)| field.validity.iter().map(move |&range| (at, field.name, range)))
+            .collect();
+        judged.sort_unstable();
+        let mut code = pruned.code;
+        if let Some((row, _)) = closing {
+            let value = code.len() - 1;
+            code.push(row);
+            code.push(Op::Subtract([value + 1, value]));
+            kept.extend([None, None]);
+        }
+        Ok(Some(KernelData {
+            code,
+            accepts_no_nerve: pruned.accepts_no_nerve,
+            fields: pruned.fields,
+            unreached,
+            origins: (kept.iter().enumerate())
+                .filter_map(|(at, origin)| Some((at, (*origin)?)))
+                .collect(),
+            judged,
+            ..self.clone()
+        }))
     }
 }
 
@@ -1335,6 +1468,77 @@ impl<C: SiteSet, U: Dimension> Carried for PerSite<C, U> {
     }
 }
 pub type SiteField<'b, O, C, U> = (Output<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
+/// A field with no row. Compile writes its expression into each program that reads it, where the read stood, and each
+/// op it writes there names this field's law. Only a contract port issues one, and a row is not expressed.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn expressed<'b>(bc: &mut FragmentBuilder<'b, BloodChemistry>, outputs: &SpeciationOutputs<'b>) {
+///     bc.express_at(&outputs.acidity.0, |mut k| {
+///         let value = k.at_site(&outputs.acidity.1);
+///         k.finish_term(value)
+///     });
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn expressed<'b>(bc: &mut FragmentBuilder<'b, BloodChemistry>, outputs: &SpeciationOutputs<'b>) {
+///     bc.express_at(&outputs.carbon_dioxide_partial_pressure.0, |mut k| {
+///         let value = k.at_site(&outputs.oxygen_partial_pressure.1);
+///         k.finish_term(value)
+///     });
+/// }
+/// ```
+/// The field states no rate class and no mode: the law that reads it holds them.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn expressed<'b>(bc: &mut FragmentBuilder<'b, BloodChemistry>, outputs: &SpeciationOutputs<'b>, class: RateClass) {
+///     let modes = bc.every_mode();
+///     bc.express_at(&outputs.carbon_dioxide_partial_pressure.0, |mut k| {
+///         let value = k.at_site(&outputs.oxygen_partial_pressure.1);
+///         k.finish(value, modes, class)
+///     });
+/// }
+/// ```
+/// Nor is an explicit field defined as a row is.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn defined<'b>(
+///     bc: &mut FragmentBuilder<'b, BloodChemistry>,
+///     outputs: &SpeciationOutputs<'b>,
+///     pressure: PureKernel<'b, BloodChemistry, Pressure, Speciated>,
+/// ) {
+///     bc.define_at(&outputs.carbon_dioxide_partial_pressure.0, pressure);
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn defined<'b>(
+///     bc: &mut FragmentBuilder<'b, BloodChemistry>,
+///     outputs: &SpeciationOutputs<'b>,
+///     pressure: PureKernel<'b, BloodChemistry, Pressure, Speciated>,
+/// ) {
+///     bc.define_at(&outputs.oxygen_partial_pressure.0, pressure);
+/// }
+/// ```
+pub struct Explicit<'b, O, U> {
+    name: &'static str,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, U)>,
+}
+/// The expression to attach with `express_at`, and the read of it, which a law or a guard reads as it reads a row. A
+/// lens channel needs a row, so it does not read one.
+pub type ExplicitField<'b, O, C, U> = (Explicit<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
+pub(crate) struct ExplicitLaw<'f> {
+    pub(crate) name: LawName,
+    pub(crate) set: Sites,
+    pub(crate) kernel: &'f KernelData,
+    pub(crate) validity: Vec<Validity>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Unwritable {
+    NoSuchRead,
+    Dimension(LawName),
+}
 /// A route family at every site of the set `C`: one column per site and per species carried.
 pub struct SiteRoute<'b, O, C, Q> {
     family: Family,
@@ -1887,6 +2091,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
                 defines: false,
                 placing,
                 origins: Vec::new(),
+                judged: Vec::new(),
             },
             brand: PhantomData,
             kind: PhantomData,
@@ -2055,6 +2260,68 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             Output::named(name),
             ReadPort::field(LawName { owner, local: name }),
         )
+    }
+    pub(crate) fn explicit_field<C: SiteSet, U: Dimension>(
+        &mut self,
+        name: &'static str,
+    ) -> ExplicitField<'b, O, C, U> {
+        self.data.slots.push(SlotDeclaration {
+            name,
+            kind: SlotKind::Explicit,
+            dimension: dimension::<U>(),
+            set: AdmissibleSet::Finite,
+            over: Over::Every(C::SET),
+        });
+        let field = Explicit {
+            name,
+            brand: PhantomData,
+            kind: PhantomData,
+        };
+        let owner = O::CARD;
+        (field, ReadPort::field(LawName { owner, local: name }))
+    }
+    /// The expression of an explicit field at each site of its set, closed as a site term's is: it closes on no row,
+    /// and it holds where and at the rate class of the law that reads it, where the read stands.
+    pub fn express_at<C: SiteSet, U: Dimension, F>(
+        &mut self,
+        field: &Explicit<'b, O, PerSite<C, U>>,
+        build: F,
+    ) where
+        F: for<'k> FnOnce(Kernel<'b, 'k, O, C>) -> FinishedTerm<'b, 'k, O, U, C>,
+    {
+        let Placing {
+            code,
+            result,
+            accepting,
+            fields,
+            splices,
+            ..
+        } = build(Kernel::open()).graph;
+        let finished: Finished<'b, '_, O, U, C> = Finished {
+            code,
+            accepts_no_nerve: accepting,
+            fields,
+            splices,
+            result,
+            dimension: dimension::<U>(),
+            modes: self.every_mode(),
+            rate: RateClass::UNMOVED,
+            kernel: PhantomData,
+            kind: PhantomData,
+        };
+        let kernel = self.close(finished);
+        self.attach(Obligation::Explicit(field.name), kernel.data);
+    }
+    /// Where an explicit field's value is trusted. Each program the field is written into judges it, and leaving the
+    /// range is reported under the field's law, never refused.
+    pub fn field_validity<C: SiteSet, U>(
+        &mut self,
+        field: &Explicit<'b, O, PerSite<C, U>>,
+        range: ValidityRange<U>,
+    ) {
+        let (lower, upper, basis) = range.parts();
+        let validity = Validity { lower, upper, basis };
+        self.data.field_validity.push((field.name, validity));
     }
     /// Declares one mode variable of this owner and returns its values in order.
     pub fn modes<const N: usize>(
@@ -2389,6 +2656,7 @@ pub(crate) struct FragmentData {
     pub(crate) kept_back: Vec<(Family, Species)>,
     pub(crate) reactions: Vec<ReactionDeclaration>,
     pub(crate) terms: Vec<&'static str>,
+    pub(crate) field_validity: Vec<(&'static str, Validity)>,
 }
 impl FragmentData {
     pub(crate) fn owe_flow(&mut self, family: Family) {
@@ -2418,6 +2686,7 @@ impl FragmentData {
             kept_back: Vec::new(),
             reactions: Vec::new(),
             terms: Vec::new(),
+            field_validity: Vec::new(),
         }
     }
 }
@@ -2434,6 +2703,7 @@ pub(crate) enum SlotKind {
     Algebraic,
     /// Only a definition serves it and only a port reads it, so a plain slot of its name does neither.
     Defined,
+    Explicit,
 }
 pub(crate) struct ModeDeclaration {
     pub(crate) name: &'static str,
@@ -2464,6 +2734,7 @@ pub(crate) enum Obligation {
     Boundary(&'static str),
     Sum(&'static str, Sites),
     Reaction(&'static str),
+    Explicit(&'static str),
 }
 impl Obligation {
     pub(crate) fn local(self) -> &'static str {
@@ -2472,7 +2743,8 @@ impl Obligation {
             | Obligation::Defined(name)
             | Obligation::Boundary(name)
             | Obligation::Sum(name, _)
-            | Obligation::Reaction(name) => name,
+            | Obligation::Reaction(name)
+            | Obligation::Explicit(name) => name,
             Obligation::Family(family) => family.name(),
         }
     }

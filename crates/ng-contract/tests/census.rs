@@ -1,4 +1,8 @@
-use ng_contract::catalog::{ARROWS, Arrow, Carries, Disposition, HeldField, WiredField};
+use ng_contract::Sites;
+use ng_contract::catalog::{
+    ARROWS, Arrow, Carries, Disposition, HeldField, HeldRead, SPECIATION_READERS, SpeciationReader,
+    WiredField, WiredRead,
+};
 
 const ATRIAL: WiredField = WiredField {
     name: "atrial_wall_stress",
@@ -171,5 +175,96 @@ fn every_arrow_of_the_catalog_keeps_the_census_rules() {
         );
         assert!(arrow.one_holder_per_field(), "line {line} has a second holder");
         assert!(arrow.every_reason_given(), "line {line} has an empty reason");
+    }
+}
+
+const fn reader(
+    reader: &'static str,
+    wired: &'static [WiredRead],
+    held: &'static [HeldRead],
+) -> SpeciationReader {
+    SpeciationReader {
+        reader,
+        sites: Sites::Speciated,
+        label: "a synthetic reader",
+        wired,
+        held,
+    }
+}
+const ACIDITY: WiredRead = WiredRead {
+    quantity: "acidity",
+    body_ticket: 11,
+};
+const HELD: HeldRead = HeldRead {
+    quantity: "acidity",
+    reason: "a synthetic reason",
+};
+
+#[test]
+fn the_readers_table_refuses_a_reader_that_reads_nothing() {
+    assert!(reader("NS", &[ACIDITY], &[]).accounted());
+    assert!(!reader("NS", &[], &[]).accounted());
+}
+
+#[test]
+fn the_readers_table_refuses_blood_chemistry_as_a_reader() {
+    assert!(reader("NS", &[ACIDITY], &[]).read_by_another_card());
+    assert!(!reader("BC", &[ACIDITY], &[]).read_by_another_card());
+}
+
+#[test]
+fn the_readers_table_refuses_one_quantity_twice_in_a_row() {
+    assert!(reader("NS", &[ACIDITY], &[]).each_quantity_once());
+    assert!(!reader("NS", &[ACIDITY], &[HELD]).each_quantity_once());
+    assert!(!reader("NS", &[ACIDITY, ACIDITY], &[]).each_quantity_once());
+}
+
+#[test]
+fn the_readers_table_refuses_a_wired_read_no_body_ticket_wires() {
+    const EARLY: WiredRead = WiredRead {
+        body_ticket: 5,
+        ..ACIDITY
+    };
+    const LATE: WiredRead = WiredRead {
+        body_ticket: 26,
+        ..ACIDITY
+    };
+    assert!(reader("NS", &[ACIDITY], &[]).wired_by_body_tickets());
+    assert!(!reader("NS", &[EARLY], &[]).wired_by_body_tickets());
+    assert!(!reader("NS", &[LATE], &[]).wired_by_body_tickets());
+}
+
+#[test]
+fn the_readers_table_refuses_an_empty_reason() {
+    const UNREASONED: HeldRead = HeldRead { reason: "", ..HELD };
+    assert!(reader("NS", &[], &[HELD]).every_reason_given());
+    assert!(!reader("NS", &[], &[UNREASONED]).every_reason_given());
+}
+
+#[test]
+fn the_readers_table_refuses_two_rows_for_one_reader_and_set() {
+    let brain = SpeciationReader {
+        sites: Sites::Tissue(ng_contract::Tissue::Brain),
+        ..reader("NS", &[], &[HELD])
+    };
+    let once = [reader("NS", &[ACIDITY], &[]), brain, reader("RN", &[], &[HELD])];
+    assert!(SpeciationReader::one_row_per_reader_and_set(&once));
+    let twice = [reader("NS", &[ACIDITY], &[]), reader("NS", &[], &[HELD])];
+    assert!(!SpeciationReader::one_row_per_reader_and_set(&twice));
+}
+
+#[test]
+fn every_row_of_the_readers_table_keeps_its_rules() {
+    assert!(SpeciationReader::one_row_per_reader_and_set(&SPECIATION_READERS));
+    for row in &SPECIATION_READERS {
+        let label = row.label;
+        assert!(row.accounted(), "{label} reads nothing");
+        assert!(row.read_by_another_card(), "{label} is blood chemistry's own");
+        assert!(row.each_quantity_once(), "{label} names a quantity twice");
+        assert!(
+            row.wired_by_body_tickets(),
+            "{label} names no body ticket from 06 to 25"
+        );
+        assert!(row.every_reason_given(), "{label} has an empty reason");
     }
 }

@@ -3,15 +3,16 @@ use crate::body::{
     HazardLayout, Instance, Layout, ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Receipt, Row,
     RowId, RowKind, Slot, Sparsity, StreamLayout, Target, UnknownId,
 };
+use crate::catalog::SpeciationReader;
 use crate::chance::key_word;
 use crate::conservation::{Balanced, admission_totals, conserved_basis, weight};
 use crate::elimination::Elimination;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::law::{
-    End, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation, Op, Over,
-    ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration, SlotKind, Source,
-    Where,
+    End, ExplicitLaw, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation,
+    Op, Over, ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration,
+    SlotKind, Source, Unwritable, Validity, Where,
 };
 use crate::scheme::greatest_common_divisor;
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, PoolRef, RouteBoundary};
@@ -27,6 +28,7 @@ pub(crate) fn compile(
     issued: Vec<&'static str>,
     mut held: Vec<HeldCard>,
     mut fragments: Vec<FragmentData>,
+    readers: &[SpeciationReader],
 ) -> Result<CompiledBody, AdmissionError> {
     fragments.sort_by_key(|fragment| fragment.owner);
     lift_flows(&mut fragments, &schema);
@@ -54,12 +56,15 @@ pub(crate) fn compile(
         schema: &schema,
         fragments: &fragments,
         held: &held,
+        readers,
     };
-    let placement = place(&owed, &places, &unread)?;
+    let fields = explicit_laws(&owed)?;
+    let placement = place(&owed, &places, &unread, &fields)?;
     check_holds(&rows, &schema, &held)?;
     check_orphans(&rows, &placement.columns, &schema, &held)?;
     let modes = modes(&fragments, &places);
-    let guards = guards(&fragments, &places, &modes)?;
+    let guards = guards(&fragments, &places, &modes, &fields)?;
+    check_samples(&placement, &guards, &modes, &rows, &schema.anatomy)?;
     let forced = forcing_parameters(&fragments);
     let (parameters, instances, guards) = bind(placement.instances, guards, &forced, &declarations);
     let closed = closed_rows(&fragments, &rows);
@@ -415,6 +420,7 @@ enum Serves<'f> {
     Boundary(&'f RouteBoundary),
     Sum(Sites),
     Reaction(&'f ReactionDeclaration),
+    Explicit(Sites),
 }
 
 fn obligations<'f>(
@@ -470,16 +476,14 @@ fn obligations<'f>(
     }
     for fragment in fragments {
         for slot in &fragment.slots {
-            let obligation = match slot.kind {
-                SlotKind::Defined => Obligation::Defined(slot.name),
-                SlotKind::Memory | SlotKind::Algebraic => Obligation::Slot(slot.name),
+            let (serves, obligation) = match (slot.kind, slot.over) {
+                (SlotKind::Explicit, Over::Every(set)) => {
+                    (Serves::Explicit(set), Obligation::Explicit(slot.name))
+                }
+                (SlotKind::Defined, over) => (Serves::Slot(over), Obligation::Defined(slot.name)),
+                (_, over) => (Serves::Slot(over), Obligation::Slot(slot.name)),
             };
-            owed.push(Owed::gather(
-                fragment,
-                slot.name,
-                Serves::Slot(slot.over),
-                obligation,
-            ));
+            owed.push(Owed::gather(fragment, slot.name, serves, obligation));
         }
         for &family in fragment.families.iter().filter(|family| !flows(**family, schema)) {
             owed.push(Owed::gather(
@@ -778,7 +782,11 @@ impl Rows {
             .collect();
         let mut slots: Vec<(SlotKind, Slot, AdmissibleSet, &String)> = (fragments.iter())
             .flat_map(|fragment| {
-                fragment.slots.iter().flat_map(|slot| {
+                let rows = fragment
+                    .slots
+                    .iter()
+                    .filter(|slot| slot.kind != SlotKind::Explicit);
+                rows.flat_map(|slot| {
                     let SlotDeclaration {
                         name,
                         kind,
@@ -817,7 +825,7 @@ impl Rows {
         let slot_rows = slots.iter().map(|&(kind, slot, set, dimension)| {
             let kind = match kind {
                 SlotKind::Memory => RowKind::Memory(slot),
-                SlotKind::Algebraic | SlotKind::Defined => RowKind::Algebraic(slot),
+                SlotKind::Algebraic | SlotKind::Defined | SlotKind::Explicit => RowKind::Algebraic(slot),
             };
             (kind, set, dimension.clone())
         });
@@ -1203,6 +1211,7 @@ struct Places<'a> {
     schema: &'a Schema,
     fragments: &'a [FragmentData],
     held: &'a [HeldCard],
+    readers: &'a [SpeciationReader],
 }
 
 struct ChanceNames {
@@ -1347,7 +1356,12 @@ fn marked(
     Ok(instances)
 }
 
-fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement, CompileDefect> {
+fn place(
+    owed: &[Owed],
+    places: &Places,
+    unread: &[LawName],
+    fields: &[ExplicitLaw],
+) -> Result<Placement, CompileDefect> {
     let Places {
         rows,
         reaches,
@@ -1363,6 +1377,7 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
     let mut variants: Vec<Program> = Vec::new();
     for law in owed {
         let targets = match law.serves {
+            Serves::Explicit(_) => continue,
             Serves::Slot(over) => places_of(anatomy, reaches, schema, law.name.owner, over)
                 .into_iter()
                 .map(|at| {
@@ -1441,6 +1456,18 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
                 | Input::Memory(_) => Some(true),
                 _ => None,
             };
+            let defined;
+            let mut kernel = kernel;
+            if let Serves::Boundary(water) = law.serves
+                && water.drains
+            {
+                defined = kernel.clone().defining(water.name);
+                kernel = &defined;
+            }
+            let write = |kernel: &KernelData| written(law.name, kernel, fields);
+            let own = kernel;
+            let written = write(own)?;
+            let kernel = written.as_ref().unwrap_or(own);
             let reads: Vec<bool> = (kernel.code.iter())
                 .filter_map(|op| match op {
                     Op::Input(input) => read(input),
@@ -1450,18 +1477,16 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
             if reads.contains(&false) && !reads.contains(&true) {
                 return Err(CompileDefect::UnscaledInput { law: law.name });
             }
-            let defined;
-            let mut kernel = kernel;
-            if let Serves::Boundary(water) = law.serves
-                && water.drains
-            {
-                defined = kernel.clone().defining(water.name);
-                kernel = &defined;
-            }
             let declared = ProgramId::at(placement.programs.len());
             let base = code(law.fragment, kernel);
             for &(context, target) in &targets {
-                let variant = kernel.at(|set| inside(anatomy, set, context));
+                let unwritten = own.at(|set| inside(anatomy, set, context));
+                let variant = match &unwritten {
+                    Some(unwritten) => Some(write(unwritten)?.unwrap_or_else(|| unwritten.clone())),
+                    None => None,
+                };
+                let reads = unwritten.as_ref().unwrap_or(own);
+                check_landing(law.name, reads, fields, context, anatomy)?;
                 let (program, kernel) = match &variant {
                     None => (declared, kernel),
                     Some(variant) => {
@@ -1501,6 +1526,7 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
                     target,
                     addresses: addresses(law.name, route, kernel, context, places)?,
                 });
+                check_wired(law.name, reads, context, places)?;
             }
             placement.programs.push(Program {
                 id: declared,
@@ -1531,6 +1557,158 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
 }
 
 const VARIANT: usize = usize::MAX / 2;
+
+fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileDefect> {
+    let explicit: Vec<(&Owed<'f>, Sites)> = (owed.iter())
+        .filter_map(|owed| match owed.serves {
+            Serves::Explicit(set) => Some((owed, set)),
+            _ => None,
+        })
+        .collect();
+    let mut fields = Vec::new();
+    for &(owed, set) in &explicit {
+        let law = owed.name;
+        let &(_, kernel) = owed
+            .laws
+            .first()
+            .expect("check_coverage refuses a field with no law");
+        let local = |input: &Input| match input {
+            Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,
+            Input::SiteParameter(_) => true,
+            Input::Read(
+                Source::Drive(_) | Source::RoutePool(..) | Source::Reacting(..) | Source::Flow(_),
+                _,
+            ) => true,
+            Input::Read(Source::Field(name), _) => explicit.iter().any(|(field, _)| field.name == *name),
+            _ => false,
+        };
+        let mut inputs = (kernel.code.iter())
+            .filter_map(|op| match op {
+                Op::Input(input) => Some(input),
+                _ => None,
+            })
+            .chain(kernel.unreached.iter().map(|read| &read.input));
+        if kernel.placing.is_some() || inputs.any(local) {
+            return Err(CompileDefect::NoSuchRead { law });
+        }
+        let mut validity: Vec<Validity> = (owed.fragment.field_validity.iter())
+            .filter(|&&(name, _)| name == law.local)
+            .map(|&(_, range)| range)
+            .collect();
+        validity.sort_unstable();
+        fields.push(ExplicitLaw {
+            name: law,
+            set,
+            kernel,
+            validity,
+        });
+    }
+    Ok(fields)
+}
+
+fn written(
+    law: LawName,
+    kernel: &KernelData,
+    fields: &[ExplicitLaw],
+) -> Result<Option<KernelData>, CompileDefect> {
+    kernel.written_in(fields).map_err(|refused| match refused {
+        Unwritable::NoSuchRead => CompileDefect::NoSuchRead { law },
+        Unwritable::Dimension(field) => CompileDefect::FieldDimension { law, field },
+    })
+}
+
+fn check_samples(
+    placement: &Placement,
+    guards: &[(GuardLayout, Vec<Address>)],
+    modes: &[ModeLayout],
+    rows: &Rows,
+    anatomy: &Anatomy,
+) -> Result<(), CompileDefect> {
+    let stater = crate::BloodChemistry::CARD;
+    let stated_at = |address: &Address, site: SiteId| match address {
+        Address::Unknown(row) => matches!(
+            rows.rows[row.index()].kind,
+            RowKind::Algebraic(Slot { law, at: Context::Site(at) }) if law.owner == stater && at == site
+        ),
+        _ => false,
+    };
+    let laws = (placement.instances.iter())
+        .map(|placed| (placement.programs[placed.program.index()].law, &placed.addresses))
+        .chain((guards.iter()).map(|(guard, addresses)| (modes[guard.variable].variable.law, addresses)));
+    let readers: Vec<(LawName, &Vec<Address>)> = laws.filter(|(law, _)| law.owner != stater).collect();
+    let read_at = |site: SiteId| {
+        (readers.iter()).any(|(_, addresses)| addresses.iter().any(|address| stated_at(address, site)))
+    };
+    match anatomy.sampled().iter().find(|&&site| !read_at(site)) {
+        Some(&site) => Err(CompileDefect::UnreadSample { site }),
+        None => Ok(()),
+    }
+}
+
+fn check_wired(
+    law: LawName,
+    kernel: &KernelData,
+    context: Context,
+    places: &Places,
+) -> Result<(), CompileDefect> {
+    let stater = crate::BloodChemistry::CARD;
+    if law.owner == stater {
+        return Ok(());
+    }
+    let inputs = (kernel.code.iter())
+        .filter_map(|op| match op {
+            Op::Input(input) => Some(input),
+            _ => None,
+        })
+        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let &Input::Read(Source::Field(field), place) = input else {
+            continue;
+        };
+        if field.owner != stater {
+            continue;
+        }
+        let landed = place_of(place, context, places.anatomy);
+        let wires = |row: &SpeciationReader| {
+            row.reader == law.owner
+                && row.wired.iter().any(|read| read.quantity == field.local)
+                && landed.is_some_and(|site| places.anatomy.in_set(row.sites).contains(&site))
+        };
+        if !places.readers.iter().any(wires) {
+            return Err(CompileDefect::UnwiredRead { law, field });
+        }
+    }
+    Ok(())
+}
+
+fn check_landing(
+    law: LawName,
+    kernel: &KernelData,
+    fields: &[ExplicitLaw],
+    context: Context,
+    anatomy: &Anatomy,
+) -> Result<(), CompileDefect> {
+    let inputs = (kernel.code.iter())
+        .filter_map(|op| match op {
+            Op::Input(input) => Some(input),
+            _ => None,
+        })
+        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let Input::Read(Source::Field(name), place) = input else {
+            continue;
+        };
+        let Some(field) = fields.iter().find(|field| field.name == *name) else {
+            continue;
+        };
+        let landed = place_of(*place, context, anatomy);
+        if !landed.is_some_and(|site| anatomy.in_set(field.set).contains(&site)) {
+            let field = field.name;
+            return Err(CompileDefect::UnemittedField { law, field });
+        }
+    }
+    Ok(())
+}
 
 fn inside(anatomy: &Anatomy, set: Sites, context: Context) -> bool {
     matches!(context, Context::Site(site) if anatomy.in_set(set).contains(&site))
@@ -1715,6 +1893,7 @@ fn fluid_program(
             validity: Vec::new(),
             defines: false,
             origins: Vec::new(),
+            judged: Vec::new(),
         },
     });
     id
@@ -1844,6 +2023,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         defines,
         placing: _,
         origins,
+        judged,
     } = kernel;
     let mut validity: Vec<_> = (fragment.validity.iter())
         .filter(|(kernel, _)| kernel == id)
@@ -1858,6 +2038,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         validity,
         defines: *defines,
         origins: origins.clone(),
+        judged: judged.clone(),
     }
 }
 
@@ -1896,6 +2077,7 @@ fn addresses(
         schema,
         fragments,
         held,
+        readers: _,
     } = *places;
     let inputs = kernel
         .code
@@ -2205,6 +2387,7 @@ fn guards(
     fragments: &[FragmentData],
     places: &Places,
     modes: &[ModeLayout],
+    fields: &[ExplicitLaw],
 ) -> Result<Vec<(GuardLayout, Vec<Address>)>, CompileDefect> {
     let Places {
         rows,
@@ -2245,7 +2428,10 @@ fn guards(
             if resets.as_ref().is_some_and(positive) {
                 return Err(CompileDefect::ResetOutsideSet { law });
             }
+            let written = written(law, zero, fields)?;
+            let program = written.as_ref().unwrap_or(zero);
             for at in places_of(anatomy, reaches, schema, fragment.owner, mode.over) {
+                check_landing(law, zero, fields, at, anatomy)?;
                 let reset = resets.map(|local| {
                     let owner = fragment.owner;
                     let row = rows.slot(LawName { owner, local }, at).map(RowId::at);
@@ -2258,11 +2444,12 @@ fn guards(
                     leaves: sorted(*leaves),
                     enters: sorted(*enters),
                     crossing: *crossing,
-                    code: code(fragment, zero),
+                    code: code(fragment, program),
                     inputs: Vec::new(),
                     resets: reset,
                 };
-                guards.push((layout, addresses(law, route, zero, at, places)?));
+                guards.push((layout, addresses(law, route, program, at, places)?));
+                check_wired(law, zero, at, places)?;
             }
         }
     }
@@ -2312,6 +2499,7 @@ fn bind(
                     ParameterContext::Site(Sites::Tissue(_) | Sites::Besides(_)) => {
                         Some(Binding::Class(Class::CapillaryBed))
                     }
+                    ParameterContext::Site(Sites::Speciated) => Some(Binding::Network(Network::Vascular)),
                     ParameterContext::Site(Sites::Blood | Sites::Veins) => {
                         Some(Binding::Network(Network::Vascular))
                     }
