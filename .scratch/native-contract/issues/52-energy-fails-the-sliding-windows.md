@@ -4,7 +4,7 @@ Spec: [solver contract](../../../docs/architecture/solver-contract.md) §7 (the 
 
 Type: task
 
-Status: claimed
+Status: resolved
 
 Claimed by: nc52-build
 
@@ -31,7 +31,7 @@ This bears on the options below. A bound from the measured windows would be set 
 - Admit the man in his daily balance: fixture amounts for which the state at 06:55 repeats a day later. Then every book's bound can be tight, and the check reads a leak and not the first day's settling.
 
 - [x] A third day confirms or corrects the cause: day three against day two, at every start. It corrects it in part: "The third day" above, with `~/lanes/logs/ng-wave-4/nc52/by-day.txt`
-- [ ] The milestone protocol passes on the slice with the working core, with [native-contract 68](68-the-ledgers-sum-reads-one-last-place-off.md), and each bound states its source as native-contract 43 states the species'. Each bound now states its source. The pass is the certificate's own 48 h run, which the coordinator starts from `~/lanes/logs/ng-wave-4/nc52-build/milestone-certificate.sh`; this box stays open until that run is read.
+- [x] The milestone protocol passes on the slice with the working core, with [native-contract 68](68-the-ledgers-sum-reads-one-last-place-off.md), and each bound states its source as native-contract 43 states the species'. Each bound now states its source. The milestone run passed it: `engine-bench score 10 5 ng-solver milestone` at main `020a4a403ffb` simulated 172,800 s, and the certificate passed in 36,429,927 pieces. The worst closure is 1.1e-22, on energy, and energy's drift is 1.83e6 of its 4e6. Accuracy and replay passed, with no floor fault and no excursion.
 - [x] A bound that is raised, or a check that covers fewer windows, has its reason in the fixture's own doc line or in §7, and a mutant row holds it.
 - [x] The PR says what the chosen check still sees: the smallest steady leak in a boundary energy flow that fails it, beside the slice window's whole-beat check ([native-contract 31](31-cross-interval-drift-check.md)).
 
@@ -63,6 +63,6 @@ With the baroreflex set point held, the counts are 622, 142 and 128, so the set 
 - A ramping bias of a a second squared fails when a·W/k passes the bound: a growth of 4e3 a second over a day at 4e6, and 200 at 2e5.
 - Native-contract 31's whole-beat window passes a stroke-work bias up to 2.7e3 a second. That is its plan's figure, measured at main `7f0cbfe`, for a check that reads the first 6 s. So for a bias from admission energy's drift at 4e6 adds nothing below it, and a bias that starts after those 6 s is drift's alone, read from 2.2e3 a second as a loss. Native-contract 31's plan gave energy's bound as a rate of 2.3 a second, assuming the store adds up the bias. On this slice the store relaxes, so the figures above are what it catches. The repo carries that rate nowhere.
 
-**The 48 h gate.** The whole gate over 48 h is the milestone route's own run, after the developer reviewer confirms the pick. The certificate's own 48 h pass comes first, from `milestone-certificate.sh`, and box 1 waits on it.
+**The 48 h gate.** The whole gate over 48 h is the milestone route's own run, after the developer reviewer confirms the pick. That run passed at main `020a4a403ffb`: the certificate, accuracy and replay over every sliding 24 h window of 48 h, with energy's drift at 1.83e6 of its 4e6. [Foundation 01](../../foundation/issues/01-arena-and-milestone.md)'s Comments hold the run's record.
 
 **The pick's record.** The pick ran at model hash `42c60687`. The merge of nightingale#168 moved the slice's solution at rounding only (item 6 of `~/lanes/logs/ng-wave-4/nc57/verify-coordinator/VERIFY-pr168.md`), and this ticket's PR leaves the pick's policy as it was.
