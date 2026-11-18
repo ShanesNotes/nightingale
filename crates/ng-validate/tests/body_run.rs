@@ -308,10 +308,11 @@ fn counted_until<'s>(
 
 /// The books whose inventories move with each breath: the gases the lungs hold, and vasopressin and energy with the
 /// circulation's breath-scale swing.
-const BREATHING_BOOKS: [Book; 5] = [
+const BREATHING_BOOKS: [Book; 6] = [
     Book::Of(Species::Vasopressin),
     Book::Element(Element::Oxygen),
     Book::Element(Element::Carbon),
+    Book::Element(Element::Hydrogen),
     Book::Of(Species::NitrogenGas),
     Book::Energy,
 ];
@@ -323,6 +324,12 @@ fn larger(a: f64, b: f64) -> f64 {
 
 fn widen((low, high): (f64, f64), x: f64) -> (f64, f64) {
     (if x < low { x } else { low }, if x > high { x } else { high })
+}
+
+fn paid_by_the_coronary_bed(body: &CompiledBody, terms: &[(RowId, i64)]) -> bool {
+    terms.iter().all(|(row, _)| {
+        matches!(body.rows()[row.index()].kind(), RowKind::Amount { site, .. } if site.key() == "coronary bed")
+    })
 }
 
 /// One accepted step of the first minute.
@@ -388,6 +395,7 @@ impl Watch {
         };
         let books = (body.conserved_basis().combinations().iter())
             .filter(|combination| BREATHING_BOOKS.contains(&combination.book()))
+            .filter(|combination| !paid_by_the_coronary_bed(body, combination.terms()))
             .map(|combination| (combination.book(), combination.terms().to_vec()))
             .collect();
         Self {
@@ -527,7 +535,13 @@ fn each_breath_swings_the_alveolar_gases_and_venous_return(watch: &Watch) -> Str
             )
         })
         .collect();
-    let mut report = String::new();
+    let first = edges.first().copied().expect("a breath edge");
+    let mut report = format!(
+        "before the first breath edge: alveolar oxygen {:.3}, carbon dioxide {:.3}, venous return {:.2}\n",
+        watch.mean(0, first, |moment| moment.alveolar[0]),
+        watch.mean(0, first, |moment| moment.alveolar[1]),
+        watch.mean(0, first, |moment| moment.venous)
+    );
     for pair in edges.windows(2) {
         let (from, to) = (pair[0], pair[1]);
         let swing = |gas: usize| {
@@ -549,7 +563,7 @@ fn each_breath_swings_the_alveolar_gases_and_venous_return(watch: &Watch) -> Str
         let (low, high) = means
             .iter()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |range, &x| widen(range, x));
-        let mean = means.iter().sum::<f64>() / means.len() as f64;
+        let mean = watch.mean(from, to, |moment| moment.venous);
         assert!(
             means.len() >= 2 && high - low >= 0.02 * mean,
             "the breath from {at} s holds venous return's beat means {means:?}"
@@ -690,11 +704,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT skin bed glucose feed moved
     "#]]
     .assert_eq(&report);
-    let payer = |terms: &[(RowId, i64)]| {
-        terms.iter().all(|(row, _)| {
-            matches!(start.body.rows()[row.index()].kind(), RowKind::Amount { site, .. } if site.key() == "coronary bed")
-        })
-    };
+    let payer = |terms: &[(RowId, i64)]| paid_by_the_coronary_bed(&start.body, terms);
     let rule = [
         (Book::Energy, false, 9e3, 1e4),
         (Book::Element(Element::Carbon), false, 4e2, 5e2),
