@@ -130,6 +130,7 @@ pub fn body_anatomy() -> Result<Anatomy, AdmissionError> {
     for (from, to) in [
         (pulmonary_artery.id(), lung.id()),
         (lung.id(), pulmonary_vein.id()),
+        (pulmonary_artery.id(), pulmonary_vein.id()),
         (pulmonary_vein.id(), left_atrium.id()),
         (arteries.id(), gut.id()),
         (gut.id(), portal_vein.id()),

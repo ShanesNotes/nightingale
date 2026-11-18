@@ -125,7 +125,7 @@ Blood chemistry speciates the blood at every capillary bed and at each vessel se
 | Reader | Sites | Wired (body ticket) | Held |
 |---|---|---|---|
 | MT | `CapillaryBed` | oxygen partial pressure (08), carbon dioxide partial pressure (08) | none |
-| RS | `Beds<Lung>` | none | oxygen partial pressure, carbon dioxide partial pressure |
+| RS | `Beds<Lung>` | oxygen partial pressure (10), carbon dioxide partial pressure (10) | none |
 | NS | `Beds<Brain>` | none | acidity |
 | NS | `Speciated` | none | oxygen partial pressure, carbon dioxide partial pressure |
 | RN | `Beds<Tubule>` | none | acidity |

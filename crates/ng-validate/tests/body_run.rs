@@ -306,7 +306,7 @@ fn counted_until<'s>(
 
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (Session<'_, Running>, Minute) {
     let pools = start.held_pools();
-    assert_eq!(pools.len(), 322);
+    assert_eq!(pools.len(), 319);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
         let view = session.record().accepted();
         pools.iter().map(|(row, _)| view.value(*row).bits()).collect()
@@ -401,6 +401,76 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT skin bed glucose feed moved
     "#]]
     .assert_eq(&report);
+}
+
+/// Over ten seconds after the first minute, each gas the airway carries closes on the respiratory card's routes: what
+/// the room puts in less what it takes out and what the membrane moves into the pulmonary bed's plasma is what the
+/// dead space and the alveolar unit gained.
+fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
+    start: &Start,
+    minute: Session<'_, Running>,
+) {
+    let body = &start.body;
+    let columns = every_column(body);
+    let (airway, lung) = (
+        site::<TissueSite>("conducting airway"),
+        site::<CapillaryBed>("pulmonary bed"),
+    );
+    let held = |session: &Session<'_, Running>, gas| -> f64 {
+        let view = session.record().accepted();
+        let in_gas = |kind| matches!(kind, RowKind::Amount { site, species, space: Space::Gas } if (site == airway || site == lung) && species == gas);
+        (body.rows().iter())
+            .filter(|row| in_gas(row.kind()))
+            .map(|row| lead(view.value(row.id())))
+            .sum()
+    };
+    let gases = [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas];
+    let from = minute.record().accepted().time().nanoseconds();
+    let before = gases.map(|gas| held(&minute, gas));
+    let session = until(minute, from - anchor_moment().nanoseconds() + 10 * SECOND);
+    let to = session.record().accepted().time().nanoseconds();
+    let after = gases.map(|gas| held(&session, gas));
+    let (early, late) = (extents(&session, &columns, from), extents(&session, &columns, to));
+    for (at, gas) in gases.into_iter().enumerate() {
+        let gas_at =
+            |bed: SiteId| move |site, species, space| site == bed && species == gas && space == Space::Gas;
+        let (mut inspired, mut expired, mut diffused, mut along) = (0.0, 0.0, 0.0, 0.0);
+        for &column in &columns {
+            let (into_airway, into_lung) = (
+                count(body, column, gas_at(airway)),
+                count(body, column, gas_at(lung)),
+            );
+            if into_airway == 0.0 && into_lung == 0.0 {
+                continue;
+            }
+            let moved = late[column.index()] - early[column.index()];
+            let placed = &body.columns()[column.index()];
+            let receipt = placed.receipt().map(|receipt| receipt.boundary());
+            assert_eq!(
+                placed.origin().owner,
+                "RS",
+                "{:?} moves {gas:?} in the airway's gas",
+                placed.origin()
+            );
+            match (receipt, into_airway, into_lung) {
+                (Some(_), 1.0, 0.0) => inspired += moved,
+                (Some(_), -1.0, 0.0) => expired += moved,
+                (None, -1.0, 1.0) => along += moved,
+                (None, 0.0, -1.0) => diffused += moved,
+                other => panic!("{:?} moves {gas:?} as {other:?}", placed.origin()),
+            }
+        }
+        let gained = after[at] - before[at];
+        let gross = [inspired, expired, diffused, along]
+            .map(f64::abs)
+            .into_iter()
+            .fold(0.0, |most, x| if x > most { x } else { most });
+        assert!(gross > 0.0, "{gas:?} moved nowhere");
+        assert!(
+            (gained - (inspired - expired - diffused)).abs() <= 1e-9 * gross,
+            "{gas:?}: in {inspired}, out {expired}, across {diffused}, along {along}, gained {gained}"
+        );
+    }
 }
 
 fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
@@ -1453,6 +1523,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         steps: minute.record().revision(),
         solves: start.core.solves.get() - before,
     };
+    each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(&start, minute);
     let mut minute = format!(
         "steps {}, solves {}: ordinary {}, landing {}\n",
         counts.steps,

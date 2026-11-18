@@ -164,8 +164,6 @@ pub(super) const CELL_WATER_OUT: [&str; 11] = [
     "skin bed cell water out",
     "bone bed cell water out",
 ];
-pub(super) const LUNG_OXYGEN: &str = "lung oxygen";
-pub(super) const LUNG_CARBON_DIOXIDE: &str = "lung carbon dioxide";
 
 fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     let portal = site::<VesselSegment>("portal vein")?;
@@ -199,8 +197,6 @@ fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
         schema.boundary::<Water>(water, out, bed, Space::Cells)?;
     }
     let lung = site::<CapillaryBed>("pulmonary bed")?;
-    schema.boundary::<Oxygen>(LUNG_OXYGEN, into, lung, Space::Plasma)?;
-    schema.boundary::<CarbonDioxide>(LUNG_CARBON_DIOXIDE, out, lung, Space::Plasma)?;
 
     let veins = site::<VesselSegment>("central veins")?;
     let glomerular = site::<CapillaryBed>("glomerular bed")?;

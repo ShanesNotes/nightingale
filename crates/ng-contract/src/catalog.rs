@@ -972,14 +972,16 @@ macro_rules! speciation_readers {
 const READERS: usize = 5;
 
 speciation_readers! {
-    Metabolism at CapillaryBed, "each bed's plasma gases, for wall diffusion and the held lung exchange",
+    Metabolism at CapillaryBed, "each bed's plasma gases, for wall diffusion",
         wired (PlasmaGases {
             oxygen_partial_pressure: OxygenPartialPressure => 8,
             carbon_dioxide_partial_pressure: CarbonDioxidePartialPressure => 8,
         });
     Respiratory at Beds<Lung>, "the pulmonary bed's gases, for alveolar exchange",
-        held [OxygenPartialPressure "metabolism's held lung exchange reads the pulmonary bed until ticket 10's alveoli",
-            CarbonDioxidePartialPressure "the same held exchange"];
+        wired (LungGases {
+            oxygen_partial_pressure: OxygenPartialPressure => 10,
+            carbon_dioxide_partial_pressure: CarbonDioxidePartialPressure => 10,
+        });
     Nervous at Beds<Brain>, "the brain bed's acidity, at the central chemoreceptor",
         held [Acidity "no central sensor until ticket 11"];
     Nervous at Speciated, "arterial gases, at the peripheral chemoreceptor",
@@ -1005,7 +1007,7 @@ const fn read_count() -> ReadCount {
     count
 }
 const READ: ReadCount = read_count();
-const _: () = assert!(READ.wired == 2 && READ.held == 6);
+const _: () = assert!(READ.wired == 4 && READ.held == 4);
 const _: () = assert!(SpeciationReader::one_row_per_reader_and_set(&SPECIATION_READERS));
 const _: () = {
     let mut i = 0;
@@ -1026,7 +1028,7 @@ const _: () = {
     }
 };
 const _: () = {
-    let plan: [(&str, Sites, &str, u8); 2] = [
+    let plan: [(&str, Sites, &str, u8); 4] = [
         (
             "MT",
             Sites::Class(Class::CapillaryBed),
@@ -1038,6 +1040,13 @@ const _: () = {
             Sites::Class(Class::CapillaryBed),
             "carbon dioxide partial pressure",
             8,
+        ),
+        ("RS", Sites::Tissue(Tissue::Lung), "oxygen partial pressure", 10),
+        (
+            "RS",
+            Sites::Tissue(Tissue::Lung),
+            "carbon dioxide partial pressure",
+            10,
         ),
     ];
     let (mut i, mut n) = (0, 0);
@@ -1061,13 +1070,7 @@ const _: () = {
     assert!(n == plan.len());
 };
 const _: () = {
-    let plan: [(&str, Sites, &str); 6] = [
-        ("RS", Sites::Tissue(Tissue::Lung), "oxygen partial pressure"),
-        (
-            "RS",
-            Sites::Tissue(Tissue::Lung),
-            "carbon dioxide partial pressure",
-        ),
+    let plan: [(&str, Sites, &str); 4] = [
         ("NS", Sites::Tissue(Tissue::Brain), "acidity"),
         ("NS", Sites::Speciated, "oxygen partial pressure"),
         ("NS", Sites::Speciated, "carbon dioxide partial pressure"),
