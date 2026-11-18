@@ -3,6 +3,7 @@
 
 use core::num::NonZeroU64;
 use ng_contract::*;
+use ng_musculoskeletal::breathe;
 use ng_record::{Curve, Running, Session, Step};
 use ng_respiratory::{Plasma, Ventilation, exchange};
 use ng_validate::*;
@@ -217,6 +218,10 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         laws.transfer(Transfer::new(&made, rate));
         body.add(laws.finish());
 
+        let (mut laws, _) = body.musculoskeletal(None)?.parts();
+        breathe(&mut laws)?;
+        body.add(laws.finish());
+
         let (mut laws, ports) = body.respiratory(None)?.parts();
         let ventilation = Ventilation::declare(&mut laws, &ports)?;
         let plasma = Dissolved {
@@ -279,23 +284,23 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Volume>(p, "rs.wall-rest-volume", unit.rests[1])?;
     set::<Volume>(p, "rs.wall-rest-rise", UPRIGHT_WALL_REST_RISE)?;
     set::<Length>(p, "rs.trunk-length", CAROTID_ABOVE_VESSEL)?;
-    set::<Pressure>(p, "rs.pump-pressure", unit.pump)?;
+    set::<Pressure>(p, "ms.pump-pressure", unit.pump)?;
     for (key, value) in [
-        ("rs.breath-rate", RATE),
-        ("rs.drive-rise", DRIVE[0]),
-        ("rs.drive-fall", DRIVE[1]),
-        ("rs.rest-speed", 1.0),
-        ("rs.share-fall", unit.share_fall),
-        ("rs.breath-start", unit.breath_start),
+        ("ms.breath-rate", RATE),
+        ("ms.drive-rise", DRIVE[0]),
+        ("ms.drive-fall", DRIVE[1]),
+        ("ms.rest-speed", 1.0),
+        ("ms.share-fall", unit.share_fall),
+        ("ms.breath-start", unit.breath_start),
     ] {
         set::<Rate<Dimensionless>>(p, key, value)?;
     }
     for (key, value) in [
-        ("rs.inspiration-length", unit.phases[0]),
-        ("rs.expiration-length", unit.phases[1]),
-        ("rs.drive-peak", DRIVE[2]),
-        ("rs.rest-drive", unit.rest_drive),
-        ("rs.rest-share", 1.0),
+        ("ms.inspiration-length", unit.phases[0]),
+        ("ms.expiration-length", unit.phases[1]),
+        ("ms.drive-peak", DRIVE[2]),
+        ("ms.rest-drive", unit.rest_drive),
+        ("ms.rest-share", 1.0),
     ] {
         set::<Dimensionless>(p, key, value)?;
     }
@@ -337,10 +342,12 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
         RowKind::Memory(slot) if slot.law.local == "mixing share" => unit.initial_mixing_share,
         RowKind::Memory(slot) if slot.law.local == "pump drive" => unit.rest_drive,
         RowKind::Algebraic(slot) if slot.law.local == "chest wall rest volume" => unit.rests[1],
+        RowKind::Algebraic(slot) if slot.law.local == "pump_force" => unit.pump * unit.rest_drive,
+        RowKind::Algebraic(slot) if slot.law.local == "mixing_share" => unit.initial_mixing_share,
         RowKind::Memory(_) | RowKind::Algebraic(_) => 0.0,
     };
     let breath = LawName {
-        owner: Respiratory::CARD,
+        owner: Musculoskeletal::CARD,
         local: "breath",
     };
     packet.start_mode(breath, "rest", NOTE)?;
@@ -614,7 +621,7 @@ fn a_mixing_share_outside_zero_to_one_is_refused_at_its_row() -> Result<(), Init
     run(AT_REST, 0, |_, _| ())?;
     let share = RowKind::Memory(Slot {
         law: LawName {
-            owner: Respiratory::CARD,
+            owner: Musculoskeletal::CARD,
             local: "mixing share",
         },
         at: Context::Body,

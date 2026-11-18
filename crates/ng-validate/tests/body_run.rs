@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "23b5753243a212d29fbf2f6a1839ab10abe43c0e5595fa54280963fa43d034b5";
-const ADMITTED_SEAL: &str = "0994fbad5dd80903f95e7a46706899614ea25e2dd32ee252e68e91aaec7d7eed";
+const PACKET: &str = "0bfa96e99622a5d7885a590080f9d74990981f95ff491accdca283e74e6612e2";
+const ADMITTED_SEAL: &str = "d85a733c21dc4e8b4077c5ad905abcbe212a3c2f666ce21b7910fb66ea839346";
 
 struct Counted {
     core: ng_solver::Core,
@@ -369,7 +369,7 @@ impl Watch {
                 .id()
         };
         let phase = (body.rows().iter())
-            .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "RS" && slot.law.local == "breath phase"))
+            .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "MS" && slot.law.local == "breath phase"))
             .expect("the breath's phase")
             .id();
         let venous = Context::Edge {
@@ -665,7 +665,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11671, quantities 399, held routes 89
+        steps 11675, quantities 399, held routes 89
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -760,7 +760,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
 
 fn to_the_breaths_end<'s>(start: &Start, mut session: Session<'s, Running>) -> Session<'s, Running> {
     let phase = (start.body.rows().iter())
-        .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "RS" && slot.law.local == "breath phase"))
+        .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "MS" && slot.law.local == "breath phase"))
         .expect("the breath's phase")
         .id();
     loop {
@@ -938,23 +938,23 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 23b5753243a212d29fbf2f6a1839ab10abe43c0e5595fa54280963fa43d034b5
-        seal 5152265e61545a06b0a32a59bc2c0aa78c583430661c443f231d38cad36e13b8
-        steps 198
+        packet 0bfa96e99622a5d7885a590080f9d74990981f95ff491accdca283e74e6612e2
+        seal 1958bb1d9a7207182e39c56af2d65ce6021a201571ffc9dec14b0fb52fdaec0a
+        steps 197
         viscosity over its reference at the start 1.000234140
     "#]]
     .assert_eq(&pin);
     expect![[r#"
-         100.403446 ms  arterial pressure 134.601269  right atrial pressure 2.843641  portal vein pressure 6.244676  leg vein pressure 3.539214  heart rate 1.063931  sympathetic traffic 0.786553  filtration 1.669107  urine 0.020000  wall power 24560.983051  aortic flow 0.000000
-         201.433366 ms  arterial pressure 126.985705  right atrial pressure 3.291840  portal vein pressure 6.370534  leg vein pressure 3.684452  heart rate 1.081205  sympathetic traffic 0.086030  filtration 2.106929  urine 0.020000  wall power 15556.203956  aortic flow 39.628797
-         302.696199 ms  arterial pressure 118.697846  right atrial pressure 3.714403  portal vein pressure 6.150610  leg vein pressure 3.872230  heart rate 1.047429  sympathetic traffic 0.016489  filtration 2.340250  urine 0.020000  wall power 38248.362634  aortic flow 0.000000
-         402.779726 ms  arterial pressure 109.431891  right atrial pressure 3.229225  portal vein pressure 5.902154  leg vein pressure 4.229787  heart rate 1.004896  sympathetic traffic 0.012386  filtration 2.404005  urine 0.020000  wall power 14035.650432  aortic flow 0.000000
-         504.160253 ms  arterial pressure 100.945499  right atrial pressure 1.494082  portal vein pressure 5.648199  leg vein pressure 3.930286  heart rate 0.970460  sympathetic traffic 0.023279  filtration 2.342866  urine 0.020000  wall power 12009.296776  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.031450  right atrial pressure 0.901488  portal vein pressure 5.356791  leg vein pressure 3.237583  heart rate 0.947724  sympathetic traffic 0.075377  filtration 2.188546  urine 0.020000  wall power 8628.863519  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.043565  right atrial pressure 0.826700  portal vein pressure 5.135960  leg vein pressure 2.666845  heart rate 0.940826  sympathetic traffic 0.263694  filtration 1.993062  urine 0.020000  wall power 6296.742215  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.606036  right atrial pressure 0.997983  portal vein pressure 5.128166  leg vein pressure 2.425356  heart rate 0.952742  sympathetic traffic 0.644069  filtration 1.780424  urine 0.020000  wall power 4911.355677  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.690079  right atrial pressure 1.251502  portal vein pressure 5.405636  leg vein pressure 2.522915  heart rate 0.983060  sympathetic traffic 0.905286  filtration 1.566187  urine 0.020000  wall power 3944.365530  aortic flow 0.000000
-        1000.382092 ms  arterial pressure 68.667041  right atrial pressure 1.487235  portal vein pressure 5.772029  leg vein pressure 2.716771  heart rate 1.021902  sympathetic traffic 0.977673  filtration 1.376097  urine 0.020000  wall power 3072.862098  aortic flow 0.000000
+         100.403583 ms  arterial pressure 134.600935  right atrial pressure 2.844227  portal vein pressure 6.244698  leg vein pressure 3.539581  heart rate 1.063931  sympathetic traffic 0.786558  filtration 1.669111  urine 0.020000  wall power 24560.847446  aortic flow 0.000000
+         201.434364 ms  arterial pressure 126.985318  right atrial pressure 3.292278  portal vein pressure 6.370632  leg vein pressure 3.684887  heart rate 1.081206  sympathetic traffic 0.086032  filtration 2.106940  urine 0.020000  wall power 15556.031460  aortic flow 39.629109
+         302.696069 ms  arterial pressure 118.697567  right atrial pressure 3.714741  portal vein pressure 6.150743  leg vein pressure 3.872595  heart rate 1.047430  sympathetic traffic 0.016490  filtration 2.340259  urine 0.020000  wall power 38247.986576  aortic flow 0.000000
+         402.781667 ms  arterial pressure 109.431475  right atrial pressure 3.229497  portal vein pressure 5.902299  leg vein pressure 4.230055  heart rate 1.004896  sympathetic traffic 0.012387  filtration 2.404013  urine 0.020000  wall power 14035.347368  aortic flow 0.000000
+         504.159288 ms  arterial pressure 100.945374  right atrial pressure 1.494359  portal vein pressure 5.648359  leg vein pressure 3.930553  heart rate 0.970462  sympathetic traffic 0.023281  filtration 2.342874  urine 0.020000  wall power 12009.265251  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.031286  right atrial pressure 0.901714  portal vein pressure 5.356945  leg vein pressure 3.237822  heart rate 0.947725  sympathetic traffic 0.075382  filtration 2.188552  urine 0.020000  wall power 8628.835822  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.043434  right atrial pressure 0.826888  portal vein pressure 5.136102  leg vein pressure 2.667057  heart rate 0.940828  sympathetic traffic 0.263705  filtration 1.993066  urine 0.020000  wall power 6296.729140  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.605935  right atrial pressure 0.998135  portal vein pressure 5.128296  leg vein pressure 2.425537  heart rate 0.952744  sympathetic traffic 0.644080  filtration 1.780426  urine 0.020000  wall power 4911.344939  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.690004  right atrial pressure 1.251621  portal vein pressure 5.405754  leg vein pressure 2.523064  heart rate 0.983063  sympathetic traffic 0.905289  filtration 1.566187  urine 0.020000  wall power 3944.357790  aortic flow 0.000000
+        1000.380685 ms  arterial pressure 68.667060  right atrial pressure 1.487323  portal vein pressure 5.772126  leg vein pressure 2.716888  heart rate 1.021904  sympathetic traffic 0.977674  filtration 1.376099  urine 0.020000  wall power 3072.872086  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -1922,7 +1922,7 @@ fn the_whole_body_passes_every_replay_gate() {
         local: "stir",
     };
     let breathing = LawName {
-        owner: Respiratory::CARD,
+        owner: Musculoskeletal::CARD,
         local: "breath dice",
     };
     for gate in [
@@ -1982,27 +1982,27 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
         before the first breath edge: alveolar oxygen 101.326, carbon dioxide 28.340, venous return 77.34
-        breath from 5.000 s: alveolar oxygen 100.791 swinging 3.070, carbon dioxide 28.690 swinging 2.011, venous return's beat means 74.25 to 84.57 around 78.05
-        breath from 10.000 s: alveolar oxygen 100.452 swinging 3.053, carbon dioxide 28.831 swinging 1.946, venous return's beat means 74.11 to 84.52 around 78.01
-        breath from 15.000 s: alveolar oxygen 100.177 swinging 3.042, carbon dioxide 28.896 swinging 1.918, venous return's beat means 74.11 to 84.49 around 78.00
-        breath from 20.000 s: alveolar oxygen 99.950 swinging 3.035, carbon dioxide 28.927 swinging 1.905, venous return's beat means 74.11 to 84.50 around 78.00
-        breath from 25.000 s: alveolar oxygen 99.759 swinging 3.032, carbon dioxide 28.942 swinging 1.900, venous return's beat means 74.12 to 84.50 around 78.00
-        breath from 30.000 s: alveolar oxygen 99.596 swinging 3.049, carbon dioxide 28.952 swinging 1.901, venous return's beat means 74.05 to 84.49 around 78.00
-        breath from 35.000 s: alveolar oxygen 99.455 swinging 3.072, carbon dioxide 28.960 swinging 1.903, venous return's beat means 74.06 to 84.49 around 78.00
-        breath from 40.001 s: alveolar oxygen 99.331 swinging 3.092, carbon dioxide 28.966 swinging 1.904, venous return's beat means 74.06 to 84.49 around 78.00
+        breath from 5.001 s: alveolar oxygen 100.791 swinging 3.070, carbon dioxide 28.690 swinging 2.010, venous return's beat means 74.25 to 84.56 around 78.05
+        breath from 10.001 s: alveolar oxygen 100.452 swinging 3.053, carbon dioxide 28.831 swinging 1.946, venous return's beat means 74.11 to 84.52 around 78.01
+        breath from 15.001 s: alveolar oxygen 100.177 swinging 3.042, carbon dioxide 28.896 swinging 1.917, venous return's beat means 74.11 to 84.49 around 78.00
+        breath from 20.001 s: alveolar oxygen 99.950 swinging 3.035, carbon dioxide 28.927 swinging 1.905, venous return's beat means 74.11 to 84.50 around 78.00
+        breath from 25.001 s: alveolar oxygen 99.759 swinging 3.032, carbon dioxide 28.942 swinging 1.900, venous return's beat means 74.12 to 84.49 around 78.00
+        breath from 30.001 s: alveolar oxygen 99.596 swinging 3.049, carbon dioxide 28.952 swinging 1.901, venous return's beat means 74.05 to 84.49 around 78.00
+        breath from 35.001 s: alveolar oxygen 99.455 swinging 3.073, carbon dioxide 28.960 swinging 1.903, venous return's beat means 74.06 to 84.49 around 78.00
+        breath from 40.001 s: alveolar oxygen 99.332 swinging 3.093, carbon dioxide 28.966 swinging 1.904, venous return's beat means 74.06 to 84.49 around 78.00
         breath from 45.001 s: alveolar oxygen 99.223 swinging 3.111, carbon dioxide 28.973 swinging 1.905, venous return's beat means 74.06 to 84.49 around 78.01
-        breath from 50.001 s: alveolar oxygen 99.127 swinging 3.127, carbon dioxide 28.978 swinging 1.906, venous return's beat means 74.06 to 84.49 around 78.01
-        highest alveolar oxygen 102.575 (4.103 times P50) at 1.088 s: plasma oxygen pressure 93.084 (3.723 times P50), bound 0.963989 of capacity
-        Energy: worst 1.1289e3, from admission 5.9381e1, steady 1.1296e3, inside a breath 5.6486e2
-        Element(Carbon): worst 4.7480e1, from admission 3.6194e1, steady 4.4205e1, inside a breath 2.0167e2
-        Element(Oxygen): worst 1.8252e3, from admission 1.8235e3, steady 5.2037e1, inside a breath 4.4882e3
-        Element(Hydrogen): worst 5.0585e-5, from admission 1.5862e-5, steady 5.0627e-5, inside a breath 2.5428e-5
-        Of(NitrogenGas): worst 3.4121e3, from admission 3.4115e3, steady 7.5750e1, inside a breath 8.6038e3
-        Of(Vasopressin): worst 2.1035e-3, from admission 1.3302e-4, steady 1.3759e-3, inside a breath 1.5313e-2
+        breath from 50.001 s: alveolar oxygen 99.127 swinging 3.128, carbon dioxide 28.978 swinging 1.907, venous return's beat means 74.06 to 84.49 around 78.01
+        highest alveolar oxygen 102.575 (4.103 times P50) at 1.088 s: plasma oxygen pressure 93.084 (3.723 times P50), bound 0.963988 of capacity
+        Energy: worst 1.1300e3, from admission 5.9629e1, steady 1.1307e3, inside a breath 5.6513e2
+        Element(Carbon): worst 4.7475e1, from admission 3.6196e1, steady 4.4207e1, inside a breath 2.0167e2
+        Element(Oxygen): worst 1.8252e3, from admission 1.8235e3, steady 5.2181e1, inside a breath 4.4882e3
+        Element(Hydrogen): worst 5.0578e-5, from admission 1.5859e-5, steady 5.0620e-5, inside a breath 2.5424e-5
+        Of(NitrogenGas): worst 3.4122e3, from admission 3.4115e3, steady 7.6015e1, inside a breath 8.6037e3
+        Of(Vasopressin): worst 2.1019e-3, from admission 1.3093e-4, steady 1.3738e-3, inside a breath 1.5313e-2
         two breaths from 60.001 s to 70.001 s
-        Oxygen: in 4589.9436, out 3651.6821, across 950.4726, along 938.9561, gained -1.2211e1
-        CarbonDioxide: in 8.7427, out 686.3418, across -678.3349, along -677.6465, gained 7.3587e-1
-        NitrogenGas: in 17258.1880, out 17246.6866, across 0.0000, along 10.8382, gained 1.1501e1
+        Oxygen: in 4589.9398, out 3651.6799, across 950.4730, along 938.9544, gained -1.2213e1
+        CarbonDioxide: in 8.7427, out 686.3416, across -678.3351, along -677.6462, gained 7.3630e-1
+        NitrogenGas: in 17258.1735, out 17246.6710, across 0.0000, along 10.8392, gained 1.1502e1
     "#]].assert_eq(&report);
     let mut minute = format!(
         "steps {}, solves {}: ordinary {}, landing {}\n",
@@ -2015,12 +2015,11 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
     expect![[r#"
-        steps 11671, solves 14388: ordinary 12338, landing 2050
+        steps 11675, solves 14396: ordinary 12342, landing 2054
         refused 74 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
-        refused 1 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "elastic energy" }, at: Body })
         refused 1 Accuracy Amount { site: SiteId { key: "body", class: TissueSite }, space: Elastic, species: Energy }
         refused 1 Accuracy Amount { site: SiteId { key: "conducting airway", class: TissueSite }, space: Gas, species: CarbonDioxide }
-        refused 239 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
+        refused 240 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
         refused 293 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
         refused 58 IterationLimit
     "#]]

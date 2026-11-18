@@ -20,7 +20,7 @@ SLICE_REASONED = {"relation", "outside", "unresolved"}
 BODY_TICKETS = range(6, 26)
 SLICE_COUNTS = {"rows": 38, "mapped": 27, "listed unmapped": 11, "incident mapped": 27, "incident unmapped": 1}
 BODY_COUNTS = {"rows": 38, "wire a field": 18, "relations": 5, "hold every field": 15, "wire and hold": 7,
-               "wired fields": 20, "held fields": 30}
+               "wired fields": 21, "held fields": 30}
 SLICE_LINES = {
     "live": [77, 80, 97],
     "input": [83, 90, 91, 99, 100, 102, 105, 106, 108, 114],
@@ -83,6 +83,7 @@ WIRED_BY = [
     (90, "oxygen_debt_per_bed", 9),
     (91, "core_temperature", 12),
     (95, "pump_force", 10),
+    (95, "mixing_share", 10),
     (97, "afferent_tone", 6),
     (98, "renin_secretion", 17),
     (114, "viscosity", 8),

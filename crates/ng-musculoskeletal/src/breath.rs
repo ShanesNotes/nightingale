@@ -1,21 +1,43 @@
+use ng_contract::catalog::{Defines, PumpForce};
 use ng_contract::*;
 
-type Bound<'b, U> = Parameter<'b, Respiratory, U>;
-type Memory<'b> = StateSlot<'b, Respiratory, Dimensionless>;
+type Bound<'b, U> = Parameter<'b, Musculoskeletal, U>;
+type Memory<'b> = StateSlot<'b, Musculoskeletal, Dimensionless>;
 
 /// One breath is a pass of the phase through inspiration's length, while the pump drive rises toward its
 /// peak, and then expiration's, while it falls. Two positive lengths leave every breath room to end.
 /// Admission solves one heartbeat, and a phase that ran free could not return to itself inside one, so the
 /// body admits in `rest`, where the phase rests at zero, the drive at the breath's mean and the mixing share
-/// at the rest share, and a hazard starts the first breath.
-pub(crate) struct Breath<'b> {
-    pub(crate) drive: Memory<'b>,
-    pub(crate) share: Memory<'b>,
+/// at the rest share, and a hazard starts the first breath. The pump force on line 95 is `P_mus = PImax a` for the
+/// pump drive `a` (research 11's pump row). The mixing share rides line 95 too: the respiratory card's mixing exchange
+/// carries the breath's mean ventilation while the breath rests, and only the breath's modes say when it starts.
+pub fn breathe<'b>(laws: &mut FragmentBuilder<'b, Musculoskeletal>) -> Result<(), AdmissionError> {
+    let class = RateClass::new(RateBand::Beat, 1_000_000_000)?;
+    let Breath { drive, share } = Breath::declare(laws, class)?;
+    let pump = laws.parameter::<Pressure>(ParameterKey::new("ms.pump-pressure"), Admissible::nonnegative());
+    let line: PumpForce<Defines<'b, Musculoskeletal>> = laws.emit();
+    let force = laws.kernel(|mut k| {
+        let (pump, drive) = (k.parameter(&pump), k.state(&drive));
+        let value = k.scale(pump, drive);
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.define(&line.pump_force, force);
+    let mixing = laws.kernel(|mut k| {
+        let value = k.state(&share);
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.define(&line.mixing_share, mixing);
+    Ok(())
+}
+
+struct Breath<'b> {
+    drive: Memory<'b>,
+    share: Memory<'b>,
 }
 
 impl<'b> Breath<'b> {
-    pub(crate) fn declare(
-        laws: &mut FragmentBuilder<'b, Respiratory>,
+    fn declare(
+        laws: &mut FragmentBuilder<'b, Musculoskeletal>,
         class: RateClass,
     ) -> Result<Self, AdmissionError> {
         let key = ParameterKey::new;
@@ -24,22 +46,23 @@ impl<'b> Breath<'b> {
         let drive = laws.state::<Dimensionless>("pump drive", Admissible::nonnegative());
         let share = laws.state::<Dimensionless>("mixing share", Admissible::unit_interval());
         let hazard = laws.state::<Dimensionless>("breath start", Admissible::nonnegative());
-        let speed = |laws: &mut FragmentBuilder<'b, Respiratory>, name| -> Bound<'b, Rate<Dimensionless>> {
-            laws.parameter(key(name), Admissible::positive())
-        };
-        let rate = speed(laws, "rs.breath-rate");
-        let rise = speed(laws, "rs.drive-rise");
-        let fall = speed(laws, "rs.drive-fall");
-        let settle = speed(laws, "rs.rest-speed");
-        let mixing_fall = speed(laws, "rs.share-fall");
-        let start = laws.parameter::<Rate<Dimensionless>>(key("rs.breath-start"), Admissible::nonnegative());
+        let speed =
+            |laws: &mut FragmentBuilder<'b, Musculoskeletal>, name| -> Bound<'b, Rate<Dimensionless>> {
+                laws.parameter(key(name), Admissible::positive())
+            };
+        let rate = speed(laws, "ms.breath-rate");
+        let rise = speed(laws, "ms.drive-rise");
+        let fall = speed(laws, "ms.drive-fall");
+        let settle = speed(laws, "ms.rest-speed");
+        let mixing_fall = speed(laws, "ms.share-fall");
+        let start = laws.parameter::<Rate<Dimensionless>>(key("ms.breath-start"), Admissible::nonnegative());
         let inspiration_length =
-            laws.parameter::<Dimensionless>(key("rs.inspiration-length"), Admissible::positive());
+            laws.parameter::<Dimensionless>(key("ms.inspiration-length"), Admissible::positive());
         let expiration_length =
-            laws.parameter::<Dimensionless>(key("rs.expiration-length"), Admissible::positive());
-        let peak = laws.parameter::<Dimensionless>(key("rs.drive-peak"), Admissible::positive());
-        let rest_drive = laws.parameter::<Dimensionless>(key("rs.rest-drive"), Admissible::nonnegative());
-        let rest_share = laws.parameter::<Dimensionless>(key("rs.rest-share"), Admissible::unit_interval());
+            laws.parameter::<Dimensionless>(key("ms.expiration-length"), Admissible::positive());
+        let peak = laws.parameter::<Dimensionless>(key("ms.drive-peak"), Admissible::positive());
+        let rest_drive = laws.parameter::<Dimensionless>(key("ms.rest-drive"), Admissible::nonnegative());
+        let rest_share = laws.parameter::<Dimensionless>(key("ms.rest-share"), Admissible::unit_interval());
         let dice = laws.stream("breath dice");
 
         let advance = laws.kernel(|mut k| {
@@ -124,11 +147,11 @@ impl<'b> Breath<'b> {
 }
 
 fn toward<'b, 'k>(
-    k: &mut Kernel<'b, 'k, Respiratory>,
-    target: Expr<'b, 'k, Respiratory, Dimensionless>,
+    k: &mut Kernel<'b, 'k, Musculoskeletal>,
+    target: Expr<'b, 'k, Musculoskeletal, Dimensionless>,
     slot: &Memory<'b>,
     speed: &Bound<'b, Rate<Dimensionless>>,
-) -> Expr<'b, 'k, Respiratory, Rate<Dimensionless>> {
+) -> Expr<'b, 'k, Musculoskeletal, Rate<Dimensionless>> {
     let (now, speed) = (k.state(slot), k.parameter(speed));
     k.relax(target, now, speed)
 }

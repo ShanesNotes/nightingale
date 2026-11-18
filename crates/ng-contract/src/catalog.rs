@@ -489,7 +489,7 @@ coupling_map! {
     94 Metabolism => BloodChemistry, "temperature", outside "neither end in the arena slice",
         held [temperature: Temperature => BloodChemistry "BC's speciation runs at a reference temperature (ticket 12)"];
     95 Musculoskeletal => Respiratory, "pump force and fatigue", outside "neither end in the arena slice",
-        wired (PumpForce { pump_force: Pressure => 10 })
+        wired (PumpForce { pump_force: Pressure => 10, mixing_share: Dimensionless => 10 })
         held [fatigue: Dimensionless => Musculoskeletal "a resting day has no fatigue law"];
     96 Musculoskeletal => Cardiovascular, "position and gravity",
         relation "site positions under the boundary's posture",
@@ -551,7 +551,7 @@ const _: () = assert!(SLICE.mapped() == 27 && SLICE.unmapped() == 11);
 const _: () = assert!(SLICE.incident_mapped == 27 && SLICE.incident_unmapped == 1);
 const _: () = assert!(WHOLE_BODY.live == 18 && WHOLE_BODY.relation == 5 && WHOLE_BODY.held == 15);
 const FIELDS: FieldCount = field_count();
-const _: () = assert!(FIELDS.wired == 20 && FIELDS.held == 30 && FIELDS.wire_and_hold == 7);
+const _: () = assert!(FIELDS.wired == 21 && FIELDS.held == 30 && FIELDS.wire_and_hold == 7);
 const _: () = {
     let mut i = 0;
     while i < MAP_EDGES {
@@ -690,7 +690,7 @@ const _: () = {
     assert!(n == plan.len());
 };
 const _: () = {
-    let plan: [(usize, &str, u8); 20] = [
+    let plan: [(usize, &str, u8); 21] = [
         (77, "carotid_sinus_stretch", 6),
         (77, "aortic_arch_stretch", 6),
         (78, "myocardial_work", 9),
@@ -708,6 +708,7 @@ const _: () = {
         (90, "oxygen_debt_per_bed", 9),
         (91, "core_temperature", 12),
         (95, "pump_force", 10),
+        (95, "mixing_share", 10),
         (97, "afferent_tone", 6),
         (98, "renin_secretion", 17),
         (114, "viscosity", 8),

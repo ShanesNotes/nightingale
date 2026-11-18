@@ -1,4 +1,4 @@
-use crate::breath::Breath;
+use ng_contract::catalog::{PumpForce, Reads};
 use ng_contract::*;
 
 type Bound<'b, U> = Parameter<'b, Respiratory, U>;
@@ -87,8 +87,7 @@ impl Dry for NitrogenGas {
 /// The room's side reads the dead space's own head, not the alveolar unit's: with the alveolar unit's head there, the
 /// dead space's total is conserved by these laws and nothing sets it.
 pub struct Ventilation<'b> {
-    breath: Breath<'b>,
-    pump: Bound<'b, Pressure>,
+    pump: PumpForce<Reads<'b, Respiratory>>,
     wall: AlgebraicSlot<'b, Respiratory, Volume>,
     oxygen: Gas<'b, Oxygen>,
     carbon_dioxide: Gas<'b, CarbonDioxide>,
@@ -114,8 +113,7 @@ impl<'b> Ventilation<'b> {
         let key = ParameterKey::new;
         let class = class()?;
         let ventilation = Self {
-            breath: Breath::declare(laws, class)?,
-            pump: laws.parameter(key("rs.pump-pressure"), Admissible::nonnegative()),
+            pump: laws.receive(),
             wall: laws.algebraic("chest wall rest volume", Admissible::positive()),
             oxygen: Gas::declare(laws, "rs.oxygen-volume"),
             carbon_dioxide: Gas::declare(laws, "rs.carbon-dioxide-volume"),
@@ -173,10 +171,8 @@ impl<'b> Ventilation<'b> {
         k.as_dimension(share)
     }
 
-    /// The pump's pressure, `P_mus = PImax a` for the pump drive `a` (research 11's pump row).
     fn muscle<'k, C>(&self, k: &mut Kernel<'b, 'k, Respiratory, C>) -> Expr<'b, 'k, Respiratory, Pressure> {
-        let (pump, drive) = (k.parameter(&self.pump), k.state(&self.breath.drive));
-        k.scale(pump, drive)
+        k.read(&self.pump.pump_force)
     }
 
     /// `V_W0 = V_W0,supine + dV_W rise / L`: sitting up raises the chest wall's relaxed volume (research 11, Nunn
@@ -207,7 +203,7 @@ impl<'b> Ventilation<'b> {
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
     ) -> Expr<'b, 'k, Respiratory, Rate<Volume>> {
-        let (m, share) = (k.parameter(&self.mixing), k.state(&self.breath.share));
+        let (m, share) = (k.parameter(&self.mixing), k.read(&self.pump.mixing_share));
         k.scale(m, share)
     }
 
