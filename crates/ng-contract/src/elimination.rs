@@ -281,8 +281,13 @@ impl Factors<'_> {
             &self.plan.own
         }
     }
-    fn ghosts(&self) -> Option<&Ghosts> {
-        (!self.closed).then_some(&self.plan.ghosts)
+    /// A sum ends a negative zero only where its side was one, so a group with none needs no ghost.
+    fn ghosts<const L: usize>(&self, sides: &[[f64; L]]) -> Option<&Ghosts> {
+        let signed = || {
+            (sides.as_flattened().iter())
+                .fold(false, |found, value| found | (value.to_bits() == NEGATIVE_ZERO))
+        };
+        (!self.closed && signed()).then_some(&self.plan.ghosts)
     }
     /// Replaces a right side, one slot per row, with the update, one slot per unknown.
     pub fn solve(&self, side: &mut [f64]) {
@@ -321,7 +326,8 @@ impl Factors<'_> {
     /// takes zero over its pivot going back, as a full walk gives it. A value that is not finite sends the group back
     /// to the full walk, since a zero factor times it is not zero.
     fn substitute_reached(&self, pivoted: &mut [[f64; LANES]], reach: &Reach, marks: &mut Marks) -> bool {
-        let Pattern { diagonals, .. } = self.pattern();
+        let pattern = self.pattern();
+        let (diagonals, ghosts) = (&pattern.diagonals, self.ghosts(pivoted));
         let size = pivoted.len();
         marks.clear();
         for (at, values) in pivoted.iter().enumerate() {
@@ -332,7 +338,7 @@ impl Factors<'_> {
         }
         marks.spread(|marks| &mut marks.forward, &reach.lower_starts, &reach.lower);
         for at in (0..size).filter(|&at| marks.forward[at]) {
-            forward(self.pattern(), &self.lu, self.ghosts(), pivoted, at);
+            forward(pattern, &self.lu, ghosts, pivoted, at);
         }
         marks.back.copy_from_slice(&marks.forward);
         marks
@@ -343,20 +349,18 @@ impl Factors<'_> {
             pivoted[at] = [0.0 / self.lu[index(diagonals[at])]; LANES];
         }
         for at in (0..size).rev().filter(|&at| marks.back[at]) {
-            back(self.pattern(), &self.lu, self.ghosts(), pivoted, at);
+            back(pattern, &self.lu, ghosts, pivoted, at);
         }
         (0..size)
             .filter(|&at| marks.back[at])
             .all(|at| pivoted[at].iter().all(|value| value.is_finite()))
     }
     fn substitute<const L: usize>(&self, pivoted: &mut [[f64; L]]) -> bool {
-        for at in 0..pivoted.len() {
-            forward(self.pattern(), &self.lu, self.ghosts(), pivoted, at);
+        match self.ghosts(pivoted) {
+            None => walk(self.pattern(), &self.lu, None, pivoted),
+            ghosts => walk(self.pattern(), &self.lu, ghosts, pivoted),
         }
-        for at in (0..pivoted.len()).rev() {
-            back(self.pattern(), &self.lu, self.ghosts(), pivoted, at);
-        }
-        self.closed || pivoted.iter().flatten().all(|value| value.is_finite())
+        self.closed || (pivoted.as_flattened().iter()).fold(true, |finite, value| finite & value.is_finite())
     }
     fn substitute_closed<const L: usize>(&self, pivoted: &mut [[f64; L]]) {
         let Elimination { own, closure, .. } = self.plan;
@@ -377,15 +381,21 @@ impl Factors<'_> {
                     }),
             );
         }
-        for at in 0..pivoted.len() {
-            forward(closure, &lu, None, pivoted, at);
-        }
-        for at in (0..pivoted.len()).rev() {
-            back(closure, &lu, None, pivoted, at);
-        }
+        walk(closure, &lu, None, pivoted);
     }
 }
 
+#[inline(always)]
+fn walk<const L: usize>(pattern: &Pattern, lu: &[f64], ghosts: Option<&Ghosts>, pivoted: &mut [[f64; L]]) {
+    for at in 0..pivoted.len() {
+        forward(pattern, lu, ghosts, pivoted, at);
+    }
+    for at in (0..pivoted.len()).rev() {
+        back(pattern, lu, ghosts, pivoted, at);
+    }
+}
+
+#[inline(always)]
 fn forward<const L: usize>(
     pattern: &Pattern,
     lu: &[f64],
@@ -400,13 +410,14 @@ fn forward<const L: usize>(
             *value -= cell * read;
         }
     }
-    if let Some(ghosts) = ghosts {
+    if let Some(ghosts) = ghosts.filter(|_| sum.iter().any(|value| value.to_bits() == NEGATIVE_ZERO)) {
         let negative = |pivot: usize| lu[index(pattern.diagonals[pivot])].is_sign_negative();
         ghosts.settle(&mut sum, ghosts.lower(at), negative, pivoted);
     }
     pivoted[at] = sum;
 }
 
+#[inline(always)]
 fn back<const L: usize>(
     pattern: &Pattern,
     lu: &[f64],
@@ -421,7 +432,7 @@ fn back<const L: usize>(
             *value -= cell * read;
         }
     }
-    if let Some(ghosts) = ghosts {
+    if let Some(ghosts) = ghosts.filter(|_| sum.iter().any(|value| value.to_bits() == NEGATIVE_ZERO)) {
         ghosts.settle(&mut sum, ghosts.upper(at), |_| false, pivoted);
     }
     let pivot = lu[index(pattern.diagonals[at])];

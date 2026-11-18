@@ -1447,7 +1447,7 @@ test = "-p ng-contract --lib elimination::tests::a_value_that_is_not_finite_fact
 [[mutant]]
 name = "solve-not-finite-stays-on-own"
 path = "crates/ng-contract/src/elimination.rs"
-old = '''self.closed || pivoted.iter().flatten().all(|value| value.is_finite())'''
+old = '''self.closed || (pivoted.as_flattened().iter()).fold(true, |finite, value| finite & value.is_finite())'''
 new = '''true'''
 test = "-p ng-contract --lib elimination::tests::own_keeps_every_bit_of_the_symmetric_plan"
 
