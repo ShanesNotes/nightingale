@@ -4,7 +4,9 @@ Spec: [solver contract](../../../docs/architecture/solver-contract.md), section 
 
 Type: prototype
 
-Status: open
+Status: claimed
+
+Claimed by: nc82-diagnose
 
 Blocked by: none
 
