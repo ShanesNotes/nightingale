@@ -18,6 +18,10 @@ const DRY: f64 = ROOM - VAPOUR;
 const INSPIRED: [f64; 3] = [0.21, 0.0, 0.79];
 const CONDUCTANCE: f64 = 1_000.0;
 const MIXING: f64 = 5_000.0;
+/// The lung's and the chest wall's elastances and relaxed volumes, apart so their balance is no plain mean.
+const ELASTANCES: [f64; 2] = [1e-3, 3e-3];
+const RESTS: [f64; 2] = [4_000.0, 6_000.0];
+const ZERO_HEAD: f64 = (ELASTANCES[0] * RESTS[0] + ELASTANCES[1] * RESTS[1]) / (ELASTANCES[0] + ELASTANCES[1]);
 const WIDTH: f64 = 1e-6;
 const DIFFUSING: [f64; 2] = [25.0, 100.0];
 const PER_AMOUNT: f64 = 0.1;
@@ -31,12 +35,14 @@ struct Case {
     oxygen_use: f64,
     carbon_dioxide_made: f64,
     ventilation: f64,
+    molar_volume: [f64; 3],
 }
 
 const AT_REST: Case = Case {
     oxygen_use: 250.0,
     carbon_dioxide_made: 200.0,
     ventilation: 1.0,
+    molar_volume: [1.0; 3],
 };
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
@@ -190,22 +196,19 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Pressure>(p, "rs.head-width", WIDTH)?;
     set::<Conductance<Oxygen>>(p, "rs.oxygen-diffusing", DIFFUSING[0])?;
     set::<Conductance<CarbonDioxide>>(p, "rs.carbon-dioxide-diffusing", DIFFUSING[1])?;
-    set::<Elastance>(p, "rs.lung-elastance", 1e-3)?;
-    set::<Elastance>(p, "rs.wall-elastance", 1e-3)?;
-    set::<Volume>(p, "rs.lung-rest-volume", 4_000.0)?;
-    set::<Volume>(p, "rs.wall-rest-volume", 6_000.0)?;
+    set::<Elastance>(p, "rs.lung-elastance", ELASTANCES[0])?;
+    set::<Elastance>(p, "rs.wall-elastance", ELASTANCES[1])?;
+    set::<Volume>(p, "rs.lung-rest-volume", RESTS[0])?;
+    set::<Volume>(p, "rs.wall-rest-volume", RESTS[1])?;
     set::<Elastance>(p, "rs.dead-space-elastance", 1e-2)?;
     set::<Volume>(p, "rs.dead-space-volume", 500.0)?;
     let (g, m) = (CONDUCTANCE * unit.ventilation, MIXING * unit.ventilation);
-    set::<Quotient<Volume, Oxygen>>(p, "rs.oxygen-volume", 1.0)?;
-    set::<Quotient<Volume, CarbonDioxide>>(p, "rs.carbon-dioxide-volume", 1.0)?;
-    set::<Quotient<Volume, NitrogenGas>>(p, "rs.nitrogen-volume", 1.0)?;
-    set::<Conductance<Oxygen>>(p, "rs.oxygen-conductance", g)?;
-    set::<Conductance<CarbonDioxide>>(p, "rs.carbon-dioxide-conductance", g)?;
-    set::<Conductance<NitrogenGas>>(p, "rs.nitrogen-conductance", g)?;
-    set::<Rate<Oxygen>>(p, "rs.oxygen-mixing", m)?;
-    set::<Rate<CarbonDioxide>>(p, "rs.carbon-dioxide-mixing", m)?;
-    set::<Rate<NitrogenGas>>(p, "rs.nitrogen-mixing", m)?;
+    let [vo, vc, vn] = unit.molar_volume;
+    set::<Quotient<Volume, Oxygen>>(p, "rs.oxygen-volume", vo)?;
+    set::<Quotient<Volume, CarbonDioxide>>(p, "rs.carbon-dioxide-volume", vc)?;
+    set::<Quotient<Volume, NitrogenGas>>(p, "rs.nitrogen-volume", vn)?;
+    set::<Conductance<Volume>>(p, "rs.airway-conductance", g)?;
+    set::<Rate<Volume>>(p, "rs.airway-mixing", m)?;
     for (gas, key) in [
         (0, "rs.oxygen-inspired"),
         (1, "rs.carbon-dioxide-inspired"),
@@ -217,14 +220,14 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     let guess = |row: RowKind| match row {
         RowKind::Amount { site, species, space } => {
             let (shares, volume) = if site.key() == LUNG {
-                (alveolar, 5_000.0)
+                (alveolar, ZERO_HEAD)
             } else {
                 (dead, 500.0)
             };
             match (species, space) {
-                (Species::Oxygen, Space::Gas) => shares[0] * volume,
-                (Species::CarbonDioxide, Space::Gas) => shares[1] * volume,
-                (Species::NitrogenGas, Space::Gas) => shares[2] * volume,
+                (Species::Oxygen, Space::Gas) => shares[0] * volume / vo,
+                (Species::CarbonDioxide, Space::Gas) => shares[1] * volume / vc,
+                (Species::NitrogenGas, Space::Gas) => shares[2] * volume / vn,
                 (Species::Oxygen, Space::Plasma) => DRY * alveolar[0] / PER_AMOUNT,
                 (Species::CarbonDioxide, Space::Plasma) => DRY * alveolar[1] / PER_AMOUNT,
                 _ => 100.0,
@@ -238,6 +241,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
 }
 
 struct Settled {
+    alveolar_volume: f64,
     alveolar: [f64; 3],
     dead: [f64; 3],
     plasma: [f64; 2],
@@ -266,16 +270,20 @@ fn settled(unit: Case) -> Result<Settled, InitializationFailure> {
             session.record().accepted().value(row.id()).bits()[0],
         ))
     };
-    let shares = |key| -> Result<[f64; 3], AdmissionError> {
+    let gas_space = |key| -> Result<(f64, [f64; 3]), AdmissionError> {
         let gas = [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas];
         let held = gas.map(|species| amount(&session, key, species, Space::Gas));
-        let held = [held[0]?, held[1]?, held[2]?];
-        let total: f64 = held.iter().sum();
-        Ok(held.map(|amount| amount / total))
+        let [vo, vc, vn] = unit.molar_volume;
+        let parts = [held[0]? * vo, held[1]? * vc, held[2]? * vn];
+        let total: f64 = parts.iter().sum();
+        Ok((total, parts.map(|part| part / total)))
     };
+    let (alveolar_volume, alveolar) = gas_space(LUNG)?;
+    let (_, dead) = gas_space(AIRWAY)?;
     Ok(Settled {
-        alveolar: shares(LUNG)?,
-        dead: shares(AIRWAY)?,
+        alveolar_volume,
+        alveolar,
+        dead,
         plasma: [
             PER_AMOUNT * amount(&session, LUNG, Species::Oxygen, Space::Plasma)?,
             PER_AMOUNT * amount(&session, LUNG, Species::CarbonDioxide, Space::Plasma)?,
@@ -298,6 +306,26 @@ fn the_alveolar_gas_equation_holds_at_a_steady_state() -> Result<(), Initializat
     assert!(
         close(oxygen, expected, TOLERANCE),
         "alveolar oxygen {oxygen}, the gas equation's {expected} at alveolar carbon dioxide {carbon_dioxide}"
+    );
+    Ok(())
+}
+
+#[test]
+fn mixing_moves_no_net_volume_when_the_membrane_trades_equal_volumes() -> Result<(), InitializationFailure> {
+    let unit = Case {
+        molar_volume: [1.0, 1.25, 0.8],
+        ..AT_REST
+    };
+    assert_eq!(
+        unit.oxygen_use * unit.molar_volume[0],
+        unit.carbon_dioxide_made * unit.molar_volume[1]
+    );
+    let settled = settled(unit)?;
+    let zero_head_volume = ZERO_HEAD;
+    assert!(
+        close(settled.alveolar_volume, zero_head_volume, TOLERANCE),
+        "alveolar volume {} with no net volume uptake, expected {zero_head_volume}",
+        settled.alveolar_volume
     );
     Ok(())
 }
@@ -344,7 +372,7 @@ fn the_membrane_moves_each_gas_down_its_own_head_from_the_dry_alveolar_pressure(
 }
 
 #[test]
-fn doubling_ventilation_at_a_fixed_production_halves_alveolar_carbon_dioxide()
+fn doubling_ventilation_halves_alveolar_carbon_dioxide_where_use_equals_production()
 -> Result<(), InitializationFailure> {
     let even = Case {
         oxygen_use: 200.0,
@@ -358,6 +386,26 @@ fn doubling_ventilation_at_a_fixed_production_halves_alveolar_carbon_dioxide()
     assert!(
         close(twice, once / 2.0, TOLERANCE),
         "alveolar carbon dioxide {once}, then {twice} at twice the ventilation"
+    );
+    Ok(())
+}
+
+/// With a net uptake the two exchanges in series do not halve: the miss is the net uptake's share of the
+/// ventilation, and the closed form carries it.
+#[test]
+fn doubling_ventilation_at_resting_use_meets_the_closed_form_of_the_two_exchanges_in_series()
+-> Result<(), InitializationFailure> {
+    let twice = Case {
+        ventilation: 2.0,
+        ..AT_REST
+    };
+    let (_, expected) = closed_form(twice);
+    let settled = settled(twice)?;
+    assert!(
+        close(settled.alveolar[1], expected[1], TOLERANCE),
+        "alveolar carbon dioxide's share {} at twice the ventilation, the closed form's {}",
+        settled.alveolar[1],
+        expected[1]
     );
     Ok(())
 }

@@ -3662,9 +3662,9 @@ test = "-p ng-validate --test viscosity a_beds_inflow_resistance_falls_with_its_
 [[mutant]]
 name = "peritubular-inflow-widens-with-its-debt"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };'''
-new = '''let share = DEBT_SHARE;'''
-test = "-p ng-validate --test viscosity every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt"
+old = '''let share = if matches!(bed, "peritubular bed" | "pulmonary bed") { 0.0 } else { DEBT_SHARE };'''
+new = '''let share = if bed == "pulmonary bed" { 0.0 } else { DEBT_SHARE };'''
+test = "-p ng-validate --test viscosity every_beds_inflow_but_the_liver_the_peritubular_and_the_pulmonary_bed_widens_with_its_debt"
 
 [[mutant]]
 name = "lactate-burns-with-no-cell-oxygen"
@@ -4453,8 +4453,8 @@ test = "-p ng-validate --test alveolar the_membrane_moves_each_gas_down_its_own_
 [[mutant]]
 name = "airway-carries-downstream-share"
 path = "crates/ng-respiratory/src/airway.rs"
-old = '''        let (carried_in, carried_out) = (k.scale(inward, up), k.scale(outward, down));'''
-new = '''        let (carried_in, carried_out) = (k.scale(inward, down), k.scale(outward, down));'''
+old = '''        let (carried_in, carried_out) = (k.scale(bulk_in, up), k.scale(bulk_out, down));'''
+new = '''        let (carried_in, carried_out) = (k.scale(bulk_in, down), k.scale(bulk_out, down));'''
 test = "-p ng-validate --test alveolar the_airway_carries_each_ends_share_upwind_into_the_dead_space_and_the_alveolar_unit"
 
 [[mutant]]
@@ -4465,3 +4465,17 @@ old = '''    let (room, vapour) = (k.parameter(room), k.parameter(vapour));
 new = '''    let (room, _vapour) = (k.parameter(room), k.parameter(vapour));
     let dry = room;'''
 test = "-p ng-validate --test alveolar the_membrane_moves_each_gas_down_its_own_head_from_the_dry_alveolar_pressure"
+
+[[mutant]]
+name = "pulmonary-inflow-reads-its-debt"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''            let share = if matches!(bed, "peritubular bed" | "pulmonary bed") { 0.0 } else { DEBT_SHARE };'''
+new = '''            let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };'''
+test = "-p ng-validate --test viscosity the_shunt_keeps_its_fraction_when_the_pulmonary_bed_owes_oxygen"
+
+[[mutant]]
+name = "alveolar-head-swaps-the-rest-volumes"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''        let (stretched, sprung) = (k.subtract(v, l0), k.subtract(v, w0));'''
+new = '''        let (stretched, sprung) = (k.subtract(v, w0), k.subtract(v, l0));'''
+test = "-p ng-validate --test alveolar mixing_moves_no_net_volume_when_the_membrane_trades_equal_volumes"

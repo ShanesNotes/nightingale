@@ -950,9 +950,10 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     for (bed, used) in BEDS.into_iter().zip(USES) {
         let at = Binding::Site(site::<CapillaryBed>(bed)?);
         // The liver's inflows are the hepatic sinusoids', which read no debt; the peritubular inflow leaves
-        // the glomerular bed, whose tone is the kidney's.
+        // the glomerular bed, whose tone is the kidney's; the lung's vessels answer alveolar oxygen, a later
+        // rung's law (ticket 01), not their tissue's debt, so the shunt keeps its share.
         if bed != "liver bed" {
-            let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };
+            let share = if matches!(bed, "peritubular bed" | "pulmonary bed") { 0.0 } else { DEBT_SHARE };
             set::<Dimensionless>(packet, "cv.debt-share", at, share)?;
             set::<Oxygen>(packet, "cv.debt-half", at, used * DEBT_HALF_TIME)?;
         }
@@ -1124,11 +1125,7 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Quotient<Volume, Oxygen>>(packet, "rs.oxygen-volume", body, 1.0)?;
     set::<Quotient<Volume, CarbonDioxide>>(packet, "rs.carbon-dioxide-volume", body, 1.0)?;
     set::<Quotient<Volume, NitrogenGas>>(packet, "rs.nitrogen-volume", body, 1.0)?;
-    set::<Conductance<Oxygen>>(packet, "rs.oxygen-conductance", body, 15_600.0)?;
-    set::<Conductance<CarbonDioxide>>(packet, "rs.carbon-dioxide-conductance", body, 15_600.0)?;
-    set::<Conductance<NitrogenGas>>(packet, "rs.nitrogen-conductance", body, 15_600.0)?;
-    set::<Rate<Oxygen>>(packet, "rs.oxygen-mixing", body, 3_240.0)?;
-    set::<Rate<CarbonDioxide>>(packet, "rs.carbon-dioxide-mixing", body, 3_240.0)?;
-    set::<Rate<NitrogenGas>>(packet, "rs.nitrogen-mixing", body, 3_240.0)?;
+    set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, 15_600.0)?;
+    set::<Rate<Volume>>(packet, "rs.airway-mixing", body, 3_240.0)?;
     Ok(())
 }

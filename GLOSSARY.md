@@ -451,7 +451,7 @@ The lungs' one gas space at rung 0: the pulmonary bed's gas. It fills from the d
 The conducting airway's gas, in series between the room and the alveolar unit, so the room's gas reaches the alveolar unit only through it. Its own elastic head draws gas from the room when it holds less than its volume.
 
 **Mixing exchange**:
-A transfer of one gas along the airway, or between the room and the dead space, at a rate times the difference of the gas's shares of the dry gas at the two ends. It stands for the breath's mean ventilation until the breath is built.
+A volume of gas a second traded both ways along the airway, or between the room and the dead space, so each gas moves at that volume rate times its share of the dry gas at each end, over its molar volume. The two ways carry equal volumes, so it moves no net volume. It stands for the breath's mean ventilation until the breath is built.
 
 **Alveolar exchange**:
 A transfer of oxygen or carbon dioxide across the gas-exchange surface, at a conductance times the alveolar partial pressure less the pulmonary bed's plasma's. The alveolar partial pressure is the gas's share of the dry gas times the room's pressure less water vapour's.

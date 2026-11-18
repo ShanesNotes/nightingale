@@ -29,6 +29,30 @@
 //!     k.at_site(&gases.oxygen_partial_pressure)
 //! }
 //! ```
+//!
+//! A volume flow becomes a gas's rate over that gas's molar volume, and only a substance has one.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn rate<'b, 'k, C>(
+//!     k: &mut Kernel<'b, 'k, Respiratory, C>,
+//!     flow: Expr<'b, 'k, Respiratory, Rate<Volume>>,
+//!     per: Expr<'b, 'k, Respiratory, Quotient<Volume, Pressure>>,
+//! ) -> Expr<'b, 'k, Respiratory, Rate<Pressure>> {
+//!     let rate = k.divide(flow, per);
+//!     k.as_dimension(rate)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn rate<'b, 'k, C>(
+//!     k: &mut Kernel<'b, 'k, Respiratory, C>,
+//!     flow: Expr<'b, 'k, Respiratory, Rate<Volume>>,
+//!     per: Expr<'b, 'k, Respiratory, Quotient<Volume, Oxygen>>,
+//! ) -> Expr<'b, 'k, Respiratory, Rate<Oxygen>> {
+//!     let rate = k.divide(flow, per);
+//!     k.as_dimension(rate)
+//! }
+//! ```
 
 mod airway;
 mod membrane;
