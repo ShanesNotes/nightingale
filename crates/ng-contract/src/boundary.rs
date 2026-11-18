@@ -1,5 +1,5 @@
-use crate::identity::{Canonical, Seal};
 use crate::chance::Trigger;
+use crate::identity::{Canonical, Seal};
 use crate::landing::Bracket;
 use crate::pinned::turn;
 use crate::{

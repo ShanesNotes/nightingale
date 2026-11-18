@@ -193,7 +193,11 @@ impl<'r> CoupledProblem<'r> {
                     Some(step) => step.gap(self, trigger)?,
                     None => self.gap(ticket, base, trigger)?,
                 };
-                let root = if before >= 0.0 { 0.0 } else { width * before / (before - after) };
+                let root = if before >= 0.0 {
+                    0.0
+                } else {
+                    width * before / (before - after)
+                };
                 if earliest.is_none_or(|(first, _)| root + floor < first) {
                     earliest = Some((root, trigger));
                 }

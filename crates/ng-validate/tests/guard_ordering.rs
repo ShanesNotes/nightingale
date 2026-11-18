@@ -144,7 +144,8 @@ fn first_step(first: Gap, second: Gap) -> Landed {
             let [above, below] = laws.modes(name, ["above", "below"]);
             let zero = match gap {
                 Gap::Straight(_) => {
-                    let threshold = laws.parameter::<Dimensionless>(ParameterKey::new(name), Admissible::finite());
+                    let threshold =
+                        laws.parameter::<Dimensionless>(ParameterKey::new(name), Admissible::finite());
                     laws.kernel(|mut k| {
                         let (value, threshold) = (k.state(&x), k.parameter(&threshold));
                         let gap = k.subtract(value, threshold);
@@ -152,7 +153,8 @@ fn first_step(first: Gap, second: Gap) -> Landed {
                     })
                 }
                 Gap::Quartic => {
-                    let mut key = |key| laws.parameter::<Dimensionless>(ParameterKey::new(key), Admissible::finite());
+                    let mut key =
+                        |key| laws.parameter::<Dimensionless>(ParameterKey::new(key), Admissible::finite());
                     let (one, coefficient, offset) = (key("one"), key("coefficient"), key("offset"));
                     laws.kernel(|mut k| {
                         let (value, one) = (k.state(&x), k.parameter(&one));
@@ -231,9 +233,17 @@ fn first_step(first: Gap, second: Gap) -> Landed {
 #[test]
 fn a_landing_reads_the_guard_that_crossed_first_not_the_first_in_layout_order() {
     let landed = first_step(Gap::Straight(-0.05), Gap::Straight(-0.75));
-    assert!(landed.at_ns.abs_diff(250_000_000) <= 1_000_000, "landed at {} ns", landed.at_ns);
+    assert!(
+        landed.at_ns.abs_diff(250_000_000) <= 1_000_000,
+        "landed at {} ns",
+        landed.at_ns
+    );
     assert_eq!(landed.modes, [BELOW, ABOVE], "only the second guard fires");
-    assert!(landed.solves <= 3, "{} solves: the step and two trials land a straight gap", landed.solves);
+    assert!(
+        landed.solves <= 3,
+        "{} solves: the step and two trials land a straight gap",
+        landed.solves
+    );
 }
 
 /// Read first in layout order, the later crossing lands just short of itself and fires only the earlier; read first,
@@ -255,7 +265,11 @@ fn two_crossings_inside_the_floor_land_where_layout_order_puts_them() {
 #[test]
 fn a_curved_gap_that_looked_first_gives_way_to_the_guard_that_crossed_first() {
     let landed = first_step(Gap::Quartic, Gap::Straight(-0.7));
-    assert!(landed.at_ns.abs_diff(300_000_000) <= 1_000_000, "landed at {} ns", landed.at_ns);
+    assert!(
+        landed.at_ns.abs_diff(300_000_000) <= 1_000_000,
+        "landed at {} ns",
+        landed.at_ns
+    );
     assert_eq!(landed.modes, [BELOW, ABOVE], "only the second guard fires");
     assert!(
         landed.solves <= 6,
