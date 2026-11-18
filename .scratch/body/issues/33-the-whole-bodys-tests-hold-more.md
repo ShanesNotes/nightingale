@@ -25,4 +25,9 @@ From the independent check of nightingale#192: three of the heart's work's choic
 - [ ] The packet's oxygen for each unit of energy, `mt.oxygen-per-energy`, which the run's rest check sees and no staged test does
 - [ ] The paying bed's basal value, the stated 8 less the work's oxygen, which no staged test sees. The check did not try it against the run's tests
 
+From the independent check of nightingale#194: two choices are held only by the body's pin or by one bound.
+
+- [ ] The one-unit fixture states inspired carbon dioxide at 0, so a law that left carbon dioxide out of nitrogen gas's rest passes every fixture test, and only the body's model hash holds it. The check reasoned this and did not run it
+- [ ] Each bed's inflow keeps its resistance at rest within 4 ulp, and at the pulmonary and the peritubular bed, whose debt share is 0, only the debt bound sees a debt
+
 **Non-goals:** any change to the body's model, its packet or its pins. A row budget, which foundation 14 owns.
