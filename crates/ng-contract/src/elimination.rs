@@ -2,20 +2,81 @@ use crate::body::{RowId, UnknownId};
 use alloc::collections::BTreeSet;
 
 /// A fixed elimination over one sparsity. Each pivot pairs an unknown with the row the structural matching gave it,
-/// in least-degree order, ties to the least unknown, so a sparse body factors in about its nonzeros and every run
-/// fills the same entries. The pattern is the union over modes, so a mode change moves no entry.
+/// in least-degree order on the symmetric pattern, ties to the least unknown, so a sparse body factors in about its
+/// nonzeros and every run fills the same entries. The pattern is the union over modes, so a mode change moves no entry.
+///
+/// `own` stores the entries the rows hold and those their elimination fills, lower and upper apart. `closure` is the
+/// symmetric pattern the order is read from: the extra entries hold zeros, and `ghosts` lists them so a solve keeps
+/// the bits a walk over them gives. A value that is not finite takes `closure` whole, since a zero times it is not zero.
 #[derive(Debug, PartialEq)]
 pub(crate) struct Elimination {
     rows: Vec<u32>,
     unknowns: Vec<u32>,
+    own: Pattern,
+    closure: Pattern,
+    ghosts: Ghosts,
+}
+
+#[derive(Debug, PartialEq)]
+struct Pattern {
     starts: Vec<u32>,
     columns: Vec<u32>,
     diagonals: Vec<u32>,
     places: Vec<u32>,
 }
 
+#[derive(Debug, PartialEq)]
+struct Ghosts {
+    starts: Vec<u32>,
+    splits: Vec<u32>,
+    columns: Vec<u32>,
+}
+
+struct Eliminated {
+    found: Result<Vec<f64>, usize>,
+    finite: bool,
+}
+
 fn index(value: u32) -> usize {
     value as usize
+}
+
+impl Pattern {
+    fn of(
+        lines: &[Vec<u32>],
+        rows: &[u32],
+        offsets: &[usize],
+        unknowns: &[UnknownId],
+        position: &[u32],
+    ) -> Self {
+        let (mut starts, mut columns, mut diagonals) =
+            (vec![0_u32], Vec::new(), Vec::with_capacity(lines.len()));
+        for (at, line) in lines.iter().enumerate() {
+            diagonals.push(columns.len() as u32 + line.partition_point(|&column| column < at as u32) as u32);
+            columns.extend_from_slice(line);
+            starts.push(columns.len() as u32);
+        }
+        let mut places = vec![0_u32; unknowns.len()];
+        for (at, &row) in rows.iter().enumerate() {
+            let row = index(row);
+            let pattern = &columns[index(starts[at])..index(starts[at + 1])];
+            for entry in offsets[row]..offsets[row + 1] {
+                let column = position[unknowns[entry].index()];
+                let found = pattern.binary_search(&column);
+                let found = found.expect("every entry of a row lies on its pivot's pattern");
+                places[entry] = starts[at] + found as u32;
+            }
+        }
+        Self {
+            starts,
+            columns,
+            diagonals,
+            places,
+        }
+    }
+    fn line(&self, at: usize) -> &[u32] {
+        &self.columns[index(self.starts[at])..index(self.starts[at + 1])]
+    }
 }
 
 impl Elimination {
@@ -58,45 +119,74 @@ impl Elimination {
                 waiting.insert((neighbours[index(one)].len(), one));
             }
         }
-        let mut lower: Vec<Vec<u32>> = vec![Vec::new(); size];
+        let rows: Vec<u32> = (order.iter())
+            .map(|&node| solved_by[index(node)].index() as u32)
+            .collect();
+        let mut closure: Vec<Vec<u32>> = vec![Vec::new(); size];
         for (at, &node) in order.iter().enumerate() {
             for &other in &fill[index(node)] {
-                lower[index(position[index(other)])].push(at as u32);
+                closure[index(position[index(other)])].push(at as u32);
             }
         }
-        let (mut starts, mut columns, mut diagonals) = (vec![0_u32], Vec::new(), Vec::with_capacity(size));
         for (at, &node) in order.iter().enumerate() {
-            columns.extend_from_slice(&lower[at]);
-            diagonals.push(columns.len() as u32);
-            columns.push(at as u32);
+            closure[at].push(at as u32);
             let mut upper: Vec<u32> = (fill[index(node)].iter())
                 .map(|&other| position[index(other)])
                 .collect();
             upper.sort_unstable();
-            columns.extend_from_slice(&upper);
-            starts.push(columns.len() as u32);
+            closure[at].extend_from_slice(&upper);
         }
-        let rows: Vec<u32> = (order.iter())
-            .map(|&node| solved_by[index(node)].index() as u32)
-            .collect();
-        let mut places = vec![0_u32; unknowns.len()];
+        let mut own: Vec<Vec<u32>> = Vec::with_capacity(size);
+        let mut stamp = vec![u32::MAX; size];
         for (at, &row) in rows.iter().enumerate() {
-            let row = index(row);
-            let pattern = &columns[index(starts[at])..index(starts[at + 1])];
-            for entry in offsets[row]..offsets[row + 1] {
-                let column = position[unknowns[entry].index()];
-                let found = pattern.binary_search(&column);
-                let found = found.expect("every entry of a row lies on its pivot's pattern");
-                places[entry] = starts[at] + found as u32;
+            let at = at as u32;
+            let (mut line, mut pending) = (vec![at], Vec::new());
+            stamp[index(at)] = at;
+            let read = unknowns[offsets[index(row)]..offsets[index(row) + 1]].iter();
+            let mut reach = |column: u32, line: &mut Vec<u32>, pending: &mut Vec<u32>| {
+                if stamp[index(column)] != at {
+                    stamp[index(column)] = at;
+                    line.push(column);
+                    if column < at {
+                        pending.push(column);
+                    }
+                }
+            };
+            for unknown in read {
+                reach(position[unknown.index()], &mut line, &mut pending);
             }
+            while let Some(pivot) = pending.pop() {
+                for &column in &own[index(pivot)] {
+                    if column > pivot {
+                        reach(column, &mut line, &mut pending);
+                    }
+                }
+            }
+            line.sort_unstable();
+            own.push(line);
+        }
+        let mut ghosts = Ghosts {
+            starts: vec![0],
+            splits: Vec::with_capacity(size),
+            columns: Vec::new(),
+        };
+        for (at, (closed, line)) in closure.iter().zip(&own).enumerate() {
+            let left = |column: &&u32| line.binary_search(column).is_err();
+            ghosts
+                .columns
+                .extend(closed.iter().filter(|column| **column < at as u32).filter(left));
+            ghosts.splits.push(ghosts.columns.len() as u32);
+            ghosts
+                .columns
+                .extend(closed.iter().filter(|column| **column > at as u32).filter(left));
+            ghosts.starts.push(ghosts.columns.len() as u32);
         }
         Self {
+            own: Pattern::of(&own, &rows, offsets, unknowns, &position),
+            closure: Pattern::of(&closure, &rows, offsets, unknowns, &position),
             rows,
             unknowns: order,
-            starts,
-            columns,
-            diagonals,
-            places,
+            ghosts,
         }
     }
 
@@ -117,50 +207,92 @@ impl Elimination {
     }
 
     pub(crate) fn factor(&self, values: &[f64]) -> Result<Factors<'_>, usize> {
-        let mut lu = vec![0.0; self.columns.len()];
-        for (&place, &value) in self.places.iter().zip(values) {
+        let (found, closed) = match self.eliminate(&self.own, values) {
+            Eliminated { found, finite: true } => (found, false),
+            Eliminated { finite: false, .. } => (self.eliminate(&self.closure, values).found, true),
+        };
+        let lu = found.map_err(|at| index(self.rows[at]))?;
+        Ok(Factors {
+            plan: self,
+            closed,
+            lu,
+        })
+    }
+
+    fn eliminate(&self, pattern: &Pattern, values: &[f64]) -> Eliminated {
+        let Pattern {
+            starts,
+            columns,
+            diagonals,
+            places,
+        } = pattern;
+        let mut lu = vec![0.0; columns.len()];
+        for (&place, &value) in places.iter().zip(values) {
             lu[index(place)] += value;
         }
-        let mut seen = vec![0.0; self.rows.len()];
+        let (mut seen, mut finite) = (vec![0.0; self.rows.len()], true);
         for at in 0..self.rows.len() {
-            let (start, end) = (index(self.starts[at]), index(self.starts[at + 1]));
+            let (start, end) = (index(starts[at]), index(starts[at + 1]));
             let (done, rest) = lu.split_at_mut(start);
             let line = &mut rest[..end - start];
-            for (cell, &column) in line.iter().zip(&self.columns[start..end]) {
+            for (cell, &column) in line.iter().zip(&columns[start..end]) {
                 seen[index(column)] = *cell;
             }
-            for &pivot in &self.columns[start..index(self.diagonals[at])] {
+            for &pivot in &columns[start..index(diagonals[at])] {
                 let pivot = index(pivot);
-                let factor = seen[pivot] / done[index(self.diagonals[pivot])];
+                let factor = seen[pivot] / done[index(diagonals[pivot])];
                 seen[pivot] = factor;
-                let tail = index(self.diagonals[pivot]) + 1..index(self.starts[pivot + 1]);
-                for (cell, &column) in done[tail.clone()].iter().zip(&self.columns[tail]) {
+                let tail = index(diagonals[pivot]) + 1..index(starts[pivot + 1]);
+                for (cell, &column) in done[tail.clone()].iter().zip(&columns[tail]) {
                     seen[index(column)] -= factor * cell;
                 }
             }
-            for (cell, &column) in line.iter_mut().zip(&self.columns[start..end]) {
+            for (cell, &column) in line.iter_mut().zip(&columns[start..end]) {
                 *cell = seen[index(column)];
+                finite &= cell.is_finite();
             }
             let diagonal = seen[at];
             if diagonal == 0.0 || !diagonal.is_finite() {
-                return Err(index(self.rows[at]));
+                return Eliminated {
+                    found: Err(at),
+                    finite,
+                };
             }
         }
-        Ok(Factors { plan: self, lu })
+        Eliminated {
+            found: Ok(lu),
+            finite,
+        }
     }
 }
 pub struct Factors<'b> {
     plan: &'b Elimination,
+    closed: bool,
     lu: Vec<f64>,
 }
 pub(crate) const LANES: usize = 8;
+const NEGATIVE_ZERO: u64 = 0x8000_0000_0000_0000;
 
 impl Factors<'_> {
+    fn pattern(&self) -> &Pattern {
+        if self.closed {
+            &self.plan.closure
+        } else {
+            &self.plan.own
+        }
+    }
+    fn ghosts(&self) -> Option<&Ghosts> {
+        (!self.closed).then_some(&self.plan.ghosts)
+    }
     /// Replaces a right side, one slot per row, with the update, one slot per unknown.
     pub fn solve(&self, side: &mut [f64]) {
         let Elimination { rows, unknowns, .. } = self.plan;
-        let mut pivoted: Vec<[f64; 1]> = rows.iter().map(|&row| [side[index(row)]]).collect();
-        self.substitute(&mut pivoted);
+        let pivot = |side: &[f64]| -> Vec<[f64; 1]> { rows.iter().map(|&row| [side[index(row)]]).collect() };
+        let mut pivoted = pivot(side);
+        if !self.substitute(&mut pivoted) {
+            pivoted = pivot(side);
+            self.substitute_closed(&mut pivoted);
+        }
         for (&unknown, [value]) in unknowns.iter().zip(pivoted) {
             side[index(unknown)] = value;
         }
@@ -178,7 +310,10 @@ impl Factors<'_> {
         spare.copy_from_slice(group);
         if !reach.is_some_and(|reach| self.substitute_reached(group, reach, marks)) {
             group.copy_from_slice(spare);
-            self.substitute(group);
+            if !self.substitute(group) {
+                group.copy_from_slice(spare);
+                self.substitute_closed(group);
+            }
         }
     }
     /// Walks only the rows a nonzero side reaches through a nonzero factor, in the order a full walk takes them. A row
@@ -186,12 +321,7 @@ impl Factors<'_> {
     /// takes zero over its pivot going back, as a full walk gives it. A value that is not finite sends the group back
     /// to the full walk, since a zero factor times it is not zero.
     fn substitute_reached(&self, pivoted: &mut [[f64; LANES]], reach: &Reach, marks: &mut Marks) -> bool {
-        let Elimination {
-            starts,
-            columns,
-            diagonals,
-            ..
-        } = self.plan;
+        let Pattern { diagonals, .. } = self.pattern();
         let size = pivoted.len();
         marks.clear();
         for (at, values) in pivoted.iter().enumerate() {
@@ -202,14 +332,7 @@ impl Factors<'_> {
         }
         marks.spread(|marks| &mut marks.forward, &reach.lower_starts, &reach.lower);
         for at in (0..size).filter(|&at| marks.forward[at]) {
-            let line = index(starts[at])..index(diagonals[at]);
-            let mut sum = pivoted[at];
-            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
-                    *value -= cell * read;
-                }
-            }
-            pivoted[at] = sum;
+            forward(self.pattern(), &self.lu, self.ghosts(), pivoted, at);
         }
         marks.back.copy_from_slice(&marks.forward);
         marks
@@ -220,53 +343,117 @@ impl Factors<'_> {
             pivoted[at] = [0.0 / self.lu[index(diagonals[at])]; LANES];
         }
         for at in (0..size).rev().filter(|&at| marks.back[at]) {
-            let line = index(diagonals[at]) + 1..index(starts[at + 1]);
-            let mut sum = pivoted[at];
-            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
-                    *value -= cell * read;
-                }
-            }
-            let pivot = self.lu[index(diagonals[at])];
-            for value in &mut sum {
-                *value /= pivot;
-            }
-            pivoted[at] = sum;
+            back(self.pattern(), &self.lu, self.ghosts(), pivoted, at);
         }
         (0..size)
             .filter(|&at| marks.back[at])
             .all(|at| pivoted[at].iter().all(|value| value.is_finite()))
     }
-    fn substitute<const L: usize>(&self, pivoted: &mut [[f64; L]]) {
-        let Elimination {
-            starts,
-            columns,
-            diagonals,
-            ..
-        } = self.plan;
+    fn substitute<const L: usize>(&self, pivoted: &mut [[f64; L]]) -> bool {
         for at in 0..pivoted.len() {
-            let line = index(starts[at])..index(diagonals[at]);
-            let mut sum = pivoted[at];
-            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
-                    *value -= cell * read;
-                }
-            }
-            pivoted[at] = sum;
+            forward(self.pattern(), &self.lu, self.ghosts(), pivoted, at);
         }
         for at in (0..pivoted.len()).rev() {
-            let line = index(diagonals[at]) + 1..index(starts[at + 1]);
-            let mut sum = pivoted[at];
-            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
-                    *value -= cell * read;
-                }
+            back(self.pattern(), &self.lu, self.ghosts(), pivoted, at);
+        }
+        self.closed || pivoted.iter().flatten().all(|value| value.is_finite())
+    }
+    fn substitute_closed<const L: usize>(&self, pivoted: &mut [[f64; L]]) {
+        let Elimination { own, closure, .. } = self.plan;
+        let mut lu = Vec::with_capacity(closure.columns.len());
+        for at in 0..own.diagonals.len() {
+            let (line, values) = (
+                own.line(at),
+                &self.lu[index(own.starts[at])..index(own.starts[at + 1])],
+            );
+            lu.extend(
+                closure
+                    .line(at)
+                    .iter()
+                    .map(|column| match line.binary_search(column) {
+                        Ok(found) => values[found],
+                        Err(_) if index(*column) < at => 0.0 / self.lu[index(own.diagonals[index(*column)])],
+                        Err(_) => 0.0,
+                    }),
+            );
+        }
+        for at in 0..pivoted.len() {
+            forward(closure, &lu, None, pivoted, at);
+        }
+        for at in (0..pivoted.len()).rev() {
+            back(closure, &lu, None, pivoted, at);
+        }
+    }
+}
+
+fn forward<const L: usize>(
+    pattern: &Pattern,
+    lu: &[f64],
+    ghosts: Option<&Ghosts>,
+    pivoted: &mut [[f64; L]],
+    at: usize,
+) {
+    let line = index(pattern.starts[at])..index(pattern.diagonals[at]);
+    let mut sum = pivoted[at];
+    for (cell, &column) in lu[line.clone()].iter().zip(&pattern.columns[line]) {
+        for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
+            *value -= cell * read;
+        }
+    }
+    if let Some(ghosts) = ghosts {
+        let negative = |pivot: usize| lu[index(pattern.diagonals[pivot])].is_sign_negative();
+        ghosts.settle(&mut sum, ghosts.lower(at), negative, pivoted);
+    }
+    pivoted[at] = sum;
+}
+
+fn back<const L: usize>(
+    pattern: &Pattern,
+    lu: &[f64],
+    ghosts: Option<&Ghosts>,
+    pivoted: &mut [[f64; L]],
+    at: usize,
+) {
+    let line = index(pattern.diagonals[at]) + 1..index(pattern.starts[at + 1]);
+    let mut sum = pivoted[at];
+    for (cell, &column) in lu[line.clone()].iter().zip(&pattern.columns[line]) {
+        for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
+            *value -= cell * read;
+        }
+    }
+    if let Some(ghosts) = ghosts {
+        ghosts.settle(&mut sum, ghosts.upper(at), |_| false, pivoted);
+    }
+    let pivot = lu[index(pattern.diagonals[at])];
+    for value in &mut sum {
+        *value /= pivot;
+    }
+    pivoted[at] = sum;
+}
+
+impl Ghosts {
+    fn lower(&self, at: usize) -> &[u32] {
+        &self.columns[index(self.starts[at])..index(self.splits[at])]
+    }
+    fn upper(&self, at: usize) -> &[u32] {
+        &self.columns[index(self.splits[at])..index(self.starts[at + 1])]
+    }
+    /// A ghost holds a zero: a positive one above the diagonal, and below it a zero over its pivot, so of that pivot's
+    /// sign. Times a finite read it is a zero whose sign is the two signs' difference. Subtracted, it changes only a
+    /// sum that is a negative zero, and a negative zero turns positive and stays so.
+    fn settle<const L: usize>(
+        &self,
+        sum: &mut [f64; L],
+        ghosts: &[u32],
+        negative: impl Fn(usize) -> bool,
+        pivoted: &[[f64; L]],
+    ) {
+        for (lane, value) in sum.iter_mut().enumerate() {
+            let flips =
+                |ghost: &u32| negative(index(*ghost)) != pivoted[index(*ghost)][lane].is_sign_negative();
+            if value.to_bits() == NEGATIVE_ZERO && ghosts.iter().any(flips) {
+                *value = 0.0;
             }
-            let pivot = self.lu[index(diagonals[at])];
-            for value in &mut sum {
-                *value /= pivot;
-            }
-            pivoted[at] = sum;
         }
     }
 }
@@ -312,12 +499,12 @@ impl Reach {
     /// `None` where a factor is not finite, since a zero times it is not zero. `factor` refuses that case first, so
     /// this is a second guard.
     fn of(factors: &Factors<'_>) -> Option<Self> {
-        let Elimination {
+        let Pattern {
             starts,
             columns,
             diagonals,
             ..
-        } = factors.plan;
+        } = factors.pattern();
         if !factors.lu.iter().all(|cell| cell.is_finite()) {
             return None;
         }
@@ -658,6 +845,225 @@ mod tests {
             })
             .collect();
         assert!(alone_and_walked(&factors, sides), "zeros keep their signs");
+    }
+
+    impl Elimination {
+        fn factor_closed(&self, values: &[f64]) -> Result<Factors<'_>, usize> {
+            let lu = self.eliminate(&self.closure, values).found;
+            let lu = lu.map_err(|at| self.rows[at] as usize)?;
+            Ok(Factors {
+                plan: self,
+                closed: true,
+                lu,
+            })
+        }
+    }
+
+    struct System {
+        a: Vec<Vec<f64>>,
+        offsets: Vec<usize>,
+        unknowns: Vec<UnknownId>,
+        values: Vec<f64>,
+        matching: Vec<RowId>,
+    }
+
+    fn system(size: usize, reads: usize, state: &mut u64) -> System {
+        let mut lines = vec![std::collections::BTreeMap::new(); size];
+        let matching: Vec<RowId> = (0..size)
+            .map(|unknown| RowId::at((unknown * 7 + 3) % size))
+            .collect();
+        for (unknown, row) in matching.iter().enumerate() {
+            let sign = if next(state) < 0.5 { -1.0 } else { 1.0 };
+            lines[row.index()].insert(unknown, sign * (4.0 + next(state)));
+            for _ in 0..reads {
+                let other = (next(state) * size as f64) as usize;
+                let value = match (next(state) * 8.0) as usize {
+                    0 => -0.0,
+                    1 => 0.0,
+                    _ => next(state) - 0.5,
+                };
+                lines[row.index()].entry(other).or_insert(value);
+            }
+        }
+        let (mut a, mut offsets, mut unknowns, mut values) =
+            (vec![vec![0.0; size]; size], vec![0], vec![], vec![]);
+        for (row, line) in lines.iter().enumerate() {
+            for (&unknown, &value) in line {
+                a[row][unknown] = value;
+                unknowns.push(UnknownId::at(unknown));
+                values.push(value);
+            }
+            offsets.push(unknowns.len());
+        }
+        System {
+            a,
+            offsets,
+            unknowns,
+            values,
+            matching,
+        }
+    }
+
+    fn systems(state: &mut u64) -> Vec<(System, Elimination)> {
+        let mut found = Vec::new();
+        for size in [1, 2, 5, 17, 40, 64] {
+            for reads in [1, 2, 3] {
+                let system = system(size, reads, state);
+                let plan = Elimination::plan(&system.offsets, &system.unknowns, &system.matching);
+                found.push((system, plan));
+            }
+        }
+        found
+    }
+
+    fn same_bits(one: &[f64], other: &[f64]) -> bool {
+        one.len() == other.len()
+            && one
+                .iter()
+                .zip(other)
+                .all(|(one, other)| one.to_bits() == other.to_bits())
+    }
+
+    #[test]
+    fn own_holds_each_rows_entries_and_their_fill_and_no_more() {
+        let mut state = 0x6A09_E667_F3BC_C908;
+        for (system, plan) in systems(&mut state) {
+            let (at_row, at_unknown) = plan.places();
+            let size = at_row.len();
+            let mut filled = vec![vec![false; size]; size];
+            for row in 0..size {
+                filled[at_row[row]][at_row[row]] = true;
+                for unknown in &system.unknowns[system.offsets[row]..system.offsets[row + 1]] {
+                    filled[at_row[row]][at_unknown[unknown.index()]] = true;
+                }
+            }
+            for pivot in 0..size {
+                let (above, below) = filled.split_at_mut(pivot + 1);
+                for line in below.iter_mut().filter(|line| line[pivot]) {
+                    for (cell, &held) in line.iter_mut().zip(&above[pivot]).skip(pivot + 1) {
+                        *cell |= held;
+                    }
+                }
+            }
+            for (at, line) in filled.iter().enumerate() {
+                let wanted: Vec<u32> = (0..size as u32).filter(|&column| line[column as usize]).collect();
+                assert_eq!(plan.own.line(at), wanted, "line {at} holds its entries and fill");
+                let closed = plan.closure.line(at);
+                assert!(
+                    wanted.iter().all(|column| closed.contains(column)),
+                    "the symmetric pattern holds line {at}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn own_gives_the_dense_answer_on_systems_that_read_one_way() {
+        let mut state = 0xBB67_AE85_84CA_A73B;
+        for (system, plan) in systems(&mut state) {
+            let size = system.a.len();
+            let side: Vec<f64> = (0..size).map(|_| next(&mut state) - 0.5).collect();
+            let mut found = side.clone();
+            plan.factor(&system.values).expect("a pivot").solve(&mut found);
+            for (one, other) in found.iter().zip(dense_solve(system.a.clone(), side)) {
+                assert!((one - other).abs() < 1e-11, "{one} against {other}");
+            }
+        }
+    }
+
+    #[test]
+    fn own_keeps_every_bit_of_the_symmetric_plan() {
+        let mut state = 0x3C6E_F372_FE94_F82B;
+        for (system, plan) in systems(&mut state) {
+            let size = system.a.len();
+            let own = plan.factor(&system.values).expect("a pivot");
+            let today = plan.factor_closed(&system.values).expect("a pivot");
+            assert!(!own.closed, "finite values factor over the body's own pattern");
+            for at in 0..size {
+                let (line, closed) = (plan.own.line(at), plan.closure.line(at));
+                let (from, to) = (plan.own.starts[at] as usize, plan.closure.starts[at] as usize);
+                for (place, column) in closed.iter().enumerate() {
+                    let had = today.lu[to + place];
+                    let kept = match line.binary_search(column) {
+                        Ok(found) => own.lu[from + found],
+                        Err(_) if (*column as usize) < at => {
+                            0.0 / own.lu[plan.own.diagonals[*column as usize] as usize]
+                        }
+                        Err(_) => 0.0,
+                    };
+                    assert_eq!(kept.to_bits(), had.to_bits(), "line {at}, column {column}");
+                }
+            }
+            let mut sides = sides(size, &mut state);
+            for (side, value) in
+                sides
+                    .iter_mut()
+                    .skip(LANES)
+                    .zip([f64::INFINITY, f64::NAN, f64::NEG_INFINITY])
+            {
+                side[size / 2] = value;
+            }
+            let mut marks = Marks::new(size);
+            for reached in [true, false] {
+                let (kept, had) = (
+                    grouped(&own, &sides, reached, &mut marks),
+                    grouped(&today, &sides, reached, &mut marks),
+                );
+                for (kept, had) in kept.iter().zip(&had) {
+                    assert!(same_bits(kept, had), "a grouped walk keeps today's bits");
+                }
+            }
+            for side in sides {
+                let (mut kept, mut had) = (side.clone(), side);
+                own.solve(&mut kept);
+                today.solve(&mut had);
+                assert!(same_bits(&kept, &had), "a solve alone keeps today's bits");
+            }
+        }
+    }
+
+    #[test]
+    fn a_value_that_is_not_finite_factors_as_the_symmetric_plan_does() {
+        let mut state = 0xA54F_F53A_5F1D_36F1;
+        let mut apart = 0;
+        for (mut system, plan) in systems(&mut state)
+            .into_iter()
+            .filter(|(system, _)| system.a.len() > 4)
+        {
+            let (size, entries) = (system.a.len(), system.values.len());
+            for (at, value) in [
+                (entries / 3, f64::INFINITY),
+                (entries / 2, f64::NAN),
+                (entries - 1, -1e308),
+            ] {
+                let held = core::mem::replace(&mut system.values[at], value);
+                let side: Vec<f64> = (0..size).map(|_| next(&mut state) - 0.5).collect();
+                let answer = |factors: Result<Factors<'_>, usize>| {
+                    factors.map(|factors| {
+                        let mut side = side.clone();
+                        factors.solve(&mut side);
+                        side.iter().map(|value| value.to_bits()).collect::<Vec<u64>>()
+                    })
+                };
+                let had = answer(plan.factor_closed(&system.values));
+                assert_eq!(
+                    answer(plan.factor(&system.values)),
+                    had,
+                    "the factors and a solve keep today's bits"
+                );
+                let own = (plan.eliminate(&plan.own, &system.values).found).map(|lu| Factors {
+                    plan: &plan,
+                    closed: false,
+                    lu,
+                });
+                apart += usize::from(answer(own.map_err(|at| plan.rows[at] as usize)) != had);
+                system.values[at] = held;
+            }
+        }
+        assert!(
+            apart > 0,
+            "a value that is not finite meets a zero today's plan stores"
+        );
     }
 
     #[test]
