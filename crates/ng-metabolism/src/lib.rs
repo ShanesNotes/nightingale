@@ -12,4 +12,4 @@ mod burn;
 mod diffusion;
 
 pub use burn::{bed_heat, burn};
-pub use diffusion::{CellOxygen, GasRoutes, PlasmaPressure, carbon_dioxide_diffusion, oxygen_diffusion};
+pub use diffusion::{CellOxygen, GasRoutes, carbon_dioxide_diffusion, oxygen_diffusion};

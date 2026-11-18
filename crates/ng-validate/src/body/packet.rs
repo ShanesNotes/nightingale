@@ -1060,8 +1060,8 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// blood gases' swing within a beat, read across windows that hold no whole number of beats, and hydrogen's is a bed's
 /// cell fuels and water settling, under 7.5e-6 at every bed but the stroke work's payer, whose cells settle by 0.077
 /// over the first ten seconds whatever their start, so they take a bound of their own. The species are the held gut's and skin's
-/// water and salts, vasopressin's held secretion and clearance, and nitrogen gas, which the room and the dead space trade
-/// as the alveolar unit settles. Oxygen and carbon dioxide as species keep only held
+/// water and salts, vasopressin's held secretion and clearance, and nitrogen gas, whose total falls a steady 0.22 to
+/// 0.26 in ten seconds through two minutes, following the gas volume as the net exchange settles with the body's stores. Oxygen and carbon dioxide as species keep only held
 /// pools that never move, so the slice's bound for an unmoved species holds them.
 const ENERGY_DRIFT: f64 = 3e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
@@ -1110,7 +1110,6 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     for (key, value) in [
         ("rs.oxygen-inspired", 0.21),
         ("rs.carbon-dioxide-inspired", 0.0004),
-        ("rs.nitrogen-inspired", 0.7896),
     ] {
         set::<Dimensionless>(packet, key, body, value)?;
     }

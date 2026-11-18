@@ -22,13 +22,14 @@ const ELASTANCES: [f64; 2] = [1e-3, 3e-3];
 const RESTS: [f64; 2] = [4_000.0, 6_000.0];
 const ZERO_HEAD: f64 =
     (ELASTANCES[0] * RESTS[0] + ELASTANCES[1] * RESTS[1]) / (ELASTANCES[0] + ELASTANCES[1]);
-const WIDTH: f64 = 1e-6;
+/// Wide beside the resting head, so the smooth parts add a twentieth of the mixing exchange each way.
+const WIDTH: f64 = 0.5;
 const DIFFUSING: [f64; 2] = [25.0, 100.0];
 const PER_AMOUNT: f64 = 0.1;
-/// The run's length in seconds: the slowest of the unit's settling speeds is near one a second.
-const SETTLED: u64 = 60;
-/// The run settles to about 5e-8 of each value.
+/// The run's length in seconds: at some packets a mode near ten seconds leaves 1e-4 at 60 s and 1e-10 at 240 s.
+const SETTLED: u64 = 240;
 const TOLERANCE: f64 = 1e-6;
+const DEAD_SPACE: (f64, f64) = (1e-2, 500.0);
 
 #[derive(Clone, Copy)]
 struct Case {
@@ -200,8 +201,8 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Elastance>(p, "rs.wall-elastance", ELASTANCES[1])?;
     set::<Volume>(p, "rs.lung-rest-volume", RESTS[0])?;
     set::<Volume>(p, "rs.wall-rest-volume", RESTS[1])?;
-    set::<Elastance>(p, "rs.dead-space-elastance", 1e-2)?;
-    set::<Volume>(p, "rs.dead-space-volume", 500.0)?;
+    set::<Elastance>(p, "rs.dead-space-elastance", DEAD_SPACE.0)?;
+    set::<Volume>(p, "rs.dead-space-volume", DEAD_SPACE.1)?;
     let (g, m) = (CONDUCTANCE * unit.ventilation, MIXING * unit.ventilation);
     let [vo, vc, vn] = unit.molar_volume;
     set::<Quotient<Volume, Oxygen>>(p, "rs.oxygen-volume", vo)?;
@@ -209,11 +210,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Quotient<Volume, NitrogenGas>>(p, "rs.nitrogen-volume", vn)?;
     set::<Conductance<Volume>>(p, "rs.airway-conductance", g)?;
     set::<Rate<Volume>>(p, "rs.airway-mixing", m)?;
-    for (gas, key) in [
-        (0, "rs.oxygen-inspired"),
-        (1, "rs.carbon-dioxide-inspired"),
-        (2, "rs.nitrogen-inspired"),
-    ] {
+    for (gas, key) in [(0, "rs.oxygen-inspired"), (1, "rs.carbon-dioxide-inspired")] {
         set::<Dimensionless>(p, key, INSPIRED[gas])?;
     }
     let (dead, alveolar) = closed_form(unit);
@@ -222,7 +219,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
             let (shares, volume) = if site.key() == LUNG {
                 (alveolar, ZERO_HEAD)
             } else {
-                (dead, 500.0)
+                (dead, DEAD_SPACE.1)
             };
             match (species, space) {
                 (Species::Oxygen, Space::Gas) => shares[0] * volume / vo,
@@ -242,6 +239,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
 
 struct Settled {
     alveolar_volume: f64,
+    dead_volume: f64,
     alveolar: [f64; 3],
     dead: [f64; 3],
     plasma: [f64; 2],
@@ -279,9 +277,10 @@ fn settled(unit: Case) -> Result<Settled, InitializationFailure> {
         Ok((total, parts.map(|part| part / total)))
     };
     let (alveolar_volume, alveolar) = gas_space(LUNG)?;
-    let (_, dead) = gas_space(AIRWAY)?;
+    let (dead_volume, dead) = gas_space(AIRWAY)?;
     Ok(Settled {
         alveolar_volume,
+        dead_volume,
         alveolar,
         dead,
         plasma: [
@@ -293,6 +292,29 @@ fn settled(unit: Case) -> Result<Settled, InitializationFailure> {
 
 fn close(measured: f64, expected: f64, relative: f64) -> bool {
     (measured - expected).abs() <= relative * expected.abs()
+}
+
+#[test]
+fn the_alveolar_unit_and_the_dead_space_settle_where_their_heads_carry_the_net_uptake()
+-> Result<(), InitializationFailure> {
+    let unit = AT_REST;
+    let settled = settled(unit)?;
+    let [vo, vc, _] = unit.molar_volume;
+    let net = unit.oxygen_use * vo - unit.carbon_dioxide_made * vc;
+    let head = net / (CONDUCTANCE * unit.ventilation);
+    let alveolar = ZERO_HEAD - head / (ELASTANCES[0] + ELASTANCES[1]);
+    let dead = DEAD_SPACE.1 - head / DEAD_SPACE.0;
+    assert!(
+        close(settled.alveolar_volume, alveolar, TOLERANCE),
+        "the alveolar unit holds {}, its head's closed form {alveolar}",
+        settled.alveolar_volume
+    );
+    assert!(
+        close(settled.dead_volume, dead, TOLERANCE),
+        "the dead space holds {}, its head's closed form {dead}",
+        settled.dead_volume
+    );
+    Ok(())
 }
 
 #[test]

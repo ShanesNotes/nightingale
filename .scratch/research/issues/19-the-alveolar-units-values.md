@@ -16,6 +16,7 @@ Today's forms, in `crates/ng-respiratory/src/`:
 - [ ] The anatomic dead space's volume (`V_D0`), and whether a dead space that mixes its gas, as this form does, needs a smaller volume than one that returns its gas in order (research 11's Decisions)
 - [ ] The diffusing capacities for oxygen and carbon dioxide (`D_O2`, `D_CO2`) at rest, as conductances from alveolar gas to plasma, and the water vapour pressure of alveolar gas at body temperature (`P_H2O`)
 - [ ] The resting shunt fraction (`f`), and the airway's conductance to bulk flow (`G`, volume for each unit of pressure)
+- [ ] Each gas's molar volume at body temperature, the room's pressure and the inspired shares of oxygen and carbon dioxide, which stand as parameters until ticket 24's day states the room
 - [ ] What the pulmonary bed's inflow answers. Today it reads no oxygen debt, so the shunt keeps its share; hypoxic vasoconstriction, a later rung, would read alveolar oxygen there
 - [ ] What bounds the mixing exchange (`M`): the resting alveolar ventilation it must give, so the alveolar gases sit where a tidal breath at the resting rate and depth puts their means
 - [ ] Each constant's row for [research 16](16-constants-and-what-binds-them.md)'s list: what measurable quantity binds it

@@ -13,15 +13,12 @@ pub(crate) fn class() -> Result<RateClass, AdmissionError> {
 
 pub(crate) struct Gas<'b, Q> {
     volume: Bound<'b, Quotient<Volume, Q>>,
-    inspired_share: Bound<'b, Dimensionless>,
 }
 
 impl<'b, Q: Substance> Gas<'b, Q> {
-    fn declare(laws: &mut FragmentBuilder<'b, Respiratory>, keys: [&'static str; 2]) -> Self {
-        let [volume, inspired] = keys.map(ParameterKey::new);
+    fn declare(laws: &mut FragmentBuilder<'b, Respiratory>, key: &'static str) -> Self {
         Self {
-            volume: laws.parameter(volume, Admissible::positive()),
-            inspired_share: laws.parameter(inspired, Admissible::unit_interval()),
+            volume: laws.parameter(ParameterKey::new(key), Admissible::positive()),
         }
     }
 }
@@ -29,10 +26,23 @@ impl<'b, Q: Substance> Gas<'b, Q> {
 pub(crate) trait Dry: Breathed + Plain + Sized {
     fn gas<'r, 'b>(ventilation: &'r Ventilation<'b>) -> &'r Gas<'b, Self>;
     fn of<'b, 'k>(amounts: Amounts<'b, 'k>) -> Expr<'b, 'k, Respiratory, Self>;
+    fn inspired<'b, 'k, C>(
+        ventilation: &Ventilation<'b>,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+        flow: Expr<'b, 'k, Respiratory, Rate<Volume>>,
+    ) -> Expr<'b, 'k, Respiratory, Rate<Volume>>;
 }
 impl Dry for Oxygen {
     fn gas<'r, 'b>(ventilation: &'r Ventilation<'b>) -> &'r Gas<'b, Self> {
         &ventilation.oxygen
+    }
+    fn inspired<'b, 'k, C>(
+        ventilation: &Ventilation<'b>,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+        flow: Expr<'b, 'k, Respiratory, Rate<Volume>>,
+    ) -> Expr<'b, 'k, Respiratory, Rate<Volume>> {
+        let share = k.parameter(&ventilation.oxygen_inspired);
+        k.scale(flow, share)
     }
     fn of<'b, 'k>(amounts: Amounts<'b, 'k>) -> Expr<'b, 'k, Respiratory, Self> {
         amounts.0
@@ -42,6 +52,14 @@ impl Dry for CarbonDioxide {
     fn gas<'r, 'b>(ventilation: &'r Ventilation<'b>) -> &'r Gas<'b, Self> {
         &ventilation.carbon_dioxide
     }
+    fn inspired<'b, 'k, C>(
+        ventilation: &Ventilation<'b>,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+        flow: Expr<'b, 'k, Respiratory, Rate<Volume>>,
+    ) -> Expr<'b, 'k, Respiratory, Rate<Volume>> {
+        let share = k.parameter(&ventilation.carbon_dioxide_inspired);
+        k.scale(flow, share)
+    }
     fn of<'b, 'k>(amounts: Amounts<'b, 'k>) -> Expr<'b, 'k, Respiratory, Self> {
         amounts.1
     }
@@ -49,6 +67,16 @@ impl Dry for CarbonDioxide {
 impl Dry for NitrogenGas {
     fn gas<'r, 'b>(ventilation: &'r Ventilation<'b>) -> &'r Gas<'b, Self> {
         &ventilation.nitrogen
+    }
+    fn inspired<'b, 'k, C>(
+        ventilation: &Ventilation<'b>,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+        flow: Expr<'b, 'k, Respiratory, Rate<Volume>>,
+    ) -> Expr<'b, 'k, Respiratory, Rate<Volume>> {
+        let oxygen = Oxygen::inspired(ventilation, k, flow);
+        let carbon_dioxide = CarbonDioxide::inspired(ventilation, k, flow);
+        let rest = k.subtract(flow, oxygen);
+        k.subtract(rest, carbon_dioxide)
     }
     fn of<'b, 'k>(amounts: Amounts<'b, 'k>) -> Expr<'b, 'k, Respiratory, Self> {
         amounts.2
@@ -61,6 +89,8 @@ pub struct Ventilation<'b> {
     oxygen: Gas<'b, Oxygen>,
     carbon_dioxide: Gas<'b, CarbonDioxide>,
     nitrogen: Gas<'b, NitrogenGas>,
+    oxygen_inspired: Bound<'b, Dimensionless>,
+    carbon_dioxide_inspired: Bound<'b, Dimensionless>,
     conductance: Bound<'b, Conductance<Volume>>,
     mixing: Bound<'b, Rate<Volume>>,
     lung_elastance: Bound<'b, Elastance>,
@@ -79,9 +109,12 @@ impl<'b> Ventilation<'b> {
     ) -> Result<Self, AdmissionError> {
         let key = ParameterKey::new;
         let ventilation = Self {
-            oxygen: Gas::declare(laws, ["rs.oxygen-volume", "rs.oxygen-inspired"]),
-            carbon_dioxide: Gas::declare(laws, ["rs.carbon-dioxide-volume", "rs.carbon-dioxide-inspired"]),
-            nitrogen: Gas::declare(laws, ["rs.nitrogen-volume", "rs.nitrogen-inspired"]),
+            oxygen: Gas::declare(laws, "rs.oxygen-volume"),
+            carbon_dioxide: Gas::declare(laws, "rs.carbon-dioxide-volume"),
+            nitrogen: Gas::declare(laws, "rs.nitrogen-volume"),
+            oxygen_inspired: laws.parameter(key("rs.oxygen-inspired"), Admissible::unit_interval()),
+            carbon_dioxide_inspired: laws
+                .parameter(key("rs.carbon-dioxide-inspired"), Admissible::unit_interval()),
             conductance: laws.parameter(key("rs.airway-conductance"), Admissible::positive()),
             mixing: laws.parameter(key("rs.airway-mixing"), Admissible::nonnegative()),
             lung_elastance: laws.parameter(key("rs.lung-elastance"), Admissible::positive()),
@@ -267,13 +300,15 @@ impl<'b> Ventilation<'b> {
             out.amount::<CarbonDioxide>(),
             out.amount::<NitrogenGas>(),
         );
-        let gas = I::Quantity::gas(self);
         let rate = laws.kernel(|mut k| {
             let airway = (k.read(&held.0), k.read(&held.1), k.read(&held.2));
             let head = self.dead_space_head(&mut k, airway);
             let [inward, _] = self.parts(&mut k, head);
-            let fraction = k.parameter(&gas.inspired_share);
-            let value = self.at_the_room::<_, I::Quantity>(&mut k, inward, fraction);
+            let (g, m) = (k.parameter(&self.conductance), k.parameter(&self.mixing));
+            let bulk = k.conductance_flow(g, inward);
+            let flow = k.add(bulk, m);
+            let flow = I::Quantity::inspired(self, &mut k, flow);
+            let value = self.amount_rate::<_, I::Quantity>(&mut k, flow);
             k.finish(value, laws.every_mode(), class)
         });
         laws.transfer(Transfer::new(&into, rate));
