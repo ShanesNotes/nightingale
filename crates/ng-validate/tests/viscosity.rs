@@ -234,7 +234,7 @@ fn viscosity_scales_every_circulation_edge_and_no_other_law() -> Result<(), Init
     let mut read = circulation.clone();
     read.push(field);
     read.sort_unstable();
-    assert_eq!(circulation.len(), 21);
+    assert_eq!(circulation.len(), 22);
     assert_eq!(moved, read);
     for at in circulation {
         let (once, twice) = (-staged[0][at], -staged[1][at]);

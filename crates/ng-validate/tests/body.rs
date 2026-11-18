@@ -396,17 +396,8 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         .map(|hold| format!("{} {:?} {:?} {}\n", hold.card, hold.held, hold.release, hold.line))
         .collect();
     expect![[r#"
-        RS Route("inspired oxygen") Ticket(10, "RS") 01:128
-        RS Route("inspired carbon dioxide") Ticket(10, "RS") 01:149
-        RS Route("inspired nitrogen gas") Ticket(10, "RS") 01:531
-        RS Route("expired oxygen") Ticket(10, "RS") 01:133
-        RS Route("expired carbon dioxide") Ticket(10, "RS") 01:150
-        RS Route("expired nitrogen gas") Ticket(10, "RS") 01:531
         RS Route("expired water") Ticket(10, "RS") 01:63, 873
         RS Route("airway heat") Ticket(10, "RS") 01:171-172, 873
-        RS Pool(Oxygen, Gas, Tissue(Lung)) Ticket(10, "RS") 01:129, 529
-        RS Pool(CarbonDioxide, Gas, Tissue(Lung)) Ticket(10, "RS") 01:148, 530
-        RS Pool(NitrogenGas, Gas, Tissue(Lung)) Ticket(10, "RS") 01:531
         RS Pool(Water, Gas, Tissue(Lung)) Ticket(10, "RS") 01:356, 532
         GI Route("gut water") Ticket(13, "GI") 01:54, 876
         GI Route("gut sodium") Ticket(13, "GI") 01:77, 876
@@ -530,8 +521,6 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         MT Route("bone bed glucose feed") Ticket(16, "MT") 01:190
         MT Route("bone bed fatty acid feed") Ticket(16, "MT") 01:200
         MT Route("bone bed cell water out") Ticket(17, "FL") 01:58, 880
-        MT Route("lung oxygen") Ticket(10, "RS") 01:129, 873
-        MT Route("lung carbon dioxide") Ticket(10, "RS") 01:148, 873
         MT Pool(Glucose, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 533
         MT Pool(FattyAcids, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 536
         MT Pool(Lactate, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 540
@@ -608,9 +597,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 160: routes 97, pools 63
-        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 15, "MT": 46, "RS": 12}
-        by ticket {"09": 3, "10": 14, "12": 7, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 149: routes 89, pools 60
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 15, "MT": 44, "RS": 3}
+        by ticket {"09": 3, "10": 3, "12": 7, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -915,10 +904,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1445 {"algebraic": 186, "amount": 1248, "memory": 11}, columns 1422, jacobian nonzeros 9832, blocks 430, parameter slots 709, conserved combinations 404, held pools 322, held route columns 97
-        model hash e47d61592244ce77dfb80da00c96de34c11b32516232ef7a69fa98003f185256
-        conserved basis 0209c7dba8840f794a98530d6d858db650508068452df255358f61d1f0c2eaef
-        stated packet 5dc3148703cf43a2885b20558d79ba7948c22d63eae5c7e8f5b575f1bae851c6
+        rows 1444 {"algebraic": 185, "amount": 1248, "memory": 11}, columns 1458, jacobian nonzeros 10028, blocks 424, parameter slots 714, conserved combinations 399, held pools 319, held route columns 89
+        model hash 4ac9d6c0ca61038f975c20b63841fe83439617f1f343da77d6dce700140a2646
+        conserved basis 46b9975bf1364b8364f03f0e9b79a5b884dd7f6a3f419bf8b905493f1e9ceb3e
+        stated packet 1e19be23d5f51c8e4f3dcbc041b04139f80278610c1d4ef65e43bd10efda8c46
     "#]].assert_eq(&pin);
     Ok(())
 }
