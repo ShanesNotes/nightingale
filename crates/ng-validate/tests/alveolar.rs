@@ -32,9 +32,9 @@ const TOLERANCE: f64 = 1e-6;
 const DEAD_SPACE_ELASTANCE: f64 = 1e-2;
 const DEAD_SPACE: f64 = 500.0;
 
-const RATE: f64 = BODY_RHYTHM.rate;
-const PHASES: [f64; 2] = [BODY_RHYTHM.inspiration, BODY_RHYTHM.expiration];
-const DRIVE: [f64; 3] = [BODY_RHYTHM.rise, BODY_RHYTHM.fall, BODY_RHYTHM.peak];
+const RATE: f64 = 0.2;
+const PHASES: [f64; 2] = [0.4, 0.6];
+const DRIVE: [f64; 3] = [1.5, 2.0, 1.0];
 const UPRIGHT_WALL_REST_RISE: f64 = 2_000.0;
 const CAROTID_ABOVE_VESSEL: f64 = 0.3;
 
@@ -318,7 +318,10 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     let guess = |row: RowKind| match row {
         RowKind::Amount { site, species, space } => {
             let (shares, volume) = if site.key() == LUNG {
-                (alveolar, zero_head(unit.rests))
+                (
+                    alveolar,
+                    zero_head(unit.rests) + unit.pump * unit.rest_drive / (ELASTANCES[0] + ELASTANCES[1]),
+                )
             } else {
                 (dead, unit.dead_space)
             };
@@ -462,6 +465,10 @@ struct Sample {
     drive: f64,
     held: [f64; 3],
     extents: Vec<f64>,
+}
+
+fn measured<U>(value: &Measure<U>) -> f64 {
+    f64::from_bits(Compensated::of(value).bits()[0])
 }
 
 fn memory(body: &CompiledBody, local: &str) -> RowId {
@@ -1010,7 +1017,18 @@ fn a_mixing_share_falling_fast_to_zero_raises_no_refusal_at_its_row() -> Result<
 #[test]
 fn the_drive_at_the_bodys_rhythm_means_its_rest_value_over_a_breath_and_falls_below_it()
 -> Result<(), InitializationFailure> {
-    let rest_drive = BODY_RHYTHM.mean_drive();
+    let body = body_breath()?;
+    assert_eq!(
+        [body.rate, body.rise, body.fall].map(|speed| measured(&speed)),
+        [RATE, DRIVE[0], DRIVE[1]],
+        "the fixture breathes at the body's rhythm"
+    );
+    assert_eq!(
+        [body.inspiration, body.expiration, body.peak].map(|share| measured(&share)),
+        [PHASES[0], PHASES[1], DRIVE[2]],
+        "the fixture breathes at the body's rhythm"
+    );
+    let rest_drive = measured(&body.rest_drive);
     let unit = Case {
         rest_drive,
         ..BREATHING

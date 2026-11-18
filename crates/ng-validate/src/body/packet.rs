@@ -1169,18 +1169,41 @@ const MIXING: f64 = 3_240.0;
 const DEAD_SPACE: f64 = 3_400.0;
 const CAROTID_ABOVE_ARTERIES: f64 = 0.2;
 
-/// The body's breath: a rate, inspiration's and expiration's phase lengths, and the pump drive's rise and fall speeds
-/// and its peak, as the packet states them.
-pub struct BreathRhythm {
-    pub rate: f64,
-    pub inspiration: f64,
-    pub expiration: f64,
-    pub rise: f64,
-    pub fall: f64,
-    pub peak: f64,
+struct BreathRhythm {
+    rate: f64,
+    inspiration: f64,
+    expiration: f64,
+    rise: f64,
+    fall: f64,
+    peak: f64,
 }
 
-pub const BODY_RHYTHM: BreathRhythm = BreathRhythm {
+/// The body packet's breath: its rate, inspiration's and expiration's phase lengths, the pump drive's rise and fall
+/// speeds and its peak, and the rest drive the packet states by closed form.
+pub struct BodyBreath {
+    pub rate: Measure<Rate<Dimensionless>>,
+    pub inspiration: Measure<Dimensionless>,
+    pub expiration: Measure<Dimensionless>,
+    pub rise: Measure<Rate<Dimensionless>>,
+    pub fall: Measure<Rate<Dimensionless>>,
+    pub peak: Measure<Dimensionless>,
+    pub rest_drive: Measure<Dimensionless>,
+}
+
+pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
+    let rhythm = &BODY_RHYTHM;
+    Ok(BodyBreath {
+        rate: Measure::new(rhythm.rate)?,
+        inspiration: Measure::new(rhythm.inspiration)?,
+        expiration: Measure::new(rhythm.expiration)?,
+        rise: Measure::new(rhythm.rise)?,
+        fall: Measure::new(rhythm.fall)?,
+        peak: Measure::new(rhythm.peak)?,
+        rest_drive: Measure::new(rhythm.mean_drive())?,
+    })
+}
+
+const BODY_RHYTHM: BreathRhythm = BreathRhythm {
     rate: 0.2,
     inspiration: 0.4,
     expiration: 0.6,
@@ -1198,8 +1221,7 @@ impl BreathRhythm {
         let end = self.peak * (1.0 - e_i) / (1.0 - e_i * e_e);
         (end * e_e, end, inspiring, expiring)
     }
-    /// The drive's mean over a breath, at which the body's rest mode holds it.
-    pub fn mean_drive(&self) -> f64 {
+    fn mean_drive(&self) -> f64 {
         let (start, end, inspiring, expiring) = self.ends();
         let rising =
             self.peak * inspiring + (start - self.peak) * (1.0 - exp(-self.rise * inspiring)) / self.rise;

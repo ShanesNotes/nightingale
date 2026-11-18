@@ -275,8 +275,8 @@ pub use accuracy::{
 };
 pub use arena::{Arena, ArenaProtocol};
 pub use body::{
-    BODY_RHYTHM, BodyCase, BreathRhythm, FluidRoute, HOLD_TABLE, Held, Hold, KEEP_BACKS, KeepBack, Release,
-    WholeBody, body_anatomy, body_certificate, body_lens, body_packet, body_packet_at_viscosity_exponent,
+    BodyBreath, BodyCase, FluidRoute, HOLD_TABLE, Held, Hold, KEEP_BACKS, KeepBack, Release, WholeBody,
+    body_anatomy, body_breath, body_certificate, body_lens, body_packet, body_packet_at_viscosity_exponent,
     body_schema, body_start_guess, whole_body,
 };
 pub use burning::BurningBeds;
