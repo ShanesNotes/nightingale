@@ -1,3 +1,4 @@
+use crate::breath::Breath;
 use ng_contract::*;
 
 type Bound<'b, U> = Parameter<'b, Respiratory, U>;
@@ -86,6 +87,9 @@ impl Dry for NitrogenGas {
 /// The room's side reads the dead space's own head, not the alveolar unit's: with the alveolar unit's head there, the
 /// dead space's total is conserved by these laws and nothing sets it.
 pub struct Ventilation<'b> {
+    breath: Breath<'b>,
+    pump: Bound<'b, Pressure>,
+    wall: AlgebraicSlot<'b, Respiratory, Volume>,
     oxygen: Gas<'b, Oxygen>,
     carbon_dioxide: Gas<'b, CarbonDioxide>,
     nitrogen: Gas<'b, NitrogenGas>,
@@ -108,7 +112,11 @@ impl<'b> Ventilation<'b> {
         ports: &RespiratoryPorts<'b>,
     ) -> Result<Self, AdmissionError> {
         let key = ParameterKey::new;
+        let class = class()?;
         let ventilation = Self {
+            breath: Breath::declare(laws, class)?,
+            pump: laws.parameter(key("rs.pump-pressure"), Admissible::nonnegative()),
+            wall: laws.algebraic("chest wall rest volume", Admissible::positive()),
             oxygen: Gas::declare(laws, "rs.oxygen-volume"),
             carbon_dioxide: Gas::declare(laws, "rs.carbon-dioxide-volume"),
             nitrogen: Gas::declare(laws, "rs.nitrogen-volume"),
@@ -125,7 +133,7 @@ impl<'b> Ventilation<'b> {
             dead_space: laws.parameter(key("rs.dead-space-volume"), Admissible::positive()),
             width: laws.parameter(key("rs.head-width"), Admissible::positive()),
         };
-        let class = class()?;
+        ventilation.posture(laws, class);
         ventilation.along::<Oxygen>(laws, ports, class);
         ventilation.along::<CarbonDioxide>(laws, ports, class);
         ventilation.along::<NitrogenGas>(laws, ports, class);
@@ -165,6 +173,44 @@ impl<'b> Ventilation<'b> {
         k.as_dimension(share)
     }
 
+    /// The pump's pressure, `P_mus = PImax a` for the pump drive `a` (research 11's pump row).
+    fn muscle<'k, C>(&self, k: &mut Kernel<'b, 'k, Respiratory, C>) -> Expr<'b, 'k, Respiratory, Pressure> {
+        let (pump, drive) = (k.parameter(&self.pump), k.state(&self.breath.drive));
+        k.scale(pump, drive)
+    }
+
+    /// `V_W0 = V_W0,supine + dV_W rise / L`: sitting up raises the chest wall's relaxed volume (research 11, Nunn
+    /// pp. 46 to 47), and the carotid sinus's rise over its distance up the trunk is the sine of the trunk's angle.
+    fn posture(&self, laws: &mut FragmentBuilder<'b, Respiratory>, class: RateClass) {
+        let key = ParameterKey::new;
+        let slope = laws.parameter::<Volume>(key("rs.wall-rest-rise"), Admissible::finite());
+        let trunk = laws.parameter::<Length>(key("rs.trunk-length"), Admissible::positive());
+        let residual = laws.kernel(|mut k| {
+            let (supine, slope, length) = (
+                k.parameter(&self.wall_rest),
+                k.parameter(&slope),
+                k.parameter(&trunk),
+            );
+            let rise = k.rise(Landmark::CarotidSinus);
+            let sine = k.divide(rise, length);
+            let sine: Expr<'b, '_, Respiratory, Dimensionless> = k.as_dimension(sine);
+            let raised = k.scale(slope, sine);
+            let value = k.add(supine, raised);
+            let row = k.algebraic(&self.wall);
+            let residual = k.subtract(row, value);
+            k.finish(residual, laws.every_mode(), class)
+        });
+        laws.residual(&self.wall, residual);
+    }
+
+    fn mixing<'k, C>(
+        &self,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+    ) -> Expr<'b, 'k, Respiratory, Rate<Volume>> {
+        let (m, share) = (k.parameter(&self.mixing), k.state(&self.breath.share));
+        k.scale(m, share)
+    }
+
     fn alveolar_head<'k, C>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
@@ -175,15 +221,49 @@ impl<'b> Ventilation<'b> {
             k.parameter(&self.lung_elastance),
             k.parameter(&self.wall_elastance),
             k.parameter(&self.lung_rest),
-            k.parameter(&self.wall_rest),
+            k.algebraic(&self.wall),
         );
         let (stretched, sprung) = (k.subtract(v, l0), k.subtract(v, w0));
         let (lung_recoil, wall_recoil) = (k.multiply(el, stretched), k.multiply(ew, sprung));
         let (lung_recoil, wall_recoil): (Expr<'b, 'k, Respiratory, Pressure>, _) =
             (k.as_dimension(lung_recoil), k.as_dimension(wall_recoil));
         let recoil = k.add(lung_recoil, wall_recoil);
-        let zero = k.zero();
-        k.subtract(zero, recoil)
+        let muscle = self.muscle(k);
+        k.subtract(muscle, recoil)
+    }
+
+    /// The pleural pressure is the lung's recoil at the mechanics' static solution, `P_pl = -E_L (V - V_L0)` with
+    /// `V - V_L0 = (E_W (V_W0 - V_L0) + P_mus) / (E_L + E_W)`, so `P_pl = P_pl,rest - E_L / (E_L + E_W) P_mus`. It is
+    /// not the chest wall's recoil at the lung's volume: a body that read the volume did not admit.
+    pub fn pleural(
+        &self,
+        laws: &mut FragmentBuilder<'b, Respiratory>,
+        ports: &RespiratoryPorts<'b>,
+    ) -> Result<(), AdmissionError> {
+        let class = class()?;
+        let pressure = laws.site_kernel(|mut k| {
+            let (el, ew, l0, w0) = (
+                k.parameter(&self.lung_elastance),
+                k.parameter(&self.wall_elastance),
+                k.parameter(&self.lung_rest),
+                k.algebraic(&self.wall),
+            );
+            let apart = k.subtract(w0, l0);
+            let held = k.multiply(ew, apart);
+            let held: Expr<'b, '_, Respiratory, Pressure> = k.as_dimension(held);
+            let muscle = self.muscle(&mut k);
+            let pull = k.add(held, muscle);
+            let both = k.add(el, ew);
+            let stretch = k.divide(pull, both);
+            let stretch: Expr<'b, '_, Respiratory, Volume> = k.as_dimension(stretch);
+            let recoil = k.multiply(el, stretch);
+            let recoil: Expr<'b, '_, Respiratory, Pressure> = k.as_dimension(recoil);
+            let zero = k.zero();
+            let value = k.subtract(zero, recoil);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.define_at(&ports.enclosure_pressure, pressure);
+        Ok(())
     }
 
     fn dead_space_head<'k, C>(
@@ -234,7 +314,7 @@ impl<'b> Ventilation<'b> {
         let (bulk_in, bulk_out) = (k.conductance_flow(g, inward), k.conductance_flow(g, outward));
         let (carried_in, carried_out) = (k.scale(bulk_in, up), k.scale(bulk_out, down));
         let bulk = k.subtract(carried_in, carried_out);
-        let m = k.parameter(&self.mixing);
+        let m = self.mixing(k);
         let gap = k.subtract(up, down);
         let mixed = k.scale(m, gap);
         let flow = k.add(bulk, mixed);
@@ -247,7 +327,7 @@ impl<'b> Ventilation<'b> {
         head: Expr<'b, 'k, Respiratory, Pressure>,
         share: Expr<'b, 'k, Respiratory, Dimensionless>,
     ) -> Expr<'b, 'k, Respiratory, Rate<Q>> {
-        let (g, m) = (k.parameter(&self.conductance), k.parameter(&self.mixing));
+        let (g, m) = (k.parameter(&self.conductance), self.mixing(k));
         let bulk = k.conductance_flow(g, head);
         let flow = k.add(bulk, m);
         let flow = k.scale(flow, share);
@@ -304,7 +384,7 @@ impl<'b> Ventilation<'b> {
             let airway = (k.read(&held.0), k.read(&held.1), k.read(&held.2));
             let head = self.dead_space_head(&mut k, airway);
             let [inward, _] = self.parts(&mut k, head);
-            let (g, m) = (k.parameter(&self.conductance), k.parameter(&self.mixing));
+            let (g, m) = (k.parameter(&self.conductance), self.mixing(&mut k));
             let bulk = k.conductance_flow(g, inward);
             let flow = k.add(bulk, m);
             let flow = I::Quantity::inspired(self, &mut k, flow);

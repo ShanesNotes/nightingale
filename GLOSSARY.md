@@ -451,13 +451,24 @@ The lungs' one gas space at rung 0: the pulmonary bed's gas. It fills from the d
 The conducting airway's gas, in series between the room and the alveolar unit, so the room's gas reaches the alveolar unit only through it. Its own elastic head draws gas from the room when it holds less than its volume.
 
 **Mixing exchange**:
-A volume of gas a second traded both ways along the airway, or between the room and the dead space, so each gas moves at that volume rate times its share of the dry gas at each end, over its molar volume. The two ways carry equal volumes, so it moves no net volume. It stands for the breath's mean ventilation until the breath is built.
+A volume of gas a second traded both ways along the airway, or between the room and the dead space, so each gas moves at that volume rate times its share of the dry gas at each end, over its molar volume. The two ways carry equal volumes, so it moves no net volume. It carries a breath's mean alveolar ventilation while the breath rests, and its mixing share, a memory, falls to zero once the breath starts.
 
 **Alveolar exchange**:
 A transfer of oxygen or carbon dioxide across the gas-exchange surface, at a conductance times the alveolar partial pressure less the pulmonary bed's plasma's. The alveolar partial pressure is the gas's share of the dry gas times the room's pressure less water vapour's.
 
 **Shunt**:
 A vascular edge from the pulmonary artery to the pulmonary vein beside the pulmonary bed, so a share of the blood reaches the left heart with no alveolar exchange.
+
+**Breath**:
+One pass of the respiratory card's rhythm, from one breath edge to the next: inspiration while the pump drive rises, then expiration while it falls. A run admits with the breath at rest, and a hazard starts the first one in its first milliseconds.
+_Avoid_: cycle (the packet's equal-interval pass), beat (the heart's)
+
+**Breath edge**:
+The accepted step end at which the breath's phase resets, where a guard's landing puts it.
+
+**Pump drive**:
+A memory between zero and its peak that sets the pump's pressure, the respiratory muscles' pull on the chest wall. The pleural pressure falls and the alveolar unit fills as it rises.
+_Avoid_: activation (the heart's)
 
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.

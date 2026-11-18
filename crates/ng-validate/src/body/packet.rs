@@ -265,6 +265,8 @@ fn start_guess(row: RowKind) -> f64 {
         }
         RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.0,
+        RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
+        RowKind::Memory(slot) if slot.law.local == "pump drive" => RHYTHM.mean_drive(),
         RowKind::Memory(_) => 0.0,
         RowKind::Algebraic(slot) => {
             let bed = match slot.at {
@@ -278,6 +280,7 @@ fn start_guess(row: RowKind) -> f64 {
                 "bicarbonate" => blood.bicarbonate,
                 "acidity" => blood.acidity,
                 "oxygen_debt_per_bed" => 0.0,
+                "chest wall rest volume" => WALL_REST,
                 _ => 1.0,
             }
         }
@@ -595,6 +598,11 @@ pub fn body_packet_at_viscosity_exponent(
         local: "stirring",
     };
     packet.start_mode(stirring, "still", NOTE)?;
+    let breath = LawName {
+        owner: Respiratory::CARD,
+        local: "breath",
+    };
+    packet.start_mode(breath, "rest", NOTE)?;
 
     table(&mut packet, exponent)?;
     oxygen_per_lactate(&mut packet, body)?;
@@ -669,7 +677,6 @@ fn table(
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05)?;
     set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0)?;
-    set::<Pressure>(packet, "rs.pleural-pressure", body, -3.0)?;
     respiratory(packet)?;
     set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.035)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.05)?;
@@ -1120,13 +1127,94 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Elastance>(packet, "rs.lung-elastance", body, 1.6e-4)?;
     set::<Elastance>(packet, "rs.wall-elastance", body, 1.6e-4)?;
     set::<Volume>(packet, "rs.lung-rest-volume", body, 38_250.0)?;
-    set::<Volume>(packet, "rs.wall-rest-volume", body, 75_750.0)?;
+    set::<Volume>(packet, "rs.wall-rest-volume", body, WALL_REST)?;
     set::<Elastance>(packet, "rs.dead-space-elastance", body, 6.4e-4)?;
-    set::<Volume>(packet, "rs.dead-space-volume", body, 3_400.0)?;
+    set::<Volume>(packet, "rs.dead-space-volume", body, DEAD_SPACE)?;
     set::<Quotient<Volume, Oxygen>>(packet, "rs.oxygen-volume", body, 1.0)?;
     set::<Quotient<Volume, CarbonDioxide>>(packet, "rs.carbon-dioxide-volume", body, 1.0)?;
     set::<Quotient<Volume, NitrogenGas>>(packet, "rs.nitrogen-volume", body, 1.0)?;
     set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, 15_600.0)?;
-    set::<Rate<Volume>>(packet, "rs.airway-mixing", body, 3_240.0)?;
+    set::<Rate<Volume>>(packet, "rs.airway-mixing", body, RHYTHM.mixing())?;
+    for (key, value) in [
+        ("rs.breath-rate", RHYTHM.rate),
+        ("rs.drive-rise", RHYTHM.rise),
+        ("rs.drive-fall", RHYTHM.fall),
+        ("rs.rest-speed", 1.0),
+        ("rs.share-fall", 1.0),
+        ("rs.breath-start", 1_000.0),
+    ] {
+        set::<Rate<Dimensionless>>(packet, key, body, value)?;
+    }
+    for (key, value) in [
+        ("rs.inspiration-end", RHYTHM.inspiration_end),
+        ("rs.breath-end", 1.0),
+        ("rs.drive-peak", RHYTHM.peak),
+        ("rs.rest-drive", RHYTHM.mean_drive()),
+        ("rs.rest-share", 1.0),
+    ] {
+        set::<Dimensionless>(packet, key, body, value)?;
+    }
+    set::<Pressure>(packet, "rs.pump-pressure", body, RHYTHM.pump)?;
+    set::<Volume>(packet, "rs.wall-rest-rise", body, 10_000.0)?;
+    set::<Length>(packet, "rs.trunk-length", body, TRUNK)?;
     Ok(())
+}
+
+const ELASTANCE: f64 = 1.6e-4 + 1.6e-4;
+const WALL_REST: f64 = 75_750.0;
+const DEAD_SPACE: f64 = 3_400.0;
+/// How far the carotid sinus sits up the trunk from the systemic arteries, so the rise over it is the trunk's sine.
+const TRUNK: f64 = 0.2;
+
+/// The breath's synthetic rhythm: a rate in breaths a second, the phase at which inspiration ends, and the speeds at
+/// which the pump drive rises toward its peak and falls toward zero.
+struct Rhythm {
+    rate: f64,
+    inspiration_end: f64,
+    rise: f64,
+    fall: f64,
+    peak: f64,
+    pump: f64,
+}
+
+const RHYTHM: Rhythm = Rhythm {
+    rate: 0.2,
+    inspiration_end: 0.4,
+    rise: 1.5,
+    fall: 2.0,
+    peak: 1.0,
+    pump: 4.0,
+};
+
+impl Rhythm {
+    /// The drive at inspiration's start and end once breaths repeat: `a1 = peak (1 - e_i) + a0 e_i` and `a0 = a1 e_e`,
+    /// with `e_i` and `e_e` the rise's and the fall's decay over inspiration and expiration.
+    fn ends(&self) -> (f64, f64, f64, f64) {
+        let (inspiring, expiring) = (
+            self.inspiration_end / self.rate,
+            (1.0 - self.inspiration_end) / self.rate,
+        );
+        let (e_i, e_e) = (exp(-self.rise * inspiring), exp(-self.fall * expiring));
+        let end = self.peak * (1.0 - e_i) / (1.0 - e_i * e_e);
+        (end * e_e, end, inspiring, expiring)
+    }
+    /// The drive's mean over a breath, so the rest mode holds the breathing body's mean pleural pressure and volume.
+    fn mean_drive(&self) -> f64 {
+        let (start, end, inspiring, expiring) = self.ends();
+        let rising =
+            self.peak * inspiring + (start - self.peak) * (1.0 - exp(-self.rise * inspiring)) / self.rise;
+        let falling = end * (1.0 - exp(-self.fall * expiring)) / self.fall;
+        (rising + falling) * self.rate
+    }
+    /// The mixing exchange whose alveolar gas matches a breath's mean: two mixed exchanges in series put the alveolar
+    /// unit at `2 P / M`, and a breath of volume `V_T` through a mixed dead space `V_D` at `P T / (V_T - V_D
+    /// tanh(V_T / 2 V_D))` while the alveolar gas holds through the breath. `V_T` is the drive's swing at the
+    /// mechanics' static solution.
+    fn mixing(&self) -> f64 {
+        let (start, end, ..) = self.ends();
+        let tidal = self.pump * (end - start) / ELASTANCE;
+        let x = tidal / DEAD_SPACE;
+        let tanh = (1.0 - exp(-x)) / (1.0 + exp(-x));
+        2.0 * (tidal - DEAD_SPACE * tanh) * self.rate
+    }
 }

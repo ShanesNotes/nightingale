@@ -279,6 +279,7 @@ fn counted_until<'s>(
     mut session: Session<'s, Running>,
     after: u64,
     minute: &mut Minute,
+    watch: &mut Watch,
 ) -> Session<'s, Running> {
     let row = |row: RowId| format!("{:?}", start.body.rows()[row.index()].kind());
     while session.record().accepted().time().nanoseconds() < anchor_moment().nanoseconds() + after {
@@ -300,11 +301,298 @@ fn counted_until<'s>(
                 Step::Faulted(faulted) => panic!("{:?}", faulted.fault()),
             }
         };
+        watch.see(&session);
     }
     session
 }
 
-fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (Session<'_, Running>, Minute) {
+/// The books whose inventories move with each breath: the gases the lungs hold, and vasopressin and energy with the
+/// circulation's breath-scale swing.
+const BREATHING_BOOKS: [Book; 5] = [
+    Book::Of(Species::Vasopressin),
+    Book::Element(Element::Oxygen),
+    Book::Element(Element::Carbon),
+    Book::Of(Species::NitrogenGas),
+    Book::Energy,
+];
+const DRY: f64 = 650.0;
+
+fn larger(a: f64, b: f64) -> f64 {
+    if b > a { b } else { a }
+}
+
+fn widen((low, high): (f64, f64), x: f64) -> (f64, f64) {
+    (if x < low { x } else { low }, if x > high { x } else { high })
+}
+
+/// One accepted step of the first minute.
+struct Moment {
+    at: u64,
+    phase: f64,
+    venous: f64,
+    aortic: f64,
+    alveolar: [f64; 2],
+    plasma: [f64; 3],
+    inventories: Vec<f64>,
+}
+
+/// What the first minute shows of each breath, read at every accepted step.
+struct Watch {
+    phase: RowId,
+    venous: RowId,
+    aortic: RowId,
+    lung: [RowId; 3],
+    plasma: [RowId; 4],
+    books: Vec<(Book, Vec<(RowId, i64)>)>,
+    moments: Vec<Moment>,
+}
+impl Watch {
+    fn new(start: &Start) -> Self {
+        let body = &start.body;
+        let find = |kind: RowKind| {
+            (body.rows().iter())
+                .find(|row| row.kind() == kind)
+                .unwrap_or_else(|| panic!("no row {kind:?}"))
+                .id()
+        };
+        let phase = (body.rows().iter())
+            .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "RS" && slot.law.local == "breath phase"))
+            .expect("the breath's phase")
+            .id();
+        let venous = Context::Edge {
+            from: site::<VesselSegment>("central veins"),
+            to: site::<VesselSegment>("right atrium"),
+        };
+        let aortic = Context::Edge {
+            from: site::<VesselSegment>("left ventricle"),
+            to: site::<VesselSegment>("systemic arteries"),
+        };
+        let valves = LawName {
+            owner: "CV",
+            local: "valves",
+        };
+        let lung = site::<CapillaryBed>("pulmonary bed");
+        let gas = |species| {
+            find(RowKind::Amount {
+                site: lung,
+                species,
+                space: Space::Gas,
+            })
+        };
+        let plasma = |species| {
+            find(RowKind::Amount {
+                site: lung,
+                species,
+                space: Space::Plasma,
+            })
+        };
+        let books = (body.conserved_basis().combinations().iter())
+            .filter(|combination| BREATHING_BOOKS.contains(&combination.book()))
+            .map(|combination| (combination.book(), combination.terms().to_vec()))
+            .collect();
+        Self {
+            phase,
+            venous: find(field("CV", "circulation", venous)),
+            aortic: find(RowKind::Memory(Slot {
+                law: valves,
+                at: aortic,
+            })),
+            lung: [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas].map(gas),
+            plasma: [
+                plasma(Species::Oxygen),
+                plasma(Species::Hemoglobin),
+                plasma(Species::Water),
+                find(field("BC", "oxygen partial pressure", Context::Site(lung))),
+            ],
+            books,
+            moments: Vec::new(),
+        }
+    }
+    fn see(&mut self, session: &Session<'_, Running>) {
+        let view = session.record().accepted();
+        let at = |row: RowId| lead(view.value(row));
+        let [o, c, n] = self.lung.map(at);
+        let dry = o + c + n;
+        let [oxygen, carrier, water, pressure] = self.plasma.map(at);
+        let inventories = (self.books.iter())
+            .map(|(_, terms)| terms.iter().map(|(row, count)| *count as f64 * at(*row)).sum())
+            .collect();
+        self.moments.push(Moment {
+            at: view.time().nanoseconds() - anchor_moment().nanoseconds(),
+            phase: at(self.phase),
+            venous: at(self.venous),
+            aortic: at(self.aortic),
+            alveolar: [DRY * o / dry, DRY * c / dry],
+            plasma: [oxygen / water, carrier / water, pressure],
+            inventories,
+        });
+    }
+    /// The moments at which a breath ends, where its phase resets.
+    fn edges(&self) -> Vec<usize> {
+        (1..self.moments.len())
+            .filter(|&at| self.moments[at].phase < self.moments[at - 1].phase)
+            .collect()
+    }
+    /// The moments at which a beat begins: the aortic valve opens after a closure at least half the longest.
+    fn onsets(&self) -> Vec<usize> {
+        let mut openings = Vec::new();
+        let mut closed: Option<usize> = None;
+        for (at, moment) in self.moments.iter().enumerate() {
+            match (moment.aortic > 0.0, closed) {
+                (true, Some(since)) => {
+                    openings.push((at, moment.at - self.moments[since].at));
+                    closed = None;
+                }
+                (false, None) => closed = Some(at),
+                _ => {}
+            }
+        }
+        let longest = openings.iter().map(|(_, shut)| *shut).max().unwrap_or(0);
+        (openings.iter())
+            .filter(|(_, shut)| 2 * shut >= longest)
+            .map(|(at, _)| *at)
+            .collect()
+    }
+    fn mean(&self, from: usize, to: usize, of: impl Fn(&Moment) -> f64) -> f64 {
+        let moments = &self.moments[from..=to];
+        let area: f64 = (moments.windows(2))
+            .map(|pair| 0.5 * (of(&pair[0]) + of(&pair[1])) * (pair[1].at - pair[0].at) as f64)
+            .sum();
+        area / (moments[moments.len() - 1].at - moments[0].at) as f64
+    }
+    /// For each of the breathing books: the most an inventory moved over the ten seconds from admission, over any ten
+    /// seconds from twenty seconds on, and inside one whole breath from twenty seconds on.
+    fn figures(&self) -> Vec<(Book, [f64; 3])> {
+        let steady = (self.moments.iter())
+            .position(|moment| moment.at >= 20 * SECOND)
+            .expect("twenty seconds");
+        let ten = (self.moments.iter())
+            .position(|moment| moment.at >= 10 * SECOND)
+            .expect("ten seconds");
+        let edges: Vec<usize> = self.edges().into_iter().filter(|&edge| edge >= steady).collect();
+        BREATHING_BOOKS
+            .map(|book| {
+                let mut most = [0.0_f64; 3];
+                for (index, _) in self.books.iter().enumerate().filter(|(_, (of, _))| *of == book) {
+                    let held = |at: usize| self.moments[at].inventories[index];
+                    most[0] = larger(most[0], (held(ten) - held(0)).abs());
+                    let mut later = steady;
+                    for at in steady..self.moments.len() {
+                        while later < self.moments.len()
+                            && self.moments[later].at < self.moments[at].at + 10 * SECOND
+                        {
+                            later += 1;
+                        }
+                        if later == self.moments.len() {
+                            break;
+                        }
+                        most[1] = larger(most[1], (held(later) - held(at)).abs());
+                    }
+                    for pair in edges.windows(2) {
+                        let (low, high) = (pair[0]..=pair[1])
+                            .map(held)
+                            .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
+                        most[2] = larger(most[2], high - low);
+                    }
+                }
+                (book, most)
+            })
+            .into_iter()
+            .collect()
+    }
+}
+
+/// The breath has started once the alveolar oxygen pressure swings over the minute; then each whole breath swings
+/// both gases, and each moves venous return's beat means, since the central veins and the right atrium sit inside
+/// the pleural space and the beds that fill them outside it.
+fn each_breath_swings_the_alveolar_gases_and_venous_return(watch: &Watch) -> String {
+    let after = (watch.moments.iter())
+        .position(|moment| moment.at >= 5 * SECOND)
+        .expect("five seconds");
+    let (least, most) = (watch.moments[after..].iter())
+        .map(|moment| moment.alveolar[0])
+        .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
+    assert!(
+        most - least >= 1.0,
+        "the alveolar oxygen pressure stays within {least} to {most}: no breath"
+    );
+    let edges = watch.edges();
+    let onsets = watch.onsets();
+    let beats: Vec<(usize, usize, f64)> = (onsets.windows(2))
+        .map(|pair| {
+            (
+                pair[0],
+                pair[1],
+                watch.mean(pair[0], pair[1], |moment| moment.venous),
+            )
+        })
+        .collect();
+    let mut report = String::new();
+    for pair in edges.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let swing = |gas: usize| {
+            let (low, high) = (watch.moments[from..=to].iter())
+                .map(|moment| moment.alveolar[gas])
+                .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
+            high - low
+        };
+        let (oxygen, carbon_dioxide) = (swing(0), swing(1));
+        let at = watch.moments[from].at as f64 / SECOND as f64;
+        assert!(
+            oxygen >= 1.0 && carbon_dioxide >= 0.5,
+            "the breath from {at} s swings alveolar oxygen by {oxygen} and carbon dioxide by {carbon_dioxide}"
+        );
+        let means: Vec<f64> = (beats.iter())
+            .filter(|(begins, ends, _)| *begins >= from && *ends <= to)
+            .map(|(_, _, mean)| *mean)
+            .collect();
+        let (low, high) = means
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |range, &x| widen(range, x));
+        let mean = means.iter().sum::<f64>() / means.len() as f64;
+        assert!(
+            means.len() >= 2 && high - low >= 0.02 * mean,
+            "the breath from {at} s holds venous return's beat means {means:?}"
+        );
+        let means = [0, 1].map(|gas| watch.mean(from, to, |moment| moment.alveolar[gas]));
+        writeln!(
+            report,
+            "breath from {at:.3} s: alveolar oxygen {:.3} swinging {oxygen:.3}, carbon dioxide {:.3} swinging {carbon_dioxide:.3}, venous return's beat means {low:.2} to {high:.2} around {mean:.2}",
+            means[0], means[1]
+        )
+        .expect("a string takes it");
+    }
+    report
+}
+
+/// Ticket 08's check: at the minute's highest alveolar oxygen pressure the pulmonary bed's plasma holds its oxygen
+/// under hemoglobin's capacity plus what dissolves.
+fn the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(watch: &Watch) -> String {
+    let highest = (watch.moments.iter())
+        .max_by(|a, b| a.alveolar[0].total_cmp(&b.alveolar[0]))
+        .expect("a moment");
+    let [oxygen, carrier, pressure] = highest.plasma;
+    let bound = oxygen - SOLUBILITY * pressure;
+    assert!(
+        bound < HEME * carrier,
+        "at alveolar oxygen {} the pulmonary plasma holds {oxygen}, over capacity {} plus dissolved {}",
+        highest.alveolar[0],
+        HEME * carrier,
+        SOLUBILITY * pressure
+    );
+    format!(
+        "highest alveolar oxygen {:.3} ({:.3} times P50) at {:.3} s: plasma oxygen pressure {pressure:.3} ({:.3} times P50), bound {:.6} of capacity\n",
+        highest.alveolar[0],
+        highest.alveolar[0] / P50,
+        highest.at as f64 / SECOND as f64,
+        pressure / P50,
+        bound / (HEME * carrier)
+    )
+}
+
+fn no_held_pool_moves_at_admission_or_over_the_first_minute(
+    start: &Start,
+) -> (Session<'_, Running>, Minute, Watch) {
     let pools = start.held_pools();
     assert_eq!(pools.len(), 319);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
@@ -318,19 +606,22 @@ fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (S
         assert_eq!(*amount, guess.bits(), "{kind:?} moved at admission");
     }
     let mut minute = Minute::default();
+    let mut watch = Watch::new(start);
+    watch.see(&session);
     for mark in 1..=6 {
-        session = counted_until(start, session, 10 * mark * SECOND, &mut minute);
+        session = counted_until(start, session, 10 * mark * SECOND, &mut minute, &mut watch);
         for ((_, kind), (now, then)) in pools.iter().zip(amounts(&session).iter().zip(&admitted)) {
             assert_eq!(now, then, "{kind:?} moved by {} s", 10 * mark);
         }
     }
-    (session, minute)
+    (session, minute, watch)
 }
 
 fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
     start: &Start,
     minute: &Session<'_, Running>,
-) {
+    watch: &Watch,
+) -> String {
     let reached = minute.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
     let window = NonZeroU64::new(10 * SECOND).expect("a window");
     let windows = SlidingWindows::new(window, reached).expect("windows");
@@ -417,6 +708,8 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         (Book::Of(Species::Potassium), false, 4e-5, 5e-5),
         (Book::Of(Species::Vasopressin), false, 1e-3, 2e-3),
     ];
+    let figures = watch.figures();
+    let mut report = String::new();
     for (book, at_payer, below, bound) in rule {
         let worst = (certificate.results().iter())
             .filter(|result| {
@@ -425,18 +718,46 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
             })
             .map(|result| lead(result.worst_drift()).abs())
             .fold(0.0, |most, x| if x > most { x } else { most });
+        let breathing = figures.iter().find(|(of, _)| *of == book && !at_payer);
+        if let Some((_, [start, steady, swing])) = breathing {
+            writeln!(
+                report,
+                "{book:?}: worst {worst:.4e}, from admission {start:.4e}, steady {steady:.4e}, inside a breath {swing:.4e}"
+            )
+            .expect("a string takes it");
+        }
+        let figure = breathing.map_or(worst, |(_, [.., swing])| larger(worst, *swing));
         assert!(
-            below < 2.0 * worst && 2.0 * worst <= bound,
-            "{book:?}: twice the worst ten-second change, {}, rounds up to a figure other than {bound}",
-            2.0 * worst
+            below < 2.0 * figure && 2.0 * figure <= bound,
+            "{book:?}: twice the worst ten-second change or the most a breath moves it, {}, rounds up to a figure other than {bound}",
+            2.0 * figure
         );
+    }
+    report
+}
+
+/// Steps from `session` to the end of the next breath, where its phase resets.
+fn to_the_breaths_end<'s>(start: &Start, mut session: Session<'s, Running>) -> Session<'s, Running> {
+    let phase = (start.body.rows().iter())
+        .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "RS" && slot.law.local == "breath phase"))
+        .expect("the breath's phase")
+        .id();
+    loop {
+        let (before, at) = (
+            lead(session.record().accepted().value(phase)),
+            session.record().accepted().time().nanoseconds(),
+        );
+        session = until(session, at + 1 - anchor_moment().nanoseconds());
+        if lead(session.record().accepted().value(phase)) < before {
+            return session;
+        }
     }
 }
 
-fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
+fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(
     start: &Start,
     minute: Session<'_, Running>,
-) {
+) -> String {
     let body = &start.body;
     let columns = every_column(body);
     let (airway, lung) = (
@@ -452,10 +773,16 @@ fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
             .sum()
     };
     let gases = [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas];
-    let from = minute.record().accepted().time().nanoseconds();
-    let before = gases.map(|gas| held(&minute, gas));
-    let session = until(minute, from - anchor_moment().nanoseconds() + 10 * SECOND);
+    let edge = to_the_breaths_end(start, minute);
+    let from = edge.record().accepted().time().nanoseconds();
+    let before = gases.map(|gas| held(&edge, gas));
+    let session = to_the_breaths_end(start, to_the_breaths_end(start, edge));
     let to = session.record().accepted().time().nanoseconds();
+    let mut report = format!(
+        "two breaths from {:.3} s to {:.3} s\n",
+        (from - anchor_moment().nanoseconds()) as f64 / SECOND as f64,
+        (to - anchor_moment().nanoseconds()) as f64 / SECOND as f64
+    );
     let after = gases.map(|gas| held(&session, gas));
     let (early, late) = (extents(&session, &columns, from), extents(&session, &columns, to));
     for (at, gas) in gases.into_iter().enumerate() {
@@ -497,7 +824,13 @@ fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
             (gained - (inspired - expired - diffused)).abs() <= 1e-9 * gross,
             "{gas:?}: in {inspired}, out {expired}, across {diffused}, along {along}, gained {gained}"
         );
+        writeln!(
+            report,
+            "{gas:?}: in {inspired:.4}, out {expired:.4}, across {diffused:.4}, along {along:.4}, gained {gained:.4e}"
+        )
+        .expect("a string takes it");
     }
+    report
 }
 
 fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
@@ -1539,18 +1872,23 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let start = Start::admitted();
     each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(&start);
     each_beds_speciation_meets_its_forms_at_the_admitted_state(&start);
-    the_body_admits_at_06_55(&start);
-    the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
     let before = start.core.solves.get();
-    let (minute, counted) = no_held_pool_moves_at_admission_or_over_the_first_minute(&start);
-    the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(&start, &minute);
+    let (minute, counted, watch) = no_held_pool_moves_at_admission_or_over_the_first_minute(&start);
     let counts = Counts {
         rows: start.body.rows().len(),
         jacobian_nonzeros: start.body.sparsity().unknowns().len(),
         steps: minute.record().revision(),
         solves: start.core.solves.get() - before,
     };
-    each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(&start, minute);
+    let mut report = each_breath_swings_the_alveolar_gases_and_venous_return(&watch);
+    report += &the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(&watch);
+    the_body_admits_at_06_55(&start);
+    the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
+    report += &the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
+        &start, &minute, &watch,
+    );
+    report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
+    expect![[r#""#]].assert_eq(&report);
     let mut minute = format!(
         "steps {}, solves {}: ordinary {}, landing {}\n",
         counts.steps,

@@ -1,9 +1,9 @@
-//! A held use and a held production at fixed rates stand for the blood, so the alveolar gas equation and the
-//! alveolar ventilation equation are checked against closed forms with no body admission.
+//! A held use and a held production at fixed rates stand for the blood, so the alveolar gas equation, the alveolar
+//! ventilation equation and the breath's mechanics are checked against closed forms with no body admission.
 
 use core::num::NonZeroU64;
 use ng_contract::*;
-use ng_record::{Running, Session};
+use ng_record::{Curve, Running, Session};
 use ng_respiratory::{Plasma, Ventilation, exchange};
 use ng_validate::*;
 
@@ -30,12 +30,28 @@ const SETTLED: u64 = 240;
 const TOLERANCE: f64 = 1e-6;
 const DEAD_SPACE: (f64, f64) = (1e-2, 500.0);
 
+/// The breath's synthetic rhythm: a rate, the phase at which inspiration ends, the pump drive's rise and fall speeds
+/// and its peak.
+const RATE: f64 = 0.2;
+const INSPIRATION_END: f64 = 0.4;
+const DRIVE: [f64; 3] = [1.5, 2.0, 1.0];
+/// Sitting up raises the chest wall's relaxed volume by this much; the carotid sinus sits this far up the trunk.
+const WALL_RISE: f64 = 2_000.0;
+const TRUNK: f64 = 0.3;
+
 #[derive(Clone, Copy)]
 struct Case {
     oxygen_use: f64,
     carbon_dioxide_made: f64,
     ventilation: f64,
     molar_volume: [f64; 3],
+    conductance: f64,
+    mixing: f64,
+    width: f64,
+    rests: [f64; 2],
+    pump: f64,
+    breath_start: f64,
+    upright: bool,
 }
 
 const AT_REST: Case = Case {
@@ -43,7 +59,32 @@ const AT_REST: Case = Case {
     carbon_dioxide_made: 200.0,
     ventilation: 1.0,
     molar_volume: [1.0; 3],
+    conductance: CONDUCTANCE,
+    mixing: MIXING,
+    width: WIDTH,
+    rests: RESTS,
+    pump: 0.0,
+    breath_start: 0.0,
+    upright: false,
 };
+
+/// A breath through a stiff airway and a narrow head, so the volume follows the static solution and the gas moves
+/// upwind, into an alveolar unit ten times the breath. The membrane trades equal volumes, so no net volume crosses
+/// it. The mixing exchange stands at the breath's mean, so the rest the body admits at is near the breathing one.
+const BREATHING: Case = Case {
+    oxygen_use: 20.0,
+    carbon_dioxide_made: 20.0,
+    conductance: 1e5,
+    mixing: 494.0,
+    width: 1e-6,
+    rests: [11_000.0, 19_000.0],
+    pump: 7.2,
+    breath_start: 1e3,
+    ..AT_REST
+};
+/// The run's length in seconds with a breath: the alveolar gas's slowest mode is near seventy seconds.
+const BREATHING_SETTLED: u64 = 900;
+const BREATHS: usize = 4;
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     let origin = Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?);
@@ -76,6 +117,10 @@ impl<'b> Plasma<'b> for Dissolved<'b> {
     }
 }
 
+fn zero_head([lung, wall]: [f64; 2]) -> f64 {
+    (ELASTANCES[0] * lung + ELASTANCES[1] * wall) / (ELASTANCES[0] + ELASTANCES[1])
+}
+
 fn compiled() -> Result<CompiledBody, AdmissionError> {
     let origin = || -> Result<Position, AdmissionError> {
         Ok(Position::new(
@@ -86,7 +131,8 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     };
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin()?).id();
-    let airway = map.site::<TissueSite>(AIRWAY, origin()?).id();
+    let raised = Position::new(Measure::new(TRUNK)?, Measure::new(0.0)?, Measure::new(0.0)?);
+    let airway = map.site::<TissueSite>(AIRWAY, raised).id();
     let lung_site = map.site::<CapillaryBed>(LUNG, origin()?);
     let lung = lung_site.id();
     let vessel = map.site::<VesselSegment>("vessel", origin()?).id();
@@ -97,6 +143,7 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     map.connect(Network::Vascular, vessel, lung);
     map.connect(Network::Vascular, lung, vessel);
     map.connect(Network::Airway, airway, lung);
+    map.landmark(Landmark::CarotidSinus, vessel, airway);
     let mut schema = Schema::new(map.finish()?)?;
     for space in [Space::Interstitium, Space::Cells, Space::Lumen] {
         schema.leave_out(space, "one alveolar unit and its plasma");
@@ -161,10 +208,14 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
 /// `B = G h- + M` out, and the net `G h` at each is the net uptake, so with `U_i` each gas's uptake into the plasma
 /// `f_D = (A F_I - U) / B` in the dead space and `f_A = (A f_D - U) / B` in the alveolar unit.
 fn closed_form(unit: Case) -> ([f64; 3], [f64; 3]) {
-    let (g, m) = (CONDUCTANCE * unit.ventilation, MIXING * unit.ventilation);
+    let (g, m) = (
+        unit.conductance * unit.ventilation,
+        unit.mixing * unit.ventilation,
+    );
     let net = unit.oxygen_use - unit.carbon_dioxide_made;
     let head = net / g;
-    let smooth = |a: f64| 0.5 * (a + (a * a + WIDTH * WIDTH).sqrt());
+    let width = unit.width;
+    let smooth = |a: f64| 0.5 * (a + (a * a + width * width).sqrt());
     let (inward, outward) = (g * smooth(head) + m, g * smooth(-head) + m);
     let uptake = [unit.oxygen_use, -unit.carbon_dioxide_made, 0.0];
     let dead = [0, 1, 2].map(|i| (inward * INSPIRED[i] - uptake[i]) / outward);
@@ -193,16 +244,41 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Quotient<Pressure, CarbonDioxide>>(p, "fixture.carbon-dioxide-per-amount", PER_AMOUNT)?;
     set::<Pressure>(p, "rs.room-pressure", ROOM)?;
     set::<Pressure>(p, "rs.water-vapour-pressure", VAPOUR)?;
-    set::<Pressure>(p, "rs.head-width", WIDTH)?;
+    set::<Pressure>(p, "rs.head-width", unit.width)?;
     set::<Conductance<Oxygen>>(p, "rs.oxygen-diffusing", DIFFUSING[0])?;
     set::<Conductance<CarbonDioxide>>(p, "rs.carbon-dioxide-diffusing", DIFFUSING[1])?;
     set::<Elastance>(p, "rs.lung-elastance", ELASTANCES[0])?;
     set::<Elastance>(p, "rs.wall-elastance", ELASTANCES[1])?;
-    set::<Volume>(p, "rs.lung-rest-volume", RESTS[0])?;
-    set::<Volume>(p, "rs.wall-rest-volume", RESTS[1])?;
+    set::<Volume>(p, "rs.lung-rest-volume", unit.rests[0])?;
+    set::<Volume>(p, "rs.wall-rest-volume", unit.rests[1])?;
+    set::<Volume>(p, "rs.wall-rest-rise", WALL_RISE)?;
+    set::<Length>(p, "rs.trunk-length", TRUNK)?;
+    set::<Pressure>(p, "rs.pump-pressure", unit.pump)?;
+    for (key, value) in [
+        ("rs.breath-rate", RATE),
+        ("rs.drive-rise", DRIVE[0]),
+        ("rs.drive-fall", DRIVE[1]),
+        ("rs.rest-speed", 1.0),
+        ("rs.share-fall", 1.0),
+        ("rs.breath-start", unit.breath_start),
+    ] {
+        set::<Rate<Dimensionless>>(p, key, value)?;
+    }
+    for (key, value) in [
+        ("rs.inspiration-end", INSPIRATION_END),
+        ("rs.breath-end", 1.0),
+        ("rs.drive-peak", DRIVE[2]),
+        ("rs.rest-drive", 0.0),
+        ("rs.rest-share", 1.0),
+    ] {
+        set::<Dimensionless>(p, key, value)?;
+    }
     set::<Elastance>(p, "rs.dead-space-elastance", DEAD_SPACE.0)?;
     set::<Volume>(p, "rs.dead-space-volume", DEAD_SPACE.1)?;
-    let (g, m) = (CONDUCTANCE * unit.ventilation, MIXING * unit.ventilation);
+    let (g, m) = (
+        unit.conductance * unit.ventilation,
+        unit.mixing * unit.ventilation,
+    );
     let [vo, vc, vn] = unit.molar_volume;
     set::<Quotient<Volume, Oxygen>>(p, "rs.oxygen-volume", vo)?;
     set::<Quotient<Volume, CarbonDioxide>>(p, "rs.carbon-dioxide-volume", vc)?;
@@ -216,7 +292,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     let guess = |row: RowKind| match row {
         RowKind::Amount { site, species, space } => {
             let (shares, volume) = if site.key() == LUNG {
-                (alveolar, ZERO_HEAD)
+                (alveolar, zero_head(unit.rests))
             } else {
                 (dead, DEAD_SPACE.1)
             };
@@ -229,8 +305,15 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
                 _ => 100.0,
             }
         }
+        RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
+        RowKind::Algebraic(slot) if slot.law.local == "chest wall rest volume" => unit.rests[1],
         RowKind::Memory(_) | RowKind::Algebraic(_) => 0.0,
     };
+    let breath = LawName {
+        owner: Respiratory::CARD,
+        local: "breath",
+    };
+    packet.start_mode(breath, "rest", NOTE)?;
     packet.start_rest(body, guess, NOTE)?;
     packet.within(ErrorScales::uniform(Measure::new(1e-9)?, Measure::new(1e-10)?)?);
     Ok(packet)
@@ -244,49 +327,207 @@ struct Settled {
     plasma: [f64; 2],
 }
 
-fn settled(unit: Case) -> Result<Settled, InitializationFailure> {
+fn sitting_up() -> Result<Vec<BoundaryEvent>, AdmissionError> {
+    let id = InputId::new(Digest::of_canonical(b"sits up"));
+    let upright = Posture::new(Measure::new(1.0)?, Legs::Standing)?;
+    Ok(vec![BoundaryEvent::new(
+        id,
+        SimTime::from_ns(SECOND),
+        BoundaryInput::Posture(upright),
+    )])
+}
+
+/// Admits `unit`, runs it `seconds`, and hands the body and the running session to `then`.
+fn run<T>(
+    unit: Case,
+    seconds: u64,
+    then: impl FnOnce(&CompiledBody, Session<'_, Running>) -> T,
+) -> Result<T, InitializationFailure> {
     let body = compiled()?;
     let core = ng_solver::Core::new(SECOND / 100);
     let store = MemoryStore::default();
     let lens = body.lens(Vec::new(), NonZeroU64::MIN.saturating_add(SECOND - 1))?;
-    let port = BoundaryPort::new(Vec::new())?;
+    let events = if unit.upright { sitting_up()? } else { Vec::new() };
+    let port = BoundaryPort::new(events)?;
     let session = admit_solved(&body, packet(&body, unit)?, port, &core, &lens, &store)?.session;
-    let session = run_until(session, SimTime::from_ns(SETTLED * SECOND))
+    let session = run_until(session, SimTime::from_ns(seconds * SECOND))
         .unwrap_or_else(|stopped| panic!("{:?}", stopped.fault()));
-    let amount = |session: &Session<'_, Running>, key, species, space| -> Result<f64, AdmissionError> {
-        let site = if key == LUNG {
-            site::<CapillaryBed>(LUNG)?
-        } else {
-            site::<TissueSite>(AIRWAY)?
-        };
-        let kind = RowKind::Amount { site, species, space };
-        let row = (body.rows().iter())
-            .find(|row| row.kind() == kind)
-            .unwrap_or_else(|| panic!("no row {kind:?}"));
-        Ok(f64::from_bits(
-            session.record().accepted().value(row.id()).bits()[0],
-        ))
+    Ok(then(&body, session))
+}
+
+fn row(body: &CompiledBody, kind: RowKind) -> RowId {
+    (body.rows().iter())
+        .find(|row| row.kind() == kind)
+        .unwrap_or_else(|| panic!("no row {kind:?}"))
+        .id()
+}
+
+fn now(session: &Session<'_, Running>, row: RowId) -> f64 {
+    f64::from_bits(session.record().accepted().value(row).bits()[0])
+}
+
+fn amount_row(
+    body: &CompiledBody,
+    key: &str,
+    species: Species,
+    space: Space,
+) -> Result<RowId, AdmissionError> {
+    let site = if key == LUNG {
+        site::<CapillaryBed>(LUNG)?
+    } else {
+        site::<TissueSite>(AIRWAY)?
     };
-    let gas_space = |key| -> Result<(f64, [f64; 3]), AdmissionError> {
-        let gas = [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas];
-        let held = gas.map(|species| amount(&session, key, species, Space::Gas));
-        let [vo, vc, vn] = unit.molar_volume;
-        let parts = [held[0]? * vo, held[1]? * vc, held[2]? * vn];
-        let total: f64 = parts.iter().sum();
-        Ok((total, parts.map(|part| part / total)))
-    };
-    let (alveolar_volume, alveolar) = gas_space(LUNG)?;
-    let (dead_volume, dead) = gas_space(AIRWAY)?;
-    Ok(Settled {
-        alveolar_volume,
-        dead_volume,
-        alveolar,
-        dead,
-        plasma: [
-            PER_AMOUNT * amount(&session, LUNG, Species::Oxygen, Space::Plasma)?,
-            PER_AMOUNT * amount(&session, LUNG, Species::CarbonDioxide, Space::Plasma)?,
-        ],
-    })
+    Ok(row(body, RowKind::Amount { site, species, space }))
+}
+
+fn gas_rows(body: &CompiledBody, key: &str) -> Result<[RowId; 3], AdmissionError> {
+    let gas = [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas];
+    let [o, c, n] = gas.map(|species| amount_row(body, key, species, Space::Gas));
+    Ok([o?, c?, n?])
+}
+
+/// The gas space's volume and each gas's share of it.
+fn gas_space(unit: Case, session: &Session<'_, Running>, rows: [RowId; 3]) -> (f64, [f64; 3]) {
+    let [vo, vc, vn] = unit.molar_volume;
+    let parts = [
+        now(session, rows[0]) * vo,
+        now(session, rows[1]) * vc,
+        now(session, rows[2]) * vn,
+    ];
+    let total: f64 = parts.iter().sum();
+    (total, parts.map(|part| part / total))
+}
+
+fn settled(unit: Case) -> Result<Settled, InitializationFailure> {
+    run(
+        unit,
+        SETTLED,
+        |body, session| -> Result<Settled, AdmissionError> {
+            let (alveolar_volume, alveolar) = gas_space(unit, &session, gas_rows(body, LUNG)?);
+            let (dead_volume, dead) = gas_space(unit, &session, gas_rows(body, AIRWAY)?);
+            let plasma =
+                |species| amount_row(body, LUNG, species, Space::Plasma).map(|row| now(&session, row));
+            Ok(Settled {
+                alveolar_volume,
+                dead_volume,
+                alveolar,
+                dead,
+                plasma: [
+                    PER_AMOUNT * plasma(Species::Oxygen)?,
+                    PER_AMOUNT * plasma(Species::CarbonDioxide)?,
+                ],
+            })
+        },
+    )?
+    .map_err(InitializationFailure::Admission)
+}
+
+/// One accepted step of a breathing run.
+struct Sample {
+    at: f64,
+    volume: f64,
+    shares: [f64; 3],
+    drive: f64,
+    held: [f64; 3],
+    extents: Vec<f64>,
+}
+
+/// Every accepted step over the last `BREATHS` whole breaths of a settled breathing run, edge to edge: the first and
+/// the last sample sit on breath edges, where the phase resets.
+fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
+    run(
+        unit,
+        BREATHING_SETTLED,
+        |body, mut session| -> Result<Vec<Sample>, AdmissionError> {
+            let memory = |local| {
+                (body.rows().iter())
+                    .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.local == local))
+                    .unwrap_or_else(|| panic!("no memory {local}"))
+                    .id()
+            };
+            let (phase, drive) = (memory("breath phase"), memory("pump drive"));
+            let (lung, airway) = (gas_rows(body, LUNG)?, gas_rows(body, AIRWAY)?);
+            let columns = every_column(body);
+            let mut samples = Vec::new();
+            let mut edges = 0;
+            let mut last = now(&session, phase);
+            while edges <= BREATHS {
+                let at = session.record().accepted().time().nanoseconds();
+                session = run_until(session, SimTime::from_ns(at + 1))
+                    .unwrap_or_else(|stopped| panic!("{:?}", stopped.fault()));
+                let wrapped = now(&session, phase) < last;
+                last = now(&session, phase);
+                edges += usize::from(wrapped);
+                if edges == 0 {
+                    continue;
+                }
+                let (volume, shares) = gas_space(unit, &session, lung);
+                let at = session.record().accepted().time().nanoseconds();
+                samples.push(Sample {
+                    at: at as f64 / SECOND as f64,
+                    volume,
+                    shares,
+                    drive: now(&session, drive),
+                    held: [0, 1, 2].map(|gas| now(&session, lung[gas]) + now(&session, airway[gas])),
+                    extents: Vec::new(),
+                });
+                if wrapped {
+                    let index = samples.len() - 1;
+                    samples[index].extents = extents(&session, &columns, at);
+                }
+            }
+            Ok(samples)
+        },
+    )?
+    .map_err(InitializationFailure::Admission)
+}
+
+fn every_column(body: &CompiledBody) -> Vec<ColumnId> {
+    let mut columns: Vec<ColumnId> = (body.instances().iter())
+        .filter_map(|instance| match instance.target() {
+            Target::Column(column) => Some(column),
+            Target::Row(_) => None,
+        })
+        .collect();
+    columns.sort();
+    columns.dedup();
+    columns
+}
+
+fn extents(session: &Session<'_, Running>, columns: &[ColumnId], at: u64) -> Vec<f64> {
+    for segment in session.conservation().newest_first() {
+        let segment = segment.expect("a segment");
+        let interval = segment.interval();
+        if interval.start().nanoseconds() < at && at <= interval.end().nanoseconds() {
+            let piece = Interval::new(interval.start(), SimTime::from_ns(at)).expect("a piece");
+            let mut extent = vec![0.0; columns.len()];
+            for column in columns {
+                let (forward, reverse) = segment.exchange(*column);
+                let reached = |curve: Curve<'_>| {
+                    f64::from_bits(curve.on(piece).expect("inside its segment")[1].bits()[0])
+                };
+                extent[column.index()] = reached(forward) - reached(reverse);
+            }
+            return extent;
+        }
+    }
+    panic!("no segment holds {at}")
+}
+
+/// The time mean of `of` over the samples, by the trapezoid rule.
+fn mean(samples: &[Sample], of: impl Fn(&Sample) -> f64) -> f64 {
+    let area: f64 = (samples.windows(2))
+        .map(|pair| 0.5 * (of(&pair[0]) + of(&pair[1])) * (pair[1].at - pair[0].at))
+        .sum();
+    area / (samples[samples.len() - 1].at - samples[0].at)
+}
+
+fn widen((low, high): (f64, f64), x: f64) -> (f64, f64) {
+    (if x < low { x } else { low }, if x > high { x } else { high })
+}
+
+fn span(samples: &[Sample], of: impl Fn(&Sample) -> f64) -> (f64, f64) {
+    (samples.iter().map(&of)).fold((f64::INFINITY, f64::NEG_INFINITY), widen)
 }
 
 fn close(measured: f64, expected: f64, relative: f64) -> bool {
@@ -425,6 +666,134 @@ fn doubling_ventilation_at_resting_use_meets_the_closed_form_of_the_two_exchange
         "alveolar carbon dioxide's share {} at twice the ventilation, the closed form's {}",
         settled.alveolar[1],
         expected[1]
+    );
+    Ok(())
+}
+
+fn count(body: &CompiledBody, column: ColumnId, on: impl Fn(SiteId, Species, Space) -> bool) -> f64 {
+    (body.columns()[column.index()].terms().iter())
+        .filter(|(row, _)| match body.rows()[row.index()].kind() {
+            RowKind::Amount { site, species, space } => on(site, species, space),
+            RowKind::Memory(_) | RowKind::Algebraic(_) => false,
+        })
+        .map(|&(_, count)| count as f64)
+        .sum()
+}
+
+#[test]
+fn sitting_up_raises_the_alveolar_units_resting_volume_by_the_chest_walls_share_of_its_rise()
+-> Result<(), InitializationFailure> {
+    let supine = settled(AT_REST)?;
+    let upright = settled(Case {
+        upright: true,
+        ..AT_REST
+    })?;
+    let raised = upright.alveolar_volume - supine.alveolar_volume;
+    let expected = ELASTANCES[1] * WALL_RISE / (ELASTANCES[0] + ELASTANCES[1]);
+    assert!(
+        close(raised, expected, TOLERANCE),
+        "sitting up moved the alveolar unit by {raised}, the chest wall's share of its rise {expected}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_breaths_lung_volume_follows_the_mechanics_static_solution() -> Result<(), InitializationFailure> {
+    let unit = BREATHING;
+    let samples = breaths(unit)?;
+    let elastance = ELASTANCES[0] + ELASTANCES[1];
+    let rest = zero_head(unit.rests);
+    let fixed = |sample: &Sample| rest + unit.pump * sample.drive / elastance;
+    let (low, high) = span(&samples, |sample| sample.volume);
+    let (least, most) = span(&samples, |sample| sample.drive);
+    let tidal = unit.pump * (most - least) / elastance;
+    assert!(
+        close(high - low, tidal, 1e-2),
+        "the breath moves {}, the drive's swing at the static solution {tidal}",
+        high - low
+    );
+    let lag = (samples.iter())
+        .map(|sample| (sample.volume - fixed(sample)).abs())
+        .fold(0.0, |most, x| if x > most { x } else { most });
+    assert!(
+        lag <= 1e-2 * tidal,
+        "the volume lags the static solution by {lag} of {tidal}"
+    );
+    let (volume, expected) = (mean(&samples, |sample| sample.volume), mean(&samples, fixed));
+    assert!(
+        (volume - expected).abs() <= 1e-6 * tidal,
+        "the lung's mean volume over whole breaths {volume}, the static solution at the drive's mean {expected}"
+    );
+    Ok(())
+}
+
+#[test]
+fn each_gas_closes_over_whole_breaths() -> Result<(), InitializationFailure> {
+    let unit = BREATHING;
+    let body = compiled()?;
+    let samples = breaths(unit)?;
+    let (first, last) = (&samples[0], &samples[samples.len() - 1]);
+    let (airway, lung) = (site::<TissueSite>(AIRWAY)?, site::<CapillaryBed>(LUNG)?);
+    let gases = [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas];
+    for (at, gas) in gases.into_iter().enumerate() {
+        let (mut inspired, mut expired, mut across) = (0.0, 0.0, 0.0);
+        for column in every_column(&body) {
+            let in_gas = |bed: SiteId| {
+                move |site, species, space| site == bed && species == gas && space == Space::Gas
+            };
+            let (into_airway, into_lung) = (
+                count(&body, column, in_gas(airway)),
+                count(&body, column, in_gas(lung)),
+            );
+            let moved = last.extents[column.index()] - first.extents[column.index()];
+            let receipt = body.columns()[column.index()].receipt().is_some();
+            match (receipt, into_airway, into_lung) {
+                (true, 1.0, 0.0) => inspired += moved,
+                (true, -1.0, 0.0) => expired += moved,
+                (false, 0.0, -1.0) => across += moved,
+                _ => {}
+            }
+        }
+        let gained = last.held[at] - first.held[at];
+        assert!(
+            (gained - (inspired - expired - across)).abs() <= 1e-9 * (inspired + expired.abs()),
+            "{gas:?}: in {inspired}, out {expired}, across {across}, gained {gained}"
+        );
+        let gross = [inspired, expired, across]
+            .map(f64::abs)
+            .into_iter()
+            .fold(0.0, |most, x| if x > most { x } else { most });
+        assert!(
+            gained.abs() <= 1e-4 * gross,
+            "{gas:?} gained {gained} over whole breaths of {gross} through the airway and across"
+        );
+    }
+    Ok(())
+}
+
+/// With the alveolar gas held through a breath, a breath of `V_T` through a mixed dead space `V_D` leaves `P T` of
+/// carbon dioxide made over a breath at `f_A (V_T - V_D tanh(V_T / 2 V_D))`. As the gas swings, the dead space returns
+/// a weighted mean of the expired alveolar gas, so the mean misses the closed form by at most the swing times
+/// `V_T / (V_T - V_D tanh(V_T / 2 V_D))`.
+#[test]
+fn the_mean_alveolar_carbon_dioxide_over_whole_breaths_meets_a_mixed_dead_space_in_series()
+-> Result<(), InitializationFailure> {
+    let unit = BREATHING;
+    let samples = breaths(unit)?;
+    let (low, high) = span(&samples, |sample| sample.volume);
+    let tidal = high - low;
+    let breath = (samples[samples.len() - 1].at - samples[0].at) / BREATHS as f64;
+    let x = tidal / DEAD_SPACE.1;
+    let returned = DEAD_SPACE.1 * (1.0 - exp(-x)) / (1.0 + exp(-x));
+    let made = unit.carbon_dioxide_made * unit.molar_volume[1] * breath;
+    let closed = made / (tidal - returned);
+    let measured = mean(&samples, |sample| sample.shares[1]);
+    let (least, most) = span(&samples, |sample| sample.shares[1]);
+    let bound = (most - least) * tidal / (tidal - returned);
+    assert!(
+        (measured - closed).abs() <= bound,
+        "alveolar carbon dioxide's mean share {measured} over whole breaths, a mixed dead space's closed form {closed} \
+         within {bound}"
     );
     Ok(())
 }

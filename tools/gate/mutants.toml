@@ -4527,3 +4527,17 @@ new = '''
                     width
 '''
 test = "-p ng-validate --test guard_ordering a_guard_at_its_crossing_at_the_base_lands_one_floor_in"
+
+[[mutant]]
+name = "sitting-up-lowers-the-wall-rest-volume"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let value = k.add(supine, raised);'''
+new = '''            let value = k.subtract(supine, raised);'''
+test = "-p ng-validate --test alveolar sitting_up_raises_the_alveolar_units_resting_volume_by_the_chest_walls_share_of_its_rise"
+
+[[mutant]]
+name = "dead-space-rests-at-the-lungs-volume"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            k.parameter(&self.dead_space),'''
+new = '''            k.parameter(&self.lung_rest),'''
+test = "-p ng-validate --test alveolar the_mean_alveolar_carbon_dioxide_over_whole_breaths_meets_a_mixed_dead_space_in_series"
