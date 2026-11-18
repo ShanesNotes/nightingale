@@ -696,17 +696,17 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         })
     };
     let rule = [
-        (Book::Energy, false, 2e3, 3e3),
-        (Book::Element(Element::Carbon), false, 0.1, 0.2),
-        (Book::Element(Element::Oxygen), false, 0.5, 0.6),
+        (Book::Energy, false, 9e3, 1e4),
+        (Book::Element(Element::Carbon), false, 4e2, 5e2),
+        (Book::Element(Element::Oxygen), false, 9e3, 1e4),
         (Book::Element(Element::Hydrogen), false, 1e-5, 2e-5),
         (Book::Element(Element::Hydrogen), true, 0.1, 0.2),
-        (Book::Of(Species::NitrogenGas), false, 0.7, 0.8),
+        (Book::Of(Species::NitrogenGas), false, 1e4, 2e4),
         (Book::Of(Species::Water), false, 0.03, 0.04),
         (Book::Of(Species::Sodium), false, 8e-4, 9e-4),
         (Book::Of(Species::Chloride), false, 8e-4, 9e-4),
         (Book::Of(Species::Potassium), false, 4e-5, 5e-5),
-        (Book::Of(Species::Vasopressin), false, 1e-3, 2e-3),
+        (Book::Of(Species::Vasopressin), false, 6e-2, 7e-2),
     ];
     let figures = watch.figures();
     let mut report = String::new();

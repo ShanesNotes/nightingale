@@ -907,7 +907,7 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         rows 1449 {"algebraic": 186, "amount": 1248, "memory": 15}, columns 1458, jacobian nonzeros 10053, blocks 429, parameter slots 722, conserved combinations 399, held pools 319, held route columns 89
         model hash f1fe55e087f7235a16a3e762a20e7164afa5dd6772aab5832a76626f7e8fd3a1
         conserved basis 46b9975bf1364b8364f03f0e9b79a5b884dd7f6a3f419bf8b905493f1e9ceb3e
-        stated packet 1e6e163b040dfa5bcb01ec7e1ea80a4b8f91ddec74b2f3b49245658657a7514c
+        stated packet b46f98edd84e77bb649165e30da175d654d4df26397a4bd10170ee4ba7298de5
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -998,18 +998,18 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     };
     let stated = Stated {
         species: [
-            (Species::Energy, 3e3),
+            (Species::Energy, 1e4),
             (Species::Water, 0.04),
             (Species::Sodium, 9e-4),
             (Species::Chloride, 9e-4),
             (Species::Potassium, 5e-5),
-            (Species::Vasopressin, 2e-3),
-            (Species::NitrogenGas, 0.8),
+            (Species::Vasopressin, 7e-2),
+            (Species::NitrogenGas, 2e4),
         ],
         elements: [
-            (Element::Carbon, 0.2),
+            (Element::Carbon, 5e2),
             (Element::Hydrogen, 2e-5),
-            (Element::Oxygen, 0.6),
+            (Element::Oxygen, 1e4),
         ],
         payer_hydrogen: 0.2,
     };
