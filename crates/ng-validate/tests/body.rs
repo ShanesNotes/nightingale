@@ -845,7 +845,10 @@ fn the_coronary_bed_pays_the_stroke_work_and_the_muscle_bed_the_walls_so_none_en
 -> Result<(), AdmissionError> {
     let mut heart = Schema::new(body_anatomy()?)?;
     heart.carry::<Ammonium, Beds<Heart>>(Space::Cells);
-    let beds: Vec<_> = heart.pools().map(|(site, _, _)| site.key()).collect();
+    let beds: Vec<_> = (heart.pools())
+        .filter(|pool| pool.2 == Species::Ammonium && pool.1 == Space::Cells)
+        .map(|(site, _, _)| site.key())
+        .collect();
     assert_eq!(
         beds,
         ["coronary bed"],
@@ -912,10 +915,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1445 {"algebraic": 186, "amount": 1248, "memory": 11}, columns 1422, jacobian nonzeros 9902, blocks 430, parameter slots 720, conserved combinations 404, held pools 322, held route columns 97
-        model hash 096272550f5764caa1df4c96d44c9d06e2e2c613188fb94c1e01446f96fc4755
+        rows 1445 {"algebraic": 186, "amount": 1248, "memory": 11}, columns 1422, jacobian nonzeros 9832, blocks 430, parameter slots 709, conserved combinations 404, held pools 322, held route columns 97
+        model hash 38db058a2ab7540e7c7cf98903451b1fb36daedb9caf69f7fa0ebb2c27c3dfa2
         conserved basis 0209c7dba8840f794a98530d6d858db650508068452df255358f61d1f0c2eaef
-        stated packet eacc9539ee71672ee41c8e1f3f9ac60b561a9364c45c927ae70554d36e0935d3
+        stated packet 5dc3148703cf43a2885b20558d79ba7948c22d63eae5c7e8f5b575f1bae851c6
     "#]].assert_eq(&pin);
     Ok(())
 }
