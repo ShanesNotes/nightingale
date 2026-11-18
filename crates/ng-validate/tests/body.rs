@@ -970,7 +970,7 @@ fn the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between
 fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError> {
     #[derive(Clone, Copy)]
     struct Stated {
-        species: [(Species, f64); 6],
+        species: [(Species, f64); 7],
         elements: [(Element, f64); 3],
         payer_hydrogen: f64,
     }
@@ -1000,15 +1000,16 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
         species: [
             (Species::Energy, 3e3),
             (Species::Water, 0.04),
-            (Species::Sodium, 8e-4),
+            (Species::Sodium, 9e-4),
             (Species::Chloride, 9e-4),
-            (Species::Potassium, 4e-5),
+            (Species::Potassium, 5e-5),
             (Species::Vasopressin, 2e-3),
+            (Species::NitrogenGas, 0.8),
         ],
         elements: [
-            (Element::Carbon, 0.9),
+            (Element::Carbon, 0.2),
             (Element::Hydrogen, 2e-5),
-            (Element::Oxygen, 5.0),
+            (Element::Oxygen, 0.6),
         ],
         payer_hydrogen: 0.2,
     };

@@ -399,6 +399,38 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT skin bed glucose feed moved
     "#]]
     .assert_eq(&report);
+    let payer = |terms: &[(RowId, i64)]| {
+        terms.iter().all(|(row, _)| {
+            matches!(start.body.rows()[row.index()].kind(), RowKind::Amount { site, .. } if site.key() == "coronary bed")
+        })
+    };
+    let rule = [
+        (Book::Energy, false, 2e3, 3e3),
+        (Book::Element(Element::Carbon), false, 0.1, 0.2),
+        (Book::Element(Element::Oxygen), false, 0.5, 0.6),
+        (Book::Element(Element::Hydrogen), false, 1e-5, 2e-5),
+        (Book::Element(Element::Hydrogen), true, 0.1, 0.2),
+        (Book::Of(Species::NitrogenGas), false, 0.7, 0.8),
+        (Book::Of(Species::Water), false, 0.03, 0.04),
+        (Book::Of(Species::Sodium), false, 8e-4, 9e-4),
+        (Book::Of(Species::Chloride), false, 8e-4, 9e-4),
+        (Book::Of(Species::Potassium), false, 4e-5, 5e-5),
+        (Book::Of(Species::Vasopressin), false, 1e-3, 2e-3),
+    ];
+    for (book, at_payer, below, bound) in rule {
+        let worst = (certificate.results().iter())
+            .filter(|result| {
+                let combination = &start.body.conserved_basis().combinations()[result.quantity().index()];
+                combination.book() == book && payer(combination.terms()) == at_payer
+            })
+            .map(|result| lead(result.worst_drift()).abs())
+            .fold(0.0, |most, x| if x > most { x } else { most });
+        assert!(
+            below < 2.0 * worst && 2.0 * worst <= bound,
+            "{book:?}: twice the worst ten-second change, {}, rounds up to a figure other than {bound}",
+            2.0 * worst
+        );
+    }
 }
 
 fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
