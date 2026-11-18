@@ -150,25 +150,9 @@ impl<'r> CoupledProblem<'r> {
             factors,
         }
     }
-    pub(crate) fn crossed(
-        &self,
-        ticket: &StepTicket,
-        state: &Candidate,
-    ) -> Result<Option<Trigger<'r>>, TrialFailure> {
-        if let Some(hazard) = self.chance.crossed(self.body, state) {
-            return Ok(Some(Trigger::Hazard(hazard)));
-        }
-        let guards = self.body.layout.guards.iter().enumerate();
-        for (guard, _) in guards.filter(|(_, layout)| layout.armed(&state.modes)) {
-            if self.gap(ticket, state, Trigger::Plain(guard))? >= 0.0 {
-                return Ok(Some(Trigger::Plain(guard)));
-            }
-        }
-        Ok(None)
-    }
     /// Layout order would read a guard that crosses later in the span, so each trial that only an earlier guard
-    /// crossed would put a gap below zero at the bracket's top, and the bracket would halve. Roots less than a floor
-    /// apart keep stable order, so a pair the floor cannot tell apart lands where layout order put it.
+    /// crossed would put a gap below zero at the bracket's top, and the bracket would halve. Roots on the line less
+    /// than a floor apart keep stable order, hazards first.
     pub(crate) fn landing_guard(
         &self,
         ticket: &StepTicket,
@@ -196,7 +180,8 @@ impl<'r> CoupledProblem<'r> {
                 let root = if before >= 0.0 {
                     0.0
                 } else {
-                    width * before / (before - after)
+                    // The ratio lies in 0 to 1, so taking it first keeps every finite gap's root finite.
+                    width * (before / (before - after))
                 };
                 if earliest.is_none_or(|(first, _)| root + floor < first) {
                     earliest = Some((root, trigger));

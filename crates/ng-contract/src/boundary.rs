@@ -1047,24 +1047,22 @@ fn land<T>(
         // A refusal drops the bracket: a shorter ticket can be the refused one, because a stage's error is
         // not monotone in its length.
         let step = solved(&trial)?;
-        if step.0.crossed(problem)?.is_none() {
+        let Some(earliest) = problem.landing_guard(ticket, bottom.as_ref(), &step.0)? else {
             bracket.note(length - origin_ns, step.0.gap(problem, guard)?, false);
             (bottom_ns, bottom) = (length, Some(step.0));
             continue;
-        }
+        };
         top = step;
-        let earliest = problem.landing_guard(ticket, bottom.as_ref(), &top.0)?;
-        match earliest.filter(|earliest| !same(*earliest, guard)) {
-            None => bracket.note(length - origin_ns, top.0.gap(problem, guard)?, true),
-            Some(earliest) => {
-                guard = earliest;
-                let below = match &bottom {
-                    Some(step) => step.gap(problem, guard)?,
-                    None => problem.gap(ticket, problem.accepted.state(), guard)?,
-                };
-                origin_ns = bottom_ns;
-                bracket = Bracket::new(below, length - origin_ns, top.0.gap(problem, guard)?, floor);
-            }
+        if same(earliest, guard) {
+            bracket.note(length - origin_ns, top.0.gap(problem, guard)?, true);
+        } else {
+            guard = earliest;
+            let below = match &bottom {
+                Some(step) => step.gap(problem, guard)?,
+                None => problem.gap(ticket, problem.accepted.state(), guard)?,
+            };
+            origin_ns = bottom_ns;
+            bracket = Bracket::new(below, length - origin_ns, top.0.gap(problem, guard)?, floor);
         }
     }
     Ok((top.0.fire(problem)?, top.1))

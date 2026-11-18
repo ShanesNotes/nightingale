@@ -4497,6 +4497,33 @@ test = "-p ng-validate --test guard_ordering two_crossings_inside_the_floor_land
 [[mutant]]
 name = "landing-reads-once"
 path = "crates/ng-contract/src/boundary.rs"
-old = '''match earliest.filter(|earliest| !same(*earliest, guard)) {'''
-new = '''match earliest.filter(|_| false) {'''
+old = '''        if same(earliest, guard) {'''
+new = '''        if true {'''
 test = "-p ng-validate --test guard_ordering a_curved_gap_that_looked_first_gives_way_to_the_guard_that_crossed_first"
+
+[[mutant]]
+name = "landing-root-multiplies-first"
+path = "crates/ng-contract/src/problem.rs"
+old = '''width * (before / (before - after))'''
+new = '''width * before / (before - after)'''
+test = "-p ng-validate --test guard_ordering finite_quartic_gaps_keep_the_first_trial_when_a_later_guard_crosses"
+
+[[mutant]]
+name = "landing-forgets-its-bottom"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''            (bottom_ns, bottom) = (length, Some(step.0));'''
+new = '''            drop(step);'''
+test = "-p ng-validate --test guard_ordering two_crossings_inside_the_floor_land_where_layout_order_puts_them"
+
+[[mutant]]
+name = "landing-root-past-zero-at-the-width"
+path = "crates/ng-contract/src/problem.rs"
+old = '''
+                let root = if before >= 0.0 {
+                    0.0
+'''
+new = '''
+                let root = if before >= 0.0 {
+                    width
+'''
+test = "-p ng-validate --test guard_ordering a_guard_at_its_crossing_at_the_base_lands_one_floor_in"

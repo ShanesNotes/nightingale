@@ -97,6 +97,7 @@ fn a_guard_at_the_end_of_a_step_hides_no_earlier_crossing_at_a_stage() {
 struct Counted {
     core: ReferenceIntegrator,
     solves: Cell<u64>,
+    first_trial_ns: Cell<Option<u64>>,
 }
 impl CoupledSolver for Counted {
     fn resolution(&self) -> DeclaredResolution {
@@ -106,6 +107,9 @@ impl CoupledSolver for Counted {
         self.core.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        if self.solves.get() == 1 {
+            self.first_trial_ns.set(Some(ticket.length_ns()));
+        }
         self.solves.set(self.solves.get() + 1);
         self.core.solve(problem, ticket)
     }
@@ -114,8 +118,8 @@ impl CoupledSolver for Counted {
 #[derive(Clone, Copy)]
 enum Gap {
     Straight(f64),
-    /// `1.1 (x + 1)^4 - 0.1`: a straight line from its start to its end at one second puts its root at 0.09 s, and
-    /// it crosses at 0.55 s.
+    /// `coefficient (x + 1)^4 - offset`. At `first_step`'s 1.1 and 0.1, a straight line from its start to its end at
+    /// one second puts its root at 0.09 s, and it crosses at 0.55 s.
     Quartic,
 }
 
@@ -123,9 +127,14 @@ struct Landed {
     at_ns: u64,
     modes: Vec<usize>,
     solves: u64,
+    first_trial_ns: Option<u64>,
 }
 
 fn first_step(first: Gap, second: Gap) -> Landed {
+    first_step_with_quartic(first, second, 1.1, 0.1)
+}
+
+fn first_step_with_quartic(first: Gap, second: Gap, coefficient: f64, offset: f64) -> Landed {
     let store = MemoryStore::default();
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
@@ -188,7 +197,7 @@ fn first_step(first: Gap, second: Gap) -> Landed {
     for (name, gap) in [("first", first), ("second", second)] {
         match gap {
             Gap::Straight(threshold) => values.push((name, threshold)),
-            Gap::Quartic => values.extend([("one", 1.0), ("coefficient", 1.1), ("offset", 0.1)]),
+            Gap::Quartic => values.extend([("one", 1.0), ("coefficient", coefficient), ("offset", offset)]),
         }
     }
     for (key, value) in values {
@@ -215,6 +224,7 @@ fn first_step(first: Gap, second: Gap) -> Landed {
     let core = Counted {
         core: ReferenceIntegrator::new(SECOND).with_floor(NonZeroU64::new(SECOND / 1000).expect("a floor")),
         solves: Cell::new(0),
+        first_trial_ns: Cell::new(None),
     };
     let port = BoundaryPort::new(Vec::new()).expect("empty timeline");
     let session = admit_fixture(&body, packet, port, &core, &store).expect("admitted");
@@ -227,6 +237,7 @@ fn first_step(first: Gap, second: Gap) -> Landed {
         at_ns: accepted.time().nanoseconds(),
         modes: accepted.modes().to_vec(),
         solves: core.solves.get(),
+        first_trial_ns: core.first_trial_ns.get(),
     }
 }
 
@@ -246,19 +257,28 @@ fn a_landing_reads_the_guard_that_crossed_first_not_the_first_in_layout_order() 
     );
 }
 
-/// Read first in layout order, the later crossing lands just short of itself and fires only the earlier; read first,
-/// the earlier lands past both.
+/// The seals' hash order puts the guard on mode `first` first here. Read first, the later crossing lands just short
+/// of itself and fires only the earlier; read first, the earlier lands past both.
 #[test]
 fn two_crossings_inside_the_floor_land_where_layout_order_puts_them() {
     let later_first = first_step(Gap::Straight(-0.4997), Gap::Straight(-0.5));
     assert_eq!(
-        (later_first.at_ns, later_first.modes),
-        (500_299_999, vec![BELOW, ABOVE])
+        (later_first.at_ns, later_first.modes, later_first.solves),
+        (500_299_999, vec![BELOW, ABOVE], 4)
     );
     let earlier_first = first_step(Gap::Straight(-0.5), Gap::Straight(-0.4997));
     assert_eq!(
-        (earlier_first.at_ns, earlier_first.modes),
-        (500_500_000, vec![ABOVE, ABOVE])
+        (earlier_first.at_ns, earlier_first.modes, earlier_first.solves),
+        (500_500_000, vec![ABOVE, ABOVE], 3)
+    );
+}
+
+#[test]
+fn a_guard_at_its_crossing_at_the_base_lands_one_floor_in() {
+    let landed = first_step(Gap::Straight(-1.0), Gap::Straight(-0.75));
+    assert_eq!(
+        (landed.at_ns, landed.modes, landed.solves),
+        (1_000_000, vec![ABOVE, BELOW], 2)
     );
 }
 
@@ -276,4 +296,13 @@ fn a_curved_gap_that_looked_first_gives_way_to_the_guard_that_crossed_first() {
         "{} solves: the step, three trials on the quartic's line and two on the straight gap",
         landed.solves
     );
+}
+
+#[test]
+fn finite_quartic_gaps_keep_the_first_trial_when_a_later_guard_crosses() {
+    let land = |threshold| first_step_with_quartic(Gap::Quartic, Gap::Straight(threshold), 1.1e302, 1.0e301);
+    let alone = land(0.25);
+    let together = land(-0.25);
+    let expected = alone.first_trial_ns.expect("the quartic crosses");
+    assert_eq!(together.first_trial_ns, Some(expected));
 }
