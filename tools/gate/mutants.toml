@@ -4479,3 +4479,24 @@ path = "crates/ng-respiratory/src/airway.rs"
 old = '''        let (stretched, sprung) = (k.subtract(v, l0), k.subtract(v, w0));'''
 new = '''        let (stretched, sprung) = (k.subtract(v, w0), k.subtract(v, l0));'''
 test = "-p ng-validate --test alveolar mixing_moves_no_net_volume_when_the_membrane_trades_equal_volumes"
+
+[[mutant]]
+name = "landing-reads-layout-order"
+path = "crates/ng-contract/src/problem.rs"
+old = '''if earliest.is_none_or(|(first, _)| root + floor < first) {'''
+new = '''if earliest.is_none() {'''
+test = "-p ng-validate --test guard_ordering a_landing_reads_the_guard_that_crossed_first_not_the_first_in_layout_order"
+
+[[mutant]]
+name = "landing-roots-inside-the-floor-reorder"
+path = "crates/ng-contract/src/problem.rs"
+old = '''if earliest.is_none_or(|(first, _)| root + floor < first) {'''
+new = '''if earliest.is_none_or(|(first, _)| root < first) {'''
+test = "-p ng-validate --test guard_ordering two_crossings_inside_the_floor_land_where_layout_order_puts_them"
+
+[[mutant]]
+name = "landing-reads-once"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''match earliest.filter(|earliest| !same(*earliest, guard)) {'''
+new = '''match earliest.filter(|_| false) {'''
+test = "-p ng-validate --test guard_ordering a_curved_gap_that_looked_first_gives_way_to_the_guard_that_crossed_first"

@@ -3,7 +3,7 @@ use crate::boundary::DriveFrame;
 use crate::chance::{Chance, Trigger, period_ns};
 use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
-use crate::quadrature::StageEvaluation;
+use crate::quadrature::{StageEvaluation, VerifiedStep};
 use crate::{
     AcceptedStateView, BoundParameters, Candidate, CompiledBody, Digest, EngineFault, EngineFaultKind,
     InputId, Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, SimTime, TrialFailure,
@@ -165,6 +165,41 @@ impl<'r> CoupledProblem<'r> {
             }
         }
         Ok(None)
+    }
+    /// Layout order would read a guard that crosses later in the span, so each trial that only an earlier guard
+    /// crossed would put a gap below zero at the bracket's top, and the bracket would halve. Roots less than a floor
+    /// apart keep stable order, so a pair the floor cannot tell apart lands where layout order put it.
+    pub(crate) fn landing_guard(
+        &self,
+        ticket: &StepTicket,
+        bottom: Option<&VerifiedStep>,
+        top: &VerifiedStep,
+    ) -> Result<Option<Trigger<'r>>, TrialFailure> {
+        let base = self.accepted.state();
+        let below_ns = bottom.map_or(0, |step| step.ticket().length_ns());
+        let width = (top.ticket().length_ns() - below_ns) as f64;
+        let floor = ticket.floor_ns.get() as f64;
+        let hazards = (self.body.layout.hazards.iter())
+            .filter(|hazard| hazard.armed(&base.modes))
+            .map(Trigger::Hazard);
+        let guards = (self.body.layout.guards.iter().enumerate())
+            .filter(|(_, guard)| guard.armed(&base.modes))
+            .map(|(guard, _)| Trigger::Plain(guard));
+        let mut earliest: Option<(f64, Trigger<'r>)> = None;
+        for trigger in hazards.chain(guards) {
+            let after = top.gap(self, trigger)?;
+            if after >= 0.0 {
+                let before = match bottom {
+                    Some(step) => step.gap(self, trigger)?,
+                    None => self.gap(ticket, base, trigger)?,
+                };
+                let root = if before >= 0.0 { 0.0 } else { width * before / (before - after) };
+                if earliest.is_none_or(|(first, _)| root + floor < first) {
+                    earliest = Some((root, trigger));
+                }
+            }
+        }
+        Ok(earliest.map(|(_, trigger)| trigger))
     }
     /// Whether an armed plain guard stands past its crossing at a stage before the end and not at the end. Each guard is
     /// read alone, so another guard's crossing at the end hides nothing. Stages run in the base's modes.
