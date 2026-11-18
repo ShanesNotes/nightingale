@@ -2104,7 +2104,10 @@ fn only_the_wired_readers_read_speciation_and_only_what_their_rows_list() -> Res
     let wired: BTreeSet<(String, &'static str)> = (SPECIATION_READERS.iter())
         .flat_map(|row| (row.wired.iter()).map(move |read| (row.reader.to_string(), read.quantity)))
         .collect();
-    let metabolism = (wired.iter()).filter(|(reader, _)| reader == Metabolism::CARD).cloned().collect();
+    let metabolism = (wired.iter())
+        .filter(|(reader, _)| reader == Metabolism::CARD)
+        .cloned()
+        .collect();
     assert_eq!(speciation_readers(&compiled(Cells::HeldUse)?), metabolism);
     assert_eq!(speciation_readers(&whole_body()?), wired);
     Ok(())
