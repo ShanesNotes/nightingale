@@ -4541,3 +4541,17 @@ path = "crates/ng-respiratory/src/airway.rs"
 old = '''            k.parameter(&self.dead_space),'''
 new = '''            k.parameter(&self.lung_rest),'''
 test = "-p ng-validate --test alveolar the_mean_alveolar_carbon_dioxide_over_whole_breaths_meets_a_mixed_dead_space_in_series"
+
+[[mutant]]
+name = "pleural-reads-no-drive"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let muscle = self.muscle(&mut k);'''
+new = '''            let muscle: Expr<'b, '_, Respiratory, Pressure> = k.zero();'''
+test = "-p ng-validate --test body_run the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_the_core_receives"
+
+[[mutant]]
+name = "breath-never-starts"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''        ("rs.breath-start", 1_000.0),'''
+new = '''        ("rs.breath-start", 0.0),'''
+test = "-p ng-validate --test body_run the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_the_core_receives"

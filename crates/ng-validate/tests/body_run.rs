@@ -1251,11 +1251,25 @@ fn the_heat_report_credits_each_column_only_what_it_puts_in_the_core() {
     );
 }
 
+/// One admission serves both: the first breaths, read over the first eleven seconds, and one whole beat's heat.
 #[test]
-fn the_whole_beat_heat_report_counts_what_the_core_receives_from_the_beds() {
+fn the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_the_core_receives() {
     let start = Start::admitted();
+    let mut watch = Watch::new(&start);
+    let mut session = start.session();
+    watch.see(&session);
+    while session.record().accepted().time().nanoseconds() < anchor_moment().nanoseconds() + 11 * SECOND {
+        let at = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+        session = until(session, at + 1);
+        watch.see(&session);
+    }
+    each_breath_swings_the_alveolar_gases_and_venous_return(&watch);
+    the_whole_beat_heat_report_counts_what_the_core_receives_from_the_beds(&start);
+}
+
+fn the_whole_beat_heat_report_counts_what_the_core_receives_from_the_beds(start: &Start) {
     let mut openings = Vec::new();
-    let session = beats(&start, start.session(), 3 * SECOND, |session, opened| {
+    let session = beats(start, start.session(), 3 * SECOND, |session, opened| {
         if let Some(closed) = opened {
             openings.push((session.record().accepted().time().nanoseconds(), closed));
         }
