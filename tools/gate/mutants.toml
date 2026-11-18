@@ -1410,6 +1410,55 @@ new = '''            if values.iter().any(|value| value.to_bits() != 0) || true 
 test = "-p ng-contract --lib elimination::tests::a_group_walks_only_the_rows_its_sides_reach"
 
 [[mutant]]
+name = "own-drops-its-upper-fill"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''                    if column > pivot {'''
+new = '''                    if column > pivot && column < at {'''
+test = "-p ng-contract --lib elimination::tests::own_holds_each_rows_entries_and_their_fill_and_no_more"
+
+[[mutant]]
+name = "own-drops-its-lower-fill"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''                    if column > pivot {'''
+new = '''                    if column > pivot && column > at {'''
+test = "-p ng-contract --lib elimination::tests::own_holds_each_rows_entries_and_their_fill_and_no_more"
+
+[[mutant]]
+name = "own-misses-fill-through-fill"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''                        pending.push(column);'''
+new = ''''''
+test = "-p ng-contract --lib elimination::tests::own_holds_each_rows_entries_and_their_fill_and_no_more"
+
+[[mutant]]
+name = "ghost-zero-keeps-a-negative-zero"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''                *value = 0.0;'''
+new = ''''''
+test = "-p ng-contract --lib elimination::tests::own_keeps_every_bit_of_the_symmetric_plan"
+
+[[mutant]]
+name = "factor-not-finite-stays-on-own"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''Eliminated { finite: false, .. } => (self.eliminate(&self.closure, values).found, true),'''
+new = '''Eliminated { found, finite: false } => (found, false),'''
+test = "-p ng-contract --lib elimination::tests::a_value_that_is_not_finite_factors_as_the_symmetric_plan_does"
+
+[[mutant]]
+name = "solve-not-finite-stays-on-own"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''self.closed || (pivoted.as_flattened().iter()).fold(true, |finite, value| finite & value.is_finite())'''
+new = '''true'''
+test = "-p ng-contract --lib elimination::tests::own_keeps_every_bit_of_the_symmetric_plan"
+
+[[mutant]]
+name = "ghost-gate-reads-lane-zero"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''.fold(false, |found, value| found | (value.to_bits() == NEGATIVE_ZERO))'''
+new = '''.step_by(L).fold(false, |found, value| found | (value.to_bits() == NEGATIVE_ZERO))'''
+test = "-p ng-contract --lib elimination::tests::a_negative_zero_in_any_lane_and_row_gives_its_group_the_ghosts"
+
+[[mutant]]
 name = "zero-term-skips-the-right-side"
 path = "crates/ng-contract/src/ring.rs"
 old = '''                                if !holds_right
