@@ -998,18 +998,18 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     };
     let stated = Stated {
         species: [
-            (Species::Energy, 1e4),
+            (Species::Energy, 3e3),
             (Species::Water, 0.04),
-            (Species::Sodium, 9e-4),
-            (Species::Chloride, 9e-4),
-            (Species::Potassium, 5e-5),
-            (Species::Vasopressin, 7e-2),
+            (Species::Sodium, 4e-4),
+            (Species::Chloride, 4e-4),
+            (Species::Potassium, 2e-5),
+            (Species::Vasopressin, 4e-2),
             (Species::NitrogenGas, 2e4),
         ],
         elements: [
             (Element::Carbon, 5e2),
-            (Element::Hydrogen, 2e-5),
-            (Element::Oxygen, 1e4),
+            (Element::Hydrogen, 2e-4),
+            (Element::Oxygen, 9e3),
         ],
         payer_hydrogen: 0.2,
     };

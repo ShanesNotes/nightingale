@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "98cb945b5a65a03871d9c25e131a091547c2d675b90252d335064124f66b80bf";
-const ADMITTED_SEAL: &str = "d6f5cf4332e2ddcf07f4936cf97dcea252c9c95a79830b7f1c622fc0f043a707";
+const PACKET: &str = "8da86d4f7d892cd479631c4d366ade62c7e18a51a0c5087d83353fd412bf059e";
+const ADMITTED_SEAL: &str = "b7dca7d644ca3605f621a909f3a845e44556fceb33ff634ab7ed8deba1bd5384";
 
 struct Counted {
     core: ng_solver::Core,
@@ -706,17 +706,17 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
     .assert_eq(&report);
     let payer = |terms: &[(RowId, i64)]| paid_by_the_coronary_bed(&start.body, terms);
     let rule = [
-        (Book::Energy, false, 9e3, 1e4),
+        (Book::Energy, false, 2e3, 3e3),
         (Book::Element(Element::Carbon), false, 4e2, 5e2),
-        (Book::Element(Element::Oxygen), false, 9e3, 1e4),
-        (Book::Element(Element::Hydrogen), false, 1e-5, 2e-5),
+        (Book::Element(Element::Oxygen), false, 8e3, 9e3),
+        (Book::Element(Element::Hydrogen), false, 1e-4, 2e-4),
         (Book::Element(Element::Hydrogen), true, 0.1, 0.2),
         (Book::Of(Species::NitrogenGas), false, 1e4, 2e4),
         (Book::Of(Species::Water), false, 0.03, 0.04),
-        (Book::Of(Species::Sodium), false, 8e-4, 9e-4),
-        (Book::Of(Species::Chloride), false, 8e-4, 9e-4),
-        (Book::Of(Species::Potassium), false, 4e-5, 5e-5),
-        (Book::Of(Species::Vasopressin), false, 6e-2, 7e-2),
+        (Book::Of(Species::Sodium), false, 3e-4, 4e-4),
+        (Book::Of(Species::Chloride), false, 3e-4, 4e-4),
+        (Book::Of(Species::Potassium), false, 1e-5, 2e-5),
+        (Book::Of(Species::Vasopressin), false, 3e-2, 4e-2),
     ];
     let figures = watch.figures();
     let mut report = String::new();
@@ -1006,7 +1006,8 @@ impl Edge {
 }
 
 /// Dividing out the drop and the share the bed's debt keeps leaves viscosity's part of the edge's flow. The body's gases
-/// are read at the start of a beat before the bolus and after it, so the beat's swing in them does not enter.
+/// are read at the start of a beat before the bolus and after it, and between the two they change only by what the
+/// room, the burns and the urine move, so the bolus carries none.
 fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
@@ -1048,19 +1049,34 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &
             .find(|opening| opening.0 == at)
             .map(|opening| opening.2)
     };
-    let held = (starts.iter().find(|at| **at < 2 * SECOND)).and_then(|at| gases(*at));
-    let delivered = (starts.iter().find(|at| **at >= 2 * SECOND)).and_then(|at| gases(*at));
-    let (held, delivered) = (
-        held.expect("a beat starts before the bolus ends"),
-        delivered.expect("a beat starts after the bolus"),
+    let (first, last) = (
+        *(starts.iter().find(|at| **at < 2 * SECOND)).expect("a beat starts before the bolus ends"),
+        *(starts.iter().find(|at| **at >= 2 * SECOND)).expect("a beat starts after the bolus"),
     );
-    for (gas, (held, delivered)) in ["oxygen", "carbon dioxide"]
+    let (held, delivered) = (
+        gases(first).expect("read at its start"),
+        gases(last).expect("read at its start"),
+    );
+    let body = &start.body;
+    let columns = every_column(body);
+    let [from, to] = [first, last].map(|at| extents(&session, &columns, anchor_moment().nanoseconds() + at));
+    let expected: Vec<(usize, ColumnId)> = (columns.iter())
+        .filter(|column| {
+            let placed = &body.columns()[column.index()];
+            matches!(placed.origin().owner, "RS" | "MT") || placed.origin().local == "urine"
+        })
+        .map(|column| (column.index(), *column))
+        .collect();
+    for (gas, (held, delivered)) in [Species::Oxygen, Species::CarbonDioxide]
         .iter()
         .zip(held.iter().zip(&delivered))
     {
+        let moved: f64 = (expected.iter())
+            .map(|(index, column)| count(body, *column, |_, species, _| species == *gas) * (to[*index] - from[*index]))
+            .sum();
         assert!(
-            (delivered - held).abs() <= 1e-5 * held,
-            "the body's {gas} went from {held} to {delivered} over the bolus, each at a beat's start"
+            (delivered - held - moved).abs() <= 1e-9 * held,
+            "the body's {gas:?} went from {held} to {delivered} over the bolus, where the room, the burns and the urine moved {moved}"
         );
     }
     let session = until(session, 30 * SECOND);

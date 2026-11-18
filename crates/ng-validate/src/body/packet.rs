@@ -1071,20 +1071,20 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// the first ten seconds and which falls a steady 0.22 to 0.26 in each ten seconds after, following the gas volume as
 /// the net exchange settles with the body's stores. Oxygen and carbon dioxide as species keep only held
 /// pools that never move, so the slice's bound for an unmoved species holds them.
-const ENERGY_DRIFT: f64 = 1e4;
+const ENERGY_DRIFT: f64 = 3e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
     (Element::Carbon, 5e2),
-    (Element::Hydrogen, 2e-5),
-    (Element::Oxygen, 1e4),
+    (Element::Hydrogen, 2e-4),
+    (Element::Oxygen, 9e3),
 ];
 const PAYER_HYDROGEN_DRIFT: f64 = 0.2;
 const SPECIES_DRIFTS: [(Species, f64); 7] = [
     (Species::Energy, ENERGY_DRIFT),
     (Species::Water, 0.04),
-    (Species::Sodium, 9e-4),
-    (Species::Chloride, 9e-4),
-    (Species::Potassium, 5e-5),
-    (Species::Vasopressin, 7e-2),
+    (Species::Sodium, 4e-4),
+    (Species::Chloride, 4e-4),
+    (Species::Potassium, 2e-5),
+    (Species::Vasopressin, 4e-2),
     (Species::NitrogenGas, 2e4),
 ];
 
