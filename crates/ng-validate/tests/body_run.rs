@@ -1301,7 +1301,8 @@ fn the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_th
         let at = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
         session = until(session, at + 1);
         watch.see(&session);
-        if at < SECOND && at + 1 >= SECOND {
+        let after = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+        if at < SECOND && after >= SECOND {
             assert!(
                 watch.moments.iter().any(|moment| moment.phase > 0.0),
                 "no breath has started by the first second"
