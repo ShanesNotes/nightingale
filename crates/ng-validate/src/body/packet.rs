@@ -950,8 +950,8 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     for (bed, used) in BEDS.into_iter().zip(USES) {
         let at = Binding::Site(site::<CapillaryBed>(bed)?);
         // The liver's inflows are the hepatic sinusoids', which read no debt; the peritubular inflow leaves
-        // the glomerular bed, whose tone is the kidney's; the lung's vessels answer alveolar oxygen, a later
-        // rung's law (ticket 01), not their tissue's debt, so the shunt keeps its share.
+        // the glomerular bed, whose tone is the kidney's; the lung's vessels answer alveolar oxygen, not their
+        // tissue's debt.
         if bed != "liver bed" {
             let silent = matches!(bed, "peritubular bed" | "pulmonary bed");
             let share = if silent { 0.0 } else { DEBT_SHARE };

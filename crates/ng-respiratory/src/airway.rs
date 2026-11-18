@@ -180,8 +180,6 @@ impl<'b> Ventilation<'b> {
         [inward, outward]
     }
 
-    /// A volume flow of one gas over its molar volume, so each gas moves at the volume rate times its amount over
-    /// the space's volume and the mixing exchange moves no net volume, since each end's shares sum to one.
     fn amount_rate<'k, C, Q: Dry>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,

@@ -18,7 +18,6 @@ const DRY: f64 = ROOM - VAPOUR;
 const INSPIRED: [f64; 3] = [0.21, 0.0, 0.79];
 const CONDUCTANCE: f64 = 1_000.0;
 const MIXING: f64 = 5_000.0;
-/// The lung's and the chest wall's elastances and relaxed volumes, apart so their balance is no plain mean.
 const ELASTANCES: [f64; 2] = [1e-3, 3e-3];
 const RESTS: [f64; 2] = [4_000.0, 6_000.0];
 const ZERO_HEAD: f64 =
@@ -391,8 +390,6 @@ fn doubling_ventilation_halves_alveolar_carbon_dioxide_where_use_equals_producti
     Ok(())
 }
 
-/// With a net uptake the two exchanges in series do not halve: the miss is the net uptake's share of the
-/// ventilation, and the closed form carries it.
 #[test]
 fn doubling_ventilation_at_resting_use_meets_the_closed_form_of_the_two_exchanges_in_series()
 -> Result<(), InitializationFailure> {
