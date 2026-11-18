@@ -572,7 +572,7 @@ Red cells get no space, because hemoglobin is a mass in blood (ticket 08). The s
 | Site | Class | Earned by |
 |---|---|---|
 | brain bed | capillary bed | the central chemoreceptor reads a brain space's acidity (11), and the brain takes glucose without insulin (15) |
-| coronary bed | capillary bed, inside the pleural space | Model default, as no reading names it. The check that would earn it is the slice's posture checks once ticket 09 wires arrow 90, if paying the heart's work at the muscle bed lets the heart's demand open the leg's vessels as the body stands. If they pass without it, the heart's work is paid at the muscle bed |
+| coronary bed | capillary bed, inside the pleural space | Model default, as no reading names it. The check that would earn it is the slice's posture checks once ticket 09 wires arrow 90, if paying the heart's work at the muscle bed lets the heart's demand open the leg's vessels as the body stands. If they pass without it, the heart's work is paid at the muscle bed. Ticket 09 ran it: the checks give the same verdict with the bed and without it, so the bed is not earned, and [ticket 35](35-the-coronary-bed-leaves-the-map.md) removes it |
 | liver bed | capillary bed inside the abdominal space, fed by the portal vein and the systemic arteries | the glycogen store and portal concentrations (14), first-pass insulin (15), arrows 99 and 104 |
 | muscle bed | capillary bed: the slice's leg bed, standing for all skeletal muscle and the tissue no other bed names | insulin-driven uptake (15), muscle glycogen, body protein and creatinine (16), shivering (12), and the posture checks that earned the leg bed |
 | fat bed | capillary bed | Model default, as no reading names fat. The check that would earn it is ticket 16's run in which the respiratory quotient rises after meals and falls overnight, if it fails with the triglyceride store in the muscle bed's cells. If it passes, the store and its laws move to the muscle bed |
@@ -657,7 +657,7 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | Line | Arrow | Fields at rung 0 |
 |---|---|---|
 | 77 | CV to NS, baroreceptor afferents | `carotid_sinus_stretch`: wired by 06, live in the slice; `aortic_arch_stretch`: wired by 06, live in the slice |
-| 78 | CV to MT, myocardial work, flow per bed | `myocardial_work`: wired by 09, the heart's work paid by fuel burned at the coronary bed; `flow_per_bed`: wired by 09, the delivery each bed's extraction and debt read |
+| 78 | CV to MT, myocardial work, flow per bed | `myocardial_work`: wired by 09, the heart's work paid by fuel burned at the coronary bed, a memory of the stroke work because the instant work holds by the rhythm's modes; `flow_per_bed`: held by CV, because no law reads a bed's flow at rung 0 and a bed's oxygen arrives by the blood's own transport into its plasma |
 | 79 | CV to EN, wall stress | `atrial_wall_stress`: wired by 17, the natriuretic peptide's secretion; `ventricular_wall_stress`: held at rung 0, one peptide is secreted, on atrial stretch |
 | 80 | CV to FL, capillary and venous pressure | `capillary_pressure`: wired by 06, live in the slice; `venous_pressure`: wired by 06, live in the slice |
 | 81 | CV to RS, pulmonary capillary flow | `pulmonary_capillary_flow`: wired by 10, alveolar exchange |

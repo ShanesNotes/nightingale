@@ -29,6 +29,7 @@ The reference man's reviewed packet and a reviewed healthy-range set exist as ch
 
 - **How a reviewed packet reaches a crate.** No crate reads a file. [Reviewed packet builder](issues/10-reviewed-packet-builder.md) scopes it.
 - **Which readings the lens carries.** The monitor's readings stay in the lens the milestone checks, and [Healthy ranges and the lens](issues/06-healthy-ranges-and-lens.md) proposes the list.
+- **How fast the heart's oxygen use follows its work.** [Research 18](issues/18-heart-work-time-course-and-efficiency.md) asks, with the efficiency of muscle work, for body ticket 09's memory on arrow 78.
 
 ## Out of scope
 

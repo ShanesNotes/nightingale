@@ -265,6 +265,7 @@ impl<'b, 'h> Walls<'b, 'h> {
         heart: &Heart<'b>,
         head: &Parameter<'b, Cardiovascular, Quotient<Pressure, Length>>,
         wave: RateClass,
+        emit_work: bool,
     ) -> Result<(), AdmissionError> {
         let half = cv.parameter::<Dimensionless>(ParameterKey::new("cv.half"), Admissible::positive());
         let elastic = cv.algebraic::<Energy>("elastic energy", Admissible::nonnegative());
@@ -280,6 +281,9 @@ impl<'b, 'h> Walls<'b, 'h> {
         });
         self.elastic_energy(cv, &half, &elastic, &below, wave);
         self.stroke_work(cv, ports, heart, &half, &contracting, wave);
+        if emit_work {
+            self.myocardial_work(cv, heart, &half, &contracting, wave);
+        }
         gravity_work::declare(cv, ports, head, wave);
 
         let store = ports.dissipation(cv);

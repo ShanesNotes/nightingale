@@ -841,6 +841,52 @@ fn fl_crosses_each_wall_with_only_the_species_body_01_gives_it() -> Result<(), A
 }
 
 #[test]
+fn the_coronary_bed_pays_the_stroke_work_and_the_muscle_bed_the_walls_so_none_ends_at_chemical_energy()
+-> Result<(), AdmissionError> {
+    let mut heart = Schema::new(body_anatomy()?)?;
+    heart.carry::<Ammonium, Beds<Heart>>(Space::Cells);
+    let beds: Vec<_> = (heart.pools())
+        .filter(|pool| pool.2 == Species::Ammonium && pool.1 == Space::Cells)
+        .map(|(site, _, _)| site.key())
+        .collect();
+    assert_eq!(
+        beds,
+        ["coronary bed"],
+        "the heart's beds, where the stroke work's oxygen is read"
+    );
+    let body = whole_body()?;
+    let mut paid = BTreeMap::new();
+    for column in body.columns() {
+        let origin = column.origin();
+        assert!(
+            column
+                .receipt()
+                .is_none_or(|receipt| receipt.boundary() != "chemical energy"),
+            "{origin:?} ends at chemical energy"
+        );
+        let payer = match origin.local {
+            "stroke work" => "coronary bed",
+            "wall work" => "muscle bed",
+            _ => continue,
+        };
+        let terms: BTreeSet<_> = (column.terms().iter())
+            .map(|&(row, count)| {
+                let (site, space, species) = pool_of(&body, row);
+                (site.key(), space, species, count)
+            })
+            .collect();
+        let expected = BTreeSet::from([
+            (payer, Space::Thermal, Species::Energy, -1),
+            ("body", Space::Elastic, Species::Energy, 1),
+        ]);
+        assert_eq!(terms, expected, "{origin:?} at {:?}", column.context());
+        *paid.entry(origin.local).or_insert(0) += 1;
+    }
+    assert_eq!(paid, BTreeMap::from([("stroke work", 21), ("wall work", 1)]));
+    Ok(())
+}
+
+#[test]
 fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionError> {
     let body = whole_body()?;
     let mut kinds = BTreeMap::new();
@@ -869,10 +915,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1442 {"algebraic": 184, "amount": 1248, "memory": 10}, columns 1422, jacobian nonzeros 9723, blocks 430, parameter slots 707, conserved combinations 404, held pools 322, held route columns 97
-        model hash a40c6b4ca4c054716117482e0469cae26eb90ec42f46fd5650deea304de1179b
+        rows 1445 {"algebraic": 186, "amount": 1248, "memory": 11}, columns 1422, jacobian nonzeros 9832, blocks 430, parameter slots 709, conserved combinations 404, held pools 322, held route columns 97
+        model hash e47d61592244ce77dfb80da00c96de34c11b32516232ef7a69fa98003f185256
         conserved basis 0209c7dba8840f794a98530d6d858db650508068452df255358f61d1f0c2eaef
-        stated packet f7b30103d2ebdccc678eeb0d1eed4e736c4f0cfef8b8e27bb204b523d6948718
+        stated packet 5dc3148703cf43a2885b20558d79ba7948c22d63eae5c7e8f5b575f1bae851c6
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -937,6 +983,7 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     struct Stated {
         species: [(Species, f64); 6],
         elements: [(Element, f64); 3],
+        payer_hydrogen: f64,
     }
     impl DriftTable for Stated {
         fn names(&self, species: Species) -> bool {
@@ -946,7 +993,10 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
             let named = self.species.iter().find(|(named, _)| *named == Q::SPECIES);
             Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
         }
-        fn element(&self, element: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+        fn element(&self, element: Element, at: &[SiteId]) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+            if element == Element::Hydrogen && at.iter().all(|site| site.key() == "coronary bed") {
+                return Measure::new(self.payer_hydrogen).map(Some);
+            }
             let named = self.elements.iter().find(|(named, _)| *named == element);
             named.map(|(_, drift)| Measure::new(*drift)).transpose()
         }
@@ -959,7 +1009,7 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     };
     let stated = Stated {
         species: [
-            (Species::Energy, 7e3),
+            (Species::Energy, 3e3),
             (Species::Water, 0.04),
             (Species::Sodium, 8e-4),
             (Species::Chloride, 9e-4),
@@ -967,10 +1017,11 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
             (Species::Vasopressin, 2e-3),
         ],
         elements: [
-            (Element::Carbon, 0.8),
+            (Element::Carbon, 0.9),
             (Element::Hydrogen, 2e-5),
             (Element::Oxygen, 5.0),
         ],
+        payer_hydrogen: 0.2,
     };
     let policy = body_certificate(&body, windows)?.digest();
     assert_eq!(policy, digest(&stated)?);
@@ -987,6 +1038,11 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
             let named = moved.elements[index].0;
             assert_ne!(policy, digest(&moved)?, "{named:?} times {by}");
         }
+        let moved = Stated {
+            payer_hydrogen: stated.payer_hydrogen * by,
+            ..stated
+        };
+        assert_ne!(policy, digest(&moved)?, "the payer's hydrogen times {by}");
     }
     Ok(())
 }
