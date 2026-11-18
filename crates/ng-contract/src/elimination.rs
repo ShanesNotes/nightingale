@@ -281,7 +281,7 @@ impl Factors<'_> {
             &self.plan.own
         }
     }
-    /// A sum ends a negative zero only where its side was one, so a group with none needs no ghost.
+    /// A sum ends as a negative zero only where its side was one, so a group with none needs no ghost.
     fn ghosts<const L: usize>(&self, sides: &[[f64; L]]) -> Option<&Ghosts> {
         let signed = || {
             (sides.as_flattened().iter())
@@ -357,8 +357,8 @@ impl Factors<'_> {
     }
     fn substitute<const L: usize>(&self, pivoted: &mut [[f64; L]]) -> bool {
         match self.ghosts(pivoted) {
+            Some(ghosts) => walk(self.pattern(), &self.lu, Some(ghosts), pivoted),
             None => walk(self.pattern(), &self.lu, None, pivoted),
-            ghosts => walk(self.pattern(), &self.lu, ghosts, pivoted),
         }
         self.closed || (pivoted.as_flattened().iter()).fold(true, |finite, value| finite & value.is_finite())
     }
