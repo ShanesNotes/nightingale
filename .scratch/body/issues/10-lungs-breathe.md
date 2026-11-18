@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Claimed by: b10a-build
+Claimed by: b10b-build
 Blocked by: 08, 09, `.scratch/research/issues/11-law-forms-gas-loop.md`, ../../native-contract/issues/66-what-the-gas-loop-works-around.md
 
 **What to build:** A tidal breath moves gas through the airway into one alveolar unit with a shunt and a dead space, and alveolar gas exchanges with pulmonary capillary blood. The breath's pleural pressure replaces the constant the slice holds, so venous return feels each breath. The resting lung volume follows posture. Water and heat leave with expired gas, and the work of breathing is charged to metabolism (arrow 84). The pump's force is musculoskeletal state that the lungs read, driven by a held drive until [ticket 11](11-breathing-is-controlled.md).
