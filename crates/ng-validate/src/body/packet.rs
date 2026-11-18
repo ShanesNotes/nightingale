@@ -13,16 +13,19 @@ const NOTE: &str = "body fixture: synthetic";
 const METHOD: &str = "a synthetic monitor";
 const NEW_BED: f64 = 0.1;
 const HEMOGLOBIN: f64 = 2.0;
+/// The shunt's resistance, `R_s = R_c (1 - f) / f` for a fixed shunt fraction `f` of 0.02 beside the bed's 0.09
+/// (research 11, Nunn pp. 244 to 245).
+const SHUNT: f64 = 0.09 * 0.98 / 0.02;
+
 /// The viscosity the packet's edge resistances are stated at. It was read once, at 08a's admitted start from an
 /// admission whose vessels did not read it, so 08a moved no pressure at rest. It is not read again when the admitted
 /// hematocrit moves: the resistances then move with viscosity, as a later ticket's change asks.
 const START_VISCOSITY: f64 = 7.115_102_244_801_436;
 
 /// Each bed's oxygen demand in its cells, in `BEDS`' order, and the head of partial pressure that every wall, cell
-/// membrane and the lung's exchange take at that demand.
+/// membrane and the alveolar membrane take at that demand.
 const USES: [f64; 11] = [1.0, 20.0, 25.0, 3.0, 10.0, 8.0, 8.0, 15.0, 2.0, 2.0, 2.0];
 const HEAD: f64 = 5.0;
-const ALVEOLAR: f64 = 100.0;
 const SOLUBILITY: f64 = 0.001;
 const HEME: f64 = 4.0;
 const P50: f64 = 25.0;
@@ -213,6 +216,18 @@ pub fn body_start_guess(row: RowKind) -> Result<Compensated, AdmissionError> {
 
 fn start_guess(row: RowKind) -> f64 {
     match row {
+        RowKind::Amount {
+            site,
+            species,
+            space: Space::Gas,
+        } if species != Species::Water => match (site.key(), species) {
+            ("pulmonary bed", Species::Oxygen) => 8_769.0,
+            ("pulmonary bed", Species::CarbonDioxide) => 2_631.0,
+            ("pulmonary bed", _) => 45_600.0,
+            (_, Species::Oxygen) => 618.0,
+            (_, Species::CarbonDioxide) => 78.5,
+            _ => 2_703.5,
+        },
         RowKind::Amount { site, species, space } => {
             if let Some(rest) = burn_rest(site.key(), species, space) {
                 return rest;
@@ -258,11 +273,10 @@ fn start_guess(row: RowKind) -> f64 {
             };
             let blood = blood(bed);
             match slot.law.local {
-                "oxygen partial pressure" | "pulmonary oxygen partial pressure" => blood.oxygen_pressure,
+                "oxygen partial pressure" => blood.oxygen_pressure,
                 "oxygen saturation" => blood.saturation,
                 "bicarbonate" => blood.bicarbonate,
                 "acidity" => blood.acidity,
-                "pulmonary carbon dioxide partial pressure" => blood.carbon_dioxide_pressure,
                 "oxygen_debt_per_bed" => 0.0,
                 _ => 1.0,
             }
@@ -656,6 +670,7 @@ fn table(
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05)?;
     set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0)?;
     set::<Pressure>(packet, "rs.pleural-pressure", body, -3.0)?;
+    respiratory(packet)?;
     set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.035)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.05)?;
     set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "fl.oncotic-slope", body, 20.0)?;
@@ -765,6 +780,7 @@ fn table(
     for (from, to, resistance) in [
         (artery, lung, 0.06),
         (lung, pulmonary_vein, 0.03),
+        (artery, pulmonary_vein, SHUNT),
         (gut, portal, 0.5),
         (muscle, leg_veins, 0.5),
         (glomerular, peritubular, 2.0),
@@ -899,8 +915,6 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
         ("bc.hill-reach", HILL.2),
         ("bc.standard-carbon-dioxide", BY_CARBON_DIOXIDE.standard),
         ("bc.carbon-dioxide-scale", BY_CARBON_DIOXIDE.scale),
-        ("mt.alveolar-oxygen", ALVEOLAR),
-        ("mt.alveolar-carbon-dioxide", ALVEOLAR_CARBON_DIOXIDE),
     ] {
         set::<Pressure>(packet, key, body, value)?;
     }
@@ -924,12 +938,9 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     }
     carbon_dioxide(packet)?;
     let total: f64 = USES.iter().sum();
-    set::<Conductance<Oxygen>>(packet, "mt.lung-oxygen-exchange", body, total / HEAD)?;
+    set::<Conductance<Oxygen>>(packet, "rs.oxygen-diffusing", body, total / HEAD)?;
     let made = PER_OXYGEN * total / CARBON_DIOXIDE_HEAD;
-    set::<Conductance<CarbonDioxide>>(packet, "mt.lung-carbon-dioxide-exchange", body, made)?;
-    set::<Dimensionless>(packet, "mt.lung-share", Binding::Class(Class::CapillaryBed), 0.0)?;
-    let lung = Binding::Site(site::<CapillaryBed>("pulmonary bed")?);
-    set::<Dimensionless>(packet, "mt.lung-share", lung, 1.0)?;
+    set::<Conductance<CarbonDioxide>>(packet, "rs.carbon-dioxide-diffusing", body, made)?;
     burn(packet)?;
     set::<Quotient<Oxygen, Energy>>(packet, "mt.oxygen-per-energy", body, 1.0 / ENERGY_PER_OXYGEN)?;
     set::<Rate<Dimensionless>>(packet, "cv.work-speed", body, WORK_SPEED)?;
@@ -939,9 +950,11 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     for (bed, used) in BEDS.into_iter().zip(USES) {
         let at = Binding::Site(site::<CapillaryBed>(bed)?);
         // The liver's inflows are the hepatic sinusoids', which read no debt; the peritubular inflow leaves
-        // the glomerular bed, whose tone is the kidney's.
+        // the glomerular bed, whose tone is the kidney's; the lung's vessels answer alveolar oxygen, not their
+        // tissue's debt.
         if bed != "liver bed" {
-            let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };
+            let silent = matches!(bed, "peritubular bed" | "pulmonary bed");
+            let share = if silent { 0.0 } else { DEBT_SHARE };
             set::<Dimensionless>(packet, "cv.debt-share", at, share)?;
             set::<Oxygen>(packet, "cv.debt-half", at, used * DEBT_HALF_TIME)?;
         }
@@ -1043,26 +1056,29 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// variation: twice the quantity's worst change over a ten-second window of this body's first minute from its admitted
 /// start, rounded up to one significant figure. It is a synthetic target that scores a solver and judges no body. The
 /// body's measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set
-/// (record 0004). Energy's worst change is 1,355, in the window from 47 s. Oxygen's and carbon's change is mostly the
+/// (record 0004). Energy's worst change is 1,347, in the window from 47 s. Oxygen's and carbon's change is mostly the
 /// blood gases' swing within a beat, read across windows that hold no whole number of beats, and hydrogen's is a bed's
 /// cell fuels and water settling, under 7.5e-6 at every bed but the stroke work's payer, whose cells settle by 0.077
 /// over the first ten seconds whatever their start, so they take a bound of their own. The species are the held gut's and skin's
-/// water and salts and vasopressin's held secretion and clearance. Oxygen and carbon dioxide as species keep only held
+/// water and salts, vasopressin's held secretion and clearance, and nitrogen gas, whose worst change is 0.380 in
+/// the first ten seconds and which falls a steady 0.22 to 0.26 in each ten seconds after, following the gas volume as
+/// the net exchange settles with the body's stores. Oxygen and carbon dioxide as species keep only held
 /// pools that never move, so the slice's bound for an unmoved species holds them.
 const ENERGY_DRIFT: f64 = 3e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
-    (Element::Carbon, 0.9),
+    (Element::Carbon, 0.2),
     (Element::Hydrogen, 2e-5),
-    (Element::Oxygen, 5.0),
+    (Element::Oxygen, 0.6),
 ];
 const PAYER_HYDROGEN_DRIFT: f64 = 0.2;
-const SPECIES_DRIFTS: [(Species, f64); 6] = [
+const SPECIES_DRIFTS: [(Species, f64); 7] = [
     (Species::Energy, ENERGY_DRIFT),
     (Species::Water, 0.04),
-    (Species::Sodium, 8e-4),
+    (Species::Sodium, 9e-4),
     (Species::Chloride, 9e-4),
-    (Species::Potassium, 4e-5),
+    (Species::Potassium, 5e-5),
     (Species::Vasopressin, 2e-3),
+    (Species::NitrogenGas, 0.8),
 ];
 
 struct BodyDrifts;
@@ -1088,4 +1104,29 @@ pub fn body_certificate(
     windows: SlidingWindows,
 ) -> Result<CertificatePolicy, AdmissionError> {
     crate::certificate_with(body, windows, &BodyDrifts)
+}
+
+fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    for (key, value) in [
+        ("rs.oxygen-inspired", 0.21),
+        ("rs.carbon-dioxide-inspired", 0.0004),
+    ] {
+        set::<Dimensionless>(packet, key, body, value)?;
+    }
+    set::<Pressure>(packet, "rs.room-pressure", body, 700.0)?;
+    set::<Pressure>(packet, "rs.water-vapour-pressure", body, 50.0)?;
+    set::<Pressure>(packet, "rs.head-width", body, 0.01)?;
+    set::<Elastance>(packet, "rs.lung-elastance", body, 1.6e-4)?;
+    set::<Elastance>(packet, "rs.wall-elastance", body, 1.6e-4)?;
+    set::<Volume>(packet, "rs.lung-rest-volume", body, 38_250.0)?;
+    set::<Volume>(packet, "rs.wall-rest-volume", body, 75_750.0)?;
+    set::<Elastance>(packet, "rs.dead-space-elastance", body, 6.4e-4)?;
+    set::<Volume>(packet, "rs.dead-space-volume", body, 3_400.0)?;
+    set::<Quotient<Volume, Oxygen>>(packet, "rs.oxygen-volume", body, 1.0)?;
+    set::<Quotient<Volume, CarbonDioxide>>(packet, "rs.carbon-dioxide-volume", body, 1.0)?;
+    set::<Quotient<Volume, NitrogenGas>>(packet, "rs.nitrogen-volume", body, 1.0)?;
+    set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, 15_600.0)?;
+    set::<Rate<Volume>>(packet, "rs.airway-mixing", body, 3_240.0)?;
+    Ok(())
 }

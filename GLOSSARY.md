@@ -444,6 +444,21 @@ A card whose laws read what blood chemistry states at the sites of one set: a ro
 A transfer of a dissolved gas across a capillary wall or a cell membrane, at a conductance times the difference of its partial pressures either side.
 _Avoid_: crossing (a guard's)
 
+**Alveolar unit**:
+The lungs' one gas space at rung 0: the pulmonary bed's gas. It fills from the dead space along the airway and trades oxygen and carbon dioxide with the bed's plasma by alveolar exchange.
+
+**Dead space**:
+The conducting airway's gas, in series between the room and the alveolar unit, so the room's gas reaches the alveolar unit only through it. Its own elastic head draws gas from the room when it holds less than its volume.
+
+**Mixing exchange**:
+A volume of gas a second traded both ways along the airway, or between the room and the dead space, so each gas moves at that volume rate times its share of the dry gas at each end, over its molar volume. The two ways carry equal volumes, so it moves no net volume. It stands for the breath's mean ventilation until the breath is built.
+
+**Alveolar exchange**:
+A transfer of oxygen or carbon dioxide across the gas-exchange surface, at a conductance times the alveolar partial pressure less the pulmonary bed's plasma's. The alveolar partial pressure is the gas's share of the dry gas times the room's pressure less water vapour's.
+
+**Shunt**:
+A vascular edge from the pulmonary artery to the pulmonary vein beside the pulmonary bed, so a share of the blood reaches the left heart with no alveolar exchange.
+
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.
 

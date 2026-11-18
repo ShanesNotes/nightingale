@@ -277,6 +277,8 @@ impl<Q: Substance> identities::Sealed<Concentration<Q>> for Quotient<Q, Volume> 
 impl<Q: Substance> SameDimension<Concentration<Q>> for Quotient<Q, Volume> {}
 impl<P: Substance, Q: Substance> identities::Sealed<Rate<Q>> for Product<Rate<P>, Quotient<Q, P>> {}
 impl<P: Substance, Q: Substance> SameDimension<Rate<Q>> for Product<Rate<P>, Quotient<Q, P>> {}
+impl<Q: Substance> identities::Sealed<Rate<Q>> for Quotient<Rate<Volume>, Quotient<Volume, Q>> {}
+impl<Q: Substance> SameDimension<Rate<Q>> for Quotient<Rate<Volume>, Quotient<Volume, Q>> {}
 impl<Q: Substance> identities::Sealed<Rate<Q>> for Product<Affinity<Q>, Product<Q, Q>> {}
 impl<Q: Substance> SameDimension<Rate<Q>> for Product<Affinity<Q>, Product<Q, Q>> {}
 impl<Q: Substance> identities::Sealed<Rate<Q>>

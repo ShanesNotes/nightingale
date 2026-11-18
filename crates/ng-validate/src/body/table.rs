@@ -40,7 +40,6 @@ const MEAL: &str = "the slice's absorption: a basal rate and the meal, straight 
 const KEPT_BACK: &str = "an interstitial amount the capillary wall keeps back";
 const UNCROSSED: &str = "a cell amount no membrane law moves";
 const ALVEOLAR: &str = "alveolar gas no exchange moves";
-const LUNG: &str = "a held exchange on the pulmonary bed's partial pressure";
 const FEED: &str = "a restoring feed into the bed's cells toward a stated set amount";
 const DRAIN: &str = "a restoring drain of the bed's cell water toward a stated set amount";
 
@@ -83,17 +82,8 @@ use Space::{Cells, Gas, Interstitium};
 
 /// Every hold of the whole body, by card. Its rows equal the compiled body's coverage manifest.
 pub const HOLD_TABLE: &[Hold] = &[
-    route(RS, "inspired oxygen", CONSTANT, Ticket(10, RS), "01:128"),
-    route(RS, "inspired carbon dioxide", CONSTANT, Ticket(10, RS), "01:149"),
-    route(RS, "inspired nitrogen gas", CONSTANT, Ticket(10, RS), "01:531"),
-    route(RS, "expired oxygen", CONSTANT, Ticket(10, RS), "01:133"),
-    route(RS, "expired carbon dioxide", CONSTANT, Ticket(10, RS), "01:150"),
-    route(RS, "expired nitrogen gas", CONSTANT, Ticket(10, RS), "01:531"),
     route(RS, "expired water", CONSTANT, Ticket(10, RS), "01:63, 873"),
     route(RS, "airway heat", CONSTANT, Ticket(10, RS), "01:171-172, 873"),
-    pool::<Oxygen, Beds<Lung>>(RS, Gas, ALVEOLAR, Ticket(10, RS), "01:129, 529"),
-    pool::<CarbonDioxide, Beds<Lung>>(RS, Gas, ALVEOLAR, Ticket(10, RS), "01:148, 530"),
-    pool::<NitrogenGas, Beds<Lung>>(RS, Gas, ALVEOLAR, Ticket(10, RS), "01:531"),
     pool::<Water, Beds<Lung>>(RS, Gas, ALVEOLAR, Ticket(10, RS), "01:356, 532"),
     route(GI, "gut water", MEAL, Ticket(13, GI), "01:54, 876"),
     route(GI, "gut sodium", MEAL, Ticket(13, GI), "01:77, 876"),
@@ -325,8 +315,6 @@ pub const HOLD_TABLE: &[Hold] = &[
     route(MT, "bone bed glucose feed", FEED, Ticket(16, MT), "01:190"),
     route(MT, "bone bed fatty acid feed", FEED, Ticket(16, MT), "01:200"),
     route(MT, "bone bed cell water out", DRAIN, Ticket(17, FL), "01:58, 880"),
-    route(MT, "lung oxygen", LUNG, Ticket(10, RS), "01:129, 873"),
-    route(MT, "lung carbon dioxide", LUNG, Ticket(10, RS), "01:148, 873"),
     pool::<Glucose, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(9, FL), "01:485, 533"),
     pool::<FattyAcids, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(9, FL), "01:485, 536"),
     pool::<Lactate, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(9, FL), "01:485, 540"),

@@ -234,7 +234,7 @@ fn viscosity_scales_every_circulation_edge_and_no_other_law() -> Result<(), Init
     let mut read = circulation.clone();
     read.push(field);
     read.sort_unstable();
-    assert_eq!(circulation.len(), 21);
+    assert_eq!(circulation.len(), 22);
     assert_eq!(moved, read);
     for at in circulation {
         let (once, twice) = (-staged[0][at], -staged[1][at]);
@@ -304,7 +304,53 @@ fn a_beds_inflow_resistance_falls_with_its_debt_by_its_form() -> Result<(), Init
 }
 
 #[test]
-fn every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt()
+fn the_shunt_keeps_its_fraction_when_the_pulmonary_bed_owes_oxygen() -> Result<(), InitializationFailure> {
+    let body = whole_body()?;
+    let artery = site::<VesselSegment>("pulmonary artery");
+    let lung = site::<CapillaryBed>("pulmonary bed");
+    let vein = site::<VesselSegment>("pulmonary vein");
+    let pressure = |at| index(&body, algebraic("CV", "blood pressure", Context::Site(at)));
+    let inflow = index(&body, circulation(artery, lung));
+    let outflow = index(&body, circulation(lung, vein));
+    let shunt = index(&body, circulation(artery, vein));
+    let trial = |owed, bed_pressure, through, bypass| {
+        vec![
+            (pressure(artery), PRESSURES.0),
+            (pressure(lung), bed_pressure),
+            (pressure(vein), PRESSURES.1),
+            (inflow, through),
+            (outflow, through),
+            (shunt, bypass),
+            (index(&body, viscosity()), 1.0),
+            (index(&body, debt(lung)), owed),
+        ]
+    };
+    let midpoint = (PRESSURES.0 + PRESSURES.1) / 2.0;
+    for owed in [0.0, 1e-3] {
+        let first = &staged(&body, &[trial(owed, midpoint, 0.0, 0.0)])?[0];
+        let (into, out) = (-first[inflow], -first[outflow]);
+        assert!(into > 0.0 && out > 0.0);
+        let bed_pressure = PRESSURES.1 + (PRESSURES.0 - PRESSURES.1) * into / (into + out);
+        let through = 2.0 * into * out / (into + out);
+        let expected_bypass = through * 0.02 / 0.98;
+        let rows = &staged(&body, &[trial(owed, bed_pressure, through, expected_bypass)])?[0];
+        let (into, out, bypass) = (
+            through - rows[inflow],
+            through - rows[outflow],
+            expected_bypass - rows[shunt],
+        );
+        assert!(into > 0.0 && bypass > 0.0 && (into - out).abs() <= 1e-12 * into);
+        let fraction = bypass / (bypass + into);
+        assert!(
+            (fraction - 0.02).abs() < 1e-12,
+            "shunt fraction {fraction} at debt {owed}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn every_beds_inflow_but_the_liver_the_peritubular_and_the_pulmonary_bed_widens_with_its_debt()
 -> Result<(), InitializationFailure> {
     let body = whole_body()?;
     let rows: Vec<RowKind> = body.rows().iter().map(Row::kind).collect();
@@ -345,10 +391,6 @@ fn every_beds_inflow_but_the_liver_and_the_peritubular_bed_widens_with_its_debt(
     ]
     .into_iter()
     .map(|bed| circulation(arteries, site::<CapillaryBed>(bed)))
-    .chain([circulation(
-        site::<VesselSegment>("pulmonary artery"),
-        site::<CapillaryBed>("pulmonary bed"),
-    )])
     .collect();
     moved.sort_unstable();
     fed.sort_unstable();

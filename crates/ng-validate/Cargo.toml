@@ -17,6 +17,7 @@ ng-observe = { path = "../ng-observe" }
 ng-receptor = { path = "../ng-receptor" }
 ng-record = { path = "../ng-record" }
 ng-renal = { path = "../ng-renal" }
+ng-respiratory = { path = "../ng-respiratory" }
 
 [dev-dependencies]
 expect-test = "=1.5.1"

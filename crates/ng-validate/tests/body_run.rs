@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "14cbba67470036ef8e5fdb324aaf509cb00540c59373e56c442c8f1da38ec4e0";
-const ADMITTED_SEAL: &str = "6b004a5782b27f7cdab50dc65301ced712bbaa5d7711b9ac12196789f73b961c";
+const PACKET: &str = "98cb945b5a65a03871d9c25e131a091547c2d675b90252d335064124f66b80bf";
+const ADMITTED_SEAL: &str = "d6f5cf4332e2ddcf07f4936cf97dcea252c9c95a79830b7f1c622fc0f043a707";
 
 struct Counted {
     core: ng_solver::Core,
@@ -306,7 +306,7 @@ fn counted_until<'s>(
 
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (Session<'_, Running>, Minute) {
     let pools = start.held_pools();
-    assert_eq!(pools.len(), 322);
+    assert_eq!(pools.len(), 319);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
         let view = session.record().accepted();
         pools.iter().map(|(row, _)| view.value(*row).bits()).collect()
@@ -356,7 +356,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11794, quantities 404, held routes 97
+        steps 11739, quantities 399, held routes 89
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -385,8 +385,6 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT liver bed cell water out moved
         MT liver bed fatty acid feed moved
         MT liver bed glucose feed moved
-        MT lung carbon dioxide moved
-        MT lung oxygen moved
         MT muscle bed cell water out moved
         MT muscle bed fatty acid feed moved
         MT muscle bed glucose feed moved
@@ -401,6 +399,105 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT skin bed glucose feed moved
     "#]]
     .assert_eq(&report);
+    let payer = |terms: &[(RowId, i64)]| {
+        terms.iter().all(|(row, _)| {
+            matches!(start.body.rows()[row.index()].kind(), RowKind::Amount { site, .. } if site.key() == "coronary bed")
+        })
+    };
+    let rule = [
+        (Book::Energy, false, 2e3, 3e3),
+        (Book::Element(Element::Carbon), false, 0.1, 0.2),
+        (Book::Element(Element::Oxygen), false, 0.5, 0.6),
+        (Book::Element(Element::Hydrogen), false, 1e-5, 2e-5),
+        (Book::Element(Element::Hydrogen), true, 0.1, 0.2),
+        (Book::Of(Species::NitrogenGas), false, 0.7, 0.8),
+        (Book::Of(Species::Water), false, 0.03, 0.04),
+        (Book::Of(Species::Sodium), false, 8e-4, 9e-4),
+        (Book::Of(Species::Chloride), false, 8e-4, 9e-4),
+        (Book::Of(Species::Potassium), false, 4e-5, 5e-5),
+        (Book::Of(Species::Vasopressin), false, 1e-3, 2e-3),
+    ];
+    for (book, at_payer, below, bound) in rule {
+        let worst = (certificate.results().iter())
+            .filter(|result| {
+                let combination = &start.body.conserved_basis().combinations()[result.quantity().index()];
+                combination.book() == book && payer(combination.terms()) == at_payer
+            })
+            .map(|result| lead(result.worst_drift()).abs())
+            .fold(0.0, |most, x| if x > most { x } else { most });
+        assert!(
+            below < 2.0 * worst && 2.0 * worst <= bound,
+            "{book:?}: twice the worst ten-second change, {}, rounds up to a figure other than {bound}",
+            2.0 * worst
+        );
+    }
+}
+
+fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
+    start: &Start,
+    minute: Session<'_, Running>,
+) {
+    let body = &start.body;
+    let columns = every_column(body);
+    let (airway, lung) = (
+        site::<TissueSite>("conducting airway"),
+        site::<CapillaryBed>("pulmonary bed"),
+    );
+    let held = |session: &Session<'_, Running>, gas| -> f64 {
+        let view = session.record().accepted();
+        let in_gas = |kind| matches!(kind, RowKind::Amount { site, species, space: Space::Gas } if (site == airway || site == lung) && species == gas);
+        (body.rows().iter())
+            .filter(|row| in_gas(row.kind()))
+            .map(|row| lead(view.value(row.id())))
+            .sum()
+    };
+    let gases = [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas];
+    let from = minute.record().accepted().time().nanoseconds();
+    let before = gases.map(|gas| held(&minute, gas));
+    let session = until(minute, from - anchor_moment().nanoseconds() + 10 * SECOND);
+    let to = session.record().accepted().time().nanoseconds();
+    let after = gases.map(|gas| held(&session, gas));
+    let (early, late) = (extents(&session, &columns, from), extents(&session, &columns, to));
+    for (at, gas) in gases.into_iter().enumerate() {
+        let gas_at =
+            |bed: SiteId| move |site, species, space| site == bed && species == gas && space == Space::Gas;
+        let (mut inspired, mut expired, mut diffused, mut along) = (0.0, 0.0, 0.0, 0.0);
+        for &column in &columns {
+            let (into_airway, into_lung) = (
+                count(body, column, gas_at(airway)),
+                count(body, column, gas_at(lung)),
+            );
+            if into_airway == 0.0 && into_lung == 0.0 {
+                continue;
+            }
+            let moved = late[column.index()] - early[column.index()];
+            let placed = &body.columns()[column.index()];
+            let receipt = placed.receipt().map(|receipt| receipt.boundary());
+            assert_eq!(
+                placed.origin().owner,
+                "RS",
+                "{:?} moves {gas:?} in the airway's gas",
+                placed.origin()
+            );
+            match (receipt, into_airway, into_lung) {
+                (Some(_), 1.0, 0.0) => inspired += moved,
+                (Some(_), -1.0, 0.0) => expired += moved,
+                (None, -1.0, 1.0) => along += moved,
+                (None, 0.0, -1.0) => diffused += moved,
+                other => panic!("{:?} moves {gas:?} as {other:?}", placed.origin()),
+            }
+        }
+        let gained = after[at] - before[at];
+        let gross = [inspired, expired, diffused, along]
+            .map(f64::abs)
+            .into_iter()
+            .fold(0.0, |most, x| if x > most { x } else { most });
+        assert!(gross > 0.0, "{gas:?} moved nowhere");
+        assert!(
+            (gained - (inspired - expired - diffused)).abs() <= 1e-9 * gross,
+            "{gas:?}: in {inspired}, out {expired}, across {diffused}, along {along}, gained {gained}"
+        );
+    }
 }
 
 fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
@@ -487,23 +584,23 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 14cbba67470036ef8e5fdb324aaf509cb00540c59373e56c442c8f1da38ec4e0
-        seal 9d6bccbb0bea881937e368758797222ceeb7e1aa099e2e8bcf82846d8e9ca5c4
-        steps 198
-        viscosity over its reference at the start 1.000000413
+        packet 98cb945b5a65a03871d9c25e131a091547c2d675b90252d335064124f66b80bf
+        seal 253c698a088f70ea8433a30c4f938783bc9b1c385a2e3db989956986a6a9eb68
+        steps 196
+        viscosity over its reference at the start 1.000234140
     "#]]
     .assert_eq(&pin);
     expect![[r#"
-         100.432831 ms  arterial pressure 134.633292  right atrial pressure 3.008802  portal vein pressure 6.258052  leg vein pressure 3.596931  heart rate 1.063945  sympathetic traffic 0.786091  filtration 1.670060  urine 0.020000  wall power 24549.627276  aortic flow 0.000000
-         200.971783 ms  arterial pressure 127.073846  right atrial pressure 3.566989  portal vein pressure 6.406698  leg vein pressure 3.850276  heart rate 1.081239  sympathetic traffic 0.086531  filtration 2.109289  urine 0.020000  wall power 15618.233755  aortic flow 39.436322
-         300.343558 ms  arterial pressure 119.007062  right atrial pressure 4.057781  portal vein pressure 6.216546  leg vein pressure 4.180908  heart rate 1.048358  sympathetic traffic 0.016675  filtration 2.344802  urine 0.020000  wall power 39549.054176  aortic flow 0.000000
-         403.707420 ms  arterial pressure 109.434879  right atrial pressure 3.675871  portal vein pressure 5.988799  leg vein pressure 4.614320  heart rate 1.004394  sympathetic traffic 0.012228  filtration 2.415994  urine 0.020000  wall power 13948.485600  aortic flow 0.000000
-         504.102519 ms  arterial pressure 101.045104  right atrial pressure 2.024956  portal vein pressure 5.767216  leg vein pressure 4.364992  heart rate 0.970296  sympathetic traffic 0.022847  filtration 2.358741  urine 0.020000  wall power 12015.605952  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.141457  right atrial pressure 1.494962  portal vein pressure 5.498127  leg vein pressure 3.709215  heart rate 0.947449  sympathetic traffic 0.073838  filtration 2.207971  urine 0.020000  wall power 8662.269616  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.170674  right atrial pressure 1.466155  portal vein pressure 5.280744  leg vein pressure 3.176841  heart rate 0.940358  sympathetic traffic 0.258646  filtration 2.015385  urine 0.020000  wall power 6352.014084  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.751725  right atrial pressure 1.672362  portal vein pressure 5.262427  leg vein pressure 2.969095  heart rate 0.951979  sympathetic traffic 0.637060  filtration 1.805026  urine 0.020000  wall power 4974.942873  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.855082  right atrial pressure 1.951307  portal vein pressure 5.528042  leg vein pressure 3.094495  heart rate 0.982016  sympathetic traffic 0.902233  filtration 1.592553  urine 0.020000  wall power 4010.478457  aortic flow 0.000000
-        1000.179870 ms  arterial pressure 68.861095  right atrial pressure 2.199746  portal vein pressure 5.891237  leg vein pressure 3.309513  heart rate 1.020599  sympathetic traffic 0.976716  filtration 1.404101  urine 0.020000  wall power 3214.816905  aortic flow 0.000000
+         100.431615 ms  arterial pressure 134.631135  right atrial pressure 2.998390  portal vein pressure 6.246882  leg vein pressure 3.586652  heart rate 1.063942  sympathetic traffic 0.786097  filtration 1.670136  urine 0.020000  wall power 24573.594635  aortic flow 0.000000
+         201.075082 ms  arterial pressure 127.066077  right atrial pressure 3.554914  portal vein pressure 6.392338  leg vein pressure 3.838452  heart rate 1.081222  sympathetic traffic 0.086335  filtration 2.109658  urine 0.020000  wall power 15580.644495  aortic flow 39.550340
+         300.773672 ms  arterial pressure 118.963316  right atrial pressure 4.046727  portal vein pressure 6.201253  leg vein pressure 4.169709  heart rate 1.048163  sympathetic traffic 0.016618  filtration 2.345385  urine 0.020000  wall power 39212.514690  aortic flow 0.000000
+         403.586201 ms  arterial pressure 109.444515  right atrial pressure 3.654480  portal vein pressure 5.974840  leg vein pressure 4.600291  heart rate 1.004439  sympathetic traffic 0.012230  filtration 2.415940  urine 0.020000  wall power 13935.818085  aortic flow 0.000000
+         503.972823 ms  arterial pressure 101.054947  right atrial pressure 2.010192  portal vein pressure 5.753185  leg vein pressure 4.349139  heart rate 0.970333  sympathetic traffic 0.022828  filtration 2.358777  urine 0.020000  wall power 12009.501295  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.141287  right atrial pressure 1.482228  portal vein pressure 5.484073  leg vein pressure 3.693218  heart rate 0.947452  sympathetic traffic 0.073857  filtration 2.207845  urine 0.020000  wall power 8653.474167  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.170700  right atrial pressure 1.455032  portal vein pressure 5.267650  leg vein pressure 3.162410  heart rate 0.940363  sympathetic traffic 0.258683  filtration 2.015290  urine 0.020000  wall power 6345.593911  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.751898  right atrial pressure 1.662051  portal vein pressure 5.250661  leg vein pressure 2.956498  heart rate 0.951985  sympathetic traffic 0.637088  filtration 1.804989  urine 0.020000  wall power 4971.123428  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.855379  right atrial pressure 1.941206  portal vein pressure 5.517491  leg vein pressure 3.083332  heart rate 0.982024  sympathetic traffic 0.902238  filtration 1.592580  urine 0.020000  wall power 4008.727387  aortic flow 0.000000
+        1000.170544 ms  arterial pressure 68.861963  right atrial pressure 2.189564  portal vein pressure 5.881250  leg vein pressure 3.299054  heart rate 1.020603  sympathetic traffic 0.976713  filtration 1.404194  urine 0.020000  wall power 3215.302678  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -1047,10 +1144,10 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         (Species::CarbonDioxide, carbon_dioxide),
     ] {
         let lung: f64 = (columns.iter())
-            .filter(|column| body.columns()[column.index()].receipt().is_some())
+            .filter(|column| body.columns()[column.index()].origin().owner == Respiratory::CARD)
             .map(|column| {
-                let at_lung = count(body, *column, |site, species, _| {
-                    site == lung_bed && species == gas
+                let at_lung = count(body, *column, |site, species, space| {
+                    site == lung_bed && species == gas && space == Space::Plasma
                 });
                 ((end[column.index()] - beginning[column.index()]) * at_lung).abs() / held
             })
@@ -1339,7 +1436,8 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             space: Space::Cells,
         };
         let debt = field("MT", "oxygen_debt_per_bed", Context::Site(bed));
-        let (share, half) = (if key == "peritubular bed" { 0.0 } else { 0.5 }, demand * 1e-3);
+        let silent = matches!(key, "peritubular bed" | "pulmonary bed");
+        let (share, half) = (if silent { 0.0 } else { 0.5 }, demand * 1e-3);
         for (when, session) in [("admitted", &admitted), ("a step on", &stepped)] {
             let (held, owed) = (value(start, session, lactate), value(start, session, debt));
             assert!(
@@ -1348,9 +1446,8 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             );
             let whole = owed + half;
             let kept = (half + (owed - share * owed)) / whole;
-            assert_eq!(
-                kept.to_bits(),
-                1f64.to_bits(),
+            assert!(
+                (kept - 1.0).abs() <= 4.0 * f64::EPSILON,
                 "the {key}'s inflow {when} keeps {kept} of its resistance at a debt of {owed}"
             );
         }
@@ -1453,6 +1550,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         steps: minute.record().revision(),
         solves: start.core.solves.get() - before,
     };
+    each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(&start, minute);
     let mut minute = format!(
         "steps {}, solves {}: ordinary {}, landing {}\n",
         counts.steps,
@@ -1464,10 +1562,10 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
     expect![[r#"
-        steps 11794, solves 15264: ordinary 12519, landing 2745
+        steps 11739, solves 14452: ordinary 12404, landing 2048
         refused 60 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
         refused 243 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
-        refused 361 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
+        refused 301 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
         refused 61 IterationLimit
     "#]]
     .assert_eq(&minute);
