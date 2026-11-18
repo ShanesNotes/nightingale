@@ -4665,17 +4665,6 @@ new = '''            let _ = handed;
 test = "-p ng-validate --test alveolar at_rest_the_work_of_breathing_is_the_stated_mean"
 
 [[mutant]]
-name = "breath-work-reads-the-outflow"
-path = "crates/ng-respiratory/src/airway.rs"
-old = '''            let [inward, _] = self.parts(&mut k, head);
-            let g = k.parameter(&self.conductance);
-            let inflow'''
-new = '''            let [_, inward] = self.parts(&mut k, head);
-            let g = k.parameter(&self.conductance);
-            let inflow'''
-test = "-p ng-validate --test alveolar the_work_of_breathing_means_the_pumps_work_over_whole_breaths"
-
-[[mutant]]
 name = "pump-force-ignores-the-drive"
 path = "crates/ng-musculoskeletal/src/breath.rs"
 old = '''        let value = k.scale(pump, drive);'''

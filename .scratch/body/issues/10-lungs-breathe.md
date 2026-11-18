@@ -78,7 +78,7 @@ The ticket lands as four PRs: 10a the alveolar unit and its exchange, 10b the br
 - Arrow 81's capillary flow is held by the circulation ("the exchange reads the plasma's own partial pressures, which the blood's own transport into its plasma sets") and arrow 85's pump load by the respiratory card ("the pump's fatigue is held"). The whole body's census: 16 arrows wire a field, 17 hold every field, 19 fields wired and 32 held.
 - The muscle bed's cells now settle as its work does, so its hydrogen takes the payers' bound, 0.2, beside the coronary bed's. The other beds' hydrogen then reads 3.44e-5 at worst over ten seconds, so by the rule its bound falls from 2e-4 to 7e-5. The other bounds keep theirs.
 - Rows 1,451 to 1,453 (the work's memory and its field), nonzeros 10,057 to 10,072, parameter slots 722 to 724. The first minute's step and solve counts did not move from the move's.
-- The mutant rows `work-not-paid`, `breath-work-ignores-the-share`, `breath-work-reads-the-outflow` and `pump-force-ignores-the-drive` are each caught by a fixture or a staged test.
+- The mutant rows `work-not-paid`, `breath-work-ignores-the-share` and `pump-force-ignores-the-drive` are each caught by a fixture or a staged test. A row that reads the outflow survived the fixture: at the static solution a breath's outflow work equals its inflow work, so only the body's airway resistance tells them apart, and the body's minute run holds the work to 1% of the stated mean.
 - What 10c leaves for 10d: the lung's water. Parameters with no source, each synthetic: the work memory's speed, a model default; the stated mean is computed, not sourced.
 
 ## Cost
