@@ -4,7 +4,9 @@ Spec: `crates/ng-contract/src/boundary.rs` (`land`) and `crates/ng-contract/src/
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc64-build
 
 Blocked by: none
 
