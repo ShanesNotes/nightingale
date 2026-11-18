@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "8da86d4f7d892cd479631c4d366ade62c7e18a51a0c5087d83353fd412bf059e";
-const ADMITTED_SEAL: &str = "b7dca7d644ca3605f621a909f3a845e44556fceb33ff634ab7ed8deba1bd5384";
+const PACKET: &str = "23b5753243a212d29fbf2f6a1839ab10abe43c0e5595fa54280963fa43d034b5";
+const ADMITTED_SEAL: &str = "2e7571c51824d489de808c044b5466f8243568968212eb9695d7616307710724";
 
 struct Counted {
     core: ng_solver::Core,
@@ -938,8 +938,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 8da86d4f7d892cd479631c4d366ade62c7e18a51a0c5087d83353fd412bf059e
-        seal 2040accc366138288fedbde6a07707e22b27adaf1e1aefae4bb263ad0a8127f0
+        packet 23b5753243a212d29fbf2f6a1839ab10abe43c0e5595fa54280963fa43d034b5
+        seal 440eaab02b1da7a6660cc216bc9fab6f29997032a454748fff759bf2db0e67a0
         steps 198
         viscosity over its reference at the start 1.000234140
     "#]]
@@ -1914,6 +1914,10 @@ fn the_whole_body_passes_every_replay_gate() {
         owner: Musculoskeletal::CARD,
         local: "stir",
     };
+    let breathing = LawName {
+        owner: Respiratory::CARD,
+        local: "breath dice",
+    };
     for gate in [
         ReplayGate::Pace,
         ReplayGate::Resume,
@@ -1926,13 +1930,21 @@ fn the_whole_body_passes_every_replay_gate() {
         let of = evidence.of(gate);
         assert_eq!((of.gate(), of.run()), (gate, evidence.run()));
         assert!(of.runs().len() >= 2, "{gate:?} compared {} runs", of.runs().len());
-        let [stir] = of.fired() else {
+        let [breath, stir] = of.fired() else {
             panic!("{gate:?} fired {:?}", of.fired());
         };
-        assert_eq!((stir.stream(), stir.ordinal()), (stream, 0), "{gate:?}");
+        assert_eq!(
+            [
+                (breath.stream(), breath.ordinal()),
+                (stir.stream(), stir.ordinal())
+            ],
+            [(breathing, 0), (stream, 0)],
+            "{gate:?}"
+        );
         assert!(
-            stir.at().nanoseconds() < fence,
-            "{gate:?} stirred at {:?}",
+            breath.at().nanoseconds() < stir.at().nanoseconds() && stir.at().nanoseconds() < fence,
+            "{gate:?} started the breath at {:?} and stirred at {:?}",
+            breath.at(),
             stir.at()
         );
     }

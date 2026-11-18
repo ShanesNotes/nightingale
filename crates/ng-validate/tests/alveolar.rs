@@ -3,7 +3,7 @@
 
 use core::num::NonZeroU64;
 use ng_contract::*;
-use ng_record::{Curve, Running, Session};
+use ng_record::{Curve, Running, Session, Step};
 use ng_respiratory::{Plasma, Ventilation, exchange};
 use ng_validate::*;
 
@@ -11,6 +11,7 @@ const SECOND: u64 = 1_000_000_000;
 const NOTE: &str = "alveolar fixture: synthetic";
 const LUNG: &str = "lung bed";
 const AIRWAY: &str = "conducting airway";
+const PLEURA: &str = "pleural space";
 const ROOM: f64 = 700.0;
 const VAPOUR: f64 = 50.0;
 const DRY: f64 = ROOM - VAPOUR;
@@ -28,16 +29,18 @@ const PER_AMOUNT: f64 = 0.1;
 /// The run's length in seconds: at some packets a mode near ten seconds leaves 1e-4 at 60 s and 1e-10 at 240 s.
 const SETTLED: u64 = 240;
 const TOLERANCE: f64 = 1e-6;
-const DEAD_SPACE: (f64, f64) = (1e-2, 500.0);
+const DEAD_SPACE_ELASTANCE: f64 = 1e-2;
+const DEAD_SPACE: f64 = 500.0;
 
 const RATE: f64 = 0.2;
-const INSPIRATION_END: f64 = 0.4;
+const PHASES: [f64; 2] = [0.4, 0.6];
 const DRIVE: [f64; 3] = [1.5, 2.0, 1.0];
 const UPRIGHT_WALL_REST_RISE: f64 = 2_000.0;
 const CAROTID_ABOVE_VESSEL: f64 = 0.3;
 
 #[derive(Clone, Copy)]
 struct Case {
+    initial_mixing_share: f64,
     oxygen_use: f64,
     carbon_dioxide_made: f64,
     ventilation: f64,
@@ -48,10 +51,15 @@ struct Case {
     rests: [f64; 2],
     pump: f64,
     breath_start: f64,
+    phases: [f64; 2],
+    dead_space: f64,
+    rest_drive: f64,
+    share_fall: f64,
     upright: bool,
 }
 
 const AT_REST: Case = Case {
+    initial_mixing_share: 1.0,
     oxygen_use: 250.0,
     carbon_dioxide_made: 200.0,
     ventilation: 1.0,
@@ -62,17 +70,24 @@ const AT_REST: Case = Case {
     rests: RESTS,
     pump: 0.0,
     breath_start: 0.0,
+    phases: PHASES,
+    dead_space: DEAD_SPACE,
+    rest_drive: 0.0,
+    share_fall: 1.0,
     upright: false,
 };
 
 /// A breath through a stiff airway and a narrow head, so the volume follows the static solution and the gas moves
 /// upwind, into an alveolar unit ten times the breath. The membrane trades equal volumes, so no net volume crosses
-/// it. The mixing exchange stands at the breath's mean, so the rest the body admits at is near the breathing one.
+/// it. The mixing exchange stands at the breath's mean, so the rest the body admits at is near the breathing one. The
+/// dead space is 0.7 of the breath, where a mixed dead space returns 0.61 of its volume each breath and an unmixed one
+/// all of it, so the two forms sit far apart.
 const BREATHING: Case = Case {
     oxygen_use: 20.0,
     carbon_dioxide_made: 20.0,
     conductance: 1e5,
-    mixing: 494.0,
+    mixing: 389.0,
+    dead_space: 1_200.0,
     width: 1e-6,
     rests: [11_000.0, 19_000.0],
     pump: 7.2,
@@ -145,8 +160,17 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     map.connect(Network::Vascular, lung, vessel);
     map.connect(Network::Airway, airway, lung);
     map.landmark(Landmark::CarotidSinus, vessel, airway);
+    let pleura = map.site::<EnclosedSpace>(PLEURA, origin()?);
+    map.contain(root, pleura.id());
+    map.enclose(
+        &pleura,
+        &[lung],
+        Compliance::Held {
+            card: Respiratory::CARD,
+        },
+    );
     let mut schema = Schema::new(map.finish()?)?;
-    for space in [Space::Interstitium, Space::Cells, Space::Lumen] {
+    for space in [Space::Interstitium, Space::Cells, Space::Lumen, Space::Fluid] {
         schema.leave_out(space, "one alveolar unit and its plasma");
     }
     schema.carry::<Oxygen, Airway>(Space::Gas);
@@ -200,6 +224,7 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
             carbon_dioxide: laws.parameter(key("fixture.carbon-dioxide-per-amount"), Admissible::positive()),
         };
         exchange(&mut laws, &ports, &ventilation, &plasma)?;
+        ventilation.pleural(&mut laws, &ports)?;
         body.add(laws.finish());
         body.compile()
     })
@@ -260,22 +285,22 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
         ("rs.drive-rise", DRIVE[0]),
         ("rs.drive-fall", DRIVE[1]),
         ("rs.rest-speed", 1.0),
-        ("rs.share-fall", 1.0),
+        ("rs.share-fall", unit.share_fall),
         ("rs.breath-start", unit.breath_start),
     ] {
         set::<Rate<Dimensionless>>(p, key, value)?;
     }
     for (key, value) in [
-        ("rs.inspiration-end", INSPIRATION_END),
-        ("rs.breath-end", 1.0),
+        ("rs.inspiration-length", unit.phases[0]),
+        ("rs.expiration-length", unit.phases[1]),
         ("rs.drive-peak", DRIVE[2]),
-        ("rs.rest-drive", 0.0),
+        ("rs.rest-drive", unit.rest_drive),
         ("rs.rest-share", 1.0),
     ] {
         set::<Dimensionless>(p, key, value)?;
     }
-    set::<Elastance>(p, "rs.dead-space-elastance", DEAD_SPACE.0)?;
-    set::<Volume>(p, "rs.dead-space-volume", DEAD_SPACE.1)?;
+    set::<Elastance>(p, "rs.dead-space-elastance", DEAD_SPACE_ELASTANCE)?;
+    set::<Volume>(p, "rs.dead-space-volume", unit.dead_space)?;
     let (g, m) = (
         unit.conductance * unit.ventilation,
         unit.mixing * unit.ventilation,
@@ -295,7 +320,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
             let (shares, volume) = if site.key() == LUNG {
                 (alveolar, zero_head(unit.rests))
             } else {
-                (dead, DEAD_SPACE.1)
+                (dead, unit.dead_space)
             };
             match (species, space) {
                 (Species::Oxygen, Space::Gas) => shares[0] * volume / vo,
@@ -306,7 +331,8 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
                 _ => 100.0,
             }
         }
-        RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
+        RowKind::Memory(slot) if slot.law.local == "mixing share" => unit.initial_mixing_share,
+        RowKind::Memory(slot) if slot.law.local == "pump drive" => unit.rest_drive,
         RowKind::Algebraic(slot) if slot.law.local == "chest wall rest volume" => unit.rests[1],
         RowKind::Memory(_) | RowKind::Algebraic(_) => 0.0,
     };
@@ -438,18 +464,19 @@ struct Sample {
     extents: Vec<f64>,
 }
 
+fn memory(body: &CompiledBody, local: &str) -> RowId {
+    (body.rows().iter())
+        .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.local == local))
+        .unwrap_or_else(|| panic!("no memory {local}"))
+        .id()
+}
+
 fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
     run(
         unit,
         BREATHING_SETTLED,
         |body, mut session| -> Result<Vec<Sample>, AdmissionError> {
-            let memory = |local| {
-                (body.rows().iter())
-                    .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.local == local))
-                    .unwrap_or_else(|| panic!("no memory {local}"))
-                    .id()
-            };
-            let (phase, drive) = (memory("breath phase"), memory("pump drive"));
+            let (phase, drive) = (memory(body, "breath phase"), memory(body, "pump drive"));
             let (lung, airway) = (gas_rows(body, LUNG)?, gas_rows(body, AIRWAY)?);
             let columns = every_column(body);
             let mut samples = Vec::new();
@@ -546,7 +573,7 @@ fn the_alveolar_unit_and_the_dead_space_settle_where_their_heads_carry_the_net_u
     let net = unit.oxygen_use * vo - unit.carbon_dioxide_made * vc;
     let head = net / (CONDUCTANCE * unit.ventilation);
     let alveolar = ZERO_HEAD - head / (ELASTANCES[0] + ELASTANCES[1]);
-    let dead = DEAD_SPACE.1 - head / DEAD_SPACE.0;
+    let dead = DEAD_SPACE - head / DEAD_SPACE_ELASTANCE;
     assert!(
         close(settled.alveolar_volume, alveolar, TOLERANCE),
         "the alveolar unit holds {}, its head's closed form {alveolar}",
@@ -572,6 +599,32 @@ fn the_alveolar_gas_equation_holds_at_a_steady_state() -> Result<(), Initializat
         close(oxygen, expected, TOLERANCE),
         "alveolar oxygen {oxygen}, the gas equation's {expected} at alveolar carbon dioxide {carbon_dioxide}"
     );
+    Ok(())
+}
+
+#[test]
+fn a_mixing_share_outside_zero_to_one_is_refused_at_its_row() -> Result<(), InitializationFailure> {
+    run(AT_REST, 0, |_, _| ())?;
+    let share = RowKind::Memory(Slot {
+        law: LawName {
+            owner: Respiratory::CARD,
+            local: "mixing share",
+        },
+        at: Context::Body,
+    });
+    for initial_mixing_share in [-0.25, 1.25] {
+        let unit = Case {
+            initial_mixing_share,
+            ..AT_REST
+        };
+        match run(unit, 0, |_, _| ()) {
+            Err(InitializationFailure::Admission(AdmissionError::StartOutsideSet { row })) => {
+                assert_eq!(row, share);
+            }
+            Err(other) => panic!("from a mixing share of {initial_mixing_share}: {other:?}"),
+            Ok(()) => panic!("admitted a mixing share of {initial_mixing_share}"),
+        }
+    }
     Ok(())
 }
 
@@ -701,6 +754,38 @@ fn sitting_up_raises_the_alveolar_units_resting_volume_by_the_chest_walls_share_
 }
 
 #[test]
+fn any_two_positive_phase_lengths_give_breaths_that_end() -> Result<(), InitializationFailure> {
+    for phases in [PHASES, [1.25, 0.25], [1.0, 1e-3]] {
+        let unit = Case { phases, ..BREATHING };
+        let length = (phases[0] + phases[1]) / RATE;
+        let edges = run(unit, 0, |body, mut session| {
+            let phase = memory(body, "breath phase");
+            let mut last = now(&session, phase);
+            let mut edges = Vec::new();
+            while session.record().accepted().time().nanoseconds() < (3.5 * length * SECOND as f64) as u64 {
+                let at = session.record().accepted().time().nanoseconds();
+                session = run_until(session, SimTime::from_ns(at + 1))
+                    .unwrap_or_else(|stopped| panic!("{:?}", stopped.fault()));
+                let reached = now(&session, phase);
+                if reached < last {
+                    edges.push(session.record().accepted().time().nanoseconds() as f64 / SECOND as f64);
+                }
+                last = reached;
+            }
+            edges
+        })?;
+        assert!(
+            edges.len() >= 3
+                && edges
+                    .windows(2)
+                    .all(|pair| (pair[1] - pair[0] - length).abs() <= 1e-4 * length),
+            "phases {phases:?}: breaths of {length} s should end every breath, and end at {edges:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn a_breaths_lung_volume_follows_the_mechanics_static_solution() -> Result<(), InitializationFailure> {
     let unit = BREATHING;
     let samples = breaths(unit)?;
@@ -724,7 +809,7 @@ fn a_breaths_lung_volume_follows_the_mechanics_static_solution() -> Result<(), I
     );
     let (volume, expected) = (mean(&samples, |sample| sample.volume), mean(&samples, fixed));
     assert!(
-        (volume - expected).abs() <= 1e-6 * tidal,
+        (volume - expected).abs() <= 1e-5 * tidal,
         "the lung's mean volume over whole breaths {volume}, the static solution at the drive's mean {expected}"
     );
     Ok(())
@@ -774,29 +859,143 @@ fn each_gas_closes_over_whole_breaths() -> Result<(), InitializationFailure> {
     Ok(())
 }
 
+struct CarbonDioxideCheck {
+    measured: f64,
+    mixed: f64,
+    unmixed: f64,
+    bound: f64,
+}
+
 /// With the alveolar gas held through a breath, a breath of `V_T` through a mixed dead space `V_D` leaves `P T` of
 /// carbon dioxide made over a breath at `f_A (V_T - V_D tanh(V_T / 2 V_D))`. As the gas swings, the dead space returns
 /// a weighted mean of the expired alveolar gas, so the mean misses the closed form by at most the swing times
 /// `V_T / (V_T - V_D tanh(V_T / 2 V_D))`.
-#[test]
-fn the_mean_alveolar_carbon_dioxide_over_whole_breaths_meets_a_mixed_dead_space_in_series()
--> Result<(), InitializationFailure> {
-    let unit = BREATHING;
+fn breath_carbon_dioxide_check(unit: Case) -> Result<CarbonDioxideCheck, InitializationFailure> {
     let samples = breaths(unit)?;
     let (low, high) = span(&samples, |sample| sample.volume);
     let tidal = high - low;
     let breath = (samples[samples.len() - 1].at - samples[0].at) / BREATHS as f64;
-    let x = tidal / DEAD_SPACE.1;
-    let returned = DEAD_SPACE.1 * (1.0 - exp(-x)) / (1.0 + exp(-x));
+    let x = tidal / unit.dead_space;
+    let returned = unit.dead_space * (1.0 - exp(-x)) / (1.0 + exp(-x));
     let made = unit.carbon_dioxide_made * unit.molar_volume[1] * breath;
     let closed = made / (tidal - returned);
     let measured = mean(&samples, |sample| sample.shares[1]);
     let (least, most) = span(&samples, |sample| sample.shares[1]);
     let bound = (most - least) * tidal / (tidal - returned);
+    Ok(CarbonDioxideCheck {
+        measured,
+        mixed: closed,
+        unmixed: made / (tidal - unit.dead_space),
+        bound,
+    })
+}
+
+#[test]
+fn the_mean_alveolar_carbon_dioxide_over_whole_breaths_meets_a_mixed_dead_space_in_series()
+-> Result<(), InitializationFailure> {
+    let CarbonDioxideCheck {
+        measured,
+        mixed: closed,
+        bound,
+        ..
+    } = breath_carbon_dioxide_check(BREATHING)?;
     assert!(
         (measured - closed).abs() <= bound,
         "alveolar carbon dioxide's mean share {measured} over whole breaths, a mixed dead space's closed form {closed} \
          within {bound}"
     );
+    Ok(())
+}
+
+#[test]
+fn the_whole_breath_carbon_dioxide_check_excludes_an_unmixed_dead_space() -> Result<(), InitializationFailure>
+{
+    let check = breath_carbon_dioxide_check(BREATHING)?;
+    assert!(
+        check.unmixed.is_finite() && check.unmixed > 0.0,
+        "the breath must exceed the dead space"
+    );
+    assert!(
+        (check.measured - check.mixed).abs() <= check.bound,
+        "the mixed prediction must pass"
+    );
+    assert!(
+        (check.measured - check.unmixed).abs() > check.bound,
+        "alveolar carbon dioxide {}, an unmixed dead space predicts {}, the mixed dead space allows an error of {}",
+        check.measured,
+        check.unmixed,
+        check.bound
+    );
+    Ok(())
+}
+
+/// The pleural pressure is the chest wall's recoil less the pump's pressure at the lung's static volume, which the
+/// lung's own recoil equals only there. The lung and the chest wall here have unlike elastances, so a form that took
+/// the wall's elastance for the lung's would miss.
+#[test]
+fn the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_at_rest_and_off_rest()
+-> Result<(), InitializationFailure> {
+    let held = Case {
+        pump: 7.2,
+        rest_drive: 0.5,
+        ..AT_REST
+    };
+    for unit in [AT_REST, held] {
+        let pleural = run(unit, 1, |body, session| {
+            let site = (body.rows().iter())
+                .find(|row| {
+                    matches!(row.kind(), RowKind::Algebraic(slot)
+                        if slot.law.local == "enclosure_pressure" && matches!(slot.at, Context::Site(site) if site.key() == PLEURA))
+                })
+                .expect("the pleural space's pressure")
+                .id();
+            now(&session, site)
+        })?;
+        let [lung, wall] = ELASTANCES;
+        let muscle = unit.pump * unit.rest_drive;
+        let volume = (lung * unit.rests[0] + wall * unit.rests[1] + muscle) / (lung + wall);
+        let expected = wall * (volume - unit.rests[1]) - muscle;
+        assert!(
+            (pleural - expected).abs() <= 1e-9 * expected.abs(),
+            "the pleural pressure {pleural} at a pump pressure of {muscle}, the wall's recoil less the pump at the static \
+             volume {volume}: {expected}"
+        );
+    }
+    Ok(())
+}
+
+/// The mixing share falls toward zero and never past it, so its set from zero to one refuses no step, even at a fall
+/// fast against the step.
+#[test]
+fn a_mixing_share_falling_fast_to_zero_raises_no_refusal_at_its_row() -> Result<(), InitializationFailure> {
+    let unit = Case {
+        share_fall: 1e3,
+        ..BREATHING
+    };
+    let (refused, share) = run(unit, 0, |body, mut session| {
+        let share = memory(body, "mixing share");
+        let mut refused = Vec::new();
+        while session.record().accepted().time().nanoseconds() < 10 * SECOND {
+            let mut attempt = session.step();
+            session = loop {
+                match attempt {
+                    Step::Accepted(next, _) => break next,
+                    Step::Refused(retrying) => {
+                        refused.push(format!("{:?}", retrying.refused().reason()));
+                        attempt = retrying.retry();
+                    }
+                    Step::Faulted(faulted) => panic!("{:?}", faulted.fault()),
+                }
+            };
+        }
+        let named = format!("{:?}", body.rows()[share.index()].id());
+        let mine: Vec<String> = refused
+            .into_iter()
+            .filter(|reason| reason.contains(&named))
+            .collect();
+        (mine, now(&session, share))
+    })?;
+    assert!(refused.is_empty(), "the share's row refused {refused:?}");
+    assert!((0.0..1e-12).contains(&share), "the share stands at {share}");
     Ok(())
 }

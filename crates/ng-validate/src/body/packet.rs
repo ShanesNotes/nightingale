@@ -1146,8 +1146,8 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
         set::<Rate<Dimensionless>>(packet, key, body, value)?;
     }
     for (key, value) in [
-        ("rs.inspiration-end", RHYTHM.inspiration_end),
-        ("rs.breath-end", 1.0),
+        ("rs.inspiration-length", RHYTHM.inspiration),
+        ("rs.expiration-length", RHYTHM.expiration),
         ("rs.drive-peak", RHYTHM.peak),
         ("rs.rest-drive", RHYTHM.mean_drive()),
         ("rs.rest-share", 1.0),
@@ -1171,7 +1171,8 @@ const CAROTID_ABOVE_ARTERIES: f64 = 0.2;
 
 struct Rhythm {
     rate: f64,
-    inspiration_end: f64,
+    inspiration: f64,
+    expiration: f64,
     rise: f64,
     fall: f64,
     peak: f64,
@@ -1179,7 +1180,8 @@ struct Rhythm {
 
 const RHYTHM: Rhythm = Rhythm {
     rate: 0.2,
-    inspiration_end: 0.4,
+    inspiration: 0.4,
+    expiration: 0.6,
     rise: 1.5,
     fall: 2.0,
     peak: 1.0,
@@ -1189,10 +1191,7 @@ impl Rhythm {
     /// The drive at inspiration's start and end once breaths repeat: `a1 = peak (1 - e_i) + a0 e_i` and `a0 = a1 e_e`,
     /// with `e_i` and `e_e` the rise's and the fall's decay over inspiration and expiration.
     fn ends(&self) -> (f64, f64, f64, f64) {
-        let (inspiring, expiring) = (
-            self.inspiration_end / self.rate,
-            (1.0 - self.inspiration_end) / self.rate,
-        );
+        let (inspiring, expiring) = (self.inspiration / self.rate, self.expiration / self.rate);
         let (e_i, e_e) = (exp(-self.rise * inspiring), exp(-self.fall * expiring));
         let end = self.peak * (1.0 - e_i) / (1.0 - e_i * e_e);
         (end * e_e, end, inspiring, expiring)

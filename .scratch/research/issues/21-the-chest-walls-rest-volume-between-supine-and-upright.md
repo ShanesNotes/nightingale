@@ -8,7 +8,7 @@ Blocked by: 11
 
 Today's form, in `crates/ng-respiratory/src/airway.rs`:
 
-- `V_W0 = V_W0,supine + dV_W rise / L`, with `rise` the carotid sinus's height over the systemic arteries under the drive frame's posture and `L` its distance up the trunk, 0.2, so `rise / L` is the sine of the trunk's angle. The slope `dV_W` is 10,000 against a supine relaxed volume of 75,750, so sitting up raises the resting volume by 5,000 of 57,000 and lowers the pleural pressure at rest by 0.8.
+- `V_W0 = V_W0,supine + dV_W rise / L`, with `rise` the carotid sinus's height over the systemic arteries under the drive frame's posture and `L` its distance up the trunk, 0.2, so `rise / L` is the sine of the trunk's angle. The slope `dV_W` is 10,000 against a supine relaxed volume of 66,997.6 (75,750 less the pump's mean pull, so the breath's means are the body's admitted ones), so sitting up raises the resting volume by 5,000 of 57,000 and lowers the pleural pressure at rest by 0.8.
 - The pleural pressure at rest follows: `P_pl,rest = -E_L E_W (V_W0 - V_L0) / (E_L + E_W)`.
 
 - [ ] The resting lung volume (FRC) at angles between supine and upright, as a curve or as values at stated angles, with the population and the method

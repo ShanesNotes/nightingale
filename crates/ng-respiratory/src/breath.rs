@@ -3,8 +3,8 @@ use ng_contract::*;
 type Bound<'b, U> = Parameter<'b, Respiratory, U>;
 type Memory<'b> = StateSlot<'b, Respiratory, Dimensionless>;
 
-/// One breath is a pass of the phase from zero to the breath's end: inspiration while the pump drive rises toward its
-/// peak, expiration while it falls. Admission solves one heartbeat, and a phase that ran free could not return to
+/// One breath is a pass of the phase through inspiration's length, while the pump drive rises toward its peak, and then
+/// expiration's, while it falls. Two positive lengths leave every breath room to end. Admission solves one heartbeat, and a phase that ran free could not return to
 /// itself inside one, so the body admits in `rest`, where the phase rests at zero, the drive at the breath's mean and
 /// the mixing share at the rest share, and a hazard starts the first breath.
 pub(crate) struct Breath<'b> {
@@ -21,7 +21,7 @@ impl<'b> Breath<'b> {
         let [rest, inspiration, expiration] = laws.modes("breath", ["rest", "inspiration", "expiration"]);
         let phase = laws.state::<Dimensionless>("breath phase", Admissible::finite());
         let drive = laws.state::<Dimensionless>("pump drive", Admissible::finite());
-        let share = laws.state::<Dimensionless>("mixing share", Admissible::finite());
+        let share = laws.state::<Dimensionless>("mixing share", Admissible::unit_interval());
         let hazard = laws.state::<Dimensionless>("breath start", Admissible::nonnegative());
         let speed = |laws: &mut FragmentBuilder<'b, Respiratory>, name| -> Bound<'b, Rate<Dimensionless>> {
             laws.parameter(key(name), Admissible::positive())
@@ -32,12 +32,13 @@ impl<'b> Breath<'b> {
         let settle = speed(laws, "rs.rest-speed");
         let mixing_fall = speed(laws, "rs.share-fall");
         let start = laws.parameter::<Rate<Dimensionless>>(key("rs.breath-start"), Admissible::nonnegative());
-        let inspiration_end =
-            laws.parameter::<Dimensionless>(key("rs.inspiration-end"), Admissible::positive());
-        let breath_end = laws.parameter::<Dimensionless>(key("rs.breath-end"), Admissible::positive());
+        let inspiration_length =
+            laws.parameter::<Dimensionless>(key("rs.inspiration-length"), Admissible::positive());
+        let expiration_length =
+            laws.parameter::<Dimensionless>(key("rs.expiration-length"), Admissible::positive());
         let peak = laws.parameter::<Dimensionless>(key("rs.drive-peak"), Admissible::positive());
         let rest_drive = laws.parameter::<Dimensionless>(key("rs.rest-drive"), Admissible::nonnegative());
-        let rest_share = laws.parameter::<Dimensionless>(key("rs.rest-share"), Admissible::nonnegative());
+        let rest_share = laws.parameter::<Dimensionless>(key("rs.rest-share"), Admissible::unit_interval());
         let dice = laws.stream("breath dice");
 
         let advance = laws.kernel(|mut k| {
@@ -96,7 +97,7 @@ impl<'b> Breath<'b> {
         }
 
         let past_inspiration = laws.kernel(|mut k| {
-            let (now, end) = (k.state(&phase), k.parameter(&inspiration_end));
+            let (now, end) = (k.state(&phase), k.parameter(&inspiration_length));
             let gap = k.subtract(now, end);
             k.finish(gap, inspiration.only(), class)
         });
@@ -106,7 +107,12 @@ impl<'b> Breath<'b> {
             inspiration.to(&expiration)?,
         ));
         let past_breath = laws.kernel(|mut k| {
-            let (now, end) = (k.state(&phase), k.parameter(&breath_end));
+            let (now, first, second) = (
+                k.state(&phase),
+                k.parameter(&inspiration_length),
+                k.parameter(&expiration_length),
+            );
+            let end = k.add(first, second);
             let gap = k.subtract(now, end);
             k.finish(gap, expiration.only(), class)
         });
