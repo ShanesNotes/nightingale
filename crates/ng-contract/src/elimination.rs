@@ -879,7 +879,7 @@ mod tests {
     }
 
     fn system(size: usize, reads: usize, state: &mut u64) -> System {
-        let mut lines = vec![std::collections::BTreeMap::new(); size];
+        let mut lines = vec![alloc::collections::BTreeMap::new(); size];
         let matching: Vec<RowId> = (0..size)
             .map(|unknown| RowId::at((unknown * 7 + 3) % size))
             .collect();
