@@ -85,6 +85,8 @@ Since nightingale#172 the body takes 6,257.2 M, 5.0% over 5,960.2 M. The rise is
 
 The gas loop straddles the removal of the ledger's walk (native-contract 69), which lowered the body's line from 6,964.4 M to 4,958.9 M with no law changed. The oversight seat restates its budget on that line: tickets 09 to 11 may add 12% of 4,958.9 M, which is 595.1 M, in place of the 73.2 M that was left, and ticket 08's share stays as it was measured. Pass 1's ceiling of 11,920 M stands. [Native-contract 83](../../native-contract/issues/83-the-elimination-factors-the-pattern-the-body-has.md) then lowered the line from 5,175.7 M to 4,016.5 M with no bit changed, as native-contract 69 did, so a loop's budget counts from the line at its base.
 
+The gas loop's lines since: 10a left about 120 M of the 595.1 M. Body 10's second PR, the breath and the pleural pressure, measured 5,175.7 M at its base and 5,171.1 M at its head, and about 18.3 M over the base at the base's solve count (inferred), so about 100 M is left on that figure.
+
 ### Not measured
 
 - A full `tools/verify` alone takes 34 to 67 minutes, and none ran beyond this ticket's proof.

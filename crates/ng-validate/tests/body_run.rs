@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "98cb945b5a65a03871d9c25e131a091547c2d675b90252d335064124f66b80bf";
-const ADMITTED_SEAL: &str = "d6f5cf4332e2ddcf07f4936cf97dcea252c9c95a79830b7f1c622fc0f043a707";
+const PACKET: &str = "23b5753243a212d29fbf2f6a1839ab10abe43c0e5595fa54280963fa43d034b5";
+const ADMITTED_SEAL: &str = "0994fbad5dd80903f95e7a46706899614ea25e2dd32ee252e68e91aaec7d7eed";
 
 struct Counted {
     core: ng_solver::Core,
@@ -279,6 +279,7 @@ fn counted_until<'s>(
     mut session: Session<'s, Running>,
     after: u64,
     minute: &mut Minute,
+    watch: &mut Watch,
 ) -> Session<'s, Running> {
     let row = |row: RowId| format!("{:?}", start.body.rows()[row.index()].kind());
     while session.record().accepted().time().nanoseconds() < anchor_moment().nanoseconds() + after {
@@ -300,11 +301,316 @@ fn counted_until<'s>(
                 Step::Faulted(faulted) => panic!("{:?}", faulted.fault()),
             }
         };
+        watch.see(&session);
     }
     session
 }
 
-fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (Session<'_, Running>, Minute) {
+/// The books whose inventories move with each breath: the gases the lungs hold, and vasopressin and energy with the
+/// circulation's breath-scale swing.
+const BREATHING_BOOKS: [Book; 6] = [
+    Book::Of(Species::Vasopressin),
+    Book::Element(Element::Oxygen),
+    Book::Element(Element::Carbon),
+    Book::Element(Element::Hydrogen),
+    Book::Of(Species::NitrogenGas),
+    Book::Energy,
+];
+const DRY: f64 = 650.0;
+
+/// The most an inventory moved over the ten seconds from admission, over any ten seconds from twenty seconds on, and
+/// inside one whole breath from twenty seconds on.
+struct Figures {
+    from_admission: f64,
+    steady: f64,
+    inside_a_breath: f64,
+}
+
+fn larger(a: f64, b: f64) -> f64 {
+    if b > a { b } else { a }
+}
+
+fn widen((low, high): (f64, f64), x: f64) -> (f64, f64) {
+    (if x < low { x } else { low }, if x > high { x } else { high })
+}
+
+fn paid_by_the_coronary_bed(body: &CompiledBody, terms: &[(RowId, i64)]) -> bool {
+    terms.iter().all(|(row, _)| {
+        matches!(body.rows()[row.index()].kind(), RowKind::Amount { site, .. } if site.key() == "coronary bed")
+    })
+}
+
+struct Moment {
+    at: u64,
+    phase: f64,
+    venous: f64,
+    aortic: f64,
+    alveolar: [f64; 2],
+    plasma: [f64; 3],
+    inventories: Vec<f64>,
+}
+
+struct Watch {
+    phase: RowId,
+    venous: RowId,
+    aortic: RowId,
+    lung: [RowId; 3],
+    plasma: [RowId; 4],
+    books: Vec<(Book, Vec<(RowId, i64)>)>,
+    moments: Vec<Moment>,
+}
+impl Watch {
+    fn new(start: &Start) -> Self {
+        let body = &start.body;
+        let find = |kind: RowKind| {
+            (body.rows().iter())
+                .find(|row| row.kind() == kind)
+                .unwrap_or_else(|| panic!("no row {kind:?}"))
+                .id()
+        };
+        let phase = (body.rows().iter())
+            .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "RS" && slot.law.local == "breath phase"))
+            .expect("the breath's phase")
+            .id();
+        let venous = Context::Edge {
+            from: site::<VesselSegment>("central veins"),
+            to: site::<VesselSegment>("right atrium"),
+        };
+        let aortic = Context::Edge {
+            from: site::<VesselSegment>("left ventricle"),
+            to: site::<VesselSegment>("systemic arteries"),
+        };
+        let valves = LawName {
+            owner: "CV",
+            local: "valves",
+        };
+        let lung = site::<CapillaryBed>("pulmonary bed");
+        let gas = |species| {
+            find(RowKind::Amount {
+                site: lung,
+                species,
+                space: Space::Gas,
+            })
+        };
+        let plasma = |species| {
+            find(RowKind::Amount {
+                site: lung,
+                species,
+                space: Space::Plasma,
+            })
+        };
+        let books = (body.conserved_basis().combinations().iter())
+            .filter(|combination| BREATHING_BOOKS.contains(&combination.book()))
+            .filter(|combination| !paid_by_the_coronary_bed(body, combination.terms()))
+            .map(|combination| (combination.book(), combination.terms().to_vec()))
+            .collect();
+        Self {
+            phase,
+            venous: find(field("CV", "circulation", venous)),
+            aortic: find(RowKind::Memory(Slot {
+                law: valves,
+                at: aortic,
+            })),
+            lung: [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas].map(gas),
+            plasma: [
+                plasma(Species::Oxygen),
+                plasma(Species::Hemoglobin),
+                plasma(Species::Water),
+                find(field("BC", "oxygen partial pressure", Context::Site(lung))),
+            ],
+            books,
+            moments: Vec::new(),
+        }
+    }
+    fn see(&mut self, session: &Session<'_, Running>) {
+        let view = session.record().accepted();
+        let at = |row: RowId| lead(view.value(row));
+        let [o, c, n] = self.lung.map(at);
+        let dry = o + c + n;
+        let [oxygen, carrier, water, pressure] = self.plasma.map(at);
+        let inventories = (self.books.iter())
+            .map(|(_, terms)| terms.iter().map(|(row, count)| *count as f64 * at(*row)).sum())
+            .collect();
+        self.moments.push(Moment {
+            at: view.time().nanoseconds() - anchor_moment().nanoseconds(),
+            phase: at(self.phase),
+            venous: at(self.venous),
+            aortic: at(self.aortic),
+            alveolar: [DRY * o / dry, DRY * c / dry],
+            plasma: [oxygen / water, carrier / water, pressure],
+            inventories,
+        });
+    }
+    fn edges(&self) -> Vec<usize> {
+        (1..self.moments.len())
+            .filter(|&at| self.moments[at].phase < self.moments[at - 1].phase)
+            .collect()
+    }
+    fn onsets(&self) -> Vec<usize> {
+        let mut openings = Vec::new();
+        let mut closed: Option<usize> = None;
+        for (at, moment) in self.moments.iter().enumerate() {
+            match (moment.aortic > 0.0, closed) {
+                (true, Some(since)) => {
+                    openings.push((at as u64, moment.at - self.moments[since].at));
+                    closed = None;
+                }
+                (false, None) => closed = Some(at),
+                _ => {}
+            }
+        }
+        onsets(&openings).into_iter().map(|at| at as usize).collect()
+    }
+    fn mean(&self, from: usize, to: usize, of: impl Fn(&Moment) -> f64) -> f64 {
+        let moments = &self.moments[from..=to];
+        let area: f64 = (moments.windows(2))
+            .map(|pair| 0.5 * (of(&pair[0]) + of(&pair[1])) * (pair[1].at - pair[0].at) as f64)
+            .sum();
+        area / (moments[moments.len() - 1].at - moments[0].at) as f64
+    }
+    fn figures(&self) -> Vec<(Book, Figures)> {
+        let steady = (self.moments.iter())
+            .position(|moment| moment.at >= 20 * SECOND)
+            .expect("twenty seconds");
+        let ten = (self.moments.iter())
+            .position(|moment| moment.at >= 10 * SECOND)
+            .expect("ten seconds");
+        let edges: Vec<usize> = self.edges().into_iter().filter(|&edge| edge >= steady).collect();
+        BREATHING_BOOKS
+            .map(|book| {
+                let mut most = [0.0_f64; 3];
+                for (index, _) in self.books.iter().enumerate().filter(|(_, (of, _))| *of == book) {
+                    let held = |at: usize| self.moments[at].inventories[index];
+                    most[0] = larger(most[0], (held(ten) - held(0)).abs());
+                    let mut later = steady;
+                    for at in steady..self.moments.len() {
+                        while later < self.moments.len()
+                            && self.moments[later].at < self.moments[at].at + 10 * SECOND
+                        {
+                            later += 1;
+                        }
+                        if later == self.moments.len() {
+                            break;
+                        }
+                        most[1] = larger(most[1], (held(later) - held(at)).abs());
+                    }
+                    for pair in edges.windows(2) {
+                        let (low, high) = (pair[0]..=pair[1])
+                            .map(held)
+                            .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
+                        most[2] = larger(most[2], high - low);
+                    }
+                }
+                let [from_admission, steady, inside_a_breath] = most;
+                (
+                    book,
+                    Figures {
+                        from_admission,
+                        steady,
+                        inside_a_breath,
+                    },
+                )
+            })
+            .into_iter()
+            .collect()
+    }
+}
+
+/// The breath has started once the alveolar oxygen pressure swings over the minute; then each whole breath swings
+/// both gases, and each moves venous return's beat means, since the central veins and the right atrium sit inside
+/// the pleural space and the beds that fill them outside it.
+fn each_breath_swings_the_alveolar_gases_and_venous_return(watch: &Watch) -> String {
+    let after = (watch.moments.iter())
+        .position(|moment| moment.at >= 5 * SECOND)
+        .expect("five seconds");
+    let (least, most) = (watch.moments[after..].iter())
+        .map(|moment| moment.alveolar[0])
+        .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
+    assert!(
+        most - least >= 1.0,
+        "the alveolar oxygen pressure stays within {least} to {most}: no breath"
+    );
+    let edges = watch.edges();
+    let onsets = watch.onsets();
+    let beats: Vec<(usize, usize, f64)> = (onsets.windows(2))
+        .map(|pair| {
+            (
+                pair[0],
+                pair[1],
+                watch.mean(pair[0], pair[1], |moment| moment.venous),
+            )
+        })
+        .collect();
+    let first = edges.first().copied().expect("a breath edge");
+    let mut report = format!(
+        "before the first breath edge: alveolar oxygen {:.3}, carbon dioxide {:.3}, venous return {:.2}\n",
+        watch.mean(0, first, |moment| moment.alveolar[0]),
+        watch.mean(0, first, |moment| moment.alveolar[1]),
+        watch.mean(0, first, |moment| moment.venous)
+    );
+    for pair in edges.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let swing = |gas: usize| {
+            let (low, high) = (watch.moments[from..=to].iter())
+                .map(|moment| moment.alveolar[gas])
+                .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
+            high - low
+        };
+        let (oxygen, carbon_dioxide) = (swing(0), swing(1));
+        let at = watch.moments[from].at as f64 / SECOND as f64;
+        assert!(
+            oxygen >= 1.0 && carbon_dioxide >= 0.5,
+            "the breath from {at} s swings alveolar oxygen by {oxygen} and carbon dioxide by {carbon_dioxide}"
+        );
+        let means: Vec<f64> = (beats.iter())
+            .filter(|(begins, ends, _)| *begins >= from && *ends <= to)
+            .map(|(_, _, mean)| *mean)
+            .collect();
+        let (low, high) = means
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |range, &x| widen(range, x));
+        let mean = watch.mean(from, to, |moment| moment.venous);
+        assert!(
+            means.len() >= 2 && high - low >= 0.02 * mean,
+            "the breath from {at} s holds venous return's beat means {means:?}"
+        );
+        let means = [0, 1].map(|gas| watch.mean(from, to, |moment| moment.alveolar[gas]));
+        writeln!(
+            report,
+            "breath from {at:.3} s: alveolar oxygen {:.3} swinging {oxygen:.3}, carbon dioxide {:.3} swinging {carbon_dioxide:.3}, venous return's beat means {low:.2} to {high:.2} around {mean:.2}",
+            means[0], means[1]
+        )
+        .expect("a string takes it");
+    }
+    report
+}
+
+fn the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(watch: &Watch) -> String {
+    let highest = (watch.moments.iter())
+        .max_by(|a, b| a.alveolar[0].total_cmp(&b.alveolar[0]))
+        .expect("a moment");
+    let [oxygen, carrier, pressure] = highest.plasma;
+    let bound = oxygen - SOLUBILITY * pressure;
+    assert!(
+        bound < HEME * carrier,
+        "at alveolar oxygen {} the pulmonary plasma holds {oxygen}, over capacity {} plus dissolved {}",
+        highest.alveolar[0],
+        HEME * carrier,
+        SOLUBILITY * pressure
+    );
+    format!(
+        "highest alveolar oxygen {:.3} ({:.3} times P50) at {:.3} s: plasma oxygen pressure {pressure:.3} ({:.3} times P50), bound {:.6} of capacity\n",
+        highest.alveolar[0],
+        highest.alveolar[0] / P50,
+        highest.at as f64 / SECOND as f64,
+        pressure / P50,
+        bound / (HEME * carrier)
+    )
+}
+
+fn no_held_pool_moves_at_admission_or_over_the_first_minute(
+    start: &Start,
+) -> (Session<'_, Running>, Minute, Watch) {
     let pools = start.held_pools();
     assert_eq!(pools.len(), 319);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
@@ -318,19 +624,22 @@ fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (S
         assert_eq!(*amount, guess.bits(), "{kind:?} moved at admission");
     }
     let mut minute = Minute::default();
+    let mut watch = Watch::new(start);
+    watch.see(&session);
     for mark in 1..=6 {
-        session = counted_until(start, session, 10 * mark * SECOND, &mut minute);
+        session = counted_until(start, session, 10 * mark * SECOND, &mut minute, &mut watch);
         for ((_, kind), (now, then)) in pools.iter().zip(amounts(&session).iter().zip(&admitted)) {
             assert_eq!(now, then, "{kind:?} moved by {} s", 10 * mark);
         }
     }
-    (session, minute)
+    (session, minute, watch)
 }
 
 fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
     start: &Start,
     minute: &Session<'_, Running>,
-) {
+    watch: &Watch,
+) -> String {
     let reached = minute.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
     let window = NonZeroU64::new(10 * SECOND).expect("a window");
     let windows = SlidingWindows::new(window, reached).expect("windows");
@@ -356,7 +665,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11739, quantities 399, held routes 89
+        steps 11671, quantities 399, held routes 89
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -399,24 +708,22 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT skin bed glucose feed moved
     "#]]
     .assert_eq(&report);
-    let payer = |terms: &[(RowId, i64)]| {
-        terms.iter().all(|(row, _)| {
-            matches!(start.body.rows()[row.index()].kind(), RowKind::Amount { site, .. } if site.key() == "coronary bed")
-        })
-    };
+    let payer = |terms: &[(RowId, i64)]| paid_by_the_coronary_bed(&start.body, terms);
     let rule = [
         (Book::Energy, false, 2e3, 3e3),
-        (Book::Element(Element::Carbon), false, 0.1, 0.2),
-        (Book::Element(Element::Oxygen), false, 0.5, 0.6),
-        (Book::Element(Element::Hydrogen), false, 1e-5, 2e-5),
+        (Book::Element(Element::Carbon), false, 4e2, 5e2),
+        (Book::Element(Element::Oxygen), false, 8e3, 9e3),
+        (Book::Element(Element::Hydrogen), false, 1e-4, 2e-4),
         (Book::Element(Element::Hydrogen), true, 0.1, 0.2),
-        (Book::Of(Species::NitrogenGas), false, 0.7, 0.8),
+        (Book::Of(Species::NitrogenGas), false, 1e4, 2e4),
         (Book::Of(Species::Water), false, 0.03, 0.04),
-        (Book::Of(Species::Sodium), false, 8e-4, 9e-4),
-        (Book::Of(Species::Chloride), false, 8e-4, 9e-4),
-        (Book::Of(Species::Potassium), false, 4e-5, 5e-5),
-        (Book::Of(Species::Vasopressin), false, 1e-3, 2e-3),
+        (Book::Of(Species::Sodium), false, 3e-4, 4e-4),
+        (Book::Of(Species::Chloride), false, 3e-4, 4e-4),
+        (Book::Of(Species::Potassium), false, 1e-5, 2e-5),
+        (Book::Of(Species::Vasopressin), false, 3e-2, 4e-2),
     ];
+    let figures = watch.figures();
+    let mut report = String::new();
     for (book, at_payer, below, bound) in rule {
         let worst = (certificate.results().iter())
             .filter(|result| {
@@ -425,18 +732,53 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
             })
             .map(|result| lead(result.worst_drift()).abs())
             .fold(0.0, |most, x| if x > most { x } else { most });
+        let breathing = figures.iter().find(|(of, _)| *of == book && !at_payer);
+        if let Some((
+            _,
+            Figures {
+                from_admission: start,
+                steady,
+                inside_a_breath: swing,
+            },
+        )) = breathing
+        {
+            writeln!(
+                report,
+                "{book:?}: worst {worst:.4e}, from admission {start:.4e}, steady {steady:.4e}, inside a breath {swing:.4e}"
+            )
+            .expect("a string takes it");
+        }
+        let figure = breathing.map_or(worst, |(_, figures)| larger(worst, figures.inside_a_breath));
         assert!(
-            below < 2.0 * worst && 2.0 * worst <= bound,
-            "{book:?}: twice the worst ten-second change, {}, rounds up to a figure other than {bound}",
-            2.0 * worst
+            below < 2.0 * figure && 2.0 * figure <= bound,
+            "{book:?}: twice the worst ten-second change or the most a breath moves it, {}, rounds up to a figure other than {bound}",
+            2.0 * figure
         );
+    }
+    report
+}
+
+fn to_the_breaths_end<'s>(start: &Start, mut session: Session<'s, Running>) -> Session<'s, Running> {
+    let phase = (start.body.rows().iter())
+        .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "RS" && slot.law.local == "breath phase"))
+        .expect("the breath's phase")
+        .id();
+    loop {
+        let (before, at) = (
+            lead(session.record().accepted().value(phase)),
+            session.record().accepted().time().nanoseconds(),
+        );
+        session = until(session, at + 1 - anchor_moment().nanoseconds());
+        if lead(session.record().accepted().value(phase)) < before {
+            return session;
+        }
     }
 }
 
-fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
+fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(
     start: &Start,
     minute: Session<'_, Running>,
-) {
+) -> String {
     let body = &start.body;
     let columns = every_column(body);
     let (airway, lung) = (
@@ -452,10 +794,16 @@ fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
             .sum()
     };
     let gases = [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas];
-    let from = minute.record().accepted().time().nanoseconds();
-    let before = gases.map(|gas| held(&minute, gas));
-    let session = until(minute, from - anchor_moment().nanoseconds() + 10 * SECOND);
+    let edge = to_the_breaths_end(start, minute);
+    let from = edge.record().accepted().time().nanoseconds();
+    let before = gases.map(|gas| held(&edge, gas));
+    let session = to_the_breaths_end(start, to_the_breaths_end(start, edge));
     let to = session.record().accepted().time().nanoseconds();
+    let mut report = format!(
+        "two breaths from {:.3} s to {:.3} s\n",
+        (from - anchor_moment().nanoseconds()) as f64 / SECOND as f64,
+        (to - anchor_moment().nanoseconds()) as f64 / SECOND as f64
+    );
     let after = gases.map(|gas| held(&session, gas));
     let (early, late) = (extents(&session, &columns, from), extents(&session, &columns, to));
     for (at, gas) in gases.into_iter().enumerate() {
@@ -497,7 +845,13 @@ fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
             (gained - (inspired - expired - diffused)).abs() <= 1e-9 * gross,
             "{gas:?}: in {inspired}, out {expired}, across {diffused}, along {along}, gained {gained}"
         );
+        writeln!(
+            report,
+            "{gas:?}: in {inspired:.4}, out {expired:.4}, across {diffused:.4}, along {along:.4}, gained {gained:.4e}"
+        )
+        .expect("a string takes it");
     }
+    report
 }
 
 fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
@@ -584,23 +938,23 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 98cb945b5a65a03871d9c25e131a091547c2d675b90252d335064124f66b80bf
-        seal 253c698a088f70ea8433a30c4f938783bc9b1c385a2e3db989956986a6a9eb68
-        steps 196
+        packet 23b5753243a212d29fbf2f6a1839ab10abe43c0e5595fa54280963fa43d034b5
+        seal 5152265e61545a06b0a32a59bc2c0aa78c583430661c443f231d38cad36e13b8
+        steps 198
         viscosity over its reference at the start 1.000234140
     "#]]
     .assert_eq(&pin);
     expect![[r#"
-         100.431615 ms  arterial pressure 134.631135  right atrial pressure 2.998390  portal vein pressure 6.246882  leg vein pressure 3.586652  heart rate 1.063942  sympathetic traffic 0.786097  filtration 1.670136  urine 0.020000  wall power 24573.594635  aortic flow 0.000000
-         201.075082 ms  arterial pressure 127.066077  right atrial pressure 3.554914  portal vein pressure 6.392338  leg vein pressure 3.838452  heart rate 1.081222  sympathetic traffic 0.086335  filtration 2.109658  urine 0.020000  wall power 15580.644495  aortic flow 39.550340
-         300.773672 ms  arterial pressure 118.963316  right atrial pressure 4.046727  portal vein pressure 6.201253  leg vein pressure 4.169709  heart rate 1.048163  sympathetic traffic 0.016618  filtration 2.345385  urine 0.020000  wall power 39212.514690  aortic flow 0.000000
-         403.586201 ms  arterial pressure 109.444515  right atrial pressure 3.654480  portal vein pressure 5.974840  leg vein pressure 4.600291  heart rate 1.004439  sympathetic traffic 0.012230  filtration 2.415940  urine 0.020000  wall power 13935.818085  aortic flow 0.000000
-         503.972823 ms  arterial pressure 101.054947  right atrial pressure 2.010192  portal vein pressure 5.753185  leg vein pressure 4.349139  heart rate 0.970333  sympathetic traffic 0.022828  filtration 2.358777  urine 0.020000  wall power 12009.501295  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.141287  right atrial pressure 1.482228  portal vein pressure 5.484073  leg vein pressure 3.693218  heart rate 0.947452  sympathetic traffic 0.073857  filtration 2.207845  urine 0.020000  wall power 8653.474167  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.170700  right atrial pressure 1.455032  portal vein pressure 5.267650  leg vein pressure 3.162410  heart rate 0.940363  sympathetic traffic 0.258683  filtration 2.015290  urine 0.020000  wall power 6345.593911  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.751898  right atrial pressure 1.662051  portal vein pressure 5.250661  leg vein pressure 2.956498  heart rate 0.951985  sympathetic traffic 0.637088  filtration 1.804989  urine 0.020000  wall power 4971.123428  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.855379  right atrial pressure 1.941206  portal vein pressure 5.517491  leg vein pressure 3.083332  heart rate 0.982024  sympathetic traffic 0.902238  filtration 1.592580  urine 0.020000  wall power 4008.727387  aortic flow 0.000000
-        1000.170544 ms  arterial pressure 68.861963  right atrial pressure 2.189564  portal vein pressure 5.881250  leg vein pressure 3.299054  heart rate 1.020603  sympathetic traffic 0.976713  filtration 1.404194  urine 0.020000  wall power 3215.302678  aortic flow 0.000000
+         100.403446 ms  arterial pressure 134.601269  right atrial pressure 2.843641  portal vein pressure 6.244676  leg vein pressure 3.539214  heart rate 1.063931  sympathetic traffic 0.786553  filtration 1.669107  urine 0.020000  wall power 24560.983051  aortic flow 0.000000
+         201.433366 ms  arterial pressure 126.985705  right atrial pressure 3.291840  portal vein pressure 6.370534  leg vein pressure 3.684452  heart rate 1.081205  sympathetic traffic 0.086030  filtration 2.106929  urine 0.020000  wall power 15556.203956  aortic flow 39.628797
+         302.696199 ms  arterial pressure 118.697846  right atrial pressure 3.714403  portal vein pressure 6.150610  leg vein pressure 3.872230  heart rate 1.047429  sympathetic traffic 0.016489  filtration 2.340250  urine 0.020000  wall power 38248.362634  aortic flow 0.000000
+         402.779726 ms  arterial pressure 109.431891  right atrial pressure 3.229225  portal vein pressure 5.902154  leg vein pressure 4.229787  heart rate 1.004896  sympathetic traffic 0.012386  filtration 2.404005  urine 0.020000  wall power 14035.650432  aortic flow 0.000000
+         504.160253 ms  arterial pressure 100.945499  right atrial pressure 1.494082  portal vein pressure 5.648199  leg vein pressure 3.930286  heart rate 0.970460  sympathetic traffic 0.023279  filtration 2.342866  urine 0.020000  wall power 12009.296776  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.031450  right atrial pressure 0.901488  portal vein pressure 5.356791  leg vein pressure 3.237583  heart rate 0.947724  sympathetic traffic 0.075377  filtration 2.188546  urine 0.020000  wall power 8628.863519  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.043565  right atrial pressure 0.826700  portal vein pressure 5.135960  leg vein pressure 2.666845  heart rate 0.940826  sympathetic traffic 0.263694  filtration 1.993062  urine 0.020000  wall power 6296.742215  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.606036  right atrial pressure 0.997983  portal vein pressure 5.128166  leg vein pressure 2.425356  heart rate 0.952742  sympathetic traffic 0.644069  filtration 1.780424  urine 0.020000  wall power 4911.355677  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.690079  right atrial pressure 1.251502  portal vein pressure 5.405636  leg vein pressure 2.522915  heart rate 0.983060  sympathetic traffic 0.905286  filtration 1.566187  urine 0.020000  wall power 3944.365530  aortic flow 0.000000
+        1000.382092 ms  arterial pressure 68.667041  right atrial pressure 1.487235  portal vein pressure 5.772029  leg vein pressure 2.716771  heart rate 1.021902  sympathetic traffic 0.977673  filtration 1.376097  urine 0.020000  wall power 3072.862098  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -663,7 +1017,8 @@ impl Edge {
 }
 
 /// Dividing out the drop and the share the bed's debt keeps leaves viscosity's part of the edge's flow. The body's gases
-/// are read at the start of a beat before the bolus and after it, so the beat's swing in them does not enter.
+/// are read at the start of a beat before the bolus and after it, and between the two they change only by what the
+/// room, the burns and the urine move, so the bolus carries none.
 fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
@@ -705,19 +1060,36 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &
             .find(|opening| opening.0 == at)
             .map(|opening| opening.2)
     };
-    let held = (starts.iter().find(|at| **at < 2 * SECOND)).and_then(|at| gases(*at));
-    let delivered = (starts.iter().find(|at| **at >= 2 * SECOND)).and_then(|at| gases(*at));
-    let (held, delivered) = (
-        held.expect("a beat starts before the bolus ends"),
-        delivered.expect("a beat starts after the bolus"),
+    let (first, last) = (
+        *(starts.iter().find(|at| **at < 2 * SECOND)).expect("a beat starts before the bolus ends"),
+        *(starts.iter().find(|at| **at >= 2 * SECOND)).expect("a beat starts after the bolus"),
     );
-    for (gas, (held, delivered)) in ["oxygen", "carbon dioxide"]
+    let (held, delivered) = (
+        gases(first).expect("read at its start"),
+        gases(last).expect("read at its start"),
+    );
+    let body = &start.body;
+    let columns = every_column(body);
+    let [from, to] = [first, last].map(|at| extents(&session, &columns, anchor_moment().nanoseconds() + at));
+    let expected: Vec<(usize, ColumnId)> = (columns.iter())
+        .filter(|column| {
+            let placed = &body.columns()[column.index()];
+            matches!(placed.origin().owner, "RS" | "MT") || placed.origin().local == "urine"
+        })
+        .map(|column| (column.index(), *column))
+        .collect();
+    for (gas, (held, delivered)) in [Species::Oxygen, Species::CarbonDioxide]
         .iter()
         .zip(held.iter().zip(&delivered))
     {
+        let moved: f64 = (expected.iter())
+            .map(|(index, column)| {
+                count(body, *column, |_, species, _| species == *gas) * (to[*index] - from[*index])
+            })
+            .sum();
         assert!(
-            (delivered - held).abs() <= 1e-5 * held,
-            "the body's {gas} went from {held} to {delivered} over the bolus, each at a beat's start"
+            (delivered - held - moved).abs() <= 1e-9 * held,
+            "the body's {gas:?} went from {held} to {delivered} over the bolus, where the room, the burns and the urine moved {moved}"
         );
     }
     let session = until(session, 30 * SECOND);
@@ -918,11 +1290,32 @@ fn the_heat_report_credits_each_column_only_what_it_puts_in_the_core() {
     );
 }
 
+/// One admission serves both: the first breaths, read over the first eleven seconds, and one whole beat's heat.
 #[test]
-fn the_whole_beat_heat_report_counts_what_the_core_receives_from_the_beds() {
+fn the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_the_core_receives() {
     let start = Start::admitted();
+    let mut watch = Watch::new(&start);
+    let mut session = start.session();
+    watch.see(&session);
+    while session.record().accepted().time().nanoseconds() < anchor_moment().nanoseconds() + 11 * SECOND {
+        let at = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+        session = until(session, at + 1);
+        watch.see(&session);
+        let after = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+        if at < SECOND && after >= SECOND {
+            assert!(
+                watch.moments.iter().any(|moment| moment.phase > 0.0),
+                "no breath has started by the first second"
+            );
+        }
+    }
+    each_breath_swings_the_alveolar_gases_and_venous_return(&watch);
+    the_whole_beat_heat_report_counts_what_the_core_receives_from_the_beds(&start);
+}
+
+fn the_whole_beat_heat_report_counts_what_the_core_receives_from_the_beds(start: &Start) {
     let mut openings = Vec::new();
-    let session = beats(&start, start.session(), 3 * SECOND, |session, opened| {
+    let session = beats(start, start.session(), 3 * SECOND, |session, opened| {
         if let Some(closed) = opened {
             openings.push((session.record().accepted().time().nanoseconds(), closed));
         }
@@ -978,12 +1371,21 @@ fn only_the_core_store_takes_the_beds_heat_but_its_burns_and_the_work_it_pays(
     }
 }
 
+fn outside_the_gas(start: &Start, session: &Session<'_, Running>, gas: Species) -> f64 {
+    let view = session.record().accepted();
+    (start.body.rows().iter())
+        .filter(|row| matches!(row.kind(), RowKind::Amount { species, space, .. } if species == gas && space != Space::Gas))
+        .map(|row| lead(view.value(row.id())))
+        .sum()
+}
+
 /// Over whole beats the flow is the water the left ventricle loses while its valve stands open, because the
 /// trapezoid of the valve's flow at the ends of steps reads it 0.6% high. The lung's lymph takes water and no gas from
 /// the pulmonary bed to the central veins, so the pulmonary artery carries that water too, and the lung's own bed
 /// takes its oxygen from its plasma before the pulmonary vein, so the arteries carry the other beds' burn. The flow
 /// times each gas's content difference then meets what the ledger says the beds' burns used and made, to LEDGER, the
-/// body's settling over nine beats.
+/// body's settling over nine beats, and to what the blood and tissues gained over them: nine beats are not whole
+/// breaths, and the breath swings the gas the blood holds. The lung's exchange meets the burns and that gain.
 fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned_over_whole_beats(
     start: &Start,
 ) {
@@ -1027,6 +1429,7 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         stored: f64,
         heat: f64,
         paying: f64,
+        stores: [f64; 2],
     }
     let mut samples: Vec<Sample> = Vec::new();
     let mut openings: Vec<(u64, u64)> = Vec::new();
@@ -1052,6 +1455,7 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
             stored: held_at(start, session, muscle, Species::Oxygen),
             heat: bed_heat(start, session),
             paying: value(start, session, paying_heat),
+            stores: [Species::Oxygen, Species::CarbonDioxide].map(|gas| outside_the_gas(start, session, gas)),
         });
     });
     let onsets = onsets(&openings);
@@ -1128,10 +1532,12 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         }
     }
     let change = moved.stored - sample(first).stored;
-    for (gas, taken, rate) in fick {
+    let gained = [0, 1].map(|gas| (sample(last).stores[gas] - sample(first).stores[gas]) / held);
+    for ((gas, taken, rate), gained) in fick.into_iter().zip(gained) {
         assert!(
-            (taken - rate).abs() <= LEDGER * rate,
-            "over {} beats flow {flow} and lymph {lymph} move {taken} of {gas} a second against {rate}",
+            (taken - rate).abs() <= LEDGER * rate + gained.abs(),
+            "over {} beats flow {flow} and lymph {lymph} move {taken} of {gas} a second against {rate}, and the blood \
+             and tissues gained {gained} a second",
             onsets.len() - 1
         );
     }
@@ -1139,9 +1545,16 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         (quotient - QUOTIENT).abs() <= 1e-12,
         "the burns made {quotient} carbon dioxide an oxygen"
     );
+    let urine: f64 = (columns.iter())
+        .filter(|column| body.columns()[column.index()].origin().local == "urine")
+        .map(|column| {
+            let leaving = count(body, *column, |_, species, _| species == Species::CarbonDioxide);
+            leaving * (end[column.index()] - beginning[column.index()]) / held
+        })
+        .sum();
     for (gas, rate) in [
-        (Species::Oxygen, oxygen),
-        (Species::CarbonDioxide, carbon_dioxide),
+        (Species::Oxygen, oxygen + gained[0]),
+        (Species::CarbonDioxide, carbon_dioxide - gained[1] + urine),
     ] {
         let lung: f64 = (columns.iter())
             .filter(|column| body.columns()[column.index()].origin().owner == Respiratory::CARD)
@@ -1508,6 +1921,10 @@ fn the_whole_body_passes_every_replay_gate() {
         owner: Musculoskeletal::CARD,
         local: "stir",
     };
+    let breathing = LawName {
+        owner: Respiratory::CARD,
+        local: "breath dice",
+    };
     for gate in [
         ReplayGate::Pace,
         ReplayGate::Resume,
@@ -1520,13 +1937,21 @@ fn the_whole_body_passes_every_replay_gate() {
         let of = evidence.of(gate);
         assert_eq!((of.gate(), of.run()), (gate, evidence.run()));
         assert!(of.runs().len() >= 2, "{gate:?} compared {} runs", of.runs().len());
-        let [stir] = of.fired() else {
+        let [breath, stir] = of.fired() else {
             panic!("{gate:?} fired {:?}", of.fired());
         };
-        assert_eq!((stir.stream(), stir.ordinal()), (stream, 0), "{gate:?}");
+        assert_eq!(
+            [
+                (breath.stream(), breath.ordinal()),
+                (stir.stream(), stir.ordinal())
+            ],
+            [(breathing, 0), (stream, 0)],
+            "{gate:?}"
+        );
         assert!(
-            stir.at().nanoseconds() < fence,
-            "{gate:?} stirred at {:?}",
+            breath.at().nanoseconds() < stir.at().nanoseconds() && stir.at().nanoseconds() < fence,
+            "{gate:?} started the breath at {:?} and stirred at {:?}",
+            breath.at(),
             stir.at()
         );
     }
@@ -1539,18 +1964,46 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let start = Start::admitted();
     each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(&start);
     each_beds_speciation_meets_its_forms_at_the_admitted_state(&start);
-    the_body_admits_at_06_55(&start);
-    the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
     let before = start.core.solves.get();
-    let (minute, counted) = no_held_pool_moves_at_admission_or_over_the_first_minute(&start);
-    the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(&start, &minute);
+    let (minute, counted, watch) = no_held_pool_moves_at_admission_or_over_the_first_minute(&start);
     let counts = Counts {
         rows: start.body.rows().len(),
         jacobian_nonzeros: start.body.sparsity().unknowns().len(),
         steps: minute.record().revision(),
         solves: start.core.solves.get() - before,
     };
-    each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(&start, minute);
+    let mut report = each_breath_swings_the_alveolar_gases_and_venous_return(&watch);
+    report += &the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(&watch);
+    the_body_admits_at_06_55(&start);
+    the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
+    report += &the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
+        &start, &minute, &watch,
+    );
+    report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
+    expect![[r#"
+        before the first breath edge: alveolar oxygen 101.326, carbon dioxide 28.340, venous return 77.34
+        breath from 5.000 s: alveolar oxygen 100.791 swinging 3.070, carbon dioxide 28.690 swinging 2.011, venous return's beat means 74.25 to 84.57 around 78.05
+        breath from 10.000 s: alveolar oxygen 100.452 swinging 3.053, carbon dioxide 28.831 swinging 1.946, venous return's beat means 74.11 to 84.52 around 78.01
+        breath from 15.000 s: alveolar oxygen 100.177 swinging 3.042, carbon dioxide 28.896 swinging 1.918, venous return's beat means 74.11 to 84.49 around 78.00
+        breath from 20.000 s: alveolar oxygen 99.950 swinging 3.035, carbon dioxide 28.927 swinging 1.905, venous return's beat means 74.11 to 84.50 around 78.00
+        breath from 25.000 s: alveolar oxygen 99.759 swinging 3.032, carbon dioxide 28.942 swinging 1.900, venous return's beat means 74.12 to 84.50 around 78.00
+        breath from 30.000 s: alveolar oxygen 99.596 swinging 3.049, carbon dioxide 28.952 swinging 1.901, venous return's beat means 74.05 to 84.49 around 78.00
+        breath from 35.000 s: alveolar oxygen 99.455 swinging 3.072, carbon dioxide 28.960 swinging 1.903, venous return's beat means 74.06 to 84.49 around 78.00
+        breath from 40.001 s: alveolar oxygen 99.331 swinging 3.092, carbon dioxide 28.966 swinging 1.904, venous return's beat means 74.06 to 84.49 around 78.00
+        breath from 45.001 s: alveolar oxygen 99.223 swinging 3.111, carbon dioxide 28.973 swinging 1.905, venous return's beat means 74.06 to 84.49 around 78.01
+        breath from 50.001 s: alveolar oxygen 99.127 swinging 3.127, carbon dioxide 28.978 swinging 1.906, venous return's beat means 74.06 to 84.49 around 78.01
+        highest alveolar oxygen 102.575 (4.103 times P50) at 1.088 s: plasma oxygen pressure 93.084 (3.723 times P50), bound 0.963989 of capacity
+        Energy: worst 1.1289e3, from admission 5.9381e1, steady 1.1296e3, inside a breath 5.6486e2
+        Element(Carbon): worst 4.7480e1, from admission 3.6194e1, steady 4.4205e1, inside a breath 2.0167e2
+        Element(Oxygen): worst 1.8252e3, from admission 1.8235e3, steady 5.2037e1, inside a breath 4.4882e3
+        Element(Hydrogen): worst 5.0585e-5, from admission 1.5862e-5, steady 5.0627e-5, inside a breath 2.5428e-5
+        Of(NitrogenGas): worst 3.4121e3, from admission 3.4115e3, steady 7.5750e1, inside a breath 8.6038e3
+        Of(Vasopressin): worst 2.1035e-3, from admission 1.3302e-4, steady 1.3759e-3, inside a breath 1.5313e-2
+        two breaths from 60.001 s to 70.001 s
+        Oxygen: in 4589.9436, out 3651.6821, across 950.4726, along 938.9561, gained -1.2211e1
+        CarbonDioxide: in 8.7427, out 686.3418, across -678.3349, along -677.6465, gained 7.3587e-1
+        NitrogenGas: in 17258.1880, out 17246.6866, across 0.0000, along 10.8382, gained 1.1501e1
+    "#]].assert_eq(&report);
     let mut minute = format!(
         "steps {}, solves {}: ordinary {}, landing {}\n",
         counts.steps,
@@ -1562,11 +2015,14 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
     expect![[r#"
-        steps 11739, solves 14452: ordinary 12404, landing 2048
-        refused 60 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
-        refused 243 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
-        refused 301 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
-        refused 61 IterationLimit
+        steps 11671, solves 14388: ordinary 12338, landing 2050
+        refused 74 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
+        refused 1 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "elastic energy" }, at: Body })
+        refused 1 Accuracy Amount { site: SiteId { key: "body", class: TissueSite }, space: Elastic, species: Energy }
+        refused 1 Accuracy Amount { site: SiteId { key: "conducting airway", class: TissueSite }, space: Gas, species: CarbonDioxide }
+        refused 239 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
+        refused 293 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
+        refused 58 IterationLimit
     "#]]
     .assert_eq(&minute);
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");

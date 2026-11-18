@@ -265,6 +265,8 @@ fn start_guess(row: RowKind) -> f64 {
         }
         RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.0,
+        RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
+        RowKind::Memory(slot) if slot.law.local == "pump drive" => BODY_RHYTHM.mean_drive(),
         RowKind::Memory(_) => 0.0,
         RowKind::Algebraic(slot) => {
             let bed = match slot.at {
@@ -278,6 +280,7 @@ fn start_guess(row: RowKind) -> f64 {
                 "bicarbonate" => blood.bicarbonate,
                 "acidity" => blood.acidity,
                 "oxygen_debt_per_bed" => 0.0,
+                "chest wall rest volume" => BODY_RHYTHM.wall_rest(),
                 _ => 1.0,
             }
         }
@@ -595,6 +598,11 @@ pub fn body_packet_at_viscosity_exponent(
         local: "stirring",
     };
     packet.start_mode(stirring, "still", NOTE)?;
+    let breath = LawName {
+        owner: Respiratory::CARD,
+        local: "breath",
+    };
+    packet.start_mode(breath, "rest", NOTE)?;
 
     table(&mut packet, exponent)?;
     oxygen_per_lactate(&mut packet, body)?;
@@ -669,7 +677,6 @@ fn table(
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05)?;
     set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0)?;
-    set::<Pressure>(packet, "rs.pleural-pressure", body, -3.0)?;
     respiratory(packet)?;
     set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.035)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.05)?;
@@ -1066,19 +1073,19 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// pools that never move, so the slice's bound for an unmoved species holds them.
 const ENERGY_DRIFT: f64 = 3e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
-    (Element::Carbon, 0.2),
-    (Element::Hydrogen, 2e-5),
-    (Element::Oxygen, 0.6),
+    (Element::Carbon, 5e2),
+    (Element::Hydrogen, 2e-4),
+    (Element::Oxygen, 9e3),
 ];
 const PAYER_HYDROGEN_DRIFT: f64 = 0.2;
 const SPECIES_DRIFTS: [(Species, f64); 7] = [
     (Species::Energy, ENERGY_DRIFT),
     (Species::Water, 0.04),
-    (Species::Sodium, 9e-4),
-    (Species::Chloride, 9e-4),
-    (Species::Potassium, 5e-5),
-    (Species::Vasopressin, 2e-3),
-    (Species::NitrogenGas, 0.8),
+    (Species::Sodium, 4e-4),
+    (Species::Chloride, 4e-4),
+    (Species::Potassium, 2e-5),
+    (Species::Vasopressin, 4e-2),
+    (Species::NitrogenGas, 2e4),
 ];
 
 struct BodyDrifts;
@@ -1117,16 +1124,130 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Pressure>(packet, "rs.room-pressure", body, 700.0)?;
     set::<Pressure>(packet, "rs.water-vapour-pressure", body, 50.0)?;
     set::<Pressure>(packet, "rs.head-width", body, 0.01)?;
-    set::<Elastance>(packet, "rs.lung-elastance", body, 1.6e-4)?;
-    set::<Elastance>(packet, "rs.wall-elastance", body, 1.6e-4)?;
+    set::<Elastance>(packet, "rs.lung-elastance", body, LUNG_ELASTANCE)?;
+    set::<Elastance>(packet, "rs.wall-elastance", body, WALL_ELASTANCE)?;
     set::<Volume>(packet, "rs.lung-rest-volume", body, 38_250.0)?;
-    set::<Volume>(packet, "rs.wall-rest-volume", body, 75_750.0)?;
+    set::<Volume>(packet, "rs.wall-rest-volume", body, BODY_RHYTHM.wall_rest())?;
     set::<Elastance>(packet, "rs.dead-space-elastance", body, 6.4e-4)?;
-    set::<Volume>(packet, "rs.dead-space-volume", body, 3_400.0)?;
+    set::<Volume>(packet, "rs.dead-space-volume", body, DEAD_SPACE)?;
     set::<Quotient<Volume, Oxygen>>(packet, "rs.oxygen-volume", body, 1.0)?;
     set::<Quotient<Volume, CarbonDioxide>>(packet, "rs.carbon-dioxide-volume", body, 1.0)?;
     set::<Quotient<Volume, NitrogenGas>>(packet, "rs.nitrogen-volume", body, 1.0)?;
     set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, 15_600.0)?;
-    set::<Rate<Volume>>(packet, "rs.airway-mixing", body, 3_240.0)?;
+    set::<Rate<Volume>>(packet, "rs.airway-mixing", body, MIXING)?;
+    for (key, value) in [
+        ("rs.breath-rate", BODY_RHYTHM.rate),
+        ("rs.drive-rise", BODY_RHYTHM.rise),
+        ("rs.drive-fall", BODY_RHYTHM.fall),
+        ("rs.rest-speed", 1.0),
+        ("rs.share-fall", 1.0),
+        ("rs.breath-start", 1_000.0),
+    ] {
+        set::<Rate<Dimensionless>>(packet, key, body, value)?;
+    }
+    for (key, value) in [
+        ("rs.inspiration-length", BODY_RHYTHM.inspiration),
+        ("rs.expiration-length", BODY_RHYTHM.expiration),
+        ("rs.drive-peak", BODY_RHYTHM.peak),
+        ("rs.rest-drive", BODY_RHYTHM.mean_drive()),
+        ("rs.rest-share", 1.0),
+    ] {
+        set::<Dimensionless>(packet, key, body, value)?;
+    }
+    set::<Pressure>(packet, "rs.pump-pressure", body, BODY_RHYTHM.pump())?;
+    set::<Volume>(packet, "rs.wall-rest-rise", body, 10_000.0)?;
+    set::<Length>(packet, "rs.trunk-length", body, CAROTID_ABOVE_ARTERIES)?;
     Ok(())
+}
+
+const LUNG_ELASTANCE: f64 = 1.6e-4;
+const WALL_ELASTANCE: f64 = 1.6e-4;
+/// The chest wall's relaxed volume with the drive at zero, at which the lung rests at 57,000 and the pleural space at
+/// -3.0, the values the circulation's packet is stated at.
+const WALL_REST: f64 = 75_750.0;
+const MIXING: f64 = 3_240.0;
+const DEAD_SPACE: f64 = 3_400.0;
+const CAROTID_ABOVE_ARTERIES: f64 = 0.2;
+
+struct BreathRhythm {
+    rate: f64,
+    inspiration: f64,
+    expiration: f64,
+    rise: f64,
+    fall: f64,
+    peak: f64,
+}
+
+/// The body packet's breath: its rate, inspiration's and expiration's phase lengths, the pump drive's rise and fall
+/// speeds and its peak, and the rest drive the packet states by closed form.
+pub struct BodyBreath {
+    pub rate: Measure<Rate<Dimensionless>>,
+    pub inspiration: Measure<Dimensionless>,
+    pub expiration: Measure<Dimensionless>,
+    pub rise: Measure<Rate<Dimensionless>>,
+    pub fall: Measure<Rate<Dimensionless>>,
+    pub peak: Measure<Dimensionless>,
+    pub rest_drive: Measure<Dimensionless>,
+}
+
+pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
+    let rhythm = &BODY_RHYTHM;
+    Ok(BodyBreath {
+        rate: Measure::new(rhythm.rate)?,
+        inspiration: Measure::new(rhythm.inspiration)?,
+        expiration: Measure::new(rhythm.expiration)?,
+        rise: Measure::new(rhythm.rise)?,
+        fall: Measure::new(rhythm.fall)?,
+        peak: Measure::new(rhythm.peak)?,
+        rest_drive: Measure::new(rhythm.mean_drive())?,
+    })
+}
+
+const BODY_RHYTHM: BreathRhythm = BreathRhythm {
+    rate: 0.2,
+    inspiration: 0.4,
+    expiration: 0.6,
+    rise: 1.5,
+    fall: 2.0,
+    peak: 1.0,
+};
+
+impl BreathRhythm {
+    /// The drive at inspiration's start and end once breaths repeat: `a1 = peak (1 - e_i) + a0 e_i` and `a0 = a1 e_e`,
+    /// with `e_i` and `e_e` the rise's and the fall's decay over inspiration and expiration.
+    fn ends(&self) -> (f64, f64, f64, f64) {
+        let (inspiring, expiring) = (self.inspiration / self.rate, self.expiration / self.rate);
+        let (e_i, e_e) = (exp(-self.rise * inspiring), exp(-self.fall * expiring));
+        let end = self.peak * (1.0 - e_i) / (1.0 - e_i * e_e);
+        (end * e_e, end, inspiring, expiring)
+    }
+    fn mean_drive(&self) -> f64 {
+        let (start, end, inspiring, expiring) = self.ends();
+        let rising =
+            self.peak * inspiring + (start - self.peak) * (1.0 - exp(-self.rise * inspiring)) / self.rise;
+        let falling = end * (1.0 - exp(-self.fall * expiring)) / self.fall;
+        (rising + falling) * self.rate
+    }
+    /// The pump's pressure whose breath ventilates the alveolar unit as the mixing exchange does. Two mixed exchanges
+    /// in series put the alveolar unit at `2 P / M`, and a breath of volume `V_T` through a mixed dead space `V_D` at
+    /// `P T / (V_T - V_D tanh(V_T / 2 V_D))` while the alveolar gas holds through the breath, so `V_T` solves
+    /// `V_T - V_D tanh(V_T / 2 V_D) = M T / 2` by Newton's method. `V_T` is the drive's swing at the mechanics'
+    /// static solution.
+    fn pump(&self) -> f64 {
+        let (start, end, ..) = self.ends();
+        let goal = MIXING / (2.0 * self.rate);
+        let mut tidal = goal + DEAD_SPACE;
+        for _ in 0..50 {
+            let decay = exp(-tidal / DEAD_SPACE);
+            let tanh = (1.0 - decay) / (1.0 + decay);
+            let slope = 1.0 - (1.0 - tanh * tanh) / 2.0;
+            tidal -= (tidal - DEAD_SPACE * tanh - goal) / slope;
+        }
+        tidal * (LUNG_ELASTANCE + WALL_ELASTANCE) / (end - start)
+    }
+    /// The chest wall's relaxed volume less the pump's mean pull over the wall's elastance, so at the mean drive the
+    /// lung's static volume and the pleural pressure are the ones the body admits at with no drive.
+    fn wall_rest(&self) -> f64 {
+        WALL_REST - self.pump() * self.mean_drive() / WALL_ELASTANCE
+    }
 }

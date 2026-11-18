@@ -55,6 +55,7 @@
 //! ```
 
 mod airway;
+mod breath;
 mod membrane;
 
 pub use airway::Ventilation;

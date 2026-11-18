@@ -904,10 +904,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1444 {"algebraic": 185, "amount": 1248, "memory": 11}, columns 1458, jacobian nonzeros 10028, blocks 424, parameter slots 709, conserved combinations 399, held pools 319, held route columns 89
-        model hash c48e3e24b44346cf94a3955c855f812771676f556ee0934cfc5ba9603708f6ac
+        rows 1449 {"algebraic": 186, "amount": 1248, "memory": 15}, columns 1458, jacobian nonzeros 10053, blocks 429, parameter slots 722, conserved combinations 399, held pools 319, held route columns 89
+        model hash c77b8c00ed3d9598ca56aba0ad50fd66868d49c0f33c83b9ec542222301c17b9
         conserved basis 46b9975bf1364b8364f03f0e9b79a5b884dd7f6a3f419bf8b905493f1e9ceb3e
-        stated packet 8d7417124121c197824d48fecdfffe2e60e3b81d082eaa207a58452d2fea82f3
+        stated packet 395bb2b09a9ab7104904c21bc783d5777c325946237c50fb0f2760424d8e884e
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -1000,16 +1000,16 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
         species: [
             (Species::Energy, 3e3),
             (Species::Water, 0.04),
-            (Species::Sodium, 9e-4),
-            (Species::Chloride, 9e-4),
-            (Species::Potassium, 5e-5),
-            (Species::Vasopressin, 2e-3),
-            (Species::NitrogenGas, 0.8),
+            (Species::Sodium, 4e-4),
+            (Species::Chloride, 4e-4),
+            (Species::Potassium, 2e-5),
+            (Species::Vasopressin, 4e-2),
+            (Species::NitrogenGas, 2e4),
         ],
         elements: [
-            (Element::Carbon, 0.2),
-            (Element::Hydrogen, 2e-5),
-            (Element::Oxygen, 0.6),
+            (Element::Carbon, 5e2),
+            (Element::Hydrogen, 2e-4),
+            (Element::Oxygen, 9e3),
         ],
         payer_hydrogen: 0.2,
     };
