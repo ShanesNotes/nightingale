@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "14cbba67470036ef8e5fdb324aaf509cb00540c59373e56c442c8f1da38ec4e0";
-const ADMITTED_SEAL: &str = "6b004a5782b27f7cdab50dc65301ced712bbaa5d7711b9ac12196789f73b961c";
+const PACKET: &str = "328146d6e6ae5cdfad1d9065a5d8b6ea17fd3c924df9203b5ce8c44cd95f09d5";
+const ADMITTED_SEAL: &str = "5cd995520edd11c20e82506e0c84a51e988f74c83ab3d9e31d1a250cd8355a90";
 
 struct Counted {
     core: ng_solver::Core,
@@ -356,7 +356,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11794, quantities 404, held routes 97
+        steps 11739, quantities 399, held routes 89
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -385,8 +385,6 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT liver bed cell water out moved
         MT liver bed fatty acid feed moved
         MT liver bed glucose feed moved
-        MT lung carbon dioxide moved
-        MT lung oxygen moved
         MT muscle bed cell water out moved
         MT muscle bed fatty acid feed moved
         MT muscle bed glucose feed moved
@@ -557,23 +555,23 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 14cbba67470036ef8e5fdb324aaf509cb00540c59373e56c442c8f1da38ec4e0
-        seal 9d6bccbb0bea881937e368758797222ceeb7e1aa099e2e8bcf82846d8e9ca5c4
-        steps 198
-        viscosity over its reference at the start 1.000000413
+        packet 328146d6e6ae5cdfad1d9065a5d8b6ea17fd3c924df9203b5ce8c44cd95f09d5
+        seal 5001258e3b0d5293808ecc4bd873705e371fa86041d46dc69080e68881566ad9
+        steps 196
+        viscosity over its reference at the start 1.000234140
     "#]]
     .assert_eq(&pin);
     expect![[r#"
-         100.432831 ms  arterial pressure 134.633292  right atrial pressure 3.008802  portal vein pressure 6.258052  leg vein pressure 3.596931  heart rate 1.063945  sympathetic traffic 0.786091  filtration 1.670060  urine 0.020000  wall power 24549.627276  aortic flow 0.000000
-         200.971783 ms  arterial pressure 127.073846  right atrial pressure 3.566989  portal vein pressure 6.406698  leg vein pressure 3.850276  heart rate 1.081239  sympathetic traffic 0.086531  filtration 2.109289  urine 0.020000  wall power 15618.233755  aortic flow 39.436322
-         300.343558 ms  arterial pressure 119.007062  right atrial pressure 4.057781  portal vein pressure 6.216546  leg vein pressure 4.180908  heart rate 1.048358  sympathetic traffic 0.016675  filtration 2.344802  urine 0.020000  wall power 39549.054176  aortic flow 0.000000
-         403.707420 ms  arterial pressure 109.434879  right atrial pressure 3.675871  portal vein pressure 5.988799  leg vein pressure 4.614320  heart rate 1.004394  sympathetic traffic 0.012228  filtration 2.415994  urine 0.020000  wall power 13948.485600  aortic flow 0.000000
-         504.102519 ms  arterial pressure 101.045104  right atrial pressure 2.024956  portal vein pressure 5.767216  leg vein pressure 4.364992  heart rate 0.970296  sympathetic traffic 0.022847  filtration 2.358741  urine 0.020000  wall power 12015.605952  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.141457  right atrial pressure 1.494962  portal vein pressure 5.498127  leg vein pressure 3.709215  heart rate 0.947449  sympathetic traffic 0.073838  filtration 2.207971  urine 0.020000  wall power 8662.269616  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.170674  right atrial pressure 1.466155  portal vein pressure 5.280744  leg vein pressure 3.176841  heart rate 0.940358  sympathetic traffic 0.258646  filtration 2.015385  urine 0.020000  wall power 6352.014084  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.751725  right atrial pressure 1.672362  portal vein pressure 5.262427  leg vein pressure 2.969095  heart rate 0.951979  sympathetic traffic 0.637060  filtration 1.805026  urine 0.020000  wall power 4974.942873  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.855082  right atrial pressure 1.951307  portal vein pressure 5.528042  leg vein pressure 3.094495  heart rate 0.982016  sympathetic traffic 0.902233  filtration 1.592553  urine 0.020000  wall power 4010.478457  aortic flow 0.000000
-        1000.179870 ms  arterial pressure 68.861095  right atrial pressure 2.199746  portal vein pressure 5.891237  leg vein pressure 3.309513  heart rate 1.020599  sympathetic traffic 0.976716  filtration 1.404101  urine 0.020000  wall power 3214.816905  aortic flow 0.000000
+         100.431615 ms  arterial pressure 134.631135  right atrial pressure 2.998390  portal vein pressure 6.246882  leg vein pressure 3.586652  heart rate 1.063942  sympathetic traffic 0.786097  filtration 1.670136  urine 0.020000  wall power 24573.594635  aortic flow 0.000000
+         201.075082 ms  arterial pressure 127.066077  right atrial pressure 3.554914  portal vein pressure 6.392338  leg vein pressure 3.838452  heart rate 1.081222  sympathetic traffic 0.086335  filtration 2.109658  urine 0.020000  wall power 15580.644495  aortic flow 39.550340
+         300.773672 ms  arterial pressure 118.963316  right atrial pressure 4.046727  portal vein pressure 6.201253  leg vein pressure 4.169709  heart rate 1.048163  sympathetic traffic 0.016618  filtration 2.345385  urine 0.020000  wall power 39212.514690  aortic flow 0.000000
+         403.586201 ms  arterial pressure 109.444515  right atrial pressure 3.654480  portal vein pressure 5.974840  leg vein pressure 4.600291  heart rate 1.004439  sympathetic traffic 0.012230  filtration 2.415940  urine 0.020000  wall power 13935.818085  aortic flow 0.000000
+         503.972823 ms  arterial pressure 101.054947  right atrial pressure 2.010192  portal vein pressure 5.753185  leg vein pressure 4.349139  heart rate 0.970333  sympathetic traffic 0.022828  filtration 2.358777  urine 0.020000  wall power 12009.501295  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.141287  right atrial pressure 1.482228  portal vein pressure 5.484073  leg vein pressure 3.693218  heart rate 0.947452  sympathetic traffic 0.073857  filtration 2.207845  urine 0.020000  wall power 8653.474167  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.170700  right atrial pressure 1.455032  portal vein pressure 5.267650  leg vein pressure 3.162410  heart rate 0.940363  sympathetic traffic 0.258683  filtration 2.015290  urine 0.020000  wall power 6345.593911  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.751898  right atrial pressure 1.662051  portal vein pressure 5.250661  leg vein pressure 2.956498  heart rate 0.951985  sympathetic traffic 0.637088  filtration 1.804989  urine 0.020000  wall power 4971.123428  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.855379  right atrial pressure 1.941206  portal vein pressure 5.517491  leg vein pressure 3.083332  heart rate 0.982024  sympathetic traffic 0.902238  filtration 1.592580  urine 0.020000  wall power 4008.727387  aortic flow 0.000000
+        1000.170544 ms  arterial pressure 68.861963  right atrial pressure 2.189564  portal vein pressure 5.881250  leg vein pressure 3.299054  heart rate 1.020603  sympathetic traffic 0.976713  filtration 1.404194  urine 0.020000  wall power 3215.302678  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -1117,10 +1115,10 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         (Species::CarbonDioxide, carbon_dioxide),
     ] {
         let lung: f64 = (columns.iter())
-            .filter(|column| body.columns()[column.index()].receipt().is_some())
+            .filter(|column| body.columns()[column.index()].origin().owner == Respiratory::CARD)
             .map(|column| {
-                let at_lung = count(body, *column, |site, species, _| {
-                    site == lung_bed && species == gas
+                let at_lung = count(body, *column, |site, species, space| {
+                    site == lung_bed && species == gas && space == Space::Plasma
                 });
                 ((end[column.index()] - beginning[column.index()]) * at_lung).abs() / held
             })
@@ -1535,10 +1533,10 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
     expect![[r#"
-        steps 11794, solves 15264: ordinary 12519, landing 2745
+        steps 11739, solves 14452: ordinary 12404, landing 2048
         refused 60 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
         refused 243 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
-        refused 361 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
+        refused 301 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
         refused 61 IterationLimit
     "#]]
     .assert_eq(&minute);
