@@ -4594,8 +4594,10 @@ test = "-p ng-validate --test alveolar the_mean_alveolar_carbon_dioxide_over_who
 [[mutant]]
 name = "pleural-reads-no-drive"
 path = "crates/ng-respiratory/src/airway.rs"
-old = '''            let muscle = self.muscle(&mut k);'''
-new = '''            let muscle: Expr<'b, '_, Respiratory, Pressure> = k.zero();'''
+old = '''            let muscle = self.muscle(&mut k);
+            let pull = k.add(held, muscle);'''
+new = '''            let muscle: Expr<'b, '_, Respiratory, Pressure> = k.zero();
+            let pull = k.add(held, muscle);'''
 test = "-p ng-validate --test alveolar the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_at_rest_and_off_rest"
 
 [[mutant]]

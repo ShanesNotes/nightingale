@@ -31,7 +31,7 @@ pub(super) fn musculoskeletal(body: &mut Assembly<'_>) -> Result<(), AdmissionEr
     Ok(())
 }
 
-/// The skin's water, until the fluids move it (ticket 17), and the stir, a hazard that fires once.
+/// Held until the fluids move the skin's water (ticket 17).
 fn stand_ins<'b>(
     laws: &mut FragmentBuilder<'b, Musculoskeletal>,
     ports: &HeldPorts<'b, Musculoskeletal>,

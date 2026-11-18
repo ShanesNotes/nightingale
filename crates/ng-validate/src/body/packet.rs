@@ -1273,6 +1273,7 @@ impl BreathRhythm {
     /// breath periodic.
     fn work(&self) -> f64 {
         const STEP: f64 = 1e-4;
+        const BREATHS: usize = 20;
         let (pump, elastance) = (self.pump(), LUNG_ELASTANCE + WALL_ELASTANCE);
         let (_, _, inspiring, expiring) = self.ends();
         let steps = [inspiring, expiring].map(|length| {
@@ -1284,7 +1285,7 @@ impl BreathRhythm {
         });
         let (rise, fall) = (exp(-self.rise * STEP), exp(-self.fall * STEP));
         let (mut drive, mut x, mut y, mut work) = (self.mean_drive(), 0.0, 0.0, 0.0);
-        for breath in 0..20 {
+        for breath in 1..=BREATHS {
             work = 0.0;
             for (phase, count) in steps.into_iter().enumerate() {
                 for _ in 0..count {
@@ -1299,7 +1300,7 @@ impl BreathRhythm {
                     let filling = AIRWAY_CONDUCTANCE * (pressure - elastance * x);
                     y = (y + STEP * filling) / (1.0 + STEP * AIRWAY_CONDUCTANCE * DEAD_SPACE_ELASTANCE);
                     let inflow = AIRWAY_CONDUCTANCE * DEAD_SPACE_ELASTANCE * y;
-                    if breath == 19 && inflow > 0.0 {
+                    if breath == BREATHS && inflow > 0.0 {
                         work += pressure * inflow * STEP;
                     }
                 }
