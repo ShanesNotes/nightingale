@@ -22,7 +22,6 @@ const ELASTANCES: [f64; 2] = [1e-3, 3e-3];
 const RESTS: [f64; 2] = [4_000.0, 6_000.0];
 const ZERO_HEAD: f64 =
     (ELASTANCES[0] * RESTS[0] + ELASTANCES[1] * RESTS[1]) / (ELASTANCES[0] + ELASTANCES[1]);
-/// Wide beside the resting head, so the smooth parts add a twentieth of the mixing exchange each way.
 const WIDTH: f64 = 0.5;
 const DIFFUSING: [f64; 2] = [25.0, 100.0];
 const PER_AMOUNT: f64 = 0.1;
