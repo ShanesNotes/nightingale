@@ -98,6 +98,7 @@ const BREATHING: Case = Case {
 /// The run's length in seconds with a breath: the alveolar gas's slowest mode is near seventy seconds.
 const BREATHING_SETTLED: u64 = 900;
 const BREATHS: usize = 4;
+const WORK_SPEED: f64 = 0.05;
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     let origin = Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?);
@@ -230,6 +231,7 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         };
         exchange(&mut laws, &ports, &ventilation, &plasma)?;
         ventilation.pleural(&mut laws, &ports)?;
+        ventilation.work(&mut laws, &ports)?;
         body.add(laws.finish());
         body.compile()
     })
@@ -285,6 +287,8 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Volume>(p, "rs.wall-rest-rise", UPRIGHT_WALL_REST_RISE)?;
     set::<Length>(p, "rs.trunk-length", CAROTID_ABOVE_VESSEL)?;
     set::<Pressure>(p, "ms.pump-pressure", unit.pump)?;
+    set::<Rate<Energy>>(p, "rs.work-mean", stated_work(unit))?;
+    set::<Rate<Dimensionless>>(p, "rs.work-speed", WORK_SPEED)?;
     for (key, value) in [
         ("ms.breath-rate", RATE),
         ("ms.drive-rise", DRIVE[0]),
@@ -341,9 +345,11 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
         }
         RowKind::Memory(slot) if slot.law.local == "mixing share" => unit.initial_mixing_share,
         RowKind::Memory(slot) if slot.law.local == "pump drive" => unit.rest_drive,
+        RowKind::Memory(slot) if slot.law.local == "breath work memory" => stated_work(unit),
         RowKind::Algebraic(slot) if slot.law.local == "chest wall rest volume" => unit.rests[1],
         RowKind::Algebraic(slot) if slot.law.local == "pump_force" => unit.pump * unit.rest_drive,
         RowKind::Algebraic(slot) if slot.law.local == "mixing_share" => unit.initial_mixing_share,
+        RowKind::Algebraic(slot) if slot.law.local == "work_of_breathing" => stated_work(unit),
         RowKind::Memory(_) | RowKind::Algebraic(_) => 0.0,
     };
     let breath = LawName {
@@ -470,6 +476,7 @@ struct Sample {
     volume: f64,
     shares: [f64; 3],
     drive: f64,
+    work: f64,
     held: [f64; 3],
     extents: Vec<f64>,
 }
@@ -485,12 +492,30 @@ fn memory(body: &CompiledBody, local: &str) -> RowId {
         .id()
 }
 
+fn algebraic(body: &CompiledBody, local: &str) -> RowId {
+    (body.rows().iter())
+        .find(|row| matches!(row.kind(), RowKind::Algebraic(slot) if slot.law.local == local))
+        .unwrap_or_else(|| panic!("no algebraic row {local}"))
+        .id()
+}
+
+/// The pump's mean work at the static solution: `(P_1^2 - P_0^2) / 2 (E_L + E_W)` a breath, with `P_0` and `P_1` the
+/// pump's pressure at inspiration's start and end once breaths repeat.
+fn stated_work(unit: Case) -> f64 {
+    let (inspiring, expiring) = (unit.phases[0] / RATE, unit.phases[1] / RATE);
+    let (e_i, e_e) = (exp(-DRIVE[0] * inspiring), exp(-DRIVE[1] * expiring));
+    let end = DRIVE[2] * (1.0 - e_i) / (1.0 - e_i * e_e);
+    let (low, high) = (unit.pump * end * e_e, unit.pump * end);
+    (high * high - low * low) / (2.0 * (ELASTANCES[0] + ELASTANCES[1]) * (inspiring + expiring))
+}
+
 fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
     run(
         unit,
         BREATHING_SETTLED,
         |body, mut session| -> Result<Vec<Sample>, AdmissionError> {
             let (phase, drive) = (memory(body, "breath phase"), memory(body, "pump drive"));
+            let work = algebraic(body, "work_of_breathing");
             let (lung, airway) = (gas_rows(body, LUNG)?, gas_rows(body, AIRWAY)?);
             let columns = every_column(body);
             let mut samples = Vec::new();
@@ -513,6 +538,7 @@ fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
                     volume,
                     shares,
                     drive: now(&session, drive),
+                    work: now(&session, work),
                     held: [0, 1, 2].map(|gas| now(&session, lung[gas]) + now(&session, airway[gas])),
                     extents: Vec::new(),
                 });
@@ -1058,6 +1084,39 @@ fn the_drive_at_the_bodys_rhythm_means_its_rest_value_over_a_breath_and_falls_be
     assert!(
         least < 0.1 * rest_drive,
         "the drive falls only to {least} against its rest value {rest_drive}"
+    );
+    Ok(())
+}
+
+/// The work's memory means what the pump did over whole breaths, which meets the stated mean, the pump's work at the
+/// mechanics' static solution, within twice the 1% of the breath by which the volume follows that solution.
+#[test]
+fn the_work_of_breathing_means_the_pumps_work_over_whole_breaths() -> Result<(), InitializationFailure> {
+    let unit = BREATHING;
+    let samples = breaths(unit)?;
+    let (held, stated) = (mean(&samples, |sample| sample.work), stated_work(unit));
+    assert!(
+        close(held, stated, 2e-2),
+        "the work of breathing means {held} over whole breaths, the stated mean {stated}"
+    );
+    Ok(())
+}
+
+/// While the breath rests the work's memory holds the stated mean, not the pump's work at rest.
+#[test]
+fn at_rest_the_work_of_breathing_is_the_stated_mean() -> Result<(), InitializationFailure> {
+    let unit = Case {
+        pump: 7.2,
+        rest_drive: 0.4,
+        ..AT_REST
+    };
+    let stated = stated_work(unit);
+    let field = run(unit, 1, |body, session| {
+        now(&session, algebraic(body, "work_of_breathing"))
+    })?;
+    assert!(
+        close(field, stated, 1e-12),
+        "at rest the field is {field}, the stated mean {stated}"
     );
     Ok(())
 }

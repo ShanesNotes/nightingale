@@ -1,4 +1,4 @@
-use ng_contract::catalog::{PumpForce, Reads};
+use ng_contract::catalog::{Defines, PumpForce, Reads, WorkOfBreathing};
 use ng_contract::*;
 
 type Bound<'b, U> = Parameter<'b, Respiratory, U>;
@@ -258,6 +258,54 @@ impl<'b> Ventilation<'b> {
             k.finish(value, laws.every_mode(), class)
         });
         laws.define_at(&ports.enclosure_pressure, pressure);
+        Ok(())
+    }
+
+    /// Line 84's work of breathing is a memory of the pump's pressure times the breath's inflow at the room's side,
+    /// `W = P_mus G h+`, so its mean over whole breaths is the pump's. While the breath rests the memory holds the
+    /// breath's stated mean instead, handed over by the mixing share as the mixing exchange is, so the body admits
+    /// paying for the breath it will take. The inflow is read inside the memory's rate: as a row of its own its kink
+    /// at zero flow refused every step.
+    pub fn work(
+        &self,
+        laws: &mut FragmentBuilder<'b, Respiratory>,
+        ports: &RespiratoryPorts<'b>,
+    ) -> Result<(), AdmissionError> {
+        let class = class()?;
+        let key = ParameterKey::new;
+        let line: WorkOfBreathing<Defines<'b, Respiratory>> = laws.emit();
+        let speed = laws.parameter::<Rate<Dimensionless>>(key("rs.work-speed"), Admissible::positive());
+        let stated = laws.parameter::<Rate<Energy>>(key("rs.work-mean"), Admissible::nonnegative());
+        let out = ports.boundary::<Expired<Oxygen>>()?.route;
+        let held = (
+            out.amount::<Oxygen>(),
+            out.amount::<CarbonDioxide>(),
+            out.amount::<NitrogenGas>(),
+        );
+        let memory = laws.state::<Rate<Energy>>("breath work memory", Admissible::nonnegative());
+        let rate = laws.kernel(|mut k| {
+            let airway = (k.read(&held.0), k.read(&held.1), k.read(&held.2));
+            let head = self.dead_space_head(&mut k, airway);
+            let [inward, _] = self.parts(&mut k, head);
+            let g = k.parameter(&self.conductance);
+            let inflow = k.conductance_flow(g, inward);
+            let muscle = self.muscle(&mut k);
+            let product = k.multiply(muscle, inflow);
+            let now = k.as_dimension(product);
+            let (mean, share) = (k.parameter(&stated), k.read(&self.pump.mixing_share));
+            let gap = k.subtract(mean, now);
+            let handed = k.scale(gap, share);
+            let target = k.add(now, handed);
+            let (held, pace) = (k.state(&memory), k.parameter(&speed));
+            let value = k.relax(target, held, pace);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.memory_rate(&memory, rate);
+        let work = laws.kernel(|mut k| {
+            let value = k.state(&memory);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.define(&line.work_of_breathing, work);
         Ok(())
     }
 

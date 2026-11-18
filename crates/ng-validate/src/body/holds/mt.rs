@@ -1,6 +1,6 @@
 use super::super::schema::{CELL_WATER_OUT, FAT_FEED, GLUCOSE_FEED};
 use super::FIXED;
-use ng_contract::catalog::{MyocardialWorkAndBedFlow, PlasmaGases, Reads};
+use ng_contract::catalog::{MyocardialWorkAndBedFlow, PlasmaGases, Reads, WorkOfBreathing};
 use ng_contract::*;
 use ng_metabolism::{GasRoutes, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
 
@@ -37,7 +37,8 @@ pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
     let cells = oxygen_diffusion(&mut laws, &oxygen, oxygen_pressure)?;
     carbon_dioxide_diffusion(&mut laws, &carbon_dioxide, carbon_dioxide_pressure)?;
     let work: MyocardialWorkAndBedFlow<Reads<'_, Metabolism>> = laws.receive();
-    burn(&mut laws, &cells, Some(work))?;
+    let breathing: WorkOfBreathing<Reads<'_, Metabolism>> = laws.receive();
+    burn(&mut laws, &cells, Some(work), Some(breathing))?;
     bed_heat(&mut laws, &ports)?;
     body.add(laws.finish());
     Ok(())

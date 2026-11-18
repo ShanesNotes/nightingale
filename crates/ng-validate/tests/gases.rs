@@ -322,7 +322,7 @@ fn compiled(cells: Cells) -> Result<CompiledBody, AdmissionError> {
             Cells::HeldUse | Cells::HeldUseAtAStatedDebt => {}
             Cells::SecondReader => second_reader(&mut laws, &gases)?,
             Cells::Burning | Cells::BurningUnderTwoCards | Cells::BurningInTheLoop => {
-                burn(&mut laws, &cell_oxygen, None)?
+                burn(&mut laws, &cell_oxygen, None, None)?
             }
             Cells::OneMixedBurn => {
                 let at = Space::Cells;

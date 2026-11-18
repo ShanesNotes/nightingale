@@ -904,10 +904,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1451 {"algebraic": 188, "amount": 1248, "memory": 15}, columns 1458, jacobian nonzeros 10057, blocks 431, parameter slots 722, conserved combinations 399, held pools 319, held route columns 89
-        model hash 3232e55d395ceb6e76ad102d54ded17ba4f45a310d98dd8f929e3fd4886f13a1
+        rows 1453 {"algebraic": 189, "amount": 1248, "memory": 16}, columns 1458, jacobian nonzeros 10072, blocks 431, parameter slots 724, conserved combinations 399, held pools 319, held route columns 89
+        model hash 0d912efcf57f2f79369c056a7a0a68f2158986901a8890cc26714142bb17bcb6
         conserved basis 46b9975bf1364b8364f03f0e9b79a5b884dd7f6a3f419bf8b905493f1e9ceb3e
-        stated packet ff2d6b69e2dc9499ec1eb02f951ce3912d46635758b56fdd0f2c1700493b42cb
+        stated packet f7b499ba05075e93fe640b11567a6d21f466bfdf336abe5c87ea21f0a521a83c
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -983,7 +983,11 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
             Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
         }
         fn element(&self, element: Element, at: &[SiteId]) -> Result<Option<Measure<Atoms>>, AdmissionError> {
-            if element == Element::Hydrogen && at.iter().all(|site| site.key() == "coronary bed") {
+            if element == Element::Hydrogen
+                && at
+                    .iter()
+                    .all(|site| matches!(site.key(), "coronary bed" | "muscle bed"))
+            {
                 return Measure::new(self.payer_hydrogen).map(Some);
             }
             let named = self.elements.iter().find(|(named, _)| *named == element);
@@ -1008,7 +1012,7 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
         ],
         elements: [
             (Element::Carbon, 5e2),
-            (Element::Hydrogen, 2e-4),
+            (Element::Hydrogen, 7e-5),
             (Element::Oxygen, 9e3),
         ],
         payer_hydrogen: 0.2,

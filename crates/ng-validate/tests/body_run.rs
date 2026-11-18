@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "0bfa96e99622a5d7885a590080f9d74990981f95ff491accdca283e74e6612e2";
-const ADMITTED_SEAL: &str = "d85a733c21dc4e8b4077c5ad905abcbe212a3c2f666ce21b7910fb66ea839346";
+const PACKET: &str = "9425c0f70b03fefcd5311bcc7c2e9661c9843b1d05a5a90f437ff03ce61a3923";
+const ADMITTED_SEAL: &str = "81ea6e2034a8a3126028de5f2b6e9b043d44bf3167f3c048f09419d8ce848faa";
 
 struct Counted {
     core: ng_solver::Core,
@@ -334,9 +334,9 @@ fn widen((low, high): (f64, f64), x: f64) -> (f64, f64) {
     (if x < low { x } else { low }, if x > high { x } else { high })
 }
 
-fn paid_by_the_coronary_bed(body: &CompiledBody, terms: &[(RowId, i64)]) -> bool {
+fn paid_by_a_works_payer(body: &CompiledBody, terms: &[(RowId, i64)]) -> bool {
     terms.iter().all(|(row, _)| {
-        matches!(body.rows()[row.index()].kind(), RowKind::Amount { site, .. } if site.key() == "coronary bed")
+        matches!(body.rows()[row.index()].kind(), RowKind::Amount { site, .. } if matches!(site.key(), "coronary bed" | "muscle bed"))
     })
 }
 
@@ -347,6 +347,7 @@ struct Moment {
     aortic: f64,
     alveolar: [f64; 2],
     plasma: [f64; 3],
+    work: f64,
     inventories: Vec<f64>,
 }
 
@@ -356,6 +357,7 @@ struct Watch {
     aortic: RowId,
     lung: [RowId; 3],
     plasma: [RowId; 4],
+    work: RowId,
     books: Vec<(Book, Vec<(RowId, i64)>)>,
     moments: Vec<Moment>,
 }
@@ -372,6 +374,12 @@ impl Watch {
             .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "MS" && slot.law.local == "breath phase"))
             .expect("the breath's phase")
             .id();
+        let algebraic = |local: &str| {
+            (body.rows().iter())
+                .find(|row| matches!(row.kind(), RowKind::Algebraic(slot) if slot.law.owner == "RS" && slot.law.local == local))
+                .unwrap_or_else(|| panic!("no row {local}"))
+                .id()
+        };
         let venous = Context::Edge {
             from: site::<VesselSegment>("central veins"),
             to: site::<VesselSegment>("right atrium"),
@@ -401,7 +409,7 @@ impl Watch {
         };
         let books = (body.conserved_basis().combinations().iter())
             .filter(|combination| BREATHING_BOOKS.contains(&combination.book()))
-            .filter(|combination| !paid_by_the_coronary_bed(body, combination.terms()))
+            .filter(|combination| !paid_by_a_works_payer(body, combination.terms()))
             .map(|combination| (combination.book(), combination.terms().to_vec()))
             .collect();
         Self {
@@ -418,6 +426,7 @@ impl Watch {
                 plasma(Species::Water),
                 find(field("BC", "oxygen partial pressure", Context::Site(lung))),
             ],
+            work: algebraic("work_of_breathing"),
             books,
             moments: Vec::new(),
         }
@@ -438,6 +447,7 @@ impl Watch {
             aortic: at(self.aortic),
             alveolar: [DRY * o / dry, DRY * c / dry],
             plasma: [oxygen / water, carrier / water, pressure],
+            work: at(self.work),
             inventories,
         });
     }
@@ -585,6 +595,24 @@ fn each_breath_swings_the_alveolar_gases_and_venous_return(watch: &Watch) -> Str
     report
 }
 
+/// The work of breathing admits at the breath's stated mean and its memory then follows the pump's work, which over
+/// the minute's last two whole breaths meets the stated mean within 1%: the packet's mechanics leave out only the
+/// heads' smooth width and the gases' net uptake.
+fn the_work_of_breathing_follows_the_pump_from_the_stated_mean(watch: &Watch) -> String {
+    let edges = watch.edges();
+    let (from, to) = (edges[edges.len() - 3], edges[edges.len() - 1]);
+    let stated = watch.moments[0].work;
+    let held = watch.mean(from, to, |moment| moment.work);
+    assert!(
+        (held - stated).abs() <= 0.01 * stated,
+        "the work of breathing means {held} over the last whole breaths, the stated mean {stated}"
+    );
+    format!(
+        "work of breathing: stated {stated:.1}, over two whole breaths from {:.3} s {held:.1}\n",
+        watch.moments[from].at as f64 / SECOND as f64
+    )
+}
+
 fn the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(watch: &Watch) -> String {
     let highest = (watch.moments.iter())
         .max_by(|a, b| a.alveolar[0].total_cmp(&b.alveolar[0]))
@@ -708,12 +736,12 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT skin bed glucose feed moved
     "#]]
     .assert_eq(&report);
-    let payer = |terms: &[(RowId, i64)]| paid_by_the_coronary_bed(&start.body, terms);
+    let payer = |terms: &[(RowId, i64)]| paid_by_a_works_payer(&start.body, terms);
     let rule = [
         (Book::Energy, false, 2e3, 3e3),
         (Book::Element(Element::Carbon), false, 4e2, 5e2),
         (Book::Element(Element::Oxygen), false, 8e3, 9e3),
-        (Book::Element(Element::Hydrogen), false, 1e-4, 2e-4),
+        (Book::Element(Element::Hydrogen), false, 6e-5, 7e-5),
         (Book::Element(Element::Hydrogen), true, 0.1, 0.2),
         (Book::Of(Species::NitrogenGas), false, 1e4, 2e4),
         (Book::Of(Species::Water), false, 0.03, 0.04),
@@ -938,8 +966,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 0bfa96e99622a5d7885a590080f9d74990981f95ff491accdca283e74e6612e2
-        seal 1958bb1d9a7207182e39c56af2d65ce6021a201571ffc9dec14b0fb52fdaec0a
+        packet 9425c0f70b03fefcd5311bcc7c2e9661c9843b1d05a5a90f437ff03ce61a3923
+        seal cddb24cd8d52758340e975dfb4cd2ec6a1915dcc7f5828750a70ff7801af26b7
         steps 197
         viscosity over its reference at the start 1.000234140
     "#]]
@@ -1974,6 +2002,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     };
     let mut report = each_breath_swings_the_alveolar_gases_and_venous_return(&watch);
     report += &the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(&watch);
+    report += &the_work_of_breathing_follows_the_pump_from_the_stated_mean(&watch);
     the_body_admits_at_06_55(&start);
     the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
     report += &the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
@@ -1986,23 +2015,24 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         breath from 10.001 s: alveolar oxygen 100.452 swinging 3.053, carbon dioxide 28.831 swinging 1.946, venous return's beat means 74.11 to 84.52 around 78.01
         breath from 15.001 s: alveolar oxygen 100.177 swinging 3.042, carbon dioxide 28.896 swinging 1.917, venous return's beat means 74.11 to 84.49 around 78.00
         breath from 20.001 s: alveolar oxygen 99.950 swinging 3.035, carbon dioxide 28.927 swinging 1.905, venous return's beat means 74.11 to 84.50 around 78.00
-        breath from 25.001 s: alveolar oxygen 99.759 swinging 3.032, carbon dioxide 28.942 swinging 1.900, venous return's beat means 74.12 to 84.49 around 78.00
+        breath from 25.001 s: alveolar oxygen 99.759 swinging 3.031, carbon dioxide 28.942 swinging 1.900, venous return's beat means 74.12 to 84.49 around 78.00
         breath from 30.001 s: alveolar oxygen 99.596 swinging 3.049, carbon dioxide 28.952 swinging 1.901, venous return's beat means 74.05 to 84.49 around 78.00
         breath from 35.001 s: alveolar oxygen 99.455 swinging 3.073, carbon dioxide 28.960 swinging 1.903, venous return's beat means 74.06 to 84.49 around 78.00
         breath from 40.001 s: alveolar oxygen 99.332 swinging 3.093, carbon dioxide 28.966 swinging 1.904, venous return's beat means 74.06 to 84.49 around 78.00
         breath from 45.001 s: alveolar oxygen 99.223 swinging 3.111, carbon dioxide 28.973 swinging 1.905, venous return's beat means 74.06 to 84.49 around 78.01
         breath from 50.001 s: alveolar oxygen 99.127 swinging 3.128, carbon dioxide 28.978 swinging 1.907, venous return's beat means 74.06 to 84.49 around 78.01
         highest alveolar oxygen 102.575 (4.103 times P50) at 1.088 s: plasma oxygen pressure 93.084 (3.723 times P50), bound 0.963988 of capacity
-        Energy: worst 1.1300e3, from admission 5.9629e1, steady 1.1307e3, inside a breath 5.6513e2
-        Element(Carbon): worst 4.7475e1, from admission 3.6196e1, steady 4.4207e1, inside a breath 2.0167e2
-        Element(Oxygen): worst 1.8252e3, from admission 1.8235e3, steady 5.2181e1, inside a breath 4.4882e3
-        Element(Hydrogen): worst 5.0578e-5, from admission 1.5859e-5, steady 5.0620e-5, inside a breath 2.5424e-5
-        Of(NitrogenGas): worst 3.4122e3, from admission 3.4115e3, steady 7.6015e1, inside a breath 8.6037e3
+        work of breathing: stated 5300.4, over two whole breaths from 45.001 s 5294.1
+        Energy: worst 1.4148e3, from admission 4.7781e0, steady 1.4156e3, inside a breath 7.0747e2
+        Element(Carbon): worst 4.7451e1, from admission 3.6199e1, steady 4.4182e1, inside a breath 2.0167e2
+        Element(Oxygen): worst 1.8251e3, from admission 1.8235e3, steady 5.2162e1, inside a breath 4.4882e3
+        Element(Hydrogen): worst 3.4414e-5, from admission 7.9390e-6, steady 3.4442e-5, inside a breath 1.7299e-5
+        Of(NitrogenGas): worst 3.4122e3, from admission 3.4115e3, steady 7.6009e1, inside a breath 8.6037e3
         Of(Vasopressin): worst 2.1019e-3, from admission 1.3093e-4, steady 1.3738e-3, inside a breath 1.5313e-2
         two breaths from 60.001 s to 70.001 s
-        Oxygen: in 4589.9398, out 3651.6799, across 950.4730, along 938.9544, gained -1.2213e1
-        CarbonDioxide: in 8.7427, out 686.3416, across -678.3351, along -677.6462, gained 7.3630e-1
-        NitrogenGas: in 17258.1735, out 17246.6710, across 0.0000, along 10.8392, gained 1.1502e1
+        Oxygen: in 4589.9385, out 3651.6895, across 950.4594, along 938.9434, gained -1.2210e1
+        CarbonDioxide: in 8.7427, out 686.3417, across -678.3351, along -677.6463, gained 7.3617e-1
+        NitrogenGas: in 17258.1688, out 17246.6690, across 0.0000, along 10.8367, gained 1.1500e1
     "#]].assert_eq(&report);
     let mut minute = format!(
         "steps {}, solves {}: ordinary {}, landing {}\n",

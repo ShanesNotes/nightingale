@@ -19,8 +19,8 @@ SLICE_KINDS = {"live", "input", "sink"}
 SLICE_REASONED = {"relation", "outside", "unresolved"}
 BODY_TICKETS = range(6, 26)
 SLICE_COUNTS = {"rows": 38, "mapped": 27, "listed unmapped": 11, "incident mapped": 27, "incident unmapped": 1}
-BODY_COUNTS = {"rows": 38, "wire a field": 18, "relations": 5, "hold every field": 15, "wire and hold": 7,
-               "wired fields": 21, "held fields": 30}
+BODY_COUNTS = {"rows": 38, "wire a field": 16, "relations": 5, "hold every field": 17, "wire and hold": 7,
+               "wired fields": 19, "held fields": 32}
 SLICE_LINES = {
     "live": [77, 80, 97],
     "input": [83, 90, 91, 99, 100, 102, 105, 106, 108, 114],
@@ -29,13 +29,15 @@ SLICE_LINES = {
     "outside": [84, 85, 92, 93, 94, 95, 103, 104, 107, 109],
     "unresolved": [111],
 }
-BODY_LIVE = [77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 88, 89, 90, 91, 95, 97, 98, 114]
-BODY_HELD = [92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
+BODY_LIVE = [77, 78, 79, 80, 83, 84, 86, 87, 88, 89, 90, 91, 95, 97, 98, 114]
+BODY_HELD = [81, 85, 92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
 RELATIONS = [82, 96, 99, 101, 104]
 WIRE_AND_HOLD = [78, 79, 87, 89, 90, 95, 114]
 HELD_BY = [
     (78, "flow_per_bed", "CV"),
     (79, "ventricular_wall_stress", "CV"),
+    (81, "pulmonary_capillary_flow", "CV"),
+    (85, "pump_load", "RS"),
     (87, "thermostat_set_point", "NS"),
     (87, "sweat_drive", "NS"),
     (89, "crh_drive", "NS"),
@@ -72,10 +74,8 @@ WIRED_BY = [
     (79, "atrial_wall_stress", 17),
     (80, "capillary_pressure", 6),
     (80, "venous_pressure", 6),
-    (81, "pulmonary_capillary_flow", 10),
     (83, "pulmonary_stretch", 11),
     (84, "work_of_breathing", 10),
-    (85, "pump_load", 10),
     (86, "respiratory_drive", 11),
     (87, "shiver_drive", 12),
     (88, "motor_drive", 11),

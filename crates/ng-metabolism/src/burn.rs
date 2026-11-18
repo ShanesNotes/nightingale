@@ -1,5 +1,5 @@
 use crate::diffusion::CellOxygen;
-use ng_contract::catalog::{Defines, MyocardialWorkAndBedFlow, OxygenDebtPerBed, Reads};
+use ng_contract::catalog::{Defines, MyocardialWorkAndBedFlow, OxygenDebtPerBed, Reads, WorkOfBreathing};
 use ng_contract::*;
 
 type Bed<'b, 'k> = Kernel<'b, 'k, Metabolism, CapillaryBed>;
@@ -19,14 +19,19 @@ struct OxygenRate<'a, 'b> {
     reach: SiteKey<'b, Conductance<Oxygen>>,
     width_share: SiteKey<'b, Dimensionless>,
     work: Option<SiteTerm<'b, Metabolism, Beds<Heart>, Rate<Oxygen>>>,
+    breathing: Option<SiteTerm<'b, Metabolism, Beds<Muscle>, Rate<Oxygen>>>,
 }
 
 impl<'b> OxygenRate<'_, 'b> {
     fn demand<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Rate<Oxygen>> {
         let basal = k.site_parameter(&self.demand);
-        match &self.work {
+        let beating = match &self.work {
             Some(work) => k.add_from(basal, work),
             None => basal,
+        };
+        match &self.breathing {
+            Some(work) => k.add_from(beating, work),
+            None => beating,
         }
     }
 
@@ -47,23 +52,35 @@ impl<'b> OxygenRate<'_, 'b> {
 /// Each bed's cells burn glucose, `glucose + 6 O2 -> 6 CO2 + 6 H2O`, and fatty acids, `fatty acid + 23 O2 -> 16 CO2 +
 /// 16 H2O`, each releasing its energy into the bed's heat. The glucose burn takes a share `s` of the bed's oxygen rate
 /// and the fatty acid burn the rest, so the share fixes the respiratory quotient at `s + 16 (1 - s) / 23`. Given line
-/// 78, the demand of the heart's beds also carries the oxygen of the heart's work, and no other bed reads it.
+/// 78, the demand of the heart's beds also carries the oxygen of the heart's work, and given line 84 the muscle beds'
+/// carries the work of breathing's, since the pump is skeletal muscle. No other bed reads either.
 pub fn burn<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     cells: &CellOxygen<'b>,
     work: Option<MyocardialWorkAndBedFlow<Reads<'b, Metabolism>>>,
+    breathing: Option<WorkOfBreathing<Reads<'b, Metabolism>>>,
 ) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, BURN_NS)?;
     let key = ParameterKey::new;
+    let per = (work.is_some() || breathing.is_some()).then(|| {
+        laws.parameter::<Quotient<Oxygen, Energy>>(key("mt.oxygen-per-energy"), Admissible::positive())
+    });
     let rate = OxygenRate {
         cells,
         demand: laws.site_parameter(key("mt.oxygen-demand"), Admissible::nonnegative()),
         reach: laws.site_parameter(key("mt.oxygen-reach"), Admissible::positive()),
         width_share: laws.site_parameter(key("mt.oxygen-rate-width-share"), Admissible::positive()),
-        work: work.map(|line| {
-            let per = laws.parameter(key("mt.oxygen-per-energy"), Admissible::positive());
+        work: work.zip(per.as_ref()).map(|(line, per)| {
             laws.site_term("heart's work oxygen", |mut k| {
-                let (power, per) = (k.read(&line.myocardial_work), k.parameter(&per));
+                let (power, per) = (k.read(&line.myocardial_work), k.parameter(per));
+                let product = k.multiply(power, per);
+                let oxygen = k.as_dimension(product);
+                k.finish_term(oxygen)
+            })
+        }),
+        breathing: breathing.zip(per.as_ref()).map(|(line, per)| {
+            laws.site_term("breathing work oxygen", |mut k| {
+                let (power, per) = (k.read(&line.work_of_breathing), k.parameter(per));
                 let product = k.multiply(power, per);
                 let oxygen = k.as_dimension(product);
                 k.finish_term(oxygen)
