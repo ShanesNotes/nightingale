@@ -46,7 +46,7 @@ Inferred, not built: a landing that read the crossed guard whose root is earlies
 - With true crossings inside the floor and lines far apart, `[quartic, S(-0.4505)]` lands at 550,028,484 ns in 8 solves, against 550,000,000 ns in 3. Both fire both guards either way.
 - The most seen is 9, against 26 before.
 
-A restart clears the bracket's stall rule. So a landing's trials are bounded by the span over the floor, which is 101 on the body's 10 ms step.
+The bound on a landing's trials is inferred from the code, and no run shows it: a restart clears the bracket's stall rule, so what bounds a landing is the span over the floor plus one, 101 on the body's 10 ms step at a 100 µs floor. The most any run of the checks took is 9.
 
 **What moves.** On main and on the slice, nothing moves. Each run is bit for bit the same as before, with the same steps, solves and refusals: the body's seal is `818f1809` and the slice's is `a50fdfdb`. No pin moves. On `2e1dcb29` the first minute's seal is `0b05ab7d`, and dividing before multiplying in the root did not move it. On `2e1dcb29`, the 845 firings in 61 beats show none lost and none added, with the same order inside every beat. The beat drifts about 1.6 us a beat, reaching 128 us at 60 s, because the rhythm restarts at each landed instant. Two landings of one crossing can each sit anywhere inside the 100 us floor, so they part beat by beat. Measured from the last landed rhythm crossing, every firing but one lands within the floor of the one before this change. The exception is the leg valve's shut at 2.285 s, at 100.88 us. That is the knife-edge guard itself: its gap is shallow, so a small change in the state moves its root a long way. Measured from the beat's start, two landings can part by up to two floors.
 
