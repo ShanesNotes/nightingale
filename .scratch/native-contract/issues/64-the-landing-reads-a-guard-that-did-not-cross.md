@@ -4,7 +4,7 @@ Spec: `crates/ng-contract/src/boundary.rs` (`land`) and `crates/ng-contract/src/
 
 Type: task
 
-Status: claimed
+Status: resolved
 
 Claimed by: nc64-build
 
@@ -23,13 +23,25 @@ Blocked by: none
 
 Inferred, not built: a landing that read the crossed guard whose root is earliest, or the guard that crossed inside the stages, would close in about 3 calls on this step.
 
-- [ ] A probe on main names the step and the guard the landing reads on it
-- [ ] The Answer names that guard and why its gap is at or past zero at the trial's end
-- [ ] The landing reads the guard that crossed, picked from two prototypes: the crossed guard whose root is earliest, and the guard that crossed inside the stages. Each reports solves by kind, ordinary and landing, on the slice and on the whole body
-- [ ] Replay stays exact, and each pin that moves has its sentence
-- [ ] A test fails on today's landing, with its mutant row
-- [ ] Cost lines before and after, on the slice and on the whole body
+- [x] A probe on main names the step and the guard the landing reads on it
+- [x] The Answer names that guard and why its gap is at or past zero at the trial's end
+- [x] The landing reads the guard that crossed, picked from two prototypes: the crossed guard whose root is earliest, and the guard that crossed inside the stages. Each reports solves by kind, ordinary and landing, on the slice and on the whole body
+- [x] Replay stays exact, and each pin that moves has its sentence
+- [x] A test fails on today's landing, with its mutant row
+- [x] Cost lines before and after, on the slice and on the whole body
 
 **Check.** The contract crate's: this ticket changes `ng-contract`.
 
 **Non-goals:** which guards exist, and the accuracy gate.
+
+## Answer
+
+**The guard.** On the commit before body 10's first PR (`2e1dcb29`), the end-systole step spans about 9.87 ms and crosses two guards. The rhythm's systole-to-diastole guard crosses at 27% of the span. The leg-vein valve (leg veins to central veins, open to shut) crosses at 93%, with its gap going from -9.9e-3 at the base to +7.2e-4 at the end. The valve comes first in layout order, so the landing read it. Its gap is past zero at the end of the span because the valve shuts at the end of each beat, with a gap that lies close to zero at a shallow slope. The pulmonary vein's mark moves pressures by about 1e-5 mmHg, and that decides whether the valve's crossing falls inside the span or just after it. Inside the span, every trial where only the rhythm crossed shows the valve below zero. The bracket then stalls and halves, taking 14 to 16 calls on 58 beats. On main, the valve stays below zero at that step's end: the minute has one landing with two guards crossed, and layout order already reads the earlier root there. A probe of every landing named the guard (`~/lanes/logs/ng-wave-4/nc64/`, `probe-*.log`).
+
+**The fix.** The landing reads the crossed guard whose root comes first. The root is placed on a straight line from the last trial that did not cross (the base at first) to the crossed end. Each trial that crosses reads the crossed guards again. Roots less than a floor apart keep stable order, hazards first, so a pair the floor cannot tell apart lands where layout order put it. Two prototypes were tried, the earliest root and the guard first seen in the stages. They agreed exactly: one seal, 14,510 solves, 1,988 landing solves on the dear commit. The earliest root was picked because it needs no change to the quadrature.
+
+**What moves.** On main and on the slice, nothing moves. Each run is bit for bit the same as before: body seal `818f1809`, slice seal `a50fdfdb`, the same steps, solves and refusals. No pin moves. On the dear commit, 845 firings in 61 beats were none lost and none added, with the same order inside every beat. The beat drifts about 1.6 us a beat, reaching 128 us at 60 s. The reason is that the rhythm restarts at each landed instant. Two landings of one crossing can each sit anywhere inside the floor of 100 us, so they part beat by beat. Measured from the last landed rhythm crossing, every firing but one lands within the floor of today's. The exception is the leg valve's shut at 2.285 s, at 100.88 us. That is the knife-edge guard itself, whose shallow gap moves its root more than the state that moves it. Measured from the beat's start, two landings can part by up to two floors.
+
+**Identity.** No declared version or rule names the landing. The declared resolution's event rule is its floor: a crossing is located to within it, and every landing still is. So no model hash, policy digest or run identity moves. A run saved before this change resumes on the new landing under the same identity, and on main and the slice it continues bit for bit.
+
+**Cost.** Lines on the beelink, back to back in one job. On the dear commit the body falls from 5,386.6 M to 5,157.1 M a simulated second: solves go from 15,264 to 14,510, landing solves from 2,745 to 1,988, and steps from 11,794 to 11,797. On main the body moves from 5,174.3 M to 5,175.8 M and the slice from 902.6 M to 903.4 M, at the same counts. With the pulmonary vein's mark on and off, the end-systole step lands in 3 calls on every beat either way, and the minute takes 1,988 landing solves either way.
