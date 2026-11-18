@@ -3,10 +3,11 @@ use ng_contract::*;
 type Bound<'b, U> = Parameter<'b, Respiratory, U>;
 type Memory<'b> = StateSlot<'b, Respiratory, Dimensionless>;
 
-/// One breath is a pass of the phase through inspiration's length, while the pump drive rises toward its peak, and then
-/// expiration's, while it falls. Two positive lengths leave every breath room to end. Admission solves one heartbeat, and a phase that ran free could not return to
-/// itself inside one, so the body admits in `rest`, where the phase rests at zero, the drive at the breath's mean and
-/// the mixing share at the rest share, and a hazard starts the first breath.
+/// One breath is a pass of the phase through inspiration's length, while the pump drive rises toward its
+/// peak, and then expiration's, while it falls. Two positive lengths leave every breath room to end.
+/// Admission solves one heartbeat, and a phase that ran free could not return to itself inside one, so the
+/// body admits in `rest`, where the phase rests at zero, the drive at the breath's mean and the mixing share
+/// at the rest share, and a hazard starts the first breath.
 pub(crate) struct Breath<'b> {
     pub(crate) drive: Memory<'b>,
     pub(crate) share: Memory<'b>,
@@ -19,8 +20,8 @@ impl<'b> Breath<'b> {
     ) -> Result<Self, AdmissionError> {
         let key = ParameterKey::new;
         let [rest, inspiration, expiration] = laws.modes("breath", ["rest", "inspiration", "expiration"]);
-        let phase = laws.state::<Dimensionless>("breath phase", Admissible::finite());
-        let drive = laws.state::<Dimensionless>("pump drive", Admissible::finite());
+        let phase = laws.state::<Dimensionless>("breath phase", Admissible::nonnegative());
+        let drive = laws.state::<Dimensionless>("pump drive", Admissible::nonnegative());
         let share = laws.state::<Dimensionless>("mixing share", Admissible::unit_interval());
         let hazard = laws.state::<Dimensionless>("breath start", Admissible::nonnegative());
         let speed = |laws: &mut FragmentBuilder<'b, Respiratory>, name| -> Bound<'b, Rate<Dimensionless>> {
