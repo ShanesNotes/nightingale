@@ -45,7 +45,7 @@ Tickets 01, 02, 03, 04, 05, 07, 23, 26, 27 and 29 and research tickets 11 to 15 
 | [33](issues/33-the-whole-bodys-tests-hold-more.md) The whole body's tests hold more | nothing | Ticket 06's owed tests and the low notes of nightingale#164's check, before pass 1 is checked |
 | [35](issues/35-the-coronary-bed-leaves-the-map.md) The coronary bed leaves the map | 09 | Ticket 09's earn run did not earn the bed (record 0002); its removal re-groups the body |
 | [36](issues/36-the-whole-body-answers-posture.md) The whole body's filtration and output answer posture the wrong way | nothing | The slice's posture checks fail on the whole body, before and after arrow 78 |
-| [37](issues/37-the-hearts-work-is-summed-where-the-heart-works.md) The heart's work is summed where the heart works | 09 | The contractile store's 21-site row and its memory cost 166.6 M; only two sites contract |
+| [37](issues/37-the-hearts-work-is-summed-where-the-heart-works.md) The heart's work is summed where the heart works | 09 | The contractile store's 21-site row and its memory cost 166.8 M; only two sites contract |
 | [08](issues/08-blood-carries-gases.md) Blood carries the gases | 06, 26, 29, research 11 | Gas loop. Budget: 12%, shared by 08 to 11 |
 | [09](issues/09-tissues-respire.md) Tissues respire | 02, 08, research 11 | Gas loop. Budget: 12%, shared by 08 to 11 |
 | [10](issues/10-lungs-breathe.md) The lungs breathe | 08, 09, research 11, [native-contract 65](../native-contract/issues/65-blood-chemistry-reads-what-it-speciates.md) and [66](../native-contract/issues/66-what-the-gas-loop-works-around.md) | Gas loop. Budget: 12%, shared by 08 to 11 |
