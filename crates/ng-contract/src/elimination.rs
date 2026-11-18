@@ -1033,8 +1033,6 @@ mod tests {
         }
     }
 
-    /// Each group holds one negative zero, in one lane after the first and at one row, beside a positive zero at every
-    /// other row of that lane and values that are not zero in the other lanes.
     #[test]
     fn a_negative_zero_in_any_lane_and_row_gives_its_group_the_ghosts() {
         let mut state = 0x510E_527F_ADE6_82D1;
@@ -1045,7 +1043,7 @@ mod tests {
             let today = plan.factor_closed(&system.values).expect("a pivot");
             let (at_row, at_unknown) = plan.places();
             let mut marks = Marks::new(size);
-            for lane in 1..LANES {
+            for (lane, turned) in turned.iter_mut().enumerate().skip(1) {
                 let mut sides = Vec::with_capacity(size * LANES);
                 for row in 0..size {
                     for at in 0..LANES {
@@ -1063,7 +1061,10 @@ mod tests {
                         grouped(&today, &sides, reached, &mut marks),
                     );
                     for (kept, had) in kept.iter().zip(&had) {
-                        assert!(same_bits(kept, had), "lane {lane} keeps the symmetric plan's bits");
+                        assert!(
+                            same_bits(kept, had),
+                            "lane {lane} keeps the symmetric plan's bits"
+                        );
                     }
                 }
                 let had = grouped(&today, &sides, false, &mut marks);
@@ -1074,12 +1075,15 @@ mod tests {
                     }
                     super::walk(&plan.own, &own.lu, None, &mut pivoted);
                     let bare: Vec<f64> = (0..size).map(|unknown| pivoted[at_unknown[unknown]][0]).collect();
-                    turned[lane] += usize::from(at_row[row] > 0 && !same_bits(&bare, had));
+                    *turned += usize::from(at_row[row] > 0 && !same_bits(&bare, had));
                 }
             }
         }
         for (lane, turned) in turned.iter().enumerate().skip(1) {
-            assert!(*turned > 0, "a ghost turns a negative zero in lane {lane} after the first row");
+            assert!(
+                *turned > 0,
+                "a ghost turns a negative zero in lane {lane} after the first row"
+            );
         }
     }
 
