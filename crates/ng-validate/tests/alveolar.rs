@@ -30,14 +30,11 @@ const SETTLED: u64 = 240;
 const TOLERANCE: f64 = 1e-6;
 const DEAD_SPACE: (f64, f64) = (1e-2, 500.0);
 
-/// The breath's synthetic rhythm: a rate, the phase at which inspiration ends, the pump drive's rise and fall speeds
-/// and its peak.
 const RATE: f64 = 0.2;
 const INSPIRATION_END: f64 = 0.4;
 const DRIVE: [f64; 3] = [1.5, 2.0, 1.0];
-/// Sitting up raises the chest wall's relaxed volume by this much; the carotid sinus sits this far up the trunk.
-const WALL_RISE: f64 = 2_000.0;
-const TRUNK: f64 = 0.3;
+const UPRIGHT_WALL_REST_RISE: f64 = 2_000.0;
+const CAROTID_ABOVE_VESSEL: f64 = 0.3;
 
 #[derive(Clone, Copy)]
 struct Case {
@@ -131,7 +128,11 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     };
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin()?).id();
-    let raised = Position::new(Measure::new(TRUNK)?, Measure::new(0.0)?, Measure::new(0.0)?);
+    let raised = Position::new(
+        Measure::new(CAROTID_ABOVE_VESSEL)?,
+        Measure::new(0.0)?,
+        Measure::new(0.0)?,
+    );
     let airway = map.site::<TissueSite>(AIRWAY, raised).id();
     let lung_site = map.site::<CapillaryBed>(LUNG, origin()?);
     let lung = lung_site.id();
@@ -251,8 +252,8 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Elastance>(p, "rs.wall-elastance", ELASTANCES[1])?;
     set::<Volume>(p, "rs.lung-rest-volume", unit.rests[0])?;
     set::<Volume>(p, "rs.wall-rest-volume", unit.rests[1])?;
-    set::<Volume>(p, "rs.wall-rest-rise", WALL_RISE)?;
-    set::<Length>(p, "rs.trunk-length", TRUNK)?;
+    set::<Volume>(p, "rs.wall-rest-rise", UPRIGHT_WALL_REST_RISE)?;
+    set::<Length>(p, "rs.trunk-length", CAROTID_ABOVE_VESSEL)?;
     set::<Pressure>(p, "rs.pump-pressure", unit.pump)?;
     for (key, value) in [
         ("rs.breath-rate", RATE),
@@ -337,7 +338,6 @@ fn sitting_up() -> Result<Vec<BoundaryEvent>, AdmissionError> {
     )])
 }
 
-/// Admits `unit`, runs it `seconds`, and hands the body and the running session to `then`.
 fn run<T>(
     unit: Case,
     seconds: u64,
@@ -386,16 +386,23 @@ fn gas_rows(body: &CompiledBody, key: &str) -> Result<[RowId; 3], AdmissionError
     Ok([o?, c?, n?])
 }
 
-/// The gas space's volume and each gas's share of it.
-fn gas_space(unit: Case, session: &Session<'_, Running>, rows: [RowId; 3]) -> (f64, [f64; 3]) {
+struct GasSpace {
+    volume: f64,
+    shares: [f64; 3],
+}
+
+fn gas_space(unit: Case, session: &Session<'_, Running>, rows: [RowId; 3]) -> GasSpace {
     let [vo, vc, vn] = unit.molar_volume;
     let parts = [
         now(session, rows[0]) * vo,
         now(session, rows[1]) * vc,
         now(session, rows[2]) * vn,
     ];
-    let total: f64 = parts.iter().sum();
-    (total, parts.map(|part| part / total))
+    let volume: f64 = parts.iter().sum();
+    GasSpace {
+        volume,
+        shares: parts.map(|part| part / volume),
+    }
 }
 
 fn settled(unit: Case) -> Result<Settled, InitializationFailure> {
@@ -403,15 +410,15 @@ fn settled(unit: Case) -> Result<Settled, InitializationFailure> {
         unit,
         SETTLED,
         |body, session| -> Result<Settled, AdmissionError> {
-            let (alveolar_volume, alveolar) = gas_space(unit, &session, gas_rows(body, LUNG)?);
-            let (dead_volume, dead) = gas_space(unit, &session, gas_rows(body, AIRWAY)?);
+            let alveolar = gas_space(unit, &session, gas_rows(body, LUNG)?);
+            let dead = gas_space(unit, &session, gas_rows(body, AIRWAY)?);
             let plasma =
                 |species| amount_row(body, LUNG, species, Space::Plasma).map(|row| now(&session, row));
             Ok(Settled {
-                alveolar_volume,
-                dead_volume,
-                alveolar,
-                dead,
+                alveolar_volume: alveolar.volume,
+                dead_volume: dead.volume,
+                alveolar: alveolar.shares,
+                dead: dead.shares,
                 plasma: [
                     PER_AMOUNT * plasma(Species::Oxygen)?,
                     PER_AMOUNT * plasma(Species::CarbonDioxide)?,
@@ -422,7 +429,6 @@ fn settled(unit: Case) -> Result<Settled, InitializationFailure> {
     .map_err(InitializationFailure::Admission)
 }
 
-/// One accepted step of a breathing run.
 struct Sample {
     at: f64,
     volume: f64,
@@ -432,8 +438,6 @@ struct Sample {
     extents: Vec<f64>,
 }
 
-/// Every accepted step over the last `BREATHS` whole breaths of a settled breathing run, edge to edge: the first and
-/// the last sample sit on breath edges, where the phase resets.
 fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
     run(
         unit,
@@ -461,7 +465,7 @@ fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
                 if edges == 0 {
                     continue;
                 }
-                let (volume, shares) = gas_space(unit, &session, lung);
+                let GasSpace { volume, shares } = gas_space(unit, &session, lung);
                 let at = session.record().accepted().time().nanoseconds();
                 samples.push(Sample {
                     at: at as f64 / SECOND as f64,
@@ -514,7 +518,6 @@ fn extents(session: &Session<'_, Running>, columns: &[ColumnId], at: u64) -> Vec
     panic!("no segment holds {at}")
 }
 
-/// The time mean of `of` over the samples, by the trapezoid rule.
 fn mean(samples: &[Sample], of: impl Fn(&Sample) -> f64) -> f64 {
     let area: f64 = (samples.windows(2))
         .map(|pair| 0.5 * (of(&pair[0]) + of(&pair[1])) * (pair[1].at - pair[0].at))
@@ -689,7 +692,7 @@ fn sitting_up_raises_the_alveolar_units_resting_volume_by_the_chest_walls_share_
         ..AT_REST
     })?;
     let raised = upright.alveolar_volume - supine.alveolar_volume;
-    let expected = ELASTANCES[1] * WALL_RISE / (ELASTANCES[0] + ELASTANCES[1]);
+    let expected = ELASTANCES[1] * UPRIGHT_WALL_REST_RISE / (ELASTANCES[0] + ELASTANCES[1]);
     assert!(
         close(raised, expected, TOLERANCE),
         "sitting up moved the alveolar unit by {raised}, the chest wall's share of its rise {expected}"

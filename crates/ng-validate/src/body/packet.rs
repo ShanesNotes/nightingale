@@ -1156,7 +1156,7 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     }
     set::<Pressure>(packet, "rs.pump-pressure", body, RHYTHM.pump())?;
     set::<Volume>(packet, "rs.wall-rest-rise", body, 10_000.0)?;
-    set::<Length>(packet, "rs.trunk-length", body, TRUNK)?;
+    set::<Length>(packet, "rs.trunk-length", body, CAROTID_ABOVE_ARTERIES)?;
     Ok(())
 }
 
@@ -1167,12 +1167,8 @@ const WALL_ELASTANCE: f64 = 1.6e-4;
 const WALL_REST: f64 = 75_750.0;
 const MIXING: f64 = 3_240.0;
 const DEAD_SPACE: f64 = 3_400.0;
-/// How far the carotid sinus sits up the trunk from the systemic arteries, so the rise over it is the trunk's sine.
-const TRUNK: f64 = 0.2;
+const CAROTID_ABOVE_ARTERIES: f64 = 0.2;
 
-/// The breath's synthetic rhythm: a rate in breaths a second, the phase at which inspiration ends, and the speeds at
-/// which the pump drive rises toward its peak and falls toward zero. The pump's pressure and the chest wall's relaxed
-/// volume are fitted to it, so the body admits at rest where it breathes on average.
 struct Rhythm {
     rate: f64,
     inspiration_end: f64,
@@ -1201,7 +1197,6 @@ impl Rhythm {
         let end = self.peak * (1.0 - e_i) / (1.0 - e_i * e_e);
         (end * e_e, end, inspiring, expiring)
     }
-    /// The drive's mean over a breath, at which the rest mode holds it.
     fn mean_drive(&self) -> f64 {
         let (start, end, inspiring, expiring) = self.ends();
         let rising =

@@ -233,8 +233,7 @@ impl<'b> Ventilation<'b> {
     }
 
     /// The pleural pressure is the lung's recoil at the mechanics' static solution, `P_pl = -E_L (V - V_L0)` with
-    /// `V - V_L0 = (E_W (V_W0 - V_L0) + P_mus) / (E_L + E_W)`, so `P_pl = P_pl,rest - E_L / (E_L + E_W) P_mus`. It is
-    /// not the chest wall's recoil at the lung's volume: a body that read the volume did not admit.
+    /// `V - V_L0 = (E_W (V_W0 - V_L0) + P_mus) / (E_L + E_W)`, so `P_pl = P_pl,rest - E_L / (E_L + E_W) P_mus`.
     pub fn pleural(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,

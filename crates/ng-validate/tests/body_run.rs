@@ -318,6 +318,14 @@ const BREATHING_BOOKS: [Book; 6] = [
 ];
 const DRY: f64 = 650.0;
 
+/// The most an inventory moved over the ten seconds from admission, over any ten seconds from twenty seconds on, and
+/// inside one whole breath from twenty seconds on.
+struct Figures {
+    from_admission: f64,
+    steady: f64,
+    inside_a_breath: f64,
+}
+
 fn larger(a: f64, b: f64) -> f64 {
     if b > a { b } else { a }
 }
@@ -332,7 +340,6 @@ fn paid_by_the_coronary_bed(body: &CompiledBody, terms: &[(RowId, i64)]) -> bool
     })
 }
 
-/// One accepted step of the first minute.
 struct Moment {
     at: u64,
     phase: f64,
@@ -343,7 +350,6 @@ struct Moment {
     inventories: Vec<f64>,
 }
 
-/// What the first minute shows of each breath, read at every accepted step.
 struct Watch {
     phase: RowId,
     venous: RowId,
@@ -435,31 +441,25 @@ impl Watch {
             inventories,
         });
     }
-    /// The moments at which a breath ends, where its phase resets.
     fn edges(&self) -> Vec<usize> {
         (1..self.moments.len())
             .filter(|&at| self.moments[at].phase < self.moments[at - 1].phase)
             .collect()
     }
-    /// The moments at which a beat begins: the aortic valve opens after a closure at least half the longest.
     fn onsets(&self) -> Vec<usize> {
         let mut openings = Vec::new();
         let mut closed: Option<usize> = None;
         for (at, moment) in self.moments.iter().enumerate() {
             match (moment.aortic > 0.0, closed) {
                 (true, Some(since)) => {
-                    openings.push((at, moment.at - self.moments[since].at));
+                    openings.push((at as u64, moment.at - self.moments[since].at));
                     closed = None;
                 }
                 (false, None) => closed = Some(at),
                 _ => {}
             }
         }
-        let longest = openings.iter().map(|(_, shut)| *shut).max().unwrap_or(0);
-        (openings.iter())
-            .filter(|(_, shut)| 2 * shut >= longest)
-            .map(|(at, _)| *at)
-            .collect()
+        onsets(&openings).into_iter().map(|at| at as usize).collect()
     }
     fn mean(&self, from: usize, to: usize, of: impl Fn(&Moment) -> f64) -> f64 {
         let moments = &self.moments[from..=to];
@@ -468,9 +468,7 @@ impl Watch {
             .sum();
         area / (moments[moments.len() - 1].at - moments[0].at) as f64
     }
-    /// For each of the breathing books: the most an inventory moved over the ten seconds from admission, over any ten
-    /// seconds from twenty seconds on, and inside one whole breath from twenty seconds on.
-    fn figures(&self) -> Vec<(Book, [f64; 3])> {
+    fn figures(&self) -> Vec<(Book, Figures)> {
         let steady = (self.moments.iter())
             .position(|moment| moment.at >= 20 * SECOND)
             .expect("twenty seconds");
@@ -503,7 +501,15 @@ impl Watch {
                         most[2] = larger(most[2], high - low);
                     }
                 }
-                (book, most)
+                let [from_admission, steady, inside_a_breath] = most;
+                (
+                    book,
+                    Figures {
+                        from_admission,
+                        steady,
+                        inside_a_breath,
+                    },
+                )
             })
             .into_iter()
             .collect()
@@ -579,8 +585,6 @@ fn each_breath_swings_the_alveolar_gases_and_venous_return(watch: &Watch) -> Str
     report
 }
 
-/// Ticket 08's check: at the minute's highest alveolar oxygen pressure the pulmonary bed's plasma holds its oxygen
-/// under hemoglobin's capacity plus what dissolves.
 fn the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(watch: &Watch) -> String {
     let highest = (watch.moments.iter())
         .max_by(|a, b| a.alveolar[0].total_cmp(&b.alveolar[0]))
@@ -729,14 +733,22 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
             .map(|result| lead(result.worst_drift()).abs())
             .fold(0.0, |most, x| if x > most { x } else { most });
         let breathing = figures.iter().find(|(of, _)| *of == book && !at_payer);
-        if let Some((_, [start, steady, swing])) = breathing {
+        if let Some((
+            _,
+            Figures {
+                from_admission: start,
+                steady,
+                inside_a_breath: swing,
+            },
+        )) = breathing
+        {
             writeln!(
                 report,
                 "{book:?}: worst {worst:.4e}, from admission {start:.4e}, steady {steady:.4e}, inside a breath {swing:.4e}"
             )
             .expect("a string takes it");
         }
-        let figure = breathing.map_or(worst, |(_, [.., swing])| larger(worst, *swing));
+        let figure = breathing.map_or(worst, |(_, figures)| larger(worst, figures.inside_a_breath));
         assert!(
             below < 2.0 * figure && 2.0 * figure <= bound,
             "{book:?}: twice the worst ten-second change or the most a breath moves it, {}, rounds up to a figure other than {bound}",
@@ -746,7 +758,6 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
     report
 }
 
-/// Steps from `session` to the end of the next breath, where its phase resets.
 fn to_the_breaths_end<'s>(start: &Start, mut session: Session<'s, Running>) -> Session<'s, Running> {
     let phase = (start.body.rows().iter())
         .find(|row| matches!(row.kind(), RowKind::Memory(slot) if slot.law.owner == "RS" && slot.law.local == "breath phase"))
@@ -1072,7 +1083,9 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &
         .zip(held.iter().zip(&delivered))
     {
         let moved: f64 = (expected.iter())
-            .map(|(index, column)| count(body, *column, |_, species, _| species == *gas) * (to[*index] - from[*index]))
+            .map(|(index, column)| {
+                count(body, *column, |_, species, _| species == *gas) * (to[*index] - from[*index])
+            })
             .sum();
         assert!(
             (delivered - held - moved).abs() <= 1e-9 * held,
@@ -1351,7 +1364,6 @@ fn only_the_core_store_takes_the_beds_heat_but_its_burns_and_the_work_it_pays(
     }
 }
 
-/// The gas a species holds in the blood and the tissues, outside the airway's and the alveolar unit's gas.
 fn outside_the_gas(start: &Start, session: &Session<'_, Running>, gas: Species) -> f64 {
     let view = session.record().accepted();
     (start.body.rows().iter())
