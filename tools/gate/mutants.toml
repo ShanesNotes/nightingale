@@ -1452,6 +1452,13 @@ new = '''true'''
 test = "-p ng-contract --lib elimination::tests::own_keeps_every_bit_of_the_symmetric_plan"
 
 [[mutant]]
+name = "ghost-gate-reads-lane-zero"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''.fold(false, |found, value| found | (value.to_bits() == NEGATIVE_ZERO))'''
+new = '''.step_by(L).fold(false, |found, value| found | (value.to_bits() == NEGATIVE_ZERO))'''
+test = "-p ng-contract --lib elimination::tests::a_negative_zero_in_any_lane_and_row_gives_its_group_the_ghosts"
+
+[[mutant]]
 name = "zero-term-skips-the-right-side"
 path = "crates/ng-contract/src/ring.rs"
 old = '''                                if !holds_right

@@ -1033,6 +1033,56 @@ mod tests {
         }
     }
 
+    /// Each group holds one negative zero, in one lane after the first and at one row, beside a positive zero at every
+    /// other row of that lane and values that are not zero in the other lanes.
+    #[test]
+    fn a_negative_zero_in_any_lane_and_row_gives_its_group_the_ghosts() {
+        let mut state = 0x510E_527F_ADE6_82D1;
+        let mut turned = [0_usize; LANES];
+        for (system, plan) in systems(&mut state) {
+            let size = system.a.len();
+            let own = plan.factor(&system.values).expect("a pivot");
+            let today = plan.factor_closed(&system.values).expect("a pivot");
+            let (at_row, at_unknown) = plan.places();
+            let mut marks = Marks::new(size);
+            for lane in 1..LANES {
+                let mut sides = Vec::with_capacity(size * LANES);
+                for row in 0..size {
+                    for at in 0..LANES {
+                        let side = (0..size).map(|other| match (at == lane, other == row) {
+                            (true, true) => -0.0,
+                            (true, false) => 0.0,
+                            (false, _) => next(&mut state) + 0.5,
+                        });
+                        sides.push(side.collect::<Vec<f64>>());
+                    }
+                }
+                for reached in [true, false] {
+                    let (kept, had) = (
+                        grouped(&own, &sides, reached, &mut marks),
+                        grouped(&today, &sides, reached, &mut marks),
+                    );
+                    for (kept, had) in kept.iter().zip(&had) {
+                        assert!(same_bits(kept, had), "lane {lane} keeps the symmetric plan's bits");
+                    }
+                }
+                let had = grouped(&today, &sides, false, &mut marks);
+                for (row, (side, had)) in sides.iter().zip(&had).skip(lane).step_by(LANES).enumerate() {
+                    let mut pivoted = vec![[0.0]; size];
+                    for (from, &value) in side.iter().enumerate() {
+                        pivoted[at_row[from]] = [value];
+                    }
+                    super::walk(&plan.own, &own.lu, None, &mut pivoted);
+                    let bare: Vec<f64> = (0..size).map(|unknown| pivoted[at_unknown[unknown]][0]).collect();
+                    turned[lane] += usize::from(at_row[row] > 0 && !same_bits(&bare, had));
+                }
+            }
+        }
+        for (lane, turned) in turned.iter().enumerate().skip(1) {
+            assert!(*turned > 0, "a ghost turns a negative zero in lane {lane} after the first row");
+        }
+    }
+
     #[test]
     fn a_value_that_is_not_finite_factors_as_the_symmetric_plan_does() {
         let mut state = 0xA54F_F53A_5F1D_36F1;
