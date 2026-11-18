@@ -137,12 +137,6 @@ impl Chance {
     pub(crate) fn gap(&self, state: &Candidate, hazard: &HazardLayout) -> f64 {
         state.value(hazard.integral).rounded() - self.thresholds[hazard.stream]
     }
-    /// A landing's gaps read only the guard this returns, so a guard that crossed nothing moves no other
-    /// stream's landing, not even inside the floor.
-    pub(crate) fn crossed<'b>(&self, body: &'b CompiledBody, state: &Candidate) -> Option<&'b HazardLayout> {
-        (body.layout.hazards.iter())
-            .find(|hazard| hazard.armed(&state.modes) && self.gap(state, hazard) >= 0.0)
-    }
     /// Only a guard armed before any guard fires can fire, so walking in stable order decides a race on one
     /// mode variable: the loser did not happen, and it keeps its integral and its draw.
     pub(crate) fn fired(

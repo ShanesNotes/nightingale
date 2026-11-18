@@ -507,14 +507,6 @@ impl VerifiedStep {
     pub fn applied(&self) -> &[InputId] {
         &self.ticket.due
     }
-    /// The first guard in stable order this step's end has crossed, hazards first. The search reads only that guard's
-    /// gap, and any crossing moves the bracket's top, so a landing closes on the earliest crossing of any guard.
-    pub(crate) fn crossed<'b>(
-        &self,
-        problem: &CoupledProblem<'b>,
-    ) -> Result<Option<Trigger<'b>>, TrialFailure> {
-        problem.crossed(&self.ticket, &self.state)
-    }
     pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: Trigger<'_>) -> Result<f64, TrialFailure> {
         problem.gap(&self.ticket, &self.state, guard)
     }

@@ -1,3 +1,4 @@
+use crate::chance::Trigger;
 use crate::identity::{Canonical, Seal};
 use crate::landing::Bracket;
 use crate::pinned::turn;
@@ -1028,16 +1029,17 @@ fn land<T>(
     solved: &mut impl FnMut(&StepTicket) -> Result<(VerifiedStep, T), TrialFailure>,
 ) -> Result<(VerifiedStep, T), TrialFailure> {
     let start = ticket.interval().start();
-    let Some(guard) = passed.0.crossed(problem)? else {
+    let Some(mut guard) = problem.landing_guard(ticket, None, &passed.0)? else {
         return Ok(passed);
     };
     let floor = problem.identity.resolution().minimum_interval_ns();
     let identity = problem.identity.digest();
     let base = problem.gap(ticket, problem.accepted.state(), guard)?;
     let mut bracket = Bracket::new(base, ticket.length_ns(), passed.0.gap(problem, guard)?, floor);
+    let (mut origin_ns, mut bottom_ns, mut bottom) = (0, 0, None);
     let mut top = passed;
     while !bracket.closed() {
-        let length = bracket.aim();
+        let length = origin_ns + bracket.aim();
         let end = start.plus_ns(length).ok_or(ticket.mismatch())?;
         let mut trial = ticket.clone();
         trial.interval = Interval::new(start, end).ok_or(ticket.mismatch())?;
@@ -1045,13 +1047,33 @@ fn land<T>(
         // A refusal drops the bracket: a shorter ticket can be the refused one, because a stage's error is
         // not monotone in its length.
         let step = solved(&trial)?;
-        let crossed = step.0.crossed(problem)?.is_some();
-        bracket.note(length, step.0.gap(problem, guard)?, crossed);
-        if crossed {
-            top = step;
+        let Some(earliest) = problem.landing_guard(ticket, bottom.as_ref(), &step.0)? else {
+            bracket.note(length - origin_ns, step.0.gap(problem, guard)?, false);
+            (bottom_ns, bottom) = (length, Some(step.0));
+            continue;
+        };
+        top = step;
+        if same(earliest, guard) {
+            bracket.note(length - origin_ns, top.0.gap(problem, guard)?, true);
+        } else {
+            guard = earliest;
+            let below = match &bottom {
+                Some(step) => step.gap(problem, guard)?,
+                None => problem.gap(ticket, problem.accepted.state(), guard)?,
+            };
+            origin_ns = bottom_ns;
+            bracket = Bracket::new(below, length - origin_ns, top.0.gap(problem, guard)?, floor);
         }
     }
     Ok((top.0.fire(problem)?, top.1))
+}
+
+fn same(a: Trigger<'_>, b: Trigger<'_>) -> bool {
+    match (a, b) {
+        (Trigger::Hazard(a), Trigger::Hazard(b)) => core::ptr::eq(a, b),
+        (Trigger::Plain(a), Trigger::Plain(b)) => a == b,
+        _ => false,
+    }
 }
 
 const POSTURE: &str = "posture";
