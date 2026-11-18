@@ -916,7 +916,7 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
     );
     expect![[r#"
         rows 1445 {"algebraic": 186, "amount": 1248, "memory": 11}, columns 1422, jacobian nonzeros 9832, blocks 430, parameter slots 709, conserved combinations 404, held pools 322, held route columns 97
-        model hash 38db058a2ab7540e7c7cf98903451b1fb36daedb9caf69f7fa0ebb2c27c3dfa2
+        model hash e47d61592244ce77dfb80da00c96de34c11b32516232ef7a69fa98003f185256
         conserved basis 0209c7dba8840f794a98530d6d858db650508068452df255358f61d1f0c2eaef
         stated packet 5dc3148703cf43a2885b20558d79ba7948c22d63eae5c7e8f5b575f1bae851c6
     "#]].assert_eq(&pin);

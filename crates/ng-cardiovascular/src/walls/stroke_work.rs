@@ -48,7 +48,7 @@ impl<'b, 'h> Walls<'b, 'h> {
         wave: RateClass,
     ) {
         let line: MyocardialWorkAndBedFlow<Defines<'b, Cardiovascular>> = cv.emit();
-        let store = cv.algebraic::<Energy>("contractile store", Admissible::finite());
+        let store = cv.algebraic::<Energy>("contractile store", Admissible::nonnegative());
         let row = cv.kernel(|mut k| {
             let value = k.algebraic(&store);
             k.finish(value, cv.every_mode(), wave)
@@ -59,7 +59,7 @@ impl<'b, 'h> Walls<'b, 'h> {
             k.finish(value, cv.every_mode(), wave)
         });
         cv.sum_at(&store, row, each);
-        let memory = cv.state::<Rate<Energy>>("work memory", Admissible::finite());
+        let memory = cv.state::<Rate<Energy>>("work memory", Admissible::nonnegative());
         let speed =
             cv.parameter::<Rate<Dimensionless>>(ParameterKey::new("cv.work-speed"), Admissible::positive());
         let rising = cv.kernel(|mut k| {

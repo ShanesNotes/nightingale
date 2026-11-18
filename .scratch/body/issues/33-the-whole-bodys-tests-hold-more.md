@@ -19,4 +19,10 @@ From the independent check of nightingale#164, its second round, in its own word
 - [ ] The fixture does not read the case's end. `assembly_fence.rs` could assert `case.end() > fence`, as `arena_body.rs:1058` does on the slice
 - [ ] Tickets 06 and 56 and the row's name write "the anchor" for the anchor moment. The glossary's Anchor is a target a quantity must meet
 
+From the independent check of nightingale#192: three of the heart's work's choices are caught fast only by the body's pin, because the staged harness starts in systole and has no diastole leg.
+
+- [ ] The work memory's fall in diastole (`cv.work-speed` toward zero), which only the run's whole-beat checks see
+- [ ] The packet's oxygen for each unit of energy, `mt.oxygen-per-energy`, which the run's rest check sees and no staged test does
+- [ ] The paying bed's basal value, the stated 8 less the work's oxygen, which no run test checks
+
 **Non-goals:** any change to the body's model, its packet or its pins. A row budget, which foundation 14 owns.

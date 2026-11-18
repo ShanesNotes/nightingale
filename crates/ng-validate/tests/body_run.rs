@@ -12,7 +12,7 @@ use ng_validate::*;
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
 const PACKET: &str = "14cbba67470036ef8e5fdb324aaf509cb00540c59373e56c442c8f1da38ec4e0";
-const ADMITTED_SEAL: &str = "336bdff017dd881576e7cf4e67bc8e6100acef138bb7631e21f3c1b55e7fedc4";
+const ADMITTED_SEAL: &str = "6b004a5782b27f7cdab50dc65301ced712bbaa5d7711b9ac12196789f73b961c";
 
 struct Counted {
     core: ng_solver::Core,
@@ -488,7 +488,7 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
     );
     expect![[r#"
         packet 14cbba67470036ef8e5fdb324aaf509cb00540c59373e56c442c8f1da38ec4e0
-        seal f848173f1b18f559e4a1b90d3a6367d827bbb79d438fef7185a4400504ec680f
+        seal 9d6bccbb0bea881937e368758797222ceeb7e1aa099e2e8bcf82846d8e9ca5c4
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
@@ -739,7 +739,8 @@ struct Burned {
     carbon_dioxide: f64,
     lung_bed_carbon_dioxide: f64,
     energy: f64,
-    heat_out: f64,
+    to_core: f64,
+    work: f64,
 }
 
 fn burned(body: &CompiledBody, columns: &[ColumnId], from: &[f64], to: &[f64]) -> Burned {
@@ -747,13 +748,18 @@ fn burned(body: &CompiledBody, columns: &[ColumnId], from: &[f64], to: &[f64]) -
     let bed_thermal = |site: SiteId, species, space| {
         species == Species::Energy && space == Space::Thermal && site.key().ends_with(" bed")
     };
+    let core = site::<TissueSite>("body");
+    let core_thermal = |site: SiteId, species: Species, space: Space| {
+        site == core && species == Species::Energy && space == Space::Thermal
+    };
     let mut burned = Burned {
         oxygen: 0.0,
         lung_bed_oxygen: 0.0,
         carbon_dioxide: 0.0,
         lung_bed_carbon_dioxide: 0.0,
         energy: 0.0,
-        heat_out: 0.0,
+        to_core: 0.0,
+        work: 0.0,
     };
     for column in columns {
         let moved = to[column.index()] - from[column.index()];
@@ -767,8 +773,10 @@ fn burned(body: &CompiledBody, columns: &[ColumnId], from: &[f64], to: &[f64]) -
                 burned.lung_bed_oxygen += oxygen;
                 burned.lung_bed_carbon_dioxide += made;
             }
-        } else {
-            burned.heat_out -= count(body, *column, bed_thermal) * moved;
+        } else if pays_work(body, *column) {
+            burned.work -= count(body, *column, bed_thermal) * moved;
+        } else if count(body, *column, bed_thermal) < 0.0 {
+            burned.to_core += count(body, *column, core_thermal) * moved;
         }
     }
     burned
@@ -776,6 +784,77 @@ fn burned(body: &CompiledBody, columns: &[ColumnId], from: &[f64], to: &[f64]) -
 
 fn pays_work(body: &CompiledBody, column: ColumnId) -> bool {
     ["stroke work", "wall work"].contains(&body.columns()[column.index()].origin().local)
+}
+
+#[test]
+fn the_heat_report_credits_each_column_only_what_it_puts_in_the_core() {
+    let body = whole_body().expect("compiles");
+    let columns = every_column(&body);
+    let core = site::<TissueSite>("body");
+    let (mut works, mut transfers) = (0, 0);
+    for column in &columns {
+        let from = vec![0.0; columns.len()];
+        let mut to = from.clone();
+        to[column.index()] = 1.0;
+        let credited = burned(&body, &columns, &from, &to).to_core;
+        let into_core = count(&body, *column, |site, species, space| {
+            site == core && species == Species::Energy && space == Space::Thermal
+        });
+        let from_beds = count(&body, *column, |site, species, space| {
+            site.key().ends_with(" bed") && species == Species::Energy && space == Space::Thermal
+        });
+        if pays_work(&body, *column) {
+            assert_eq!(credited, 0.0, "a work column is credited {credited} at the core");
+            works += 1;
+        } else if !burns(&body, *column) && from_beds < 0.0 {
+            assert_eq!(
+                credited, into_core,
+                "a bed's heat column is credited {credited} for {into_core}"
+            );
+            transfers += 1;
+        }
+    }
+    assert_eq!(works, 22);
+    assert!(
+        transfers >= 11,
+        "{transfers} columns move a bed's heat to the core"
+    );
+}
+
+#[test]
+fn the_whole_beat_heat_report_counts_what_the_core_receives_from_the_beds() {
+    let start = Start::admitted();
+    let mut openings = Vec::new();
+    let session = beats(&start, start.session(), 3 * SECOND, |session, opened| {
+        if let Some(closed) = opened {
+            openings.push((session.record().accepted().time().nanoseconds(), closed));
+        }
+    });
+    let onsets = onsets(&openings);
+    assert!(onsets.len() >= 2, "no complete beat in {openings:?}");
+    let body = &start.body;
+    let columns = every_column(body);
+    let from = extents(&session, &columns, onsets[0]);
+    let to = extents(&session, &columns, onsets[1]);
+    let core = site::<TissueSite>("body");
+    let mut received = 0.0;
+    for &column in &columns {
+        let from_beds = count(body, column, |site, species, space| {
+            site.key().ends_with(" bed") && species == Species::Energy && space == Space::Thermal
+        });
+        if from_beds < 0.0 {
+            let into_core = count(body, column, |site, species, space| {
+                site == core && species == Species::Energy && space == Space::Thermal
+            });
+            received += into_core * (to[column.index()] - from[column.index()]);
+        }
+    }
+    assert!(received > 0.0);
+    let reported = burned(body, &columns, &from, &to).to_core;
+    assert!(
+        (reported - received).abs() <= 1e-9 * received,
+        "the whole-beat check reports {reported} of bed heat at the core, which received {received}"
+    );
 }
 
 fn only_the_core_store_takes_the_beds_heat_but_its_burns_and_the_work_it_pays(
@@ -992,10 +1071,11 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
     );
     only_the_core_store_takes_the_beds_heat_but_its_burns_and_the_work_it_pays(body, &columns);
     assert!(
-        (beats.heat_out - (beats.energy - stored)).abs() <= 1e-9 * beats.energy,
-        "the core store took {} of heat against {} of fuel energy less {stored} the beds kept",
-        beats.heat_out,
-        beats.energy
+        (beats.to_core - (beats.energy - beats.work - stored)).abs() <= 1e-9 * beats.energy,
+        "the core store took {} of heat against {} of fuel energy less {} of work and {stored} the beds kept",
+        beats.to_core,
+        beats.energy,
+        beats.work
     );
     the_coronary_beds_fuel_pays_the_stroke_work_over_whole_beats(body, &columns, [&beginning, &end], held);
     let kept = sample(last).paying - sample(first).paying;

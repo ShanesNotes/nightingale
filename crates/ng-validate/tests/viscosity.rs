@@ -372,6 +372,37 @@ fn memory(local: &'static str) -> RowKind {
     })
 }
 
+fn refused_at_its_row(kind: RowKind) -> Result<(), InitializationFailure> {
+    let body = whole_body()?;
+    let held = &body.rows()[index(&body, kind)];
+    let lens = body_lens(&body)?;
+    let parameters = body.bind(body_packet(&body)?)?;
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(anchor_moment()).reading(&lens);
+    let system = body.initialization(parameters, port, request)?;
+    let mut trial = system.workspace();
+    let slot = trial.endpoint(0).start + held.id().index();
+    trial.unknowns_mut()[slot] = -1.0;
+    let history = MethodHistory::new(Digest::of_canonical(b"synthetic"), anchor_moment(), Vec::new());
+    assert_eq!(
+        system.admit(trial, history).err(),
+        Some(InitializationFailure::Inconsistent {
+            row: AdmissionRow::Body(held.id()),
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn admission_refuses_negative_myocardial_work_at_its_memory_row() -> Result<(), InitializationFailure> {
+    refused_at_its_row(memory("work memory"))
+}
+
+#[test]
+fn admission_refuses_a_negative_contractile_store_at_its_row() -> Result<(), InitializationFailure> {
+    refused_at_its_row(algebraic("CV", "contractile store", Context::Body))
+}
+
 const BEDS: [&str; 11] = [
     "pulmonary bed",
     "gut bed",

@@ -4415,3 +4415,30 @@ path = "crates/ng-validate/src/body/packet.rs"
 old = '''        if element == Element::Hydrogen && at.iter().all(|site| site.key() == STROKE_PAYER) {'''
 new = '''        if element == Element::Hydrogen {'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
+
+[[mutant]]
+name = "work-memory-admits-below-zero"
+path = "crates/ng-cardiovascular/src/walls/stroke_work.rs"
+old = '''let memory = cv.state::<Rate<Energy>>("work memory", Admissible::nonnegative());'''
+new = '''let memory = cv.state::<Rate<Energy>>("work memory", Admissible::finite());'''
+test = "-p ng-validate --test viscosity admission_refuses_negative_myocardial_work_at_its_memory_row"
+
+[[mutant]]
+name = "contractile-store-admits-below-zero"
+path = "crates/ng-cardiovascular/src/walls/stroke_work.rs"
+old = '''let store = cv.algebraic::<Energy>("contractile store", Admissible::nonnegative());'''
+new = '''let store = cv.algebraic::<Energy>("contractile store", Admissible::finite());'''
+test = "-p ng-validate --test viscosity admission_refuses_a_negative_contractile_store_at_its_row"
+
+[[mutant]]
+name = "heat-report-credits-work-to-the-core"
+path = "crates/ng-validate/tests/body_run.rs"
+old = '''        } else if pays_work(body, *column) {
+            burned.work -= count(body, *column, bed_thermal) * moved;
+        } else if count(body, *column, bed_thermal) < 0.0 {
+            burned.to_core += count(body, *column, core_thermal) * moved;
+        }'''
+new = '''        } else {
+            burned.to_core -= count(body, *column, bed_thermal) * moved;
+        }'''
+test = "-p ng-validate --test body_run the_heat_report_credits_each_column_only_what_it_puts_in_the_core"
