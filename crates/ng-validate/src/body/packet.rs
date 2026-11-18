@@ -953,7 +953,8 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
         // the glomerular bed, whose tone is the kidney's; the lung's vessels answer alveolar oxygen, a later
         // rung's law (ticket 01), not their tissue's debt, so the shunt keeps its share.
         if bed != "liver bed" {
-            let share = if matches!(bed, "peritubular bed" | "pulmonary bed") { 0.0 } else { DEBT_SHARE };
+            let silent = matches!(bed, "peritubular bed" | "pulmonary bed");
+            let share = if silent { 0.0 } else { DEBT_SHARE };
             set::<Dimensionless>(packet, "cv.debt-share", at, share)?;
             set::<Oxygen>(packet, "cv.debt-half", at, used * DEBT_HALF_TIME)?;
         }

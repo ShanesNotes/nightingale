@@ -3662,8 +3662,8 @@ test = "-p ng-validate --test viscosity a_beds_inflow_resistance_falls_with_its_
 [[mutant]]
 name = "peritubular-inflow-widens-with-its-debt"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''let share = if matches!(bed, "peritubular bed" | "pulmonary bed") { 0.0 } else { DEBT_SHARE };'''
-new = '''let share = if bed == "pulmonary bed" { 0.0 } else { DEBT_SHARE };'''
+old = '''let silent = matches!(bed, "peritubular bed" | "pulmonary bed");'''
+new = '''let silent = bed == "pulmonary bed";'''
 test = "-p ng-validate --test viscosity every_beds_inflow_but_the_liver_the_peritubular_and_the_pulmonary_bed_widens_with_its_debt"
 
 [[mutant]]
@@ -4469,8 +4469,8 @@ test = "-p ng-validate --test alveolar the_membrane_moves_each_gas_down_its_own_
 [[mutant]]
 name = "pulmonary-inflow-reads-its-debt"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''            let share = if matches!(bed, "peritubular bed" | "pulmonary bed") { 0.0 } else { DEBT_SHARE };'''
-new = '''            let share = if bed == "peritubular bed" { 0.0 } else { DEBT_SHARE };'''
+old = '''            let silent = matches!(bed, "peritubular bed" | "pulmonary bed");'''
+new = '''            let silent = bed == "peritubular bed";'''
 test = "-p ng-validate --test viscosity the_shunt_keeps_its_fraction_when_the_pulmonary_bed_owes_oxygen"
 
 [[mutant]]

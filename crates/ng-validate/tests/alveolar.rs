@@ -21,7 +21,8 @@ const MIXING: f64 = 5_000.0;
 /// The lung's and the chest wall's elastances and relaxed volumes, apart so their balance is no plain mean.
 const ELASTANCES: [f64; 2] = [1e-3, 3e-3];
 const RESTS: [f64; 2] = [4_000.0, 6_000.0];
-const ZERO_HEAD: f64 = (ELASTANCES[0] * RESTS[0] + ELASTANCES[1] * RESTS[1]) / (ELASTANCES[0] + ELASTANCES[1]);
+const ZERO_HEAD: f64 =
+    (ELASTANCES[0] * RESTS[0] + ELASTANCES[1] * RESTS[1]) / (ELASTANCES[0] + ELASTANCES[1]);
 const WIDTH: f64 = 1e-6;
 const DIFFUSING: [f64; 2] = [25.0, 100.0];
 const PER_AMOUNT: f64 = 0.1;

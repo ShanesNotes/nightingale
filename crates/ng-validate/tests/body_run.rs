@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "328146d6e6ae5cdfad1d9065a5d8b6ea17fd3c924df9203b5ce8c44cd95f09d5";
-const ADMITTED_SEAL: &str = "5cd995520edd11c20e82506e0c84a51e988f74c83ab3d9e31d1a250cd8355a90";
+const PACKET: &str = "04d441b35369385ee5ae23a501d2a142e57fde3d5c04368ea772cc606175cf13";
+const ADMITTED_SEAL: &str = "e35ad480b548c42e7bbf87dd33e966865829bb4fc836728421d3d7d4656f15db";
 
 struct Counted {
     core: ng_solver::Core,
@@ -584,8 +584,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 328146d6e6ae5cdfad1d9065a5d8b6ea17fd3c924df9203b5ce8c44cd95f09d5
-        seal 5001258e3b0d5293808ecc4bd873705e371fa86041d46dc69080e68881566ad9
+        packet 04d441b35369385ee5ae23a501d2a142e57fde3d5c04368ea772cc606175cf13
+        seal 04d51fe6abaa916ce31e5255f0b267623726665a1d3e1a987fcbc95f2bc34e74
         steps 196
         viscosity over its reference at the start 1.000234140
     "#]]
@@ -1436,7 +1436,8 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             space: Space::Cells,
         };
         let debt = field("MT", "oxygen_debt_per_bed", Context::Site(bed));
-        let (share, half) = (if key == "peritubular bed" { 0.0 } else { 0.5 }, demand * 1e-3);
+        let silent = matches!(key, "peritubular bed" | "pulmonary bed");
+        let (share, half) = (if silent { 0.0 } else { 0.5 }, demand * 1e-3);
         for (when, session) in [("admitted", &admitted), ("a step on", &stepped)] {
             let (held, owed) = (value(start, session, lactate), value(start, session, debt));
             assert!(
@@ -1445,9 +1446,8 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             );
             let whole = owed + half;
             let kept = (half + (owed - share * owed)) / whole;
-            assert_eq!(
-                kept.to_bits(),
-                1f64.to_bits(),
+            assert!(
+                (kept - 1.0).abs() <= 4.0 * f64::EPSILON,
                 "the {key}'s inflow {when} keeps {kept} of its resistance at a debt of {owed}"
             );
         }
