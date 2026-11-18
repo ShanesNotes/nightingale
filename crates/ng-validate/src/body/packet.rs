@@ -266,7 +266,7 @@ fn start_guess(row: RowKind) -> f64 {
         RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
-        RowKind::Memory(slot) if slot.law.local == "pump drive" => RHYTHM.mean_drive(),
+        RowKind::Memory(slot) if slot.law.local == "pump drive" => BODY_RHYTHM.mean_drive(),
         RowKind::Memory(_) => 0.0,
         RowKind::Algebraic(slot) => {
             let bed = match slot.at {
@@ -280,7 +280,7 @@ fn start_guess(row: RowKind) -> f64 {
                 "bicarbonate" => blood.bicarbonate,
                 "acidity" => blood.acidity,
                 "oxygen_debt_per_bed" => 0.0,
-                "chest wall rest volume" => RHYTHM.wall_rest(),
+                "chest wall rest volume" => BODY_RHYTHM.wall_rest(),
                 _ => 1.0,
             }
         }
@@ -1127,7 +1127,7 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Elastance>(packet, "rs.lung-elastance", body, LUNG_ELASTANCE)?;
     set::<Elastance>(packet, "rs.wall-elastance", body, WALL_ELASTANCE)?;
     set::<Volume>(packet, "rs.lung-rest-volume", body, 38_250.0)?;
-    set::<Volume>(packet, "rs.wall-rest-volume", body, RHYTHM.wall_rest())?;
+    set::<Volume>(packet, "rs.wall-rest-volume", body, BODY_RHYTHM.wall_rest())?;
     set::<Elastance>(packet, "rs.dead-space-elastance", body, 6.4e-4)?;
     set::<Volume>(packet, "rs.dead-space-volume", body, DEAD_SPACE)?;
     set::<Quotient<Volume, Oxygen>>(packet, "rs.oxygen-volume", body, 1.0)?;
@@ -1136,9 +1136,9 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, 15_600.0)?;
     set::<Rate<Volume>>(packet, "rs.airway-mixing", body, MIXING)?;
     for (key, value) in [
-        ("rs.breath-rate", RHYTHM.rate),
-        ("rs.drive-rise", RHYTHM.rise),
-        ("rs.drive-fall", RHYTHM.fall),
+        ("rs.breath-rate", BODY_RHYTHM.rate),
+        ("rs.drive-rise", BODY_RHYTHM.rise),
+        ("rs.drive-fall", BODY_RHYTHM.fall),
         ("rs.rest-speed", 1.0),
         ("rs.share-fall", 1.0),
         ("rs.breath-start", 1_000.0),
@@ -1146,15 +1146,15 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
         set::<Rate<Dimensionless>>(packet, key, body, value)?;
     }
     for (key, value) in [
-        ("rs.inspiration-length", RHYTHM.inspiration),
-        ("rs.expiration-length", RHYTHM.expiration),
-        ("rs.drive-peak", RHYTHM.peak),
-        ("rs.rest-drive", RHYTHM.mean_drive()),
+        ("rs.inspiration-length", BODY_RHYTHM.inspiration),
+        ("rs.expiration-length", BODY_RHYTHM.expiration),
+        ("rs.drive-peak", BODY_RHYTHM.peak),
+        ("rs.rest-drive", BODY_RHYTHM.mean_drive()),
         ("rs.rest-share", 1.0),
     ] {
         set::<Dimensionless>(packet, key, body, value)?;
     }
-    set::<Pressure>(packet, "rs.pump-pressure", body, RHYTHM.pump())?;
+    set::<Pressure>(packet, "rs.pump-pressure", body, BODY_RHYTHM.pump())?;
     set::<Volume>(packet, "rs.wall-rest-rise", body, 10_000.0)?;
     set::<Length>(packet, "rs.trunk-length", body, CAROTID_ABOVE_ARTERIES)?;
     Ok(())
@@ -1169,16 +1169,18 @@ const MIXING: f64 = 3_240.0;
 const DEAD_SPACE: f64 = 3_400.0;
 const CAROTID_ABOVE_ARTERIES: f64 = 0.2;
 
-struct Rhythm {
-    rate: f64,
-    inspiration: f64,
-    expiration: f64,
-    rise: f64,
-    fall: f64,
-    peak: f64,
+/// The body's breath: a rate, inspiration's and expiration's phase lengths, and the pump drive's rise and fall speeds
+/// and its peak, as the packet states them.
+pub struct BreathRhythm {
+    pub rate: f64,
+    pub inspiration: f64,
+    pub expiration: f64,
+    pub rise: f64,
+    pub fall: f64,
+    pub peak: f64,
 }
 
-const RHYTHM: Rhythm = Rhythm {
+pub const BODY_RHYTHM: BreathRhythm = BreathRhythm {
     rate: 0.2,
     inspiration: 0.4,
     expiration: 0.6,
@@ -1187,7 +1189,7 @@ const RHYTHM: Rhythm = Rhythm {
     peak: 1.0,
 };
 
-impl Rhythm {
+impl BreathRhythm {
     /// The drive at inspiration's start and end once breaths repeat: `a1 = peak (1 - e_i) + a0 e_i` and `a0 = a1 e_e`,
     /// with `e_i` and `e_e` the rise's and the fall's decay over inspiration and expiration.
     fn ends(&self) -> (f64, f64, f64, f64) {
@@ -1196,7 +1198,8 @@ impl Rhythm {
         let end = self.peak * (1.0 - e_i) / (1.0 - e_i * e_e);
         (end * e_e, end, inspiring, expiring)
     }
-    fn mean_drive(&self) -> f64 {
+    /// The drive's mean over a breath, at which the body's rest mode holds it.
+    pub fn mean_drive(&self) -> f64 {
         let (start, end, inspiring, expiring) = self.ends();
         let rising =
             self.peak * inspiring + (start - self.peak) * (1.0 - exp(-self.rise * inspiring)) / self.rise;

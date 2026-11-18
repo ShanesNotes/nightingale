@@ -32,9 +32,9 @@ const TOLERANCE: f64 = 1e-6;
 const DEAD_SPACE_ELASTANCE: f64 = 1e-2;
 const DEAD_SPACE: f64 = 500.0;
 
-const RATE: f64 = 0.2;
-const PHASES: [f64; 2] = [0.4, 0.6];
-const DRIVE: [f64; 3] = [1.5, 2.0, 1.0];
+const RATE: f64 = BODY_RHYTHM.rate;
+const PHASES: [f64; 2] = [BODY_RHYTHM.inspiration, BODY_RHYTHM.expiration];
+const DRIVE: [f64; 3] = [BODY_RHYTHM.rise, BODY_RHYTHM.fall, BODY_RHYTHM.peak];
 const UPRIGHT_WALL_REST_RISE: f64 = 2_000.0;
 const CAROTID_ABOVE_VESSEL: f64 = 0.3;
 
@@ -931,7 +931,7 @@ fn the_whole_breath_carbon_dioxide_check_excludes_an_unmixed_dead_space() -> Res
 
 /// The pleural pressure is the chest wall's recoil less the pump's pressure at the lung's static volume, which the
 /// lung's own recoil equals only there. The lung and the chest wall here have unlike elastances, so a form that took
-/// the wall's elastance for the lung's would miss.
+/// one's elastance for the other's would miss, and sitting up moves the wall's relaxed volume off its supine value.
 #[test]
 fn the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_at_rest_and_off_rest()
 -> Result<(), InitializationFailure> {
@@ -940,8 +940,12 @@ fn the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_a
         rest_drive: 0.5,
         ..AT_REST
     };
-    for unit in [AT_REST, held] {
-        let pleural = run(unit, 1, |body, session| {
+    let upright = Case {
+        upright: true,
+        ..held
+    };
+    for unit in [AT_REST, held, upright] {
+        let pleural = run(unit, 2, |body, session| {
             let site = (body.rows().iter())
                 .find(|row| {
                     matches!(row.kind(), RowKind::Algebraic(slot)
@@ -953,8 +957,9 @@ fn the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_a
         })?;
         let [lung, wall] = ELASTANCES;
         let muscle = unit.pump * unit.rest_drive;
-        let volume = (lung * unit.rests[0] + wall * unit.rests[1] + muscle) / (lung + wall);
-        let expected = wall * (volume - unit.rests[1]) - muscle;
+        let relaxed = unit.rests[1] + if unit.upright { UPRIGHT_WALL_REST_RISE } else { 0.0 };
+        let volume = (lung * unit.rests[0] + wall * relaxed + muscle) / (lung + wall);
+        let expected = wall * (volume - relaxed) - muscle;
         assert!(
             (pleural - expected).abs() <= 1e-9 * expected.abs(),
             "the pleural pressure {pleural} at a pump pressure of {muscle}, the wall's recoil less the pump at the static \
@@ -997,5 +1002,33 @@ fn a_mixing_share_falling_fast_to_zero_raises_no_refusal_at_its_row() -> Result<
     })?;
     assert!(refused.is_empty(), "the share's row refused {refused:?}");
     assert!((0.0..1e-12).contains(&share), "the share stands at {share}");
+    Ok(())
+}
+
+/// The body's rest mode holds the drive at its mean over a breath by the packet's closed form, so once breathing the
+/// drive's measured mean over a whole breath is that closed form, and expiration takes it below its rest value.
+#[test]
+fn the_drive_at_the_bodys_rhythm_means_its_rest_value_over_a_breath_and_falls_below_it()
+-> Result<(), InitializationFailure> {
+    let rest_drive = BODY_RHYTHM.mean_drive();
+    let unit = Case {
+        rest_drive,
+        ..BREATHING
+    };
+    let samples = breaths(unit)?;
+    let edges: Vec<usize> = (1..samples.len())
+        .filter(|&at| !samples[at].extents.is_empty())
+        .collect();
+    let breath = &samples[edges[edges.len() - 2]..=edges[edges.len() - 1]];
+    let measured = mean(breath, |sample| sample.drive);
+    let (least, _) = span(breath, |sample| sample.drive);
+    assert!(
+        (measured - rest_drive).abs() <= 1e-4 * rest_drive,
+        "the drive's mean over a breath {measured}, the packet's closed form {rest_drive}"
+    );
+    assert!(
+        least < 0.1 * rest_drive,
+        "the drive falls only to {least} against its rest value {rest_drive}"
+    );
     Ok(())
 }

@@ -4555,3 +4555,38 @@ path = "crates/ng-validate/src/body/packet.rs"
 old = '''        ("rs.breath-start", 1_000.0),'''
 new = '''        ("rs.breath-start", 0.0),'''
 test = "-p ng-validate --test body_run the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_the_core_receives"
+
+[[mutant]]
+name = "pleural-recoil-reads-the-walls-elastance"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let recoil = k.multiply(el, stretch);'''
+new = '''            let recoil = k.multiply(ew, stretch);'''
+test = "-p ng-validate --test alveolar the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_at_rest_and_off_rest"
+
+[[mutant]]
+name = "pleural-held-term-reads-the-lungs-elastance"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let held = k.multiply(ew, apart);'''
+new = '''            let held = k.multiply(el, apart);'''
+test = "-p ng-validate --test alveolar the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_at_rest_and_off_rest"
+
+[[mutant]]
+name = "pleural-reads-the-supine-relaxed-volume"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''                k.algebraic(&self.wall),'''
+new = '''                k.parameter(&self.wall_rest),'''
+test = "-p ng-validate --test alveolar the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_at_rest_and_off_rest"
+
+[[mutant]]
+name = "expiration-drive-relaxes-to-the-rest-drive"
+path = "crates/ng-respiratory/src/breath.rs"
+old = '''            let (target, now, speed) = (k.zero(), k.state(&drive), k.parameter(&fall));'''
+new = '''            let (target, now, speed) = (k.parameter(&rest_drive), k.state(&drive), k.parameter(&fall));'''
+test = "-p ng-validate --test alveolar the_drive_at_the_bodys_rhythm_means_its_rest_value_over_a_breath_and_falls_below_it"
+
+[[mutant]]
+name = "packet-mean-drive-leaves-out-expiration"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''        (rising + falling) * self.rate'''
+new = '''        rising * self.rate'''
+test = "-p ng-validate --test alveolar the_drive_at_the_bodys_rhythm_means_its_rest_value_over_a_breath_and_falls_below_it"

@@ -9,7 +9,7 @@ Blocked by: 11
 Today's forms, in `crates/ng-respiratory/src/breath.rs`:
 
 - The breath's phase runs at the rate `f`, 0.2 a second, through inspiration's length, 0.4, and then expiration's, 0.6, so inspiration takes 2 s of a 5 s breath.
-- The pump drive `a` relaxes toward its peak, 1, at 1.5 a second through inspiration, and toward zero at 2.0 a second through expiration. The pump's pressure is `P_mus = PImax a`, with `PImax` 3.80, fitted so the breath ventilates the alveolar unit as 10a's mixing exchange does (research 11's pump row holds `PImax`).
+- The pump drive `a` relaxes toward its peak, 1, at 1.5 a second through inspiration, and toward zero at 2.0 a second through expiration. The pump's pressure is `P_mus = PImax a`, with `PImax` 3.8013 in the packet, fitted so the breath ventilates the alveolar unit as 10a's mixing exchange does. No source gives `PImax` a value here: research 11's pump row holds it, and the plan's prototype used 4.
 - The body admits with the breath at rest, the drive held at its mean over a breath by closed form from these values, and a hazard at 1,000 a second starts the first breath.
 
 - [ ] The resting rate and inspiration's share of a breath (the duty cycle `T_I / T_TOT`), awake and supine or seated, with the population and the method, and how each moves asleep. Douglas 1982 and Gothe 1981 report both awake and asleep and were not read for a form
