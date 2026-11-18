@@ -8,8 +8,6 @@ constant_routes! {Respiratory;
     AirwayHeat => "rs.airway-heat",
 }
 
-/// The alveolar unit's gas and its exchange are the respiratory card's own laws. Its stand-ins hold the pleural
-/// pressure until the breath is built, and the water and heat that leave with expired gas.
 pub(super) fn respiratory(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Respiratory>::new(CONSTANT.to_vec(), Vec::new(), FIXED)
         .pool::<Water, Beds<Lung>>(Space::Gas);

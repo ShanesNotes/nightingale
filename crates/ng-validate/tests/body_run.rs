@@ -401,9 +401,6 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
     .assert_eq(&report);
 }
 
-/// Over ten seconds after the first minute, each gas the airway carries closes on the respiratory card's routes: what
-/// the room puts in less what it takes out and what the membrane moves into the pulmonary bed's plasma is what the
-/// dead space and the alveolar unit gained.
 fn each_gas_closes_on_the_airway_the_room_and_the_membrane_over_ten_seconds(
     start: &Start,
     minute: Session<'_, Running>,

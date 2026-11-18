@@ -1,6 +1,5 @@
-//! One alveolar unit behind one airway, on a bed whose vessel holds no blood and whose plasma a held use takes oxygen from and a held production puts carbon
-//! dioxide into at fixed rates, so the respiratory card's airway and membrane meet the alveolar gas equation and the
-//! alveolar ventilation equation with no body admission. Every value is synthetic.
+//! A held use and a held production at fixed rates stand for the blood, so the alveolar gas equation and the
+//! alveolar ventilation equation are checked against closed forms with no body admission.
 
 use core::num::NonZeroU64;
 use ng_contract::*;
@@ -24,7 +23,7 @@ const DIFFUSING: [f64; 2] = [25.0, 100.0];
 const PER_AMOUNT: f64 = 0.1;
 /// The run's length in seconds: the slowest of the unit's settling speeds is near one a second.
 const SETTLED: u64 = 60;
-/// The run's steps settle within this share of each value, far inside what any wrong form moves.
+/// The run settles to about 5e-8 of each value.
 const TOLERANCE: f64 = 1e-6;
 
 #[derive(Clone, Copy)]
@@ -45,7 +44,6 @@ fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, origin).id())
 }
 
-/// The fixture's plasma holds no carrier: each gas's partial pressure is its amount times a held pressure per amount.
 struct Dissolved<'b> {
     oxygen: Parameter<'b, Respiratory, Quotient<Pressure, Oxygen>>,
     carbon_dioxide: Parameter<'b, Respiratory, Quotient<Pressure, CarbonDioxide>>,
@@ -153,9 +151,9 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     })
 }
 
-/// The closed form at a steady state. Every gas crosses the room's side and the airway edge at the same two
-/// coefficients, `A = G h+ + M` in and `B = G h- + M` out, and the net `G h` at each is the net uptake `N = U_O2 -
-/// U_CO2`, so `f_D = (A F_I - U) / B` in the dead space and `f_A = (A f_D - U) / B` in the alveolar unit.
+/// Every gas crosses the room's side and the airway edge at the same two coefficients, `A = G h+ + M` in and
+/// `B = G h- + M` out, and the net `G h` at each is the net uptake, so with `U_i` each gas's uptake into the plasma
+/// `f_D = (A F_I - U) / B` in the dead space and `f_A = (A f_D - U) / B` in the alveolar unit.
 fn closed_form(unit: Case) -> ([f64; 3], [f64; 3]) {
     let (g, m) = (CONDUCTANCE * unit.ventilation, MIXING * unit.ventilation);
     let net = unit.oxygen_use - unit.carbon_dioxide_made;

@@ -1101,8 +1101,6 @@ pub fn body_certificate(
     crate::certificate_with(body, windows, &BodyDrifts)
 }
 
-/// The alveolar unit and its airway: a dry pressure of 650 and room fractions near the room's, with every value
-/// synthetic.
 fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
     let body = Binding::Body;
     for (key, value) in [

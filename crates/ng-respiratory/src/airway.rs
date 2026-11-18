@@ -11,13 +11,11 @@ pub(crate) fn class() -> Result<RateClass, AdmissionError> {
     RateClass::new(RateBand::Beat, 1_000_000_000)
 }
 
-/// One gas's constants: the volume each amount fills, the airway's conductance and mixing exchange for it, and its
-/// share of the room's dry gas.
 pub(crate) struct Gas<'b, Q> {
     volume: Bound<'b, Quotient<Volume, Q>>,
     conductance: Bound<'b, Conductance<Q>>,
     mixing: Bound<'b, Rate<Q>>,
-    inspired: Bound<'b, Dimensionless>,
+    inspired_share: Bound<'b, Dimensionless>,
 }
 
 impl<'b, Q: Substance> Gas<'b, Q> {
@@ -27,12 +25,11 @@ impl<'b, Q: Substance> Gas<'b, Q> {
             volume: laws.parameter(volume, Admissible::positive()),
             conductance: laws.parameter(conductance, Admissible::positive()),
             mixing: laws.parameter(mixing, Admissible::nonnegative()),
-            inspired: laws.parameter(inspired, Admissible::unit_interval()),
+            inspired_share: laws.parameter(inspired, Admissible::unit_interval()),
         }
     }
 }
 
-/// A gas of the dry gas the airway carries and the alveolar unit holds.
 pub(crate) trait Dry: Breathed + Plain + Sized {
     fn gas<'r, 'b>(ventilation: &'r Ventilation<'b>) -> &'r Gas<'b, Self>;
     fn of<'b, 'k>(amounts: Amounts<'b, 'k>) -> Expr<'b, 'k, Respiratory, Self>;
@@ -62,11 +59,8 @@ impl Dry for NitrogenGas {
     }
 }
 
-/// The airway in series with one alveolar unit. Gas moves along the airway edge and across the room's side of the
-/// airway by two terms: bulk flow `G (h+ f_up - h- f_down)`, which carries the upwind end's share, and the mixing
-/// exchange `M (f_up - f_down)`, which stands for the breath until the breath is built. Each end's head is the elastic
-/// recoil of the gas it holds: `-E_L (V - V_L0) - E_W (V - V_W0)` at the alveolar unit, and `E_D (V_D0 - V_D)` at the
-/// dead space, which the room keeps filled.
+/// The room's side reads the dead space's own head, not the alveolar unit's: with the alveolar unit's head there, the
+/// dead space's total is conserved by these laws and nothing sets it.
 pub struct Ventilation<'b> {
     oxygen: Gas<'b, Oxygen>,
     carbon_dioxide: Gas<'b, CarbonDioxide>,
@@ -81,7 +75,6 @@ pub struct Ventilation<'b> {
 }
 
 impl<'b> Ventilation<'b> {
-    /// Declares the airway's laws: each gas along the airway edge, and in and out at the room.
     pub fn declare(
         laws: &mut FragmentBuilder<'b, Respiratory>,
         ports: &RespiratoryPorts<'b>,
@@ -133,7 +126,6 @@ impl<'b> Ventilation<'b> {
         Ok(ventilation)
     }
 
-    /// The dry gas's volume, `sum v_i N_i`.
     fn volume<'k, C>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
@@ -151,7 +143,6 @@ impl<'b> Ventilation<'b> {
         k.add(total, n)
     }
 
-    /// One gas's share of the dry gas, `v_i N_i / sum v_j N_j`.
     pub(crate) fn share<'k, C, Q: Dry>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
@@ -165,7 +156,6 @@ impl<'b> Ventilation<'b> {
         k.as_dimension(share)
     }
 
-    /// The alveolar unit's head, `-E_L (V - V_L0) - E_W (V - V_W0)`, which draws gas in below the resting volume.
     fn alveolar_head<'k, C>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
@@ -187,7 +177,6 @@ impl<'b> Ventilation<'b> {
         k.subtract(zero, recoil)
     }
 
-    /// The dead space's head, `E_D (V_D0 - V_D)`, which the room fills.
     fn dead_space_head<'k, C>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
@@ -203,7 +192,6 @@ impl<'b> Ventilation<'b> {
         k.as_dimension(head)
     }
 
-    /// `h+` and `h-`, a head's inward and outward parts.
     fn parts<'k, C>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
@@ -216,7 +204,6 @@ impl<'b> Ventilation<'b> {
         [inward, outward]
     }
 
-    /// `G (h+ f_up - h- f_down) + M (f_up - f_down)` for one gas.
     fn carried<'k, C, Q: Dry>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
@@ -238,7 +225,6 @@ impl<'b> Ventilation<'b> {
         k.add(bulk, mixed)
     }
 
-    /// Along the airway edge into the alveolar unit, upwind.
     fn along<Q: Dry>(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,
@@ -267,8 +253,6 @@ impl<'b> Ventilation<'b> {
         laws.transfer_along(&route, rate);
     }
 
-    /// At the room's side of the dead space: in, `G h+ F_I + M F_I`; out, `G h- f + M f`, with `f` the dead space's
-    /// share.
     fn room<I, E>(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,
@@ -292,7 +276,7 @@ impl<'b> Ventilation<'b> {
             let airway = (k.read(&held.0), k.read(&held.1), k.read(&held.2));
             let head = self.dead_space_head(&mut k, airway);
             let [inward, _] = self.parts(&mut k, head);
-            let fraction = k.parameter(&gas.inspired);
+            let fraction = k.parameter(&gas.inspired_share);
             let carried = k.scale(inward, fraction);
             let g = k.parameter(&gas.conductance);
             let bulk = k.conductance_flow(g, carried);

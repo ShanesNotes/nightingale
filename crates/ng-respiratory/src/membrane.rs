@@ -20,7 +20,6 @@ pub trait Plasma<'b> {
     ) -> Expr<'b, 'k, Respiratory, Pressure>;
 }
 
-/// On the body, blood chemistry's speciation states the plasma's partial pressures.
 impl<'b> Plasma<'b> for LungGases<Reads<'b, Respiratory>> {
     fn oxygen<'k>(
         &self,
@@ -94,7 +93,6 @@ type Held<'b> = (
     Plasmatic<'b, NitrogenGas>,
 );
 
-/// `(P_B - P_H2O) f_i`, one gas's alveolar partial pressure.
 fn alveolar<'b, 'k, Q: Dry>(
     k: &mut AtLung<'b, 'k>,
     ventilation: &Ventilation<'b>,
