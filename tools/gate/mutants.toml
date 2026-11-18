@@ -3721,8 +3721,8 @@ test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_one
 [[mutant]]
 name = "oxygen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Oxygen, 5.0),'''
-new = '''(Element::Oxygen, 10.0),'''
+old = '''(Element::Oxygen, 0.6),'''
+new = '''(Element::Oxygen, 1.2),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -3756,8 +3756,8 @@ test = "-p ng-validate --test body each_beds_burns_carry_their_fuels_atoms_and_e
 [[mutant]]
 name = "carbon-element-drift-bound-tightened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Carbon, 0.9),'''
-new = '''(Element::Carbon, 0.45),'''
+old = '''(Element::Carbon, 0.2),'''
+new = '''(Element::Carbon, 0.1),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
