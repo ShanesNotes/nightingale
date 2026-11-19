@@ -1,5 +1,6 @@
 use super::{FIXED, hours};
 use ng_contract::*;
+use ng_musculoskeletal::breathe;
 
 const SKIN_WATER: &str = "skin water";
 
@@ -19,7 +20,22 @@ pub(super) fn musculoskeletal(body: &mut Assembly<'_>) -> Result<(), AdmissionEr
         .pool::<Calcium, CapillaryBed>(Space::Interstitium)
         .pool::<Magnesium, CapillaryBed>(Space::Interstitium)
         .pool::<Phosphate, CapillaryBed>(Space::Interstitium);
-    let (mut laws, ports) = body.hold(declaration)?.parts();
+    let mut held = body.hold(declaration)?;
+    {
+        let (laws, ports) = held.stand_ins();
+        stand_ins(laws, ports)?;
+    }
+    let (mut laws, _) = body.musculoskeletal(Some(held))?.parts();
+    breathe(&mut laws)?;
+    body.add(laws.finish());
+    Ok(())
+}
+
+/// Held until the fluids move the skin's water (ticket 17).
+fn stand_ins<'b>(
+    laws: &mut FragmentBuilder<'b, Musculoskeletal>,
+    ports: &HeldPorts<'b, Musculoskeletal>,
+) -> Result<(), AdmissionError> {
     let BoundaryRoute { route, .. } = ports.route::<Water>(SKIN_WATER)?;
     let steady = laws.parameter::<Rate<Water>>(ParameterKey::new("ms.skin-water"), Admissible::nonnegative());
     let wandering = laws.forcing(
@@ -50,6 +66,5 @@ pub(super) fn musculoskeletal(body: &mut Assembly<'_>) -> Result<(), AdmissionEr
     laws.memory_rate(&integral, accruing);
     laws.memory_rate(&integral, spent);
     laws.hazard(HazardGuard::new(&integral, &dice, still.to(&stirred)?));
-    body.add(laws.finish());
     Ok(())
 }

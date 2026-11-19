@@ -270,6 +270,9 @@ name = "ng-blood-chemistry"
 name = "ng-metabolism"
 
 [[crate]]
+name = "ng-musculoskeletal"
+
+[[crate]]
 name = "ng-respiratory"
 
 [[crate]]

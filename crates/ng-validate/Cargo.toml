@@ -12,6 +12,7 @@ ng-contract = { path = "../ng-contract" }
 ng-fluids = { path = "../ng-fluids" }
 ng-hematology = { path = "../ng-hematology" }
 ng-metabolism = { path = "../ng-metabolism" }
+ng-musculoskeletal = { path = "../ng-musculoskeletal" }
 ng-nervous = { path = "../ng-nervous" }
 ng-observe = { path = "../ng-observe" }
 ng-receptor = { path = "../ng-receptor" }

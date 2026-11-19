@@ -459,13 +459,28 @@ const BEDS: [&str; 11] = [
     "bone bed",
 ];
 
-/// Each bed's cells hold oxygen at 10,000 mmHg, so every oxygen rate sits at its demand and the burns move with the
-/// demand alone.
 #[test]
 fn only_the_coronary_beds_burn_follows_the_hearts_work_and_in_proportion() -> Result<(), InitializationFailure>
 {
+    only_the_payers_burn_follows("CV", "myocardial_work", "coronary bed", 18_000.0)
+}
+
+#[test]
+fn only_the_muscle_beds_burn_follows_the_work_of_breathing_and_in_proportion()
+-> Result<(), InitializationFailure> {
+    only_the_payers_burn_follows("RS", "work_of_breathing", "muscle bed", 4_000.0)
+}
+
+/// Each bed's cells hold oxygen at 10,000 mmHg, so every oxygen rate sits at its demand and the burns move with the
+/// demand alone.
+fn only_the_payers_burn_follows(
+    owner: &'static str,
+    field: &'static str,
+    payer: &str,
+    step: f64,
+) -> Result<(), InitializationFailure> {
     let body = whole_body()?;
-    let work = index(&body, algebraic("CV", "myocardial_work", Context::Body));
+    let work = index(&body, algebraic(owner, field, Context::Body));
     let oxygen: Vec<usize> = (BEDS.iter())
         .map(|bed| index(&body, cells(bed, Species::Oxygen)))
         .collect();
@@ -473,7 +488,7 @@ fn only_the_coronary_beds_burn_follows_the_hearts_work_and_in_proportion() -> Re
         .map(|bed| (index(&body, cells(bed, Species::Water)), 1_000.0))
         .collect();
     plenty.extend(oxygen.iter().map(|row| (*row, 10_000.0)));
-    let each: Vec<_> = [0.0, 18_000.0, 36_000.0]
+    let each: Vec<_> = [0.0, step, 2.0 * step]
         .iter()
         .map(|w| [plenty.clone(), vec![(work, *w)]].concat())
         .collect();
@@ -483,8 +498,8 @@ fn only_the_coronary_beds_burn_follows_the_hearts_work_and_in_proportion() -> Re
             staged[1][*row] - staged[0][*row],
             staged[2][*row] - staged[0][*row],
         );
-        if *bed == "coronary bed" {
-            assert!(once != 0.0, "the coronary bed's burn ignores the work");
+        if *bed == payer {
+            assert!(once != 0.0, "the {payer}'s burn ignores the {field}");
             assert!(
                 (twice - 2.0 * once).abs() <= 1e-6 * once.abs(),
                 "{once} then {twice}"
@@ -493,7 +508,7 @@ fn only_the_coronary_beds_burn_follows_the_hearts_work_and_in_proportion() -> Re
             assert_eq!(
                 once.to_bits(),
                 0f64.to_bits(),
-                "the {bed}'s burn moves with the work"
+                "the {bed}'s burn moves with the {field}"
             );
         }
     }

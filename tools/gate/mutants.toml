@@ -3812,8 +3812,8 @@ test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_one
 [[mutant]]
 name = "hydrogen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Hydrogen, 2e-4),'''
-new = '''(Element::Hydrogen, 4e-4),'''
+old = '''(Element::Hydrogen, 7e-5),'''
+new = '''(Element::Hydrogen, 1.4e-4),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -4461,7 +4461,7 @@ test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_one
 [[mutant]]
 name = "every-beds-hydrogen-takes-the-payers-bound"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''        if element == Element::Hydrogen && at.iter().all(|site| site.key() == STROKE_PAYER) {'''
+old = '''        if element == Element::Hydrogen && at.iter().all(|site| PAYERS.contains(&site.key())) {'''
 new = '''        if element == Element::Hydrogen {'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
@@ -4594,15 +4594,17 @@ test = "-p ng-validate --test alveolar the_mean_alveolar_carbon_dioxide_over_who
 [[mutant]]
 name = "pleural-reads-no-drive"
 path = "crates/ng-respiratory/src/airway.rs"
-old = '''            let muscle = self.muscle(&mut k);'''
-new = '''            let muscle: Expr<'b, '_, Respiratory, Pressure> = k.zero();'''
+old = '''            let muscle = self.muscle(&mut k);
+            let pull = k.add(held, muscle);'''
+new = '''            let muscle: Expr<'b, '_, Respiratory, Pressure> = k.zero();
+            let pull = k.add(held, muscle);'''
 test = "-p ng-validate --test alveolar the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_at_rest_and_off_rest"
 
 [[mutant]]
 name = "breath-never-starts"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''        ("rs.breath-start", 1_000.0),'''
-new = '''        ("rs.breath-start", 0.0),'''
+old = '''        ("ms.breath-start", 1_000.0),'''
+new = '''        ("ms.breath-start", 0.0),'''
 test = "-p ng-validate --test body_run the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_the_core_receives"
 
 [[mutant]]
@@ -4628,7 +4630,7 @@ test = "-p ng-validate --test alveolar the_pleural_pressure_is_the_walls_recoil_
 
 [[mutant]]
 name = "expiration-drive-relaxes-to-the-rest-drive"
-path = "crates/ng-respiratory/src/breath.rs"
+path = "crates/ng-musculoskeletal/src/breath.rs"
 old = '''            let (target, now, speed) = (k.zero(), k.state(&drive), k.parameter(&fall));'''
 new = '''            let (target, now, speed) = (k.parameter(&rest_drive), k.state(&drive), k.parameter(&fall));'''
 test = "-p ng-validate --test alveolar the_drive_at_the_bodys_rhythm_means_its_rest_value_over_a_breath_and_falls_below_it"
@@ -4642,7 +4644,30 @@ test = "-p ng-validate --test alveolar the_drive_at_the_bodys_rhythm_means_its_r
 
 [[mutant]]
 name = "mixing-share-falls-past-zero"
-path = "crates/ng-respiratory/src/breath.rs"
+path = "crates/ng-musculoskeletal/src/breath.rs"
 old = '''                let (target, now, speed) = (k.zero(), k.state(&share), k.parameter(&mixing_fall));'''
 new = '''                let (target, now, speed) = (k.zero(), k.parameter(&rest_share), k.parameter(&mixing_fall));'''
 test = "-p ng-validate --test alveolar a_mixing_share_falling_fast_to_zero_raises_no_refusal_at_its_row"
+
+[[mutant]]
+name = "work-not-paid"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''            Some(work) => k.add_from(beating, work),'''
+new = '''            Some(_) => beating,'''
+test = "-p ng-validate --test viscosity only_the_muscle_beds_burn_follows_the_work_of_breathing_and_in_proportion"
+
+[[mutant]]
+name = "breath-work-ignores-the-share"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let target = k.add(now, handed);'''
+new = '''            let _ = handed;
+            let target = now;'''
+test = "-p ng-validate --test alveolar at_rest_the_work_of_breathing_is_the_stated_mean"
+
+[[mutant]]
+name = "pump-force-ignores-the-drive"
+path = "crates/ng-musculoskeletal/src/breath.rs"
+old = '''        let value = k.scale(pump, drive);'''
+new = '''        let _ = drive;
+        let value = pump;'''
+test = "-p ng-validate --test alveolar a_breaths_lung_volume_follows_the_mechanics_static_solution"

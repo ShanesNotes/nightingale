@@ -92,6 +92,12 @@ const STROKE_PAYER: &str = "coronary bed";
 const STROKE_WORK_OXYGEN: f64 = 1.32;
 /// How fast line 78's work follows the stroke work: a model default with no source (research 18).
 const WORK_SPEED: f64 = 0.25;
+/// The muscle bed pays the work of breathing (line 84), so its stated demand gives up the oxygen of the breath's mean
+/// work and its burn at rest stays where it was. The work's heat stays in the bed, so its heat at rest does not move.
+const BREATH_PAYER: &str = "muscle bed";
+/// How fast line 84's work follows the pump's: over about four breaths, as line 78's follows four beats. A model
+/// default with no source.
+const BREATH_WORK_SPEED: f64 = 0.05;
 const CONTRACTILE_SIZE: f64 = 1e6;
 /// The oxygen reach meets the demand at this cell pressure, and the oxygen rate falls short of the demand only below
 /// twice it, 34 mmHg. Every bed's cells sit at 38 mmHg or more at rest, so none splits glucose there or admits lactate,
@@ -267,6 +273,7 @@ fn start_guess(row: RowKind) -> f64 {
         RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "pump drive" => BODY_RHYTHM.mean_drive(),
+        RowKind::Memory(slot) if slot.law.local == "breath work memory" => BODY_RHYTHM.work(),
         RowKind::Memory(_) => 0.0,
         RowKind::Algebraic(slot) => {
             let bed = match slot.at {
@@ -281,6 +288,8 @@ fn start_guess(row: RowKind) -> f64 {
                 "acidity" => blood.acidity,
                 "oxygen_debt_per_bed" => 0.0,
                 "chest wall rest volume" => BODY_RHYTHM.wall_rest(),
+                "pump_force" => BODY_RHYTHM.pump() * BODY_RHYTHM.mean_drive(),
+                "work_of_breathing" => BODY_RHYTHM.work(),
                 _ => 1.0,
             }
         }
@@ -599,7 +608,7 @@ pub fn body_packet_at_viscosity_exponent(
     };
     packet.start_mode(stirring, "still", NOTE)?;
     let breath = LawName {
-        owner: Respiratory::CARD,
+        owner: Musculoskeletal::CARD,
         local: "breath",
     };
     packet.start_mode(breath, "rest", NOTE)?;
@@ -965,7 +974,12 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
             set::<Dimensionless>(packet, "cv.debt-share", at, share)?;
             set::<Oxygen>(packet, "cv.debt-half", at, used * DEBT_HALF_TIME)?;
         }
-        set::<Rate<Oxygen>>(packet, "mt.oxygen-demand", at, basal(bed, used))?;
+        let breathing = if bed == BREATH_PAYER {
+            BODY_RHYTHM.work() / ENERGY_PER_OXYGEN
+        } else {
+            0.0
+        };
+        set::<Rate<Oxygen>>(packet, "mt.oxygen-demand", at, basal(bed, used) - breathing)?;
         set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / BODY_CELL_PRESSURE_AT_DEMAND)?;
         set::<Conductance<Oxygen>>(packet, "mt.wall-oxygen-conductance", at, used / HEAD)?;
         set::<Conductance<Oxygen>>(packet, "mt.cell-oxygen-conductance", at, used / HEAD)?;
@@ -1065,8 +1079,9 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// body's measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set
 /// (record 0004). Energy's worst change is 1,347, in the window from 47 s. Oxygen's and carbon's change is mostly the
 /// blood gases' swing within a beat, read across windows that hold no whole number of beats, and hydrogen's is a bed's
-/// cell fuels and water settling, under 7.5e-6 at every bed but the stroke work's payer, whose cells settle by 0.077
-/// over the first ten seconds whatever their start, so they take a bound of their own. The species are the held gut's and skin's
+/// cell fuels and water settling, under 7.5e-6 at every bed but the payers of the stroke work and of the work of
+/// breathing, whose cells settle as their works do, the coronary bed's by 0.077 over the first ten seconds whatever
+/// their start, so they take a bound of their own. The species are the held gut's and skin's
 /// water and salts, vasopressin's held secretion and clearance, and nitrogen gas, whose worst change is 0.380 in
 /// the first ten seconds and which falls a steady 0.22 to 0.26 in each ten seconds after, following the gas volume as
 /// the net exchange settles with the body's stores. Oxygen and carbon dioxide as species keep only held
@@ -1074,10 +1089,11 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 const ENERGY_DRIFT: f64 = 3e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
     (Element::Carbon, 5e2),
-    (Element::Hydrogen, 2e-4),
+    (Element::Hydrogen, 7e-5),
     (Element::Oxygen, 9e3),
 ];
 const PAYER_HYDROGEN_DRIFT: f64 = 0.2;
+const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
 const SPECIES_DRIFTS: [(Species, f64); 7] = [
     (Species::Energy, ENERGY_DRIFT),
     (Species::Water, 0.04),
@@ -1098,7 +1114,7 @@ impl DriftTable for BodyDrifts {
         Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
     }
     fn element(&self, element: Element, at: &[SiteId]) -> Result<Option<Measure<Atoms>>, AdmissionError> {
-        if element == Element::Hydrogen && at.iter().all(|site| site.key() == STROKE_PAYER) {
+        if element == Element::Hydrogen && at.iter().all(|site| PAYERS.contains(&site.key())) {
             return Measure::new(PAYER_HYDROGEN_DRIFT).map(Some);
         }
         let named = ELEMENT_DRIFTS.iter().find(|(named, _)| *named == element);
@@ -1128,33 +1144,35 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Elastance>(packet, "rs.wall-elastance", body, WALL_ELASTANCE)?;
     set::<Volume>(packet, "rs.lung-rest-volume", body, 38_250.0)?;
     set::<Volume>(packet, "rs.wall-rest-volume", body, BODY_RHYTHM.wall_rest())?;
-    set::<Elastance>(packet, "rs.dead-space-elastance", body, 6.4e-4)?;
+    set::<Elastance>(packet, "rs.dead-space-elastance", body, DEAD_SPACE_ELASTANCE)?;
     set::<Volume>(packet, "rs.dead-space-volume", body, DEAD_SPACE)?;
     set::<Quotient<Volume, Oxygen>>(packet, "rs.oxygen-volume", body, 1.0)?;
     set::<Quotient<Volume, CarbonDioxide>>(packet, "rs.carbon-dioxide-volume", body, 1.0)?;
     set::<Quotient<Volume, NitrogenGas>>(packet, "rs.nitrogen-volume", body, 1.0)?;
-    set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, 15_600.0)?;
+    set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, AIRWAY_CONDUCTANCE)?;
     set::<Rate<Volume>>(packet, "rs.airway-mixing", body, MIXING)?;
     for (key, value) in [
-        ("rs.breath-rate", BODY_RHYTHM.rate),
-        ("rs.drive-rise", BODY_RHYTHM.rise),
-        ("rs.drive-fall", BODY_RHYTHM.fall),
-        ("rs.rest-speed", 1.0),
-        ("rs.share-fall", 1.0),
-        ("rs.breath-start", 1_000.0),
+        ("ms.breath-rate", BODY_RHYTHM.rate),
+        ("ms.drive-rise", BODY_RHYTHM.rise),
+        ("ms.drive-fall", BODY_RHYTHM.fall),
+        ("ms.rest-speed", 1.0),
+        ("ms.share-fall", 1.0),
+        ("ms.breath-start", 1_000.0),
     ] {
         set::<Rate<Dimensionless>>(packet, key, body, value)?;
     }
     for (key, value) in [
-        ("rs.inspiration-length", BODY_RHYTHM.inspiration),
-        ("rs.expiration-length", BODY_RHYTHM.expiration),
-        ("rs.drive-peak", BODY_RHYTHM.peak),
-        ("rs.rest-drive", BODY_RHYTHM.mean_drive()),
-        ("rs.rest-share", 1.0),
+        ("ms.inspiration-length", BODY_RHYTHM.inspiration),
+        ("ms.expiration-length", BODY_RHYTHM.expiration),
+        ("ms.drive-peak", BODY_RHYTHM.peak),
+        ("ms.rest-drive", BODY_RHYTHM.mean_drive()),
+        ("ms.rest-share", 1.0),
     ] {
         set::<Dimensionless>(packet, key, body, value)?;
     }
-    set::<Pressure>(packet, "rs.pump-pressure", body, BODY_RHYTHM.pump())?;
+    set::<Pressure>(packet, "ms.pump-pressure", body, BODY_RHYTHM.pump())?;
+    set::<Rate<Energy>>(packet, "rs.work-mean", body, BODY_RHYTHM.work())?;
+    set::<Rate<Dimensionless>>(packet, "rs.work-speed", body, BREATH_WORK_SPEED)?;
     set::<Volume>(packet, "rs.wall-rest-rise", body, 10_000.0)?;
     set::<Length>(packet, "rs.trunk-length", body, CAROTID_ABOVE_ARTERIES)?;
     Ok(())
@@ -1167,6 +1185,8 @@ const WALL_ELASTANCE: f64 = 1.6e-4;
 const WALL_REST: f64 = 75_750.0;
 const MIXING: f64 = 3_240.0;
 const DEAD_SPACE: f64 = 3_400.0;
+const DEAD_SPACE_ELASTANCE: f64 = 6.4e-4;
+const AIRWAY_CONDUCTANCE: f64 = 15_600.0;
 const CAROTID_ABOVE_ARTERIES: f64 = 0.2;
 
 struct BreathRhythm {
@@ -1244,6 +1264,49 @@ impl BreathRhythm {
             tidal -= (tidal - DEAD_SPACE * tanh - goal) / slope;
         }
         tidal * (LUNG_ELASTANCE + WALL_ELASTANCE) / (end - start)
+    }
+    /// The pump's mean work, its pressure times the breath's inflow at the room's side, on the mechanics the airway
+    /// builds: the alveolar unit fills at `G (P_mus - (E_L + E_W) x)` for its volume `x` above the static rest, and
+    /// the room refills the dead space at `G E_D y` for the shortfall `y` that filling leaves there. The airway's
+    /// resistance adds its work to the elastic `(P_1^2 - P_0^2) / 2 (E_L + E_W)` a breath, about a third more here.
+    /// Each volume settles within a breath's tenth, so twenty breaths stepped implicitly at 0.1 ms leave the last
+    /// breath periodic.
+    fn work(&self) -> f64 {
+        const STEP: f64 = 1e-4;
+        const BREATHS: usize = 20;
+        let (pump, elastance) = (self.pump(), LUNG_ELASTANCE + WALL_ELASTANCE);
+        let (_, _, inspiring, expiring) = self.ends();
+        let steps = [inspiring, expiring].map(|length| {
+            let mut count = 0_u32;
+            while f64::from(count) * STEP < length {
+                count += 1;
+            }
+            count
+        });
+        let (rise, fall) = (exp(-self.rise * STEP), exp(-self.fall * STEP));
+        let (mut drive, mut x, mut y, mut work) = (self.mean_drive(), 0.0, 0.0, 0.0);
+        for breath in 1..=BREATHS {
+            work = 0.0;
+            for (phase, count) in steps.into_iter().enumerate() {
+                for _ in 0..count {
+                    drive = if phase == 0 {
+                        self.peak + (drive - self.peak) * rise
+                    } else {
+                        drive * fall
+                    };
+                    let pressure = pump * drive;
+                    x = (x + STEP * AIRWAY_CONDUCTANCE * pressure)
+                        / (1.0 + STEP * AIRWAY_CONDUCTANCE * elastance);
+                    let filling = AIRWAY_CONDUCTANCE * (pressure - elastance * x);
+                    y = (y + STEP * filling) / (1.0 + STEP * AIRWAY_CONDUCTANCE * DEAD_SPACE_ELASTANCE);
+                    let inflow = AIRWAY_CONDUCTANCE * DEAD_SPACE_ELASTANCE * y;
+                    if breath == BREATHS && inflow > 0.0 {
+                        work += pressure * inflow * STEP;
+                    }
+                }
+            }
+        }
+        work / (inspiring + expiring)
     }
     /// The chest wall's relaxed volume less the pump's mean pull over the wall's elastance, so at the mean drive the
     /// lung's static volume and the pleural pressure are the ones the body admits at with no drive.

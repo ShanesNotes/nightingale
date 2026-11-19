@@ -21,6 +21,7 @@ pub(super) fn respiratory(body: &mut Assembly<'_>) -> Result<(), AdmissionError>
     let plasma: LungGases<Reads<'_, Respiratory>> = laws.receive();
     exchange(&mut laws, &ports, &ventilation, &plasma)?;
     ventilation.pleural(&mut laws, &ports)?;
+    ventilation.work(&mut laws, &ports)?;
     body.add(laws.finish());
     Ok(())
 }
