@@ -1,3 +1,3 @@
-mod breath;
+mod pump;
 
-pub use breath::breathe;
+pub use pump::pump;

@@ -1,6 +1,6 @@
 use super::{FIXED, hours};
 use ng_contract::*;
-use ng_musculoskeletal::breathe;
+use ng_musculoskeletal::pump;
 
 const SKIN_WATER: &str = "skin water";
 
@@ -25,8 +25,8 @@ pub(super) fn musculoskeletal(body: &mut Assembly<'_>) -> Result<(), AdmissionEr
         let (laws, ports) = held.stand_ins();
         stand_ins(laws, ports)?;
     }
-    let (mut laws, _) = body.musculoskeletal(Some(held))?.parts();
-    breathe(&mut laws)?;
+    let (mut laws, ports) = body.musculoskeletal(Some(held))?.parts();
+    pump(&mut laws, &ports)?;
     body.add(laws.finish());
     Ok(())
 }

@@ -95,6 +95,7 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
 
     for space in [Space::Vesicle, Space::Cleft, Space::Bound] {
         schema.pool::<Acetylcholine>(site::<Junction>("sinoatrial junction")?, space)?;
+        schema.pool::<Acetylcholine>(site::<Junction>("respiratory pump junction")?, space)?;
     }
     schema.pool::<Vasopressin>(site::<CapillaryBed>("peritubular bed")?, Space::Bound)?;
     let body = site::<TissueSite>("body")?;

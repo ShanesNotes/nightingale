@@ -1,4 +1,4 @@
-use ng_contract::catalog::{Defines, PumpForce, Reads, WorkOfBreathing};
+use ng_contract::catalog::{Defines, PumpForce, Reads, RespiratoryDrive, WorkOfBreathing};
 use ng_contract::*;
 
 type Bound<'b, U> = Parameter<'b, Respiratory, U>;
@@ -88,6 +88,7 @@ impl Dry for NitrogenGas {
 /// dead space's total is conserved by these laws and nothing sets it.
 pub struct Ventilation<'b> {
     pump: PumpForce<Reads<'b, Respiratory>>,
+    drive: RespiratoryDrive<Reads<'b, Respiratory>>,
     wall: AlgebraicSlot<'b, Respiratory, Volume>,
     oxygen: Gas<'b, Oxygen>,
     carbon_dioxide: Gas<'b, CarbonDioxide>,
@@ -116,6 +117,7 @@ impl<'b> Ventilation<'b> {
         let class = class()?;
         let ventilation = Self {
             pump: laws.receive(),
+            drive: laws.receive(),
             wall: laws.algebraic("chest wall rest volume", Admissible::positive()),
             oxygen: Gas::declare(laws, "rs.oxygen-volume"),
             carbon_dioxide: Gas::declare(laws, "rs.carbon-dioxide-volume"),
@@ -225,7 +227,7 @@ impl<'b> Ventilation<'b> {
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
     ) -> Expr<'b, 'k, Respiratory, Rate<Volume>> {
-        let (m, share) = (k.parameter(&self.mixing), k.read(&self.pump.mixing_share));
+        let (m, share) = (k.parameter(&self.mixing), k.read(&self.drive.mixing_share));
         k.scale(m, share)
     }
 
@@ -315,7 +317,7 @@ impl<'b> Ventilation<'b> {
             let muscle = self.muscle(&mut k);
             let product = k.multiply(muscle, inflow);
             let now = k.as_dimension(product);
-            let (mean, share) = (k.parameter(&stated), k.read(&self.pump.mixing_share));
+            let (mean, share) = (k.parameter(&stated), k.read(&self.drive.mixing_share));
             let lost = k.scale(now, share);
             let kept = k.subtract(now, lost);
             let handed = k.scale(mean, share);
