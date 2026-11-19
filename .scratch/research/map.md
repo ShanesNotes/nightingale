@@ -33,6 +33,10 @@ The reference man's reviewed packet and a reviewed healthy-range set exist as ch
 - **The alveolar unit's values.** [Research 19](issues/19-the-alveolar-units-values.md) asks for the lung's and the chest wall's compliances, the dead space, the diffusing capacities, the shunt fraction and what bounds the mixing exchange, for body ticket 10's first PR.
 - **The breath's rhythm.** [Research 20](issues/20-the-breaths-rhythm.md) asks for the resting rate, inspiration's share of a breath and the drive's rise and fall, for body ticket 10's second PR.
 - **The resting volume between postures.** [Research 21](issues/21-the-chest-walls-rest-volume-between-supine-and-upright.md) asks how the chest wall's relaxed volume moves between supine and upright, for body ticket 10's second PR.
+- **The chemoreflex's gains.** [Research 22](issues/22-the-chemoreflex-gains-awake-and-asleep.md) asks for the central and peripheral gains, the peripheral offset, the wake drive and sleep's fall in gain, awake and in NREM sleep, for body ticket 11.
+- **How the drive splits into rate and depth.** [Research 23](issues/23-how-the-drive-splits-into-rate-and-depth.md) asks, for body ticket 11, which moves only the rate.
+- **The pump junction's transmission.** [Research 24](issues/24-the-pump-junctions-transmission.md) asks for release, reuptake, binding and efficacy at the respiratory pump's junction, and the pump's maximal pressure, for body ticket 11's first PR.
+- **The peripheral sensor on partial pressure.** [Research 25](issues/25-the-peripheral-sensor-on-partial-pressure.md) asks for a peripheral form on arterial oxygen partial pressure, which the receptor senses, for the ticket that moves the dissociation curve.
 
 ## Out of scope
 
