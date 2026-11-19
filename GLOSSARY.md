@@ -400,10 +400,13 @@ The carbon dioxide a bed makes over the oxygen it burns. At rung 0 the glucose s
 The heat store at each bed that takes its reactions' energy and passes it to the core store, first order at one declared speed. A paying bed's heat also pays the work the schema names it for.
 
 **Paying bed**:
-The capillary bed whose heat pays the heart's stroke work or the walls' work, named in the schema for each work. With none named, the work starts at the receipt `chemical energy`.
+The capillary bed whose heat pays the heart's stroke work or the walls' work, named in the schema for each work. With none named, the work starts at the receipt `chemical energy`. A bed also pays a work through its oxygen demand, to which metabolism adds the work's oxygen: the coronary bed so pays the myocardial work (arrow 78), and the muscle bed the work of breathing (arrow 84), a work the schema does not name.
 
 **Myocardial work**:
 The heart's stroke work as CV emits it on arrow 78: a memory that follows the stroke work in systole and falls in diastole at one stated speed, because no algebraic law may hold by the rhythm's modes. Over a beat its mean is the stroke work's.
+
+**Work of breathing**:
+The breathing pump's work as RS emits it on arrow 84, a rate of energy: a memory that follows, at one stated speed, the pump force times the breath's inflow at the room's side, and holds the packet's stated mean while the breath rests. Over whole breaths its mean is the pump's work on the inflow, so expiration costs nothing. The muscle bed's oxygen demand pays for it.
 
 **Oxygen reach**:
 A bed's conductance from its cells' oxygen partial pressure to the oxygen they can burn, a parameter of each bed. The oxygen rate follows the reach times that pressure until it nears the demand.
@@ -460,7 +463,7 @@ A transfer of oxygen or carbon dioxide across the gas-exchange surface, at a con
 A vascular edge from the pulmonary artery to the pulmonary vein beside the pulmonary bed, so a share of the blood reaches the left heart with no alveolar exchange.
 
 **Breath**:
-One pass of the respiratory card's rhythm, from one breath edge to the next: inspiration while the pump drive rises, then expiration while it falls. A run admits with the breath at rest, and a hazard starts the first one in its first milliseconds.
+One pass of the breathing rhythm, from one breath edge to the next: inspiration while the pump drive rises, then expiration while it falls. A run admits with the breath at rest, and a hazard starts the first one in its first milliseconds.
 _Avoid_: cycle (the packet's equal-interval pass), beat (the heart's)
 
 **Breath edge**:

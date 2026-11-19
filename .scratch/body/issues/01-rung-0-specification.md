@@ -660,11 +660,11 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | 78 | CV to MT, myocardial work, flow per bed | `myocardial_work`: wired by 09, the heart's work paid by fuel burned at the coronary bed, a memory of the stroke work because the instant work holds by the rhythm's modes; `flow_per_bed`: held by CV, because no law reads a bed's flow at rung 0 and a bed's oxygen arrives by the blood's own transport into its plasma |
 | 79 | CV to EN, wall stress | `atrial_wall_stress`: wired by 17, the natriuretic peptide's secretion; `ventricular_wall_stress`: held at rung 0, one peptide is secreted, on atrial stretch |
 | 80 | CV to FL, capillary and venous pressure | `capillary_pressure`: wired by 06, live in the slice; `venous_pressure`: wired by 06, live in the slice |
-| 81 | CV to RS, pulmonary capillary flow | `pulmonary_capillary_flow`: wired by 10, alveolar exchange |
+| 81 | CV to RS, pulmonary capillary flow | `pulmonary_capillary_flow`: held at rung 0, the exchange reads the plasma's own partial pressures, which the blood's own transport into its plasma sets |
 | 82 | RS to CV, pleural pressure | `pleural pressure`: anatomy relation, the pleural space's pressure felt by every bed it encloses, defined by the breath from ticket 10 |
 | 83 | RS to NS, lung afferents | `pulmonary_stretch`: wired by 11 |
 | 84 | RS to MT, work of breathing | `work of breathing`: wired by 10 |
-| 85 | RS to MS, pump load | `pump load`: wired by 10 |
+| 85 | RS to MS, pump load | `pump load`: held at rung 0, no law reads the pump's load while the pump's fatigue is held |
 | 86 | NS to RS, respiratory drive | `respiratory_drive`: wired by 11 |
 | 87 | NS to MT, thermostat, shiver and sweat | `thermostat_set_point`: held at rung 0, the set point is NS memory and no MT law reads it; `shiver_drive`: wired by 12, read by the muscle bed's heat, since shivering is a somatic motor command; `sweat_drive`: held at rung 0, sweat answers release at the skin junction (S10) |
 | 88 | NS to MS, motor drive | `motor_drive`: wired by 11, release at the respiratory pump's junction |
@@ -674,7 +674,7 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | 92 | MT to HC, temperature | `temperature`: held at rung 0, HC's laws run at a reference temperature (ticket 12) |
 | 93 | MT to HP, temperature | `temperature`: held at rung 0, HP's laws run at a reference temperature (ticket 12) |
 | 94 | MT to BC, temperature | `temperature`: held at rung 0, BC's speciation runs at a reference temperature (ticket 12) |
-| 95 | MS to RS, pump force and fatigue | `pump force`: wired by 10; `fatigue`: held at rung 0, a resting day has no fatigue law |
+| 95 | MS to RS, pump force and fatigue | `pump force`: wired by 10; `mixing_share`: wired by 10 until ticket 11 moves it; `fatigue`: held at rung 0, a resting day has no fatigue law |
 | 96 | MS to CV, position and gravity | `position`: anatomy relation, site positions under the boundary's posture; `gravity`: anatomy relation, the hydrostatic head those positions give |
 | 97 | RN to CV, tubuloglomerular feedback | `afferent_tone`: wired by 06, live in the slice |
 | 98 | RN to EN, renin | `renin_secretion`: wired by 17 |
@@ -695,7 +695,7 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | 113 | FL to MS, skin and compartment water | `skin_water`: held at rung 0, pressure injury is absent; `compartment_water`: held at rung 0, limb compartments are absent |
 | 114 | HC to CV, bleeding competence, viscosity, thrombosis | `bleeding_competence`: held at rung 0, no bleeding edge (ticket 21); `viscosity`: wired by 08; `thrombosis`: held at rung 0, zero flux (ticket 21) |
 
-Totals at rung 0: 18 arrows wire at least one field, 5 are anatomy relations, and 15 hold every field. Arrows 79, 87, 89, 90, 95 and 114 wire some fields and hold others.
+Totals at rung 0: 16 arrows wire at least one field, 5 are anatomy relations, and 17 hold every field. Arrows 78, 79, 87, 89, 90, 95 and 114 wire some fields and hold others.
 
 ### Fork owners
 
