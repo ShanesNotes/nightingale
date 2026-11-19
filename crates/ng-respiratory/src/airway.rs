@@ -94,6 +94,8 @@ pub struct Ventilation<'b> {
     nitrogen: Gas<'b, NitrogenGas>,
     oxygen_inspired: Bound<'b, Dimensionless>,
     carbon_dioxide_inspired: Bound<'b, Dimensionless>,
+    room: Bound<'b, Pressure>,
+    vapour: Bound<'b, Pressure>,
     conductance: Bound<'b, Conductance<Volume>>,
     mixing: Bound<'b, Rate<Volume>>,
     lung_elastance: Bound<'b, Elastance>,
@@ -121,6 +123,8 @@ impl<'b> Ventilation<'b> {
             oxygen_inspired: laws.parameter(key("rs.oxygen-inspired"), Admissible::unit_interval()),
             carbon_dioxide_inspired: laws
                 .parameter(key("rs.carbon-dioxide-inspired"), Admissible::unit_interval()),
+            room: laws.parameter(key("rs.room-pressure"), Admissible::positive()),
+            vapour: laws.parameter(key("rs.water-vapour-pressure"), Admissible::nonnegative()),
             conductance: laws.parameter(key("rs.airway-conductance"), Admissible::positive()),
             mixing: laws.parameter(key("rs.airway-mixing"), Admissible::nonnegative()),
             lung_elastance: laws.parameter(key("rs.lung-elastance"), Admissible::positive()),
@@ -163,12 +167,30 @@ impl<'b> Ventilation<'b> {
         k: &mut Kernel<'b, 'k, Respiratory, C>,
         amounts: Amounts<'b, 'k>,
     ) -> Expr<'b, 'k, Respiratory, Dimensionless> {
+        self.share_of(k, &Q::gas(self).volume, Q::of(amounts), amounts)
+    }
+
+    fn share_of<'k, C, Q: Breathed + Plain>(
+        &self,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+        per: &Bound<'b, Quotient<Volume, Q>>,
+        held: Expr<'b, 'k, Respiratory, Q>,
+        amounts: Amounts<'b, 'k>,
+    ) -> Expr<'b, 'k, Respiratory, Dimensionless> {
         let total = self.volume(k, amounts);
-        let v = k.parameter(&Q::gas(self).volume);
-        let part = k.multiply(v, Q::of(amounts));
+        let v = k.parameter(per);
+        let part = k.multiply(v, held);
         let part: Expr<'b, 'k, Respiratory, Volume> = k.as_dimension(part);
         let share = k.divide(part, total);
         k.as_dimension(share)
+    }
+
+    pub(crate) fn dry_gas_pressure<'k, C>(
+        &self,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+    ) -> Expr<'b, 'k, Respiratory, Pressure> {
+        let (room, vapour) = (k.parameter(&self.room), k.parameter(&self.vapour));
+        k.subtract(room, vapour)
     }
 
     fn muscle<'k, C>(&self, k: &mut Kernel<'b, 'k, Respiratory, C>) -> Expr<'b, 'k, Respiratory, Pressure> {
@@ -264,8 +286,9 @@ impl<'b> Ventilation<'b> {
     /// Line 84's work of breathing is a memory of the pump's pressure times the breath's inflow at the room's side,
     /// `W = P_mus G h+`, so its mean over whole breaths is the pump's. While the breath rests the memory holds the
     /// breath's stated mean instead, handed over by the mixing share as the mixing exchange is, so the body admits
-    /// paying for the breath it will take. The inflow is read inside the memory's rate: as a row of its own its kink
-    /// at zero flow refused every step.
+    /// paying for the breath it will take. The target is written `(W - s W) + s W_mean`, which is exact at a share of
+    /// zero and of one, where `W + s (W_mean - W)` loses the mean once the pump's work is far above it. The inflow is
+    /// read inside the memory's rate: as a row of its own its kink at zero flow refused every step.
     pub fn work(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,
@@ -293,9 +316,10 @@ impl<'b> Ventilation<'b> {
             let product = k.multiply(muscle, inflow);
             let now = k.as_dimension(product);
             let (mean, share) = (k.parameter(&stated), k.read(&self.pump.mixing_share));
-            let gap = k.subtract(mean, now);
-            let handed = k.scale(gap, share);
-            let target = k.add(now, handed);
+            let lost = k.scale(now, share);
+            let kept = k.subtract(now, lost);
+            let handed = k.scale(mean, share);
+            let target = k.add(kept, handed);
             let (held, pace) = (k.state(&memory), k.parameter(&speed));
             let value = k.relax(target, held, pace);
             k.finish(value, laws.every_mode(), class)
@@ -307,6 +331,110 @@ impl<'b> Ventilation<'b> {
         });
         laws.define(&line.work_of_breathing, work);
         Ok(())
+    }
+
+    /// The lung's water rides the dry gas. Its share is its vapour's volume over the dry gas's, `v_w W / V`, so the
+    /// airway carries it as it carries each dry gas and it adds nothing to the volume the heads read. The lining
+    /// feeds the alveolar gas the water the breath carries out, `V'_A (σ - i) / v_w`, with `V'_A` the alveolar
+    /// ventilation the breath is fitted to, `σ = P_H2O / (P_B - P_H2O)` the saturated vapour share and `i` the
+    /// room's (research 11, Guyton p. 285). It reads no gas row and no water pool, which keeps the gas's water out of
+    /// the elimination's largest block (native-contract 89). The room takes the dead space's water out and gives back
+    /// its own at `i = h P_r / (P_B - h P_r)` of the dry gas, with `h` the room's humidity and `P_r` its saturated
+    /// vapour pressure.
+    pub fn water(
+        &self,
+        laws: &mut FragmentBuilder<'b, Respiratory>,
+        ports: &RespiratoryPorts<'b>,
+    ) -> Result<(), AdmissionError> {
+        let class = class()?;
+        let key = ParameterKey::new;
+        let per = laws.parameter::<Quotient<Volume, Water>>(key("rs.water-volume"), Admissible::positive());
+        let ventilated =
+            laws.parameter::<Rate<Volume>>(key("rs.alveolar-ventilation"), Admissible::nonnegative());
+        let humidity = laws.parameter::<Dimensionless>(key("rs.room-humidity"), Admissible::unit_interval());
+        let saturating =
+            laws.parameter::<Pressure>(key("rs.room-vapour-pressure"), Admissible::nonnegative());
+        let room = (&humidity, &saturating);
+
+        let lining = ports.lining(laws);
+        let rate = laws.site_kernel(|mut k| {
+            let dry = self.dry_gas_pressure(&mut k);
+            let vapour = k.parameter(&self.vapour);
+            let saturated = k.divide(vapour, dry);
+            let saturated = k.as_dimension(saturated);
+            let given = self.room_water(&mut k, room);
+            let gap = k.subtract(saturated, given);
+            let ventilation = k.parameter(&ventilated);
+            let flow = k.scale(ventilation, gap);
+            let value = self.amount_rate(&mut k, flow, &per);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.transfer_at(&lining, rate);
+
+        let route = ports.airway::<Water>(laws);
+        let ends = [
+            (
+                route.from_amount::<Oxygen>(),
+                route.from_amount::<CarbonDioxide>(),
+                route.from_amount::<NitrogenGas>(),
+                route.from_amount::<Water>(),
+            ),
+            (
+                route.to_amount::<Oxygen>(),
+                route.to_amount::<CarbonDioxide>(),
+                route.to_amount::<NitrogenGas>(),
+                route.to_amount::<Water>(),
+            ),
+        ];
+        let rate = laws.edge_kernel(|mut k| {
+            let [up, down] = ends.each_ref().map(|end| {
+                let dry = (k.at_edge(&end.0), k.at_edge(&end.1), k.at_edge(&end.2));
+                (dry, k.at_edge(&end.3))
+            });
+            let shares = [
+                self.share_of(&mut k, &per, up.1, up.0),
+                self.share_of(&mut k, &per, down.1, down.0),
+            ];
+            let head = self.alveolar_head(&mut k, down.0);
+            let value = self.carried(&mut k, head, shares, &per);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.transfer_along(&route, rate);
+
+        let out = ports.boundary::<Expired<Water>>()?.route;
+        let held = (
+            out.amount::<Oxygen>(),
+            out.amount::<CarbonDioxide>(),
+            out.amount::<NitrogenGas>(),
+            out.amount::<Water>(),
+        );
+        let rate = laws.kernel(|mut k| {
+            let airway = (k.read(&held.0), k.read(&held.1), k.read(&held.2));
+            let water = k.read(&held.3);
+            let share = self.share_of(&mut k, &per, water, airway);
+            let head = self.dead_space_head(&mut k, airway);
+            let [inward, outward] = self.parts(&mut k, head);
+            let leaving = self.at_the_room(&mut k, outward, share, &per);
+            let room_share = self.room_water(&mut k, room);
+            let entering = self.at_the_room(&mut k, inward, room_share, &per);
+            let value = k.subtract(leaving, entering);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.transfer(Transfer::new(&out, rate));
+        Ok(())
+    }
+
+    fn room_water<'k, C>(
+        &self,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+        (humidity, saturating): (&Bound<'b, Dimensionless>, &Bound<'b, Pressure>),
+    ) -> Expr<'b, 'k, Respiratory, Dimensionless> {
+        let (h, saturated) = (k.parameter(humidity), k.parameter(saturating));
+        let vapour = k.scale(saturated, h);
+        let room = k.parameter(&self.room);
+        let dry = k.subtract(room, vapour);
+        let share = k.divide(vapour, dry);
+        k.as_dimension(share)
     }
 
     fn dead_space_head<'k, C>(
@@ -336,21 +464,23 @@ impl<'b> Ventilation<'b> {
         [inward, outward]
     }
 
-    fn amount_rate<'k, C, Q: Dry>(
+    fn amount_rate<'k, C, Q: Breathed + Plain>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
         flow: Expr<'b, 'k, Respiratory, Rate<Volume>>,
+        per: &Bound<'b, Quotient<Volume, Q>>,
     ) -> Expr<'b, 'k, Respiratory, Rate<Q>> {
-        let v = k.parameter(&Q::gas(self).volume);
+        let v = k.parameter(per);
         let rate = k.divide(flow, v);
         k.as_dimension(rate)
     }
 
-    fn carried<'k, C, Q: Dry>(
+    fn carried<'k, C, Q: Breathed + Plain>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
         head: Expr<'b, 'k, Respiratory, Pressure>,
         [up, down]: [Expr<'b, 'k, Respiratory, Dimensionless>; 2],
+        per: &Bound<'b, Quotient<Volume, Q>>,
     ) -> Expr<'b, 'k, Respiratory, Rate<Q>> {
         let [inward, outward] = self.parts(k, head);
         let g = k.parameter(&self.conductance);
@@ -361,20 +491,21 @@ impl<'b> Ventilation<'b> {
         let gap = k.subtract(up, down);
         let mixed = k.scale(m, gap);
         let flow = k.add(bulk, mixed);
-        self.amount_rate::<_, Q>(k, flow)
+        self.amount_rate(k, flow, per)
     }
 
-    fn at_the_room<'k, C, Q: Dry>(
+    fn at_the_room<'k, C, Q: Breathed + Plain>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
         head: Expr<'b, 'k, Respiratory, Pressure>,
         share: Expr<'b, 'k, Respiratory, Dimensionless>,
+        per: &Bound<'b, Quotient<Volume, Q>>,
     ) -> Expr<'b, 'k, Respiratory, Rate<Q>> {
         let (g, m) = (k.parameter(&self.conductance), self.mixing(k));
         let bulk = k.conductance_flow(g, head);
         let flow = k.add(bulk, m);
         let flow = k.scale(flow, share);
-        self.amount_rate::<_, Q>(k, flow)
+        self.amount_rate(k, flow, per)
     }
 
     fn along<Q: Dry>(
@@ -399,7 +530,7 @@ impl<'b> Ventilation<'b> {
             let down = (k.at_edge(&downs.0), k.at_edge(&downs.1), k.at_edge(&downs.2));
             let shares = [self.share::<_, Q>(&mut k, up), self.share::<_, Q>(&mut k, down)];
             let head = self.alveolar_head(&mut k, down);
-            let value = self.carried::<_, Q>(&mut k, head, shares);
+            let value = self.carried(&mut k, head, shares, &Q::gas(self).volume);
             k.finish(value, laws.every_mode(), class)
         });
         laws.transfer_along(&route, rate);
@@ -431,7 +562,7 @@ impl<'b> Ventilation<'b> {
             let bulk = k.conductance_flow(g, inward);
             let flow = k.add(bulk, m);
             let flow = I::Quantity::inspired(self, &mut k, flow);
-            let value = self.amount_rate::<_, I::Quantity>(&mut k, flow);
+            let value = self.amount_rate(&mut k, flow, &I::Quantity::gas(self).volume);
             k.finish(value, laws.every_mode(), class)
         });
         laws.transfer(Transfer::new(&into, rate));
@@ -440,7 +571,7 @@ impl<'b> Ventilation<'b> {
             let f = self.share::<_, I::Quantity>(&mut k, airway);
             let head = self.dead_space_head(&mut k, airway);
             let [_, outward] = self.parts(&mut k, head);
-            let value = self.at_the_room::<_, I::Quantity>(&mut k, outward, f);
+            let value = self.at_the_room(&mut k, outward, f, &I::Quantity::gas(self).volume);
             k.finish(value, laws.every_mode(), class)
         });
         laws.transfer(Transfer::new(&out, rate));

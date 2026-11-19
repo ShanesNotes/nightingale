@@ -224,9 +224,19 @@ fn start_guess(row: RowKind) -> f64 {
     match row {
         RowKind::Amount {
             site,
+            species: Species::Water,
+            space: Space::Gas,
+        } if site.key() == "pulmonary bed" => 0.183,
+        RowKind::Amount {
+            species: Species::Water,
+            space: Space::Gas,
+            ..
+        } => 0.006,
+        RowKind::Amount {
+            site,
             species,
             space: Space::Gas,
-        } if species != Species::Water => match (site.key(), species) {
+        } => match (site.key(), species) {
             ("pulmonary bed", Species::Oxygen) => 8_769.0,
             ("pulmonary bed", Species::CarbonDioxide) => 2_631.0,
             ("pulmonary bed", _) => 45_600.0,
@@ -490,7 +500,6 @@ const ZERO_STAND_INS: &[(&str, Zero)] = &[
     ("rs.expired-carbon-dioxide", zero::<CarbonDioxide>),
     ("rs.expired-nitrogen-gas", zero::<NitrogenGas>),
     ("rs.expired-oxygen", zero::<Oxygen>),
-    ("rs.expired-water", zero::<Water>),
     ("rs.inspired-carbon-dioxide", zero::<CarbonDioxide>),
     ("rs.inspired-nitrogen-gas", zero::<NitrogenGas>),
     ("rs.inspired-oxygen", zero::<Oxygen>),
@@ -1096,11 +1105,11 @@ const PAYER_HYDROGEN_DRIFT: f64 = 0.2;
 const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
 const SPECIES_DRIFTS: [(Species, f64); 7] = [
     (Species::Energy, ENERGY_DRIFT),
-    (Species::Water, 0.04),
-    (Species::Sodium, 4e-4),
-    (Species::Chloride, 4e-4),
+    (Species::Water, 5e-2),
+    (Species::Sodium, 3e-4),
+    (Species::Chloride, 3e-4),
     (Species::Potassium, 2e-5),
-    (Species::Vasopressin, 4e-2),
+    (Species::Vasopressin, 5e-2),
     (Species::NitrogenGas, 2e4),
 ];
 
@@ -1151,6 +1160,10 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Quotient<Volume, NitrogenGas>>(packet, "rs.nitrogen-volume", body, 1.0)?;
     set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, AIRWAY_CONDUCTANCE)?;
     set::<Rate<Volume>>(packet, "rs.airway-mixing", body, MIXING)?;
+    set::<Quotient<Volume, Water>>(packet, "rs.water-volume", body, 24_000.0)?;
+    set::<Rate<Volume>>(packet, "rs.alveolar-ventilation", body, alveolar_ventilation())?;
+    set::<Dimensionless>(packet, "rs.room-humidity", body, 0.5)?;
+    set::<Pressure>(packet, "rs.room-vapour-pressure", body, 20.0)?;
     for (key, value) in [
         ("ms.breath-rate", BODY_RHYTHM.rate),
         ("ms.drive-rise", BODY_RHYTHM.rise),
@@ -1208,6 +1221,8 @@ pub struct BodyBreath {
     pub fall: Measure<Rate<Dimensionless>>,
     pub peak: Measure<Dimensionless>,
     pub rest_drive: Measure<Dimensionless>,
+    pub mixing: Measure<Rate<Volume>>,
+    pub alveolar_ventilation: Measure<Rate<Volume>>,
 }
 
 pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
@@ -1220,7 +1235,15 @@ pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
         fall: Measure::new(rhythm.fall)?,
         peak: Measure::new(rhythm.peak)?,
         rest_drive: Measure::new(rhythm.mean_drive())?,
+        mixing: Measure::new(MIXING)?,
+        alveolar_ventilation: Measure::new(alveolar_ventilation())?,
     })
+}
+
+/// The breath's alveolar ventilation, which the pump is fitted to give: two mixed exchanges in series ventilate the
+/// alveolar unit at half the mixing exchange.
+fn alveolar_ventilation() -> f64 {
+    MIXING / 2.0
 }
 
 const BODY_RHYTHM: BreathRhythm = BreathRhythm {

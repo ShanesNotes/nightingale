@@ -344,6 +344,20 @@ fn the_whole_body_holds_its_sites_and_pools() -> Result<(), AdmissionError> {
 }
 
 #[test]
+fn the_packet_states_the_breaths_alveolar_ventilation_at_half_the_mixing_exchange()
+-> Result<(), AdmissionError> {
+    let breath = body_breath()?;
+    let value = |measure: &Measure<Rate<Volume>>| f64::from_bits(Compensated::of(measure).bits()[0]);
+    let (mixing, ventilation) = (value(&breath.mixing), value(&breath.alveolar_ventilation));
+    assert_eq!(
+        ventilation,
+        mixing / 2.0,
+        "the lining's ventilation {ventilation} against the mixing exchange {mixing}"
+    );
+    Ok(())
+}
+
+#[test]
 fn the_whole_body_compiles_on_its_holds() {
     if let Err(refused) = whole_body() {
         panic!("{refused:?}");
@@ -396,9 +410,7 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         .map(|hold| format!("{} {:?} {:?} {}\n", hold.card, hold.held, hold.release, hold.line))
         .collect();
     expect![[r#"
-        RS Route("expired water") Ticket(10, "RS") 01:63, 873
-        RS Route("airway heat") Ticket(10, "RS") 01:171-172, 873
-        RS Pool(Water, Gas, Tissue(Lung)) Ticket(10, "RS") 01:356, 532
+        RS Route("airway heat") Ticket(12, "RS") 01:171-172, 873
         GI Route("gut water") Ticket(13, "GI") 01:54, 876
         GI Route("gut sodium") Ticket(13, "GI") 01:77, 876
         GI Route("gut potassium") Ticket(13, "GI") 01:94, 876
@@ -597,9 +609,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 149: routes 89, pools 60
-        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 15, "MT": 44, "RS": 3}
-        by ticket {"09": 3, "10": 3, "12": 7, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 147: routes 88, pools 59
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 15, "MT": 44, "RS": 1}
+        by ticket {"09": 3, "12": 8, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -904,10 +916,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1453 {"algebraic": 189, "amount": 1248, "memory": 16}, columns 1458, jacobian nonzeros 10072, blocks 431, parameter slots 724, conserved combinations 399, held pools 319, held route columns 89
-        model hash 0d912efcf57f2f79369c056a7a0a68f2158986901a8890cc26714142bb17bcb6
-        conserved basis 46b9975bf1364b8364f03f0e9b79a5b884dd7f6a3f419bf8b905493f1e9ceb3e
-        stated packet f7b499ba05075e93fe640b11567a6d21f466bfdf336abe5c87ea21f0a521a83c
+        rows 1453 {"algebraic": 189, "amount": 1248, "memory": 16}, columns 1460, jacobian nonzeros 10092, blocks 430, parameter slots 727, conserved combinations 397, held pools 318, held route columns 88
+        model hash da29b233a160110e7037250aa14b24c1d700bf94a3aaabb5a241446e2ea38db8
+        conserved basis c92e95858d2c64fbdf19a00399c9e12409c151548f8d4dc1e392f153ad01e397
+        stated packet 3e4843c53ad79a90cda913669670db13104c6c02b164b3102e1d382d47c008e4
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -1003,11 +1015,11 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     let stated = Stated {
         species: [
             (Species::Energy, 3e3),
-            (Species::Water, 0.04),
-            (Species::Sodium, 4e-4),
-            (Species::Chloride, 4e-4),
+            (Species::Water, 5e-2),
+            (Species::Sodium, 3e-4),
+            (Species::Chloride, 3e-4),
             (Species::Potassium, 2e-5),
-            (Species::Vasopressin, 4e-2),
+            (Species::Vasopressin, 5e-2),
             (Species::NitrogenGas, 2e4),
         ],
         elements: [

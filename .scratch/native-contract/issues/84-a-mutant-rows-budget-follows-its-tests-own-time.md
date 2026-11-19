@@ -16,6 +16,8 @@ Blocked by: none
 - The proof of nightingale#198's first head on ryzen ran that test's baseline in 370 s, beside the desk's share, and then gave `pleural-reads-no-drive` `UNCLEAR` at 420 s. The sweep stopped there with 561 rows not run.
 - The same row runs again whenever its code or its test changes, and the whole body's assembly, packet and run tests change in most body PRs.
 
+**What body ticket 10's last PR found.** In its proof on ryzen the body breath test's baseline took 334 s and its row `breath-never-starts` 342 s of the 420 s limit, where 10c's proof took 248 s. The lung's water slowed admission (native-contract 86 holds the counts). Another admission rise of that size passes the limit.
+
 - [ ] A budget that follows each test's own baseline in the same sweep (for example a multiple of the baseline's time), or one counted in CPU time rather than wall time, so a loaded worker gives a row the same chance as an idle one
 - [ ] The sweep's report says which budget it gave each row, and a row over it still reads `UNCLEAR`
 - [ ] The rule's probe in `tools/gate/gate.py` holds the new budget the way it holds 420 s today

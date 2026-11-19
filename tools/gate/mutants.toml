@@ -3763,8 +3763,8 @@ test = "-p ng-validate --test body each_beds_glycolysis_and_lactate_burn_carry_t
 [[mutant]]
 name = "water-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Species::Water, 0.04),'''
-new = '''(Species::Water, 0.08),'''
+old = '''(Species::Water, 5e-2),'''
+new = '''(Species::Water, 0.1),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -4508,11 +4508,11 @@ test = "-p ng-validate --test alveolar the_airway_carries_each_ends_share_upwind
 
 [[mutant]]
 name = "dry-pressure-includes-water"
-path = "crates/ng-respiratory/src/membrane.rs"
-old = '''    let (room, vapour) = (k.parameter(room), k.parameter(vapour));
-    let dry = k.subtract(room, vapour);'''
-new = '''    let (room, _vapour) = (k.parameter(room), k.parameter(vapour));
-    let dry = room;'''
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''        let (room, vapour) = (k.parameter(&self.room), k.parameter(&self.vapour));
+        k.subtract(room, vapour)'''
+new = '''        let (room, _vapour) = (k.parameter(&self.room), k.parameter(&self.vapour));
+        room'''
 test = "-p ng-validate --test alveolar the_membrane_moves_each_gas_down_its_own_head_from_the_dry_alveolar_pressure"
 
 [[mutant]]
@@ -4659,10 +4659,59 @@ test = "-p ng-validate --test viscosity only_the_muscle_beds_burn_follows_the_wo
 [[mutant]]
 name = "breath-work-ignores-the-share"
 path = "crates/ng-respiratory/src/airway.rs"
-old = '''            let target = k.add(now, handed);'''
-new = '''            let _ = handed;
+old = '''            let target = k.add(kept, handed);'''
+new = '''            let _ = (kept, handed);
             let target = now;'''
 test = "-p ng-validate --test alveolar at_rest_the_work_of_breathing_is_the_stated_mean"
+
+[[mutant]]
+name = "breath-work-reads-the-outflow"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let [inward, _] = self.parts(&mut k, head);
+            let g = k.parameter(&self.conductance);'''
+new = '''            let [_, inward] = self.parts(&mut k, head);
+            let g = k.parameter(&self.conductance);'''
+test = "-p ng-validate --test alveolar the_work_of_breathing_through_a_resistive_airway_means_the_pumps_work_on_its_inflow"
+
+[[mutant]]
+name = "breath-work-reads-the-signed-flow"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let inflow = k.conductance_flow(g, inward);'''
+new = '''            let _ = inward;
+            let inflow = k.conductance_flow(g, head);'''
+test = "-p ng-validate --test alveolar the_work_of_breathing_through_a_resistive_airway_means_the_pumps_work_on_its_inflow"
+
+[[mutant]]
+name = "lining-ignores-the-saturated-vapour-share"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let gap = k.subtract(saturated, given);'''
+new = '''            let _ = saturated;
+            let gap = given;'''
+test = "-p ng-validate --test alveolar the_lining_feeds_the_alveolar_gas_and_the_airway_carries_the_water_to_the_room"
+
+[[mutant]]
+name = "airway-water-rides-the-downstream-share"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''                self.share_of(&mut k, &per, up.1, up.0),'''
+new = '''                self.share_of(&mut k, &per, down.1, down.0),'''
+test = "-p ng-validate --test alveolar the_lining_feeds_the_alveolar_gas_and_the_airway_carries_the_water_to_the_room"
+
+[[mutant]]
+name = "expired-water-ignores-the-room"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let value = k.subtract(leaving, entering);'''
+new = '''            let _ = entering;
+            let value = leaving;'''
+test = "-p ng-validate --test alveolar the_lining_feeds_the_alveolar_gas_and_the_airway_carries_the_water_to_the_room"
+
+[[mutant]]
+name = "packet-states-the-mixing-as-the-alveolar-ventilation"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''    MIXING / 2.0
+}'''
+new = '''    MIXING
+}'''
+test = "-p ng-validate --test body the_packet_states_the_breaths_alveolar_ventilation_at_half_the_mixing_exchange"
 
 [[mutant]]
 name = "pump-force-ignores-the-drive"
