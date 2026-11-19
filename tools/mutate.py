@@ -22,8 +22,13 @@ pass there before any row runs. Each row prints as it ends, so a killed sweep ke
     CAUGHT at build  rustc refused the mutant with a coded error; read it, because a mistyped mutant proves nothing
     SURVIVED         every test passed, so ask what the test could not see
     NOT APPLIED      `old` did not match exactly once, so nothing ran
-    UNCLEAR          over budget, killed from outside, or failed with no test or coded error named: neither a catch
-                     nor a survivor
+    UNCLEAR          over its limit, killed from outside, or failed with no test or coded error named: neither a
+                     catch nor a survivor
+
+A row's limit is twice its test's baseline time in this sweep, so a loaded worker slows both alike, and never under
+--budget, 420 s by default. A row's rebuild rides on its test's time: the slowest measured took 1.4 times its
+baseline. A baseline, and the build that stands in for a skipped one, gets four times --budget: the unmutated test is
+known to finish, so that limit only stops a hung build. Each verdict line names the row's limit.
 
 Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. --since keeps the
 rows whose path, or any file under their test crate's tests/, changed after REV. Each command runs in its own process
@@ -39,9 +44,9 @@ instead, so a tree that does not build still stops the sweep. A call covers only
 with the ignored ones. A `--release`, `--doc` or other flagged test, a crate 10-rust did not test, and a record from
 another commit or other settings run the baseline. A full run and a hand run run every baseline. The record counts
 only while the checkout holds no changed or untracked file and no tracked file marked assume-unchanged or skip-worktree.
-A row caught at build runs its skipped baseline, so a filter that names no test still fails. The sweep refuses a Cargo
-config in target/.cargo or target/mutate/.cargo, which its cargo reads and 10-rust's does not, and an extract that
-lacks a tracked path.
+A row caught at build runs its skipped baseline, so a filter that names no test still fails, and a row over --budget
+runs it and then runs again with its limit. The sweep refuses a Cargo config in target/.cargo or target/mutate/.cargo,
+which its cargo reads and 10-rust's does not, and an extract that lacks a tracked path.
 """
 import argparse
 import collections
@@ -67,6 +72,8 @@ CODED_ERROR = re.compile(r"^.*\berror\[E\d{4}\].*$", re.M)
 DIED = re.compile(r"process didn't exit successfully: .*\((signal: (\d+), .*)\)$", re.M)
 FAULTS = {signal.SIGABRT, signal.SIGILL, signal.SIGSEGV, signal.SIGBUS, signal.SIGFPE}
 SHOWN = 3
+ROW_TIMES = 2
+BASELINE_TIMES = 4
 ROW_KEYS = {"name", "path", "old", "new", "test"}
 MOVES = {"--manifest-path", "--target-dir", "--config"}
 SET_HERE = {"CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR", "CARGO_TERM_COLOR", "CARGO_NET_OFFLINE"}
@@ -174,7 +181,7 @@ def unseen(root):
     return [*hidden, *(place for place in CARGO_CONFIGS if os.path.lexists(os.path.join(root, place)))]
 
 
-def run_tethered(argv, budget=None, **popen):
+def run_tethered(argv, limit=None, **popen):
     read_end, write_end = os.pipe()
     keeper = subprocess.Popen(
         ["sh", "-c", "read line; kill -KILL 0"],
@@ -193,7 +200,7 @@ def run_tethered(argv, budget=None, **popen):
         **popen,
     )
     try:
-        output, _ = child.communicate(timeout=budget)
+        output, _ = child.communicate(timeout=limit)
         return child.returncode, output
     except subprocess.TimeoutExpired:
         return None, b""
@@ -226,15 +233,15 @@ def matches(sha, row):
     return blob.count(row["old"].encode()) if code == 0 else 0
 
 
-def cargo_test(test, env, budget):
+def cargo_test(test, env, limit):
     argv = ["cargo", "test", "--manifest-path", TREE / "Cargo.toml", *shlex.split(test)]
-    code, output = run_tethered(argv, budget, cwd=TREE, env=env)
+    code, output = run_tethered(argv, limit, cwd=TREE, env=env)
     return code, output.decode(errors="replace")
 
 
-def judge(code, output, budget):
+def judge(code, output, limit):
     if code is None:
-        return "UNCLEAR", f"over {budget} s"
+        return "UNCLEAR", f"over {limit:.0f} s"
     if code == 0:
         return "SURVIVED", ""
     if failed := FAILED.findall(output):
@@ -254,7 +261,7 @@ def main():
     parser.add_argument("table")
     parser.add_argument("--rev", default="HEAD")
     parser.add_argument("--only", nargs="+", default=[], metavar="NAME")
-    parser.add_argument("--budget", type=int, default=420, metavar="SECONDS", help="limit on one cargo test")
+    parser.add_argument("--budget", type=int, default=420, metavar="SECONDS", help="the least limit on a row")
     parser.add_argument("--since", metavar="REV", help="only rows whose path or test crate's tests/ changed after REV")
     parser.add_argument("--check", action="store_true", help="stop before any build")
     parser.add_argument("--tested", metavar="RECORD", help="skip the baselines 10-rust's passed test calls cover")
@@ -277,13 +284,19 @@ def main():
         if not rows:
             print(f"no row is touched after {args.since}")
             sys.exit(0)
-    print(f"sweep of {sha}, {len(rows)} rows, budget {args.budget} s", flush=True)
+    held = args.budget * BASELINE_TIMES
+    print(
+        f"sweep of {sha}, {len(rows)} rows, a row's limit {ROW_TIMES} times its baseline and at least {args.budget} s, "
+        f"a baseline's {held} s",
+        flush=True,
+    )
 
     tally = collections.Counter()
 
-    def report(verdict, name, seconds, detail):
+    def report(verdict, name, seconds, detail, limit=None):
         tally[verdict] += 1
-        print(f"{verdict:<15}  {name}  {seconds:.0f} s  {detail}".rstrip(), flush=True)
+        given = "" if limit is None else f"limit {limit:.0f} s  "
+        print(f"{verdict:<15}  {name}  {seconds:.0f} s  {given}{detail}".rstrip(), flush=True)
 
     applied = []
     for row in rows:
@@ -325,13 +338,16 @@ def main():
         print(f"the checkout holds {moved[:3]} outside {sha}, so every baseline runs", flush=True)
         calls = []
 
+    took = {}
+
     def baseline(test):
         began = time.monotonic()
-        code, output = cargo_test(test, env, args.budget)
+        code, output = cargo_test(test, env, held)
         if code != 0 or not PASSED.search(output):
-            gave = output[-2000:] or f"nothing in {args.budget} s"
+            gave = output[-2000:] or f"nothing in {held} s"
             refuse(f"`cargo test {test}` must pass some test on the unmutated tree, and it gave:\n{gave}\n")
-        print(f"baseline  {time.monotonic() - began:.0f} s  cargo test {test}", flush=True)
+        took[test] = time.monotonic() - began
+        print(f"baseline  {took[test]:.0f} s  cargo test {test}", flush=True)
 
     skipped = []
     for test in dict.fromkeys(row["test"] for row in applied):
@@ -343,25 +359,33 @@ def main():
         print(f"baselines skipped: {len(skipped)}, whose tests 10-rust passed on this commit", flush=True)
     for build in dict.fromkeys(built(test) for test in skipped):
         began = time.monotonic()
-        code, output = cargo_test(f"--no-run {build}", env, args.budget)
+        code, output = cargo_test(f"--no-run {build}", env, held)
         if code != 0:
-            gave = output[-2000:] or f"nothing in {args.budget} s"
+            gave = output[-2000:] or f"nothing in {held} s"
             refuse(f"`cargo test --no-run {build}` must build on the unmutated tree, and it gave:\n{gave}\n")
         print(f"build     {time.monotonic() - began:.0f} s  cargo test --no-run {build}", flush=True)
 
-    for row in applied:
+    def mutated(row):
+        limit = max(args.budget, ROW_TIMES * took.get(row["test"], 0))
         file = TREE / row["path"]
         original = file.read_bytes()
         file.write_bytes(original.replace(row["old"].encode(), row["new"].encode()))
         began = time.monotonic()
-        code, output = cargo_test(row["test"], env, args.budget)
+        code, output = cargo_test(row["test"], env, limit)
         file.write_bytes(original)
-        verdict, detail = judge(code, output, args.budget)
-        seconds = time.monotonic() - began
+        return code, *judge(code, output, limit), time.monotonic() - began, limit
+
+    for row in applied:
+        code, verdict, detail, seconds, limit = mutated(row)
         if verdict == "CAUGHT at build" and row["test"] in skipped:
             skipped.remove(row["test"])
             baseline(row["test"])
-        report(verdict, row["name"], seconds, detail)
+        if code is None and row["test"] in skipped:
+            print(f"over      {limit:.0f} s  {row['name']} runs again after its skipped baseline", flush=True)
+            skipped.remove(row["test"])
+            baseline(row["test"])
+            code, verdict, detail, seconds, limit = mutated(row)
+        report(verdict, row["name"], seconds, detail, limit)
 
     counts = ", ".join(f"{count} {verdict}" for verdict, count in tally.items())
     print(f"summary: {counts}, of {len(rows)} rows at {sha}")
