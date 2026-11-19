@@ -47,6 +47,7 @@ const CAROTID_ABOVE_VESSEL: f64 = 0.3;
 #[derive(Clone, Copy)]
 struct Case {
     initial_mixing_share: f64,
+    room_vapour: f64,
     oxygen_use: f64,
     carbon_dioxide_made: f64,
     ventilation: f64,
@@ -66,6 +67,7 @@ struct Case {
 
 const AT_REST: Case = Case {
     initial_mixing_share: 1.0,
+    room_vapour: ROOM_VAPOUR,
     oxygen_use: 250.0,
     carbon_dioxide_made: 200.0,
     ventilation: 1.0,
@@ -272,7 +274,8 @@ fn coefficients(unit: Case) -> (f64, f64) {
         unit.conductance * unit.ventilation,
         unit.mixing * unit.ventilation,
     );
-    let net = unit.oxygen_use - unit.carbon_dioxide_made;
+    let [vo, vc, _] = unit.molar_volume;
+    let net = unit.oxygen_use * vo - unit.carbon_dioxide_made * vc;
     let head = net / g;
     let width = unit.width;
     let smooth = |a: f64| 0.5 * (a + (a * a + width * width).sqrt());
@@ -286,7 +289,7 @@ fn coefficients(unit: Case) -> (f64, f64) {
 fn water_closed_form(unit: Case) -> [f64; 3] {
     let (a, b) = coefficients(unit);
     let saturated = VAPOUR / DRY;
-    let room = HUMIDITY * ROOM_VAPOUR / (ROOM - HUMIDITY * ROOM_VAPOUR);
+    let room = HUMIDITY * unit.room_vapour / (ROOM - HUMIDITY * unit.room_vapour);
     let q = unit.mixing * unit.ventilation / 2.0 * (saturated - room);
     let dead = (a * room + q) / b;
     [q, dead, (a * dead + q) / b]
@@ -359,7 +362,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Quotient<Volume, Water>>(p, "rs.water-volume", WATER_VOLUME)?;
     set::<Rate<Volume>>(p, "rs.alveolar-ventilation", m / 2.0)?;
     set::<Dimensionless>(p, "rs.room-humidity", HUMIDITY)?;
-    set::<Pressure>(p, "rs.room-vapour-pressure", ROOM_VAPOUR)?;
+    set::<Pressure>(p, "rs.room-vapour-pressure", unit.room_vapour)?;
     set::<Water>(p, "fixture.water-set", INTERSTITIUM_WATER_SET)?;
     set::<Rate<Dimensionless>>(p, "fixture.water-speed", INTERSTITIUM_WATER_SPEED)?;
     for (gas, key) in [(0, "rs.oxygen-inspired"), (1, "rs.carbon-dioxide-inspired")] {
@@ -821,7 +824,7 @@ fn doubling_ventilation_at_resting_use_meets_the_closed_form_of_the_two_exchange
 }
 
 #[test]
-fn the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the_water_to_the_room()
+fn the_lining_feeds_the_alveolar_gas_and_the_airway_carries_the_water_to_the_room()
 -> Result<(), InitializationFailure> {
     let unit = AT_REST;
     let settled = settled(unit)?;
@@ -835,6 +838,95 @@ fn the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the
         "water's share is {} in the alveolar unit and {} in the dead space, the closed form's {alveolar} and {dead}",
         shares[0],
         shares[1]
+    );
+    Ok(())
+}
+
+#[test]
+fn the_water_closed_form_meets_both_gas_spaces_when_the_membrane_trades_equal_volumes()
+-> Result<(), InitializationFailure> {
+    let unit = Case {
+        molar_volume: [1.0, 1.25, 0.8],
+        ..AT_REST
+    };
+    assert_eq!(
+        unit.oxygen_use * unit.molar_volume[0],
+        unit.carbon_dioxide_made * unit.molar_volume[1]
+    );
+    let settled = settled(unit)?;
+    let room_partial = HUMIDITY * ROOM_VAPOUR;
+    let room = room_partial / (ROOM - room_partial);
+    let mixing = unit.mixing * unit.ventilation;
+    let each_way = mixing + unit.conductance * unit.ventilation * unit.width / 2.0;
+    let rise = (mixing / 2.0) * (VAPOUR / DRY - room) / each_way;
+    let [_, dead, alveolar] = water_closed_form(unit);
+    for (site, amount, volume, closed, expected) in [
+        (AIRWAY, settled.water[1], settled.dead_volume, dead, room + rise),
+        (
+            LUNG,
+            settled.water[0],
+            settled.alveolar_volume,
+            alveolar,
+            room + 2.0 * rise,
+        ),
+    ] {
+        let measured = WATER_VOLUME * amount / volume;
+        assert!(
+            close(measured, expected, TOLERANCE) && close(closed, expected, TOLERANCE),
+            "{site} at zero net dry volume uptake: measured {measured}, the closed form {closed}, expected {expected}"
+        );
+    }
+    Ok(())
+}
+
+/// The one column that moves `moves` water at the site's space, a boundary's when `receipt`.
+fn water_column(body: &CompiledBody, key: &str, space: Space, moves: f64, receipt: bool) -> ColumnId {
+    let water = |at: SiteId, species, held| at.key() == key && species == Species::Water && held == space;
+    (every_column(body).into_iter())
+        .filter(|column| body.columns()[column.index()].receipt().is_some() == receipt)
+        .find(|column| count(body, *column, water) == moves)
+        .unwrap_or_else(|| panic!("no column moves {moves} water in the {key}'s {space:?}"))
+}
+
+/// In a room whose vapour stands well above the lung's, the lining's form is negative: it returns water to the
+/// interstitium.
+#[test]
+fn in_a_room_wetter_than_the_lung_the_lining_returns_water_to_the_interstitium()
+-> Result<(), InitializationFailure> {
+    let unit = Case {
+        room_vapour: 4.0 * VAPOUR / HUMIDITY,
+        ..AT_REST
+    };
+    let [q, ..] = water_closed_form(unit);
+    let moved = run(unit, 1, |body, session| {
+        let lining = water_column(body, LUNG, Space::Interstitium, -1.0, false);
+        extents(&session, &every_column(body), SECOND)[lining.index()]
+    })?;
+    let expected = q / WATER_VOLUME;
+    assert!(
+        expected < 0.0 && close(moved, expected, 1e-9),
+        "in the wetter room the lining moved {moved} in one second, the form {expected}"
+    );
+    Ok(())
+}
+
+/// With the breath running the gas's water settles at the wash-out's time constant, the alveolar unit's volume over
+/// the alveolar ventilation, `17,000 / 194.5` = 87 s here. After 900 s a start as far off as the whole pool, 131, has
+/// `e^(-900 / 87)` of itself left, 4e-3, under 2e-4 of the lining's 24 over four breaths, so the room's take meets
+/// the lining's extent to 1e-3.
+#[test]
+fn once_settled_the_room_takes_what_the_lining_moves_over_whole_breaths() -> Result<(), InitializationFailure>
+{
+    let unit = BREATHING;
+    let body = compiled()?;
+    let samples = breaths(unit)?;
+    let (first, last) = (&samples[0], &samples[samples.len() - 1]);
+    let moved = |column: ColumnId| last.extents[column.index()] - first.extents[column.index()];
+    let lining = moved(water_column(&body, LUNG, Space::Interstitium, -1.0, false));
+    let taken = moved(water_column(&body, AIRWAY, Space::Gas, -1.0, true));
+    assert!(
+        close(taken, lining, 1e-3),
+        "over whole breaths the room takes {taken} water and the lining moves {lining}"
     );
     Ok(())
 }

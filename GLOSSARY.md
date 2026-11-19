@@ -287,7 +287,7 @@ A wall between two spaces, classed by what can cross it (section 5).
 The amount of one conserved quantity (water, sodium, oxygen, heat, and so on) held in one site, or in one space of a site such as a tissue bed's plasma. The body names its pools, the state holds their amounts, and no organ or system owns one.
 
 **Space**:
-One part of a site that holds pools: a tissue bed's plasma, interstitial fluid or cells, a vessel segment's lumen, an enclosed space's own fluid, a junction's vesicles and cleft, a ligand bound to its receptors, a store of heat or of stretch energy, or the gas of a lung bed or an airway, which holds no water. Each species states the kinds of space that may hold it, and compilation refuses a pool in any other. A nerve segment has none.
+One part of a site that holds pools: a tissue bed's plasma, interstitial fluid or cells, a vessel segment's lumen, an enclosed space's own fluid, a junction's vesicles and cleft, a ligand bound to its receptors, a store of heat or of stretch energy, or the gas of a lung bed or an airway, whose water vapour is a pool beside its gases. Each species states the kinds of space that may hold it, and compilation refuses a pool in any other. A nerve segment has none.
 
 **Conserved quantity**:
 A quantity the ledger balances: water, an element (carbon, hydrogen, oxygen, sodium, potassium, chloride, calcium, magnesium, phosphorus, nitrogen), charge, energy, a moiety such as glucose or catecholamine, or carrier mass. Where a reaction joins species, the elements and energy are what balance, and a species such as water has no quantity of its own there. The contract's `Book` type names one.
@@ -374,7 +374,7 @@ The pressure a dissolved gas would hold in a gas at equilibrium with its space, 
 _Avoid_: tension
 
 **Saturation**:
-The share of hemoglobin's oxygen sites that hold oxygen in a blood space, from 0 to 1, which speciation sets from the oxygen partial pressure.
+The share of hemoglobin's oxygen sites that hold oxygen in a blood space, from 0 to 1, which speciation sets from the oxygen partial pressure. It is not the saturated vapour share, water vapour's limit in a gas.
 
 **Oxygen content**:
 All the oxygen a volume of a space holds, dissolved and bound together: the space's oxygen amount over its volume. It is not a chart entry's content.
@@ -458,6 +458,19 @@ A volume of gas a second traded both ways along the airway, or between the room 
 
 **Alveolar exchange**:
 A transfer of oxygen or carbon dioxide across the gas-exchange surface, at a conductance times the alveolar partial pressure less the pulmonary bed's plasma's. The alveolar partial pressure is the gas's share of the dry gas times the room's pressure less water vapour's.
+
+**Water share**:
+A gas space's water vapour as a share of its dry gas: the vapour's volume, the water amount times the vapour volume, over the dry gas's volume. The airway carries water at this share as it carries each dry gas at its own, and the water adds nothing to the volume the elastic heads read.
+
+**Vapour volume**:
+The gas volume one unit amount of water takes up as vapour, `v_w`, a packet parameter. It turns a water amount into the volume its water share counts.
+
+**Saturated vapour share**:
+The water share a gas holds where its water vapour pressure is its limit at body temperature: `P_H2O / (P_B - P_H2O)`, the vapour pressure over the dry gas's pressure. The room's gas holds `h P_r / (P_B - h P_r)`, with `h` its humidity and `P_r` its own limit.
+_Avoid_: saturation, for water vapour
+
+**Lining**:
+The transfer of water from a lung bed's interstitium into its gas. At rung 0 it reads parameters only: the alveolar ventilation the breath is fitted to, times the saturated vapour share less the room's water share, over the vapour volume.
 
 **Shunt**:
 A vascular edge from the pulmonary artery to the pulmonary vein beside the pulmonary bed, so a share of the blood reaches the left heart with no alveolar exchange.

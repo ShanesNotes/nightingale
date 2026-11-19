@@ -344,6 +344,20 @@ fn the_whole_body_holds_its_sites_and_pools() -> Result<(), AdmissionError> {
 }
 
 #[test]
+fn the_packet_states_the_breaths_alveolar_ventilation_at_half_the_mixing_exchange()
+-> Result<(), AdmissionError> {
+    let breath = body_breath()?;
+    let value = |measure: &Measure<Rate<Volume>>| f64::from_bits(Compensated::of(measure).bits()[0]);
+    let (mixing, ventilation) = (value(&breath.mixing), value(&breath.alveolar_ventilation));
+    assert_eq!(
+        ventilation,
+        mixing / 2.0,
+        "the lining's ventilation {ventilation} against the mixing exchange {mixing}"
+    );
+    Ok(())
+}
+
+#[test]
 fn the_whole_body_compiles_on_its_holds() {
     if let Err(refused) = whole_body() {
         panic!("{refused:?}");

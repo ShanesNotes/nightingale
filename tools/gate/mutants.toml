@@ -4682,19 +4682,19 @@ new = '''            let _ = inward;
 test = "-p ng-validate --test alveolar the_work_of_breathing_through_a_resistive_airway_means_the_pumps_work_on_its_inflow"
 
 [[mutant]]
-name = "lining-ignores-saturation"
+name = "lining-ignores-the-saturated-vapour-share"
 path = "crates/ng-respiratory/src/airway.rs"
 old = '''            let gap = k.subtract(saturated, given);'''
 new = '''            let _ = saturated;
             let gap = given;'''
-test = "-p ng-validate --test alveolar the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the_water_to_the_room"
+test = "-p ng-validate --test alveolar the_lining_feeds_the_alveolar_gas_and_the_airway_carries_the_water_to_the_room"
 
 [[mutant]]
 name = "airway-water-rides-the-downstream-share"
 path = "crates/ng-respiratory/src/airway.rs"
 old = '''                self.share_of(&mut k, &per, up.1, up.0),'''
 new = '''                self.share_of(&mut k, &per, down.1, down.0),'''
-test = "-p ng-validate --test alveolar the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the_water_to_the_room"
+test = "-p ng-validate --test alveolar the_lining_feeds_the_alveolar_gas_and_the_airway_carries_the_water_to_the_room"
 
 [[mutant]]
 name = "expired-water-ignores-the-room"
@@ -4702,7 +4702,16 @@ path = "crates/ng-respiratory/src/airway.rs"
 old = '''            let value = k.subtract(leaving, entering);'''
 new = '''            let _ = entering;
             let value = leaving;'''
-test = "-p ng-validate --test alveolar the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the_water_to_the_room"
+test = "-p ng-validate --test alveolar the_lining_feeds_the_alveolar_gas_and_the_airway_carries_the_water_to_the_room"
+
+[[mutant]]
+name = "packet-states-the-mixing-as-the-alveolar-ventilation"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''    MIXING / 2.0
+}'''
+new = '''    MIXING
+}'''
+test = "-p ng-validate --test body the_packet_states_the_breaths_alveolar_ventilation_at_half_the_mixing_exchange"
 
 [[mutant]]
 name = "pump-force-ignores-the-drive"

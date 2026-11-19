@@ -531,25 +531,18 @@ impl Watch {
     }
 }
 
-/// The lining feeds the water at the alveolar ventilation the breath is fitted to, and the breath ventilates 3% under
-/// it (10b), so the alveolar gas holds 1.0221 of the saturated share over whole breaths from 20 s.
-const SATURATED: f64 = (700.0 - DRY) / DRY;
-const WET_BAND: (f64, f64) = (1.0, 1.03);
+/// A line of the trace: it shows the alveolar gas's water share move and judges nothing.
+const SATURATED_VAPOUR_SHARE: f64 = (700.0 - DRY) / DRY;
 
-fn the_alveolar_gas_holds_near_saturation_over_whole_breaths(watch: &Watch) -> String {
+fn the_alveolar_water_share_over_whole_breaths(watch: &Watch) -> String {
     let steady = (watch.moments.iter())
         .position(|moment| moment.at >= 20 * SECOND)
         .expect("twenty seconds");
     let edges: Vec<usize> = watch.edges().into_iter().filter(|&edge| edge >= steady).collect();
     let (from, to) = (edges[0], edges[edges.len() - 1]);
-    let share = watch.mean(from, to, |moment| moment.wet) / SATURATED;
-    let (low, high) = WET_BAND;
-    assert!(
-        low <= share && share <= high,
-        "over whole breaths the alveolar gas holds {share} of the saturated water share"
-    );
+    let share = watch.mean(from, to, |moment| moment.wet) / SATURATED_VAPOUR_SHARE;
     format!(
-        "alveolar water over whole breaths from {:.3} s: {share:.5} of saturation\n",
+        "alveolar water over whole breaths from {:.3} s: {share:.5} of the saturated vapour share\n",
         watch.moments[from].at as f64 / SECOND as f64
     )
 }
@@ -1376,44 +1369,34 @@ fn the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_th
     }
     each_breath_swings_the_alveolar_gases_and_venous_return(&watch);
     the_whole_beat_heat_report_counts_what_the_core_receives_from_the_beds(&start);
-    at_rest_the_lungs_lose_water_as_research_11s_form_gives(&start);
 }
 
-/// Research 11's airway water, `V' (rho_sat - rho_insp)` with the expired gas saturated, at the packet's values. The
-/// alveolar gas leaves saturated at the mixing exchange's alveolar ventilation, `M / 2` for two mixed exchanges in
-/// series, and the dead space's gas leaves as the room gave it, so `V'` is `M / 2`. Each density is a share of the dry
-/// gas over water's molar volume: `P_H2O / (P_B - P_H2O)` saturated, and `h P_r / (P_B - h P_r)` from the room.
+/// Research 11's airway water, `V' (rho_sat - rho_insp)` with the expired gas at its vapour limit, at the packet's
+/// values: `V'` the mixing exchange's alveolar ventilation, `M / 2` for two mixed exchanges in series, and each density
+/// a share of the dry gas over water's vapour volume, `P_H2O / (P_B - P_H2O)` at the limit and `h P_r / (P_B - h P_r)`
+/// from the room. The lining moves exactly that.
 const MIXING: f64 = 3_240.0;
 const WATER_VOLUME: f64 = 24_000.0;
 const ROOM_WATER: f64 = 0.5 * 20.0 / (700.0 - 0.5 * 20.0);
-/// The lining feeds the form at rest, and over the first millisecond the lungs lose 1.0111 of it.
-const WATER_AT_REST: (f64, f64) = (1.0, 1.02);
 
-fn at_rest_the_lungs_lose_water_as_research_11s_form_gives(start: &Start) {
+fn the_lining_moves_research_11s_form_over_the_first_minute(start: &Start, minute: &Session<'_, Running>) {
     let body = &start.body;
     let columns = every_column(body);
-    let airway = site::<TissueSite>("conducting airway");
-    let expired = (columns.iter().copied())
-        .filter(|column| body.columns()[column.index()].receipt().is_some())
+    let lung = site::<CapillaryBed>("pulmonary bed");
+    let water = |space| move |site, species, held| site == lung && species == Species::Water && held == space;
+    let lining = (columns.iter().copied())
         .find(|column| {
-            count(body, *column, |site, species, space| {
-                site == airway && species == Species::Water && space == Space::Gas
-            }) == -1.0
+            count(body, *column, water(Space::Interstitium)) == -1.0
+                && count(body, *column, water(Space::Gas)) == 1.0
         })
-        .expect("expired water");
-    let first = until(start.session(), MILLISECOND / 10);
-    let from = first.record().accepted().time().nanoseconds();
-    let session = until(first, MILLISECOND);
-    let to = session.record().accepted().time().nanoseconds();
-    let moved =
-        extents(&session, &columns, to)[expired.index()] - extents(&session, &columns, from)[expired.index()];
-    let rate = moved / ((to - from) as f64 / SECOND as f64);
-    let form = MIXING / 2.0 * ((700.0 - DRY) / DRY - ROOM_WATER) / WATER_VOLUME;
-    let (low, high) = WATER_AT_REST;
+        .expect("the lining");
+    let to = minute.record().accepted().time().nanoseconds();
+    let moved = extents(minute, &columns, to)[lining.index()];
+    let seconds = (to - anchor_moment().nanoseconds()) as f64 / SECOND as f64;
+    let form = MIXING / 2.0 * ((700.0 - DRY) / DRY - ROOM_WATER) / WATER_VOLUME * seconds;
     assert!(
-        low * form <= rate && rate <= high * form,
-        "at rest the lungs lose {rate} water a second, research 11's form {form} ({:.4} of it)",
-        rate / form
+        (moved - form).abs() <= 1e-9 * form,
+        "over {seconds} s the lining moved {moved} water, research 11's form {form}"
     );
 }
 
@@ -2079,12 +2062,13 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let mut report = each_breath_swings_the_alveolar_gases_and_venous_return(&watch);
     report += &the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(&watch);
     report += &the_work_of_breathing_follows_the_pump_from_the_stated_mean(&watch);
-    report += &the_alveolar_gas_holds_near_saturation_over_whole_breaths(&watch);
+    report += &the_alveolar_water_share_over_whole_breaths(&watch);
     the_body_admits_at_06_55(&start);
     the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
     report += &the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
         &start, &minute, &watch,
     );
+    the_lining_moves_research_11s_form_over_the_first_minute(&start, &minute);
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
         before the first breath edge: alveolar oxygen 101.326, carbon dioxide 28.340, venous return 77.31

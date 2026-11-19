@@ -1161,7 +1161,7 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, AIRWAY_CONDUCTANCE)?;
     set::<Rate<Volume>>(packet, "rs.airway-mixing", body, MIXING)?;
     set::<Quotient<Volume, Water>>(packet, "rs.water-volume", body, 24_000.0)?;
-    set::<Rate<Volume>>(packet, "rs.alveolar-ventilation", body, MIXING / 2.0)?;
+    set::<Rate<Volume>>(packet, "rs.alveolar-ventilation", body, alveolar_ventilation())?;
     set::<Dimensionless>(packet, "rs.room-humidity", body, 0.5)?;
     set::<Pressure>(packet, "rs.room-vapour-pressure", body, 20.0)?;
     for (key, value) in [
@@ -1221,6 +1221,8 @@ pub struct BodyBreath {
     pub fall: Measure<Rate<Dimensionless>>,
     pub peak: Measure<Dimensionless>,
     pub rest_drive: Measure<Dimensionless>,
+    pub mixing: Measure<Rate<Volume>>,
+    pub alveolar_ventilation: Measure<Rate<Volume>>,
 }
 
 pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
@@ -1233,7 +1235,15 @@ pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
         fall: Measure::new(rhythm.fall)?,
         peak: Measure::new(rhythm.peak)?,
         rest_drive: Measure::new(rhythm.mean_drive())?,
+        mixing: Measure::new(MIXING)?,
+        alveolar_ventilation: Measure::new(alveolar_ventilation())?,
     })
+}
+
+/// The breath's alveolar ventilation, which the pump is fitted to give: two mixed exchanges in series ventilate the
+/// alveolar unit at half the mixing exchange.
+fn alveolar_ventilation() -> f64 {
+    MIXING / 2.0
 }
 
 const BODY_RHYTHM: BreathRhythm = BreathRhythm {
