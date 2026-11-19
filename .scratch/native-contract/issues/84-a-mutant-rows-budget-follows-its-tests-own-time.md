@@ -4,7 +4,9 @@ Spec: `tools/mutate.py` and `tools/gate/gate.py` (the mutant sweep), and `tools/
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc84-build
 
 Blocked by: none
 
