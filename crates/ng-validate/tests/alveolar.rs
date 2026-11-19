@@ -879,17 +879,25 @@ fn the_water_closed_form_meets_both_gas_spaces_when_the_membrane_trades_equal_vo
     Ok(())
 }
 
-/// The one column that moves `moves` water at the site's space, a boundary's when `receipt`.
-fn water_column(body: &CompiledBody, key: &str, space: Space, moves: f64, receipt: bool) -> ColumnId {
-    let water = |at: SiteId, species, held| at.key() == key && species == Species::Water && held == space;
+fn lining_column(body: &CompiledBody) -> ColumnId {
+    let held = |site: SiteId, species, space| {
+        site.key() == LUNG && species == Species::Water && space == Space::Interstitium
+    };
     (every_column(body).into_iter())
-        .filter(|column| body.columns()[column.index()].receipt().is_some() == receipt)
-        .find(|column| count(body, *column, water) == moves)
-        .unwrap_or_else(|| panic!("no column moves {moves} water in the {key}'s {space:?}"))
+        .find(|column| count(body, *column, held) == -1.0)
+        .expect("the lining")
 }
 
-/// In a room whose vapour stands well above the lung's, the lining's form is negative: it returns water to the
-/// interstitium.
+fn expired_water_column(body: &CompiledBody) -> ColumnId {
+    let held = |site: SiteId, species, space| {
+        site.key() == AIRWAY && species == Species::Water && space == Space::Gas
+    };
+    (every_column(body).into_iter())
+        .filter(|column| body.columns()[column.index()].receipt().is_some())
+        .find(|column| count(body, *column, held) == -1.0)
+        .expect("expired water")
+}
+
 #[test]
 fn in_a_room_wetter_than_the_lung_the_lining_returns_water_to_the_interstitium()
 -> Result<(), InitializationFailure> {
@@ -899,7 +907,7 @@ fn in_a_room_wetter_than_the_lung_the_lining_returns_water_to_the_interstitium()
     };
     let [q, ..] = water_closed_form(unit);
     let moved = run(unit, 1, |body, session| {
-        let lining = water_column(body, LUNG, Space::Interstitium, -1.0, false);
+        let lining = lining_column(body);
         extents(&session, &every_column(body), SECOND)[lining.index()]
     })?;
     let expected = q / WATER_VOLUME;
@@ -922,8 +930,8 @@ fn once_settled_the_room_takes_what_the_lining_moves_over_whole_breaths() -> Res
     let samples = breaths(unit)?;
     let (first, last) = (&samples[0], &samples[samples.len() - 1]);
     let moved = |column: ColumnId| last.extents[column.index()] - first.extents[column.index()];
-    let lining = moved(water_column(&body, LUNG, Space::Interstitium, -1.0, false));
-    let taken = moved(water_column(&body, AIRWAY, Space::Gas, -1.0, true));
+    let lining = moved(lining_column(&body));
+    let taken = moved(expired_water_column(&body));
     assert!(
         close(taken, lining, 1e-3),
         "over whole breaths the room takes {taken} water and the lining moves {lining}"

@@ -531,7 +531,6 @@ impl Watch {
     }
 }
 
-/// A line of the trace: it shows the alveolar gas's water share move and judges nothing.
 const SATURATED_VAPOUR_SHARE: f64 = (700.0 - DRY) / DRY;
 
 fn the_alveolar_water_share_over_whole_breaths(watch: &Watch) -> String {
