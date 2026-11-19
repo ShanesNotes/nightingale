@@ -1470,8 +1470,12 @@ fn stepped(unit: Case) -> Stepped {
                 y = (y + STEP * filling) / (1.0 + STEP * g * DEAD_SPACE_ELASTANCE);
                 let inflow = g * DEAD_SPACE_ELASTANCE * y;
                 if breath == REPEATS {
-                    last.least = last.least.min(pressure);
-                    last.most = last.most.max(pressure);
+                    if pressure < last.least {
+                        last.least = pressure;
+                    }
+                    if pressure > last.most {
+                        last.most = pressure;
+                    }
                     if inflow > 0.0 {
                         last.work += pressure * inflow * STEP;
                     }

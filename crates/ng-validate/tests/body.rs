@@ -916,7 +916,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         body.columns().len(),
         body.sparsity().unknowns().len(),
         body.blocks().len(),
-        (body.blocks().iter()).map(|block| block.rows().len()).max().unwrap_or(0),
+        (body.blocks().iter())
+            .map(|block| block.rows().len())
+            .max()
+            .unwrap_or(0),
         body.parameters().len(),
         basis.combinations().len(),
         basis.coverage().pools().len(),

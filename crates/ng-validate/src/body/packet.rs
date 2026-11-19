@@ -1373,8 +1373,12 @@ impl BreathRhythm {
                     y = (y + STEP * filling) / (1.0 + STEP * AIRWAY_CONDUCTANCE * DEAD_SPACE_ELASTANCE);
                     let inflow = AIRWAY_CONDUCTANCE * DEAD_SPACE_ELASTANCE * y;
                     if breath == BREATHS {
-                        last.least = last.least.min(pressure);
-                        last.most = last.most.max(pressure);
+                        if pressure < last.least {
+                            last.least = pressure;
+                        }
+                        if pressure > last.most {
+                            last.most = pressure;
+                        }
                         if inflow > 0.0 {
                             last.work += pressure * inflow * STEP;
                         }
