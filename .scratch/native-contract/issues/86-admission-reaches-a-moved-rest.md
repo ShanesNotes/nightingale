@@ -1,0 +1,26 @@
+# 86: Admission reaches a moved rest, and settles near-coincident crossings
+
+Spec: [solver contract](../../../docs/architecture/solver-contract.md), section 4, `crates/ng-contract/src/admission.rs` and `crates/ng-validate/src/initialize.rs`
+
+Type: prototype
+
+Status: open
+
+Blocked by: none
+
+Blocks: [body ticket 11](../../body/issues/11-breathing-is-controlled.md)
+
+**Why.** The first milestone (SRS invariant I19) runs the whole body for 48 hours, and every rung that moves the breathing body's rest meets admission first, controlled breathing first. [Native-contract 82](82-what-a-moved-rest-does-not-admit.md) found two limits of the admission section 4 states. Neither is shown to be the physiology, and the first is not Newton's conditioning.
+
+- **A sweep that cycles.** With the pleural pressure read from the lung's volume, the body has a state admission accepts: solved from the static form's state, it admits in 55 to 58 s. From the packet's guess it never does. Two valve closings sit 4 microseconds apart in one interval. Newton's update would carry one past the other, admission keeps the crossings of an interval in order, so the update is clamped, Newton stops at the clamp, and the sweep drops the crossing and finds it again, until the sweep limit.
+- **A guess that cannot reach a moved rest.** With the rest drive at the breath's mean and the chest wall's rest unfitted, Newton from the packet's guess stalls. A continuation in the rest drive admits each step to 95% of the mean, with more updates at each step, and the last step had not settled after 140 updates. Two rules of the solve refused steps that more work admits: it stops when Newton has used its 32 updates unsettled and the sweep finds no change, and it takes a trial that raises the merit when none lowers it.
+
+**What the round decides.** Each is settled by two or three prototypes on the whole body, with the volume read and the moved rest as its cases.
+
+- [ ] How the solve settles two located crossings in one interval whose order Newton would swap: reorder them, merge them into one knot, or relocate them from the new curves rather than clamp. The volume read admits from the packet's guess
+- [ ] How admission reaches a rest the packet's guess cannot: a continuation in a packet value from a solved body, or a guess solved from another form. What the start state's identity covers when its guess came from another solve, given that `admit` stays the only judge
+- [ ] When the solve stops: whether an unsettled Newton with no change in the sweep ends the solve, and whether a trial that raises the merit may stand
+- [ ] Whether the rest drive at the breath's mean has a state at all: the continuation from 0.3513 to 0.368401 settles, or a turning point is shown
+- [ ] The cost of each choice in admission's time, against today's 240 s from the packet's guess
+
+**Non-goals:** the breath's rhythm, the static pleural form and the fitted rest the body states today.
