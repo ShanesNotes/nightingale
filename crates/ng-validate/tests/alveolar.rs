@@ -1120,3 +1120,82 @@ fn at_rest_the_work_of_breathing_is_the_stated_mean() -> Result<(), Initializati
     );
     Ok(())
 }
+
+/// While the breath rests the memory holds the stated mean even where the pump's work at rest, through the head's
+/// smooth parts, is far above that mean.
+#[test]
+fn a_small_pump_at_full_mixing_share_holds_its_positive_stated_work() -> Result<(), InitializationFailure> {
+    let unit = Case {
+        pump: 1e-17,
+        rest_drive: 0.4,
+        ..AT_REST
+    };
+    let stated = stated_work(unit);
+    assert!(stated > 0.0);
+    let (held, field) = run(unit, 1, |body, session| {
+        (
+            now(&session, memory(body, "breath work memory")),
+            now(&session, algebraic(body, "work_of_breathing")),
+        )
+    })?;
+    assert!(
+        close(held, stated, 0.01) && close(field, stated, 0.01),
+        "after one resting second the memory is {held:e} and arrow 84 is {field:e}, the stated mean {stated:e}"
+    );
+    Ok(())
+}
+
+/// The packet's mean routine on the fixture's values: the alveolar unit fills at `G (P_mus - (E_L + E_W) x)` and the
+/// room refills the dead space at `G E_D y`, stepped implicitly at 0.1 ms over twenty breaths. The packet's own
+/// routine reads the body's airway and elastances, and a public routine would need a dimensioned signature.
+fn airway_work(unit: Case) -> f64 {
+    const STEP: f64 = 1e-4;
+    const REPEATS: usize = 20;
+    let (pump, elastance, g) = (unit.pump, ELASTANCES[0] + ELASTANCES[1], unit.conductance * unit.ventilation);
+    let (inspiring, expiring) = (unit.phases[0] / RATE, unit.phases[1] / RATE);
+    let steps = [inspiring, expiring].map(|length| {
+        let mut count = 0_u32;
+        while f64::from(count) * STEP < length {
+            count += 1;
+        }
+        count
+    });
+    let (rise, fall) = (exp(-DRIVE[0] * STEP), exp(-DRIVE[1] * STEP));
+    let (mut drive, mut x, mut y, mut work) = (unit.rest_drive, 0.0, 0.0, 0.0);
+    for breath in 1..=REPEATS {
+        work = 0.0;
+        for (phase, count) in steps.into_iter().enumerate() {
+            for _ in 0..count {
+                drive = if phase == 0 { DRIVE[2] + (drive - DRIVE[2]) * rise } else { drive * fall };
+                let pressure = pump * drive;
+                x = (x + STEP * g * pressure) / (1.0 + STEP * g * elastance);
+                let filling = g * (pressure - elastance * x);
+                y = (y + STEP * filling) / (1.0 + STEP * g * DEAD_SPACE_ELASTANCE);
+                let inflow = g * DEAD_SPACE_ELASTANCE * y;
+                if breath == REPEATS && inflow > 0.0 {
+                    work += pressure * inflow * STEP;
+                }
+            }
+        }
+    }
+    work / (inspiring + expiring)
+}
+
+/// Through a resistive airway, where `G (E_L + E_W)` is the body's 5 a second, a breath's outflow work falls far
+/// below its inflow work, so only the room's inflow gives the airway's own mechanics' mean: the outflow misses by
+/// 55% and the signed flow by 45%.
+#[test]
+fn the_work_of_breathing_through_a_resistive_airway_means_the_pumps_work_on_its_inflow()
+-> Result<(), InitializationFailure> {
+    let unit = Case {
+        conductance: 1_250.0,
+        ..BREATHING
+    };
+    let samples = breaths(unit)?;
+    let (held, routine) = (mean(&samples, |sample| sample.work), airway_work(unit));
+    assert!(
+        close(held, routine, 1e-2),
+        "through a resistive airway the work means {held} over whole breaths, the routine {routine}"
+    );
+    Ok(())
+}

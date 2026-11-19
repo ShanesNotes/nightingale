@@ -264,8 +264,9 @@ impl<'b> Ventilation<'b> {
     /// Line 84's work of breathing is a memory of the pump's pressure times the breath's inflow at the room's side,
     /// `W = P_mus G h+`, so its mean over whole breaths is the pump's. While the breath rests the memory holds the
     /// breath's stated mean instead, handed over by the mixing share as the mixing exchange is, so the body admits
-    /// paying for the breath it will take. The inflow is read inside the memory's rate: as a row of its own its kink
-    /// at zero flow refused every step.
+    /// paying for the breath it will take. The target is written `(W - s W) + s W_mean`, which is exact at a share of
+    /// zero and of one, where `W + s (W_mean - W)` loses the mean once the pump's work is far above it. The inflow is
+    /// read inside the memory's rate: as a row of its own its kink at zero flow refused every step.
     pub fn work(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,
@@ -293,9 +294,10 @@ impl<'b> Ventilation<'b> {
             let product = k.multiply(muscle, inflow);
             let now = k.as_dimension(product);
             let (mean, share) = (k.parameter(&stated), k.read(&self.pump.mixing_share));
-            let gap = k.subtract(mean, now);
-            let handed = k.scale(gap, share);
-            let target = k.add(now, handed);
+            let lost = k.scale(now, share);
+            let kept = k.subtract(now, lost);
+            let handed = k.scale(mean, share);
+            let target = k.add(kept, handed);
             let (held, pace) = (k.state(&memory), k.parameter(&speed));
             let value = k.relax(target, held, pace);
             k.finish(value, laws.every_mode(), class)

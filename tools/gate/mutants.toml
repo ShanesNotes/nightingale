@@ -4659,10 +4659,27 @@ test = "-p ng-validate --test viscosity only_the_muscle_beds_burn_follows_the_wo
 [[mutant]]
 name = "breath-work-ignores-the-share"
 path = "crates/ng-respiratory/src/airway.rs"
-old = '''            let target = k.add(now, handed);'''
-new = '''            let _ = handed;
+old = '''            let target = k.add(kept, handed);'''
+new = '''            let _ = (kept, handed);
             let target = now;'''
 test = "-p ng-validate --test alveolar at_rest_the_work_of_breathing_is_the_stated_mean"
+
+[[mutant]]
+name = "breath-work-reads-the-outflow"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let [inward, _] = self.parts(&mut k, head);
+            let g = k.parameter(&self.conductance);'''
+new = '''            let [_, inward] = self.parts(&mut k, head);
+            let g = k.parameter(&self.conductance);'''
+test = "-p ng-validate --test alveolar the_work_of_breathing_through_a_resistive_airway_means_the_pumps_work_on_its_inflow"
+
+[[mutant]]
+name = "breath-work-reads-the-signed-flow"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let inflow = k.conductance_flow(g, inward);'''
+new = '''            let _ = inward;
+            let inflow = k.conductance_flow(g, head);'''
+test = "-p ng-validate --test alveolar the_work_of_breathing_through_a_resistive_airway_means_the_pumps_work_on_its_inflow"
 
 [[mutant]]
 name = "pump-force-ignores-the-drive"
