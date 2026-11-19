@@ -15,6 +15,8 @@ Blocked by: 05, 10, `.scratch/research/issues/11-law-forms-gas-loop.md`
 - [ ] The certificate passes with the oxygen and carbon dioxide books held by this loop, and the body's trace is updated
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 - [ ] From [ticket 05](05-the-days-inputs.md): each law here that reads a lasting input is reviewed against the rule by reading: the input scales a gain or a set point and never stands for a produced quantity. Compile's `UnscaledInput` is only a stand-in: it passes a law that reads any parameter, such as `0 = k (T - room_air())`, and refuses one that reads only inputs. Sleep's shift of the set point and its lower gain are such reads
+- [ ] From [native-contract 82](../../native-contract/issues/82-what-a-moved-rest-does-not-admit.md): the plan first tests whether a set point fitted to the admitted body admits from the packet's guess. A controller that moves the rest waits on [native-contract 86](../../native-contract/issues/86-admission-reaches-a-moved-rest.md), whose design round comes before this ticket's build either way
+- [ ] From [ticket 10](10-lungs-breathe.md): the mixing share leaves arrow 95 here. The plan names its carrier, and arrow 86's respiratory drive is the default
 
 **Non-goals:** transport delays, periodic breathing, cough, and breathing under voluntary control.
 
