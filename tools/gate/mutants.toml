@@ -3763,8 +3763,8 @@ test = "-p ng-validate --test body each_beds_glycolysis_and_lactate_burn_carry_t
 [[mutant]]
 name = "water-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Species::Water, 0.04),'''
-new = '''(Species::Water, 0.08),'''
+old = '''(Species::Water, 5e-2),'''
+new = '''(Species::Water, 0.1),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]

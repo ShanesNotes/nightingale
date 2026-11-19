@@ -1359,8 +1359,8 @@ fn the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_th
 const MIXING: f64 = 3_240.0;
 const WATER_VOLUME: f64 = 24_000.0;
 const ROOM_WATER: f64 = 0.5 * 20.0 / (700.0 - 0.5 * 20.0);
-/// The smooth parts of the heads add 78 a second each way beside the mixing exchange's 3,240, which puts the expired
-/// water 2.4% above the form, and the lining leaves the alveolar gas just short of saturation.
+/// The smooth parts of the heads add 78 a second each way beside the mixing exchange's 3,240, 2.4% above the form,
+/// and the lining leaves the alveolar gas 0.23% short of saturation: the body loses 1.022 of the form.
 const WATER_AT_REST: (f64, f64) = (1.0, 1.03);
 
 fn at_rest_the_lungs_lose_water_as_research_11s_form_gives(start: &Start) {
