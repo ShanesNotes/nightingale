@@ -97,6 +97,6 @@ fn alveolar<'b, 'k, Q: Dry>(
 ) -> Expr<'b, 'k, Respiratory, Pressure> {
     let lung = (k.at_site(&held.0), k.at_site(&held.1), k.at_site(&held.2));
     let share = ventilation.share::<_, Q>(k, lung);
-    let dry = ventilation.dry(k);
+    let dry = ventilation.dry_gas_pressure(k);
     k.scale(dry, share)
 }

@@ -185,8 +185,7 @@ impl<'b> Ventilation<'b> {
         k.as_dimension(share)
     }
 
-    /// The room's pressure less water vapour's: the dry gas's pressure in the alveolar gas.
-    pub(crate) fn dry<'k, C>(
+    pub(crate) fn dry_gas_pressure<'k, C>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
     ) -> Expr<'b, 'k, Respiratory, Pressure> {
@@ -362,7 +361,7 @@ impl<'b> Ventilation<'b> {
         let rate = laws.site_kernel(|mut k| {
             let lung = (k.at_site(&gas.0), k.at_site(&gas.1), k.at_site(&gas.2));
             let volume = self.volume(&mut k, lung);
-            let dry = self.dry(&mut k);
+            let dry = self.dry_gas_pressure(&mut k);
             let vapour = k.parameter(&self.vapour);
             let ratio = k.divide(vapour, dry);
             let ratio = k.as_dimension(ratio);

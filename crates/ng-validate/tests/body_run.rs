@@ -1379,7 +1379,8 @@ fn at_rest_the_lungs_lose_water_as_research_11s_form_gives(start: &Start) {
     let from = first.record().accepted().time().nanoseconds();
     let session = until(first, MILLISECOND);
     let to = session.record().accepted().time().nanoseconds();
-    let moved = extents(&session, &columns, to)[expired.index()] - extents(&session, &columns, from)[expired.index()];
+    let moved =
+        extents(&session, &columns, to)[expired.index()] - extents(&session, &columns, from)[expired.index()];
     let rate = moved / ((to - from) as f64 / SECOND as f64);
     let form = MIXING / 2.0 * ((700.0 - DRY) / DRY - ROOM_WATER) / WATER_VOLUME;
     let (low, high) = WATER_AT_REST;

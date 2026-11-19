@@ -32,14 +32,12 @@ const SETTLED: u64 = 240;
 const TOLERANCE: f64 = 1e-6;
 const DEAD_SPACE_ELASTANCE: f64 = 1e-2;
 const DEAD_SPACE: f64 = 500.0;
-/// Water's vapour volume for each unit of water, the lining's speed, the room's humidity and its saturated vapour
-/// pressure, and the held interstitium's set amount and speed.
 const WATER_VOLUME: f64 = 10.0;
-const LINING: f64 = 2.0;
+const LINING_SPEED: f64 = 2.0;
 const HUMIDITY: f64 = 0.5;
 const ROOM_VAPOUR: f64 = 20.0;
-const WATER_SET: f64 = 1_000.0;
-const WATER_SPEED: f64 = 1.0;
+const INTERSTITIUM_WATER_SET: f64 = 1_000.0;
+const INTERSTITIUM_WATER_SPEED: f64 = 1.0;
 
 const RATE: f64 = 0.2;
 const PHASES: [f64; 2] = [0.4, 0.6];
@@ -290,7 +288,7 @@ fn water_closed_form(unit: Case, alveolar_volume: f64) -> [f64; 3] {
     let (a, b) = coefficients(unit);
     let saturated = VAPOUR / DRY;
     let room = HUMIDITY * ROOM_VAPOUR / (ROOM - HUMIDITY * ROOM_VAPOUR);
-    let lined = LINING * alveolar_volume;
+    let lined = LINING_SPEED * alveolar_volume;
     let q = lined * (saturated - a * a * room / (b * b)) / (1.0 + lined * (a + b) / (b * b));
     let dead = (a * room + q) / b;
     [q, dead, (a * dead + q) / b]
@@ -361,11 +359,11 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Conductance<Volume>>(p, "rs.airway-conductance", g)?;
     set::<Rate<Volume>>(p, "rs.airway-mixing", m)?;
     set::<Quotient<Volume, Water>>(p, "rs.water-volume", WATER_VOLUME)?;
-    set::<Rate<Dimensionless>>(p, "rs.lining-speed", LINING)?;
+    set::<Rate<Dimensionless>>(p, "rs.lining-speed", LINING_SPEED)?;
     set::<Dimensionless>(p, "rs.room-humidity", HUMIDITY)?;
     set::<Pressure>(p, "rs.room-vapour-pressure", ROOM_VAPOUR)?;
-    set::<Water>(p, "fixture.water-set", WATER_SET)?;
-    set::<Rate<Dimensionless>>(p, "fixture.water-speed", WATER_SPEED)?;
+    set::<Water>(p, "fixture.water-set", INTERSTITIUM_WATER_SET)?;
+    set::<Rate<Dimensionless>>(p, "fixture.water-speed", INTERSTITIUM_WATER_SPEED)?;
     for (gas, key) in [(0, "rs.oxygen-inspired"), (1, "rs.carbon-dioxide-inspired")] {
         set::<Dimensionless>(p, key, INSPIRED[gas])?;
     }
@@ -385,7 +383,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
                 (Species::CarbonDioxide, Space::Gas) => shares[1] * volume / vc,
                 (Species::NitrogenGas, Space::Gas) => shares[2] * volume / vn,
                 (Species::Water, Space::Gas) => VAPOUR / DRY * volume / WATER_VOLUME,
-                (Species::Water, Space::Interstitium) => WATER_SET,
+                (Species::Water, Space::Interstitium) => INTERSTITIUM_WATER_SET,
                 (Species::Oxygen, Space::Plasma) => DRY * alveolar[0] / PER_AMOUNT,
                 (Species::CarbonDioxide, Space::Plasma) => DRY * alveolar[1] / PER_AMOUNT,
                 _ => 100.0,
@@ -934,9 +932,8 @@ fn a_breaths_lung_volume_follows_the_mechanics_static_solution() -> Result<(), I
     Ok(())
 }
 
-/// Water closes as each gas does, with the lining in place of the membrane: it moves water into the alveolar gas.
 #[test]
-fn each_gas_closes_over_whole_breaths() -> Result<(), InitializationFailure> {
+fn each_gas_and_the_lungs_water_close_over_whole_breaths() -> Result<(), InitializationFailure> {
     let unit = BREATHING;
     let body = compiled()?;
     let samples = breaths(unit)?;
@@ -1205,8 +1202,6 @@ fn at_rest_the_work_of_breathing_is_the_stated_mean() -> Result<(), Initializati
     Ok(())
 }
 
-/// While the breath rests the memory holds the stated mean even where the pump's work at rest, through the head's
-/// smooth parts, is far above that mean.
 #[test]
 fn a_small_pump_at_full_mixing_share_holds_its_positive_stated_work() -> Result<(), InitializationFailure> {
     let unit = Case {
@@ -1230,8 +1225,7 @@ fn a_small_pump_at_full_mixing_share_holds_its_positive_stated_work() -> Result<
 }
 
 /// The packet's mean routine on the fixture's values: the alveolar unit fills at `G (P_mus - (E_L + E_W) x)` and the
-/// room refills the dead space at `G E_D y`, stepped implicitly at 0.1 ms over twenty breaths. The packet's own
-/// routine reads the body's airway and elastances, and a public routine would need a dimensioned signature.
+/// room refills the dead space at `G E_D y`, stepped implicitly at 0.1 ms over twenty breaths.
 fn airway_work(unit: Case) -> f64 {
     const STEP: f64 = 1e-4;
     const REPEATS: usize = 20;
