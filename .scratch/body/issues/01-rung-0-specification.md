@@ -591,6 +591,7 @@ The gut bed and the portal vein are the slice's splanchnic bed and veins, which 
 |---|---|---|
 | central chemoreceptor | brain bed | 11 |
 | peripheral chemoreceptor | systemic arteries | 11 |
+| respiratory pump | respiratory pump junction, the pump drive's effect | 11 |
 | skin thermoreceptor | skin heat site | 12 |
 | osmoreceptor | brain bed | 17 |
 | volume receptor | central veins | 17 |
