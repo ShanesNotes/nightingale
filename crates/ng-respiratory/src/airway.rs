@@ -334,10 +334,13 @@ impl<'b> Ventilation<'b> {
     }
 
     /// The lung's water rides the dry gas. Its share is its vapour's volume over the dry gas's, `v_w W / V`, so the
-    /// airway carries it as it carries each dry gas and it adds nothing to the volume the heads read. The lining wets
-    /// the alveolar gas toward saturation, `W_sat = V P_H2O / (P_B - P_H2O) / v_w`, and the room takes the dead
-    /// space's water out and gives back its own at `h P_r / (P_B - h P_r)` of the dry gas, with `h` the room's
-    /// humidity and `P_r` its saturated vapour pressure (research 11, Guyton p. 285).
+    /// airway carries it as it carries each dry gas and it adds nothing to the volume the heads read. The lining
+    /// feeds the alveolar gas the water the breath carries out, `V'_A (σ - i) / v_w`, with `V'_A` the alveolar
+    /// ventilation the breath is fitted to, `σ = P_H2O / (P_B - P_H2O)` the saturated share and `i` the room's (research
+    /// 11, Guyton p. 285). It reads no gas row and no water pool: a lining that read the gas's water joined the gas
+    /// water to the elimination's largest block, at about 186 M of factoring a simulated second. The room takes the
+    /// dead space's water out and gives back its own at `i = h P_r / (P_B - h P_r)` of the dry gas, with `h` the
+    /// room's humidity and `P_r` its saturated vapour pressure.
     pub fn water(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,
@@ -346,31 +349,24 @@ impl<'b> Ventilation<'b> {
         let class = class()?;
         let key = ParameterKey::new;
         let per = laws.parameter::<Quotient<Volume, Water>>(key("rs.water-volume"), Admissible::positive());
-        let speed = laws.parameter::<Rate<Dimensionless>>(key("rs.lining-speed"), Admissible::positive());
+        let ventilated =
+            laws.parameter::<Rate<Volume>>(key("rs.alveolar-ventilation"), Admissible::nonnegative());
         let humidity = laws.parameter::<Dimensionless>(key("rs.room-humidity"), Admissible::unit_interval());
         let saturating =
             laws.parameter::<Pressure>(key("rs.room-vapour-pressure"), Admissible::nonnegative());
+        let room = (&humidity, &saturating);
 
         let lining = ports.lining(laws);
-        let gas = (
-            lining.to_amount::<Oxygen>(),
-            lining.to_amount::<CarbonDioxide>(),
-            lining.to_amount::<NitrogenGas>(),
-        );
-        let wet = lining.to_amount::<Water>();
         let rate = laws.site_kernel(|mut k| {
-            let lung = (k.at_site(&gas.0), k.at_site(&gas.1), k.at_site(&gas.2));
-            let volume = self.volume(&mut k, lung);
             let dry = self.dry_gas_pressure(&mut k);
             let vapour = k.parameter(&self.vapour);
-            let ratio = k.divide(vapour, dry);
-            let ratio = k.as_dimension(ratio);
-            let saturated = k.scale(volume, ratio);
-            let v = k.parameter(&per);
-            let saturated = k.divide(saturated, v);
+            let saturated = k.divide(vapour, dry);
             let saturated = k.as_dimension(saturated);
-            let (held, pace) = (k.at_site(&wet), k.parameter(&speed));
-            let value = k.relax(saturated, held, pace);
+            let given = self.room_water(&mut k, room);
+            let gap = k.subtract(saturated, given);
+            let ventilation = k.parameter(&ventilated);
+            let flow = k.scale(ventilation, gap);
+            let value = self.amount_rate(&mut k, flow, &per);
             k.finish(value, laws.every_mode(), class)
         });
         laws.transfer_at(&lining, rate);
@@ -419,18 +415,26 @@ impl<'b> Ventilation<'b> {
             let head = self.dead_space_head(&mut k, airway);
             let [inward, outward] = self.parts(&mut k, head);
             let leaving = self.at_the_room(&mut k, outward, share, &per);
-            let (h, saturated) = (k.parameter(&humidity), k.parameter(&saturating));
-            let vapour = k.scale(saturated, h);
-            let room = k.parameter(&self.room);
-            let dry = k.subtract(room, vapour);
-            let room_share = k.divide(vapour, dry);
-            let room_share = k.as_dimension(room_share);
+            let room_share = self.room_water(&mut k, room);
             let entering = self.at_the_room(&mut k, inward, room_share, &per);
             let value = k.subtract(leaving, entering);
             k.finish(value, laws.every_mode(), class)
         });
         laws.transfer(Transfer::new(&out, rate));
         Ok(())
+    }
+
+    fn room_water<'k, C>(
+        &self,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+        (humidity, saturating): (&Bound<'b, Dimensionless>, &Bound<'b, Pressure>),
+    ) -> Expr<'b, 'k, Respiratory, Dimensionless> {
+        let (h, saturated) = (k.parameter(humidity), k.parameter(saturating));
+        let vapour = k.scale(saturated, h);
+        let room = k.parameter(&self.room);
+        let dry = k.subtract(room, vapour);
+        let share = k.divide(vapour, dry);
+        k.as_dimension(share)
     }
 
     fn dead_space_head<'k, C>(

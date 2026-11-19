@@ -33,7 +33,6 @@ const TOLERANCE: f64 = 1e-6;
 const DEAD_SPACE_ELASTANCE: f64 = 1e-2;
 const DEAD_SPACE: f64 = 500.0;
 const WATER_VOLUME: f64 = 10.0;
-const LINING_SPEED: f64 = 2.0;
 const HUMIDITY: f64 = 0.5;
 const ROOM_VAPOUR: f64 = 20.0;
 const INTERSTITIUM_WATER_SET: f64 = 1_000.0;
@@ -282,14 +281,13 @@ fn coefficients(unit: Case) -> (f64, f64) {
 
 /// Water's share `s` is its vapour's volume over the dry gas's. It crosses the room's side and the airway edge at the
 /// dry gases' two coefficients, the room gives back `i = h P_r / (P_B - h P_r)`, and the lining adds
-/// `q = k V_A (σ - s_A)` of vapour's volume to an alveolar unit of dry volume `V_A`, with `σ = P_H2O / (P_B - P_H2O)`.
-/// So `s_D = (A i + q) / B`, `s_A = (A s_D + q) / B`, and `q (1 + k V_A (A + B) / B^2) = k V_A (σ - A^2 i / B^2)`.
-fn water_closed_form(unit: Case, alveolar_volume: f64) -> [f64; 3] {
+/// `q = (M / 2)(σ - i)` of vapour's volume to the alveolar unit, with `σ = P_H2O / (P_B - P_H2O)`. So
+/// `s_D = (A i + q) / B` and `s_A = (A s_D + q) / B`, which is `σ` where `A = B = M`.
+fn water_closed_form(unit: Case) -> [f64; 3] {
     let (a, b) = coefficients(unit);
     let saturated = VAPOUR / DRY;
     let room = HUMIDITY * ROOM_VAPOUR / (ROOM - HUMIDITY * ROOM_VAPOUR);
-    let lined = LINING_SPEED * alveolar_volume;
-    let q = lined * (saturated - a * a * room / (b * b)) / (1.0 + lined * (a + b) / (b * b));
+    let q = unit.mixing * unit.ventilation / 2.0 * (saturated - room);
     let dead = (a * room + q) / b;
     [q, dead, (a * dead + q) / b]
 }
@@ -359,7 +357,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Conductance<Volume>>(p, "rs.airway-conductance", g)?;
     set::<Rate<Volume>>(p, "rs.airway-mixing", m)?;
     set::<Quotient<Volume, Water>>(p, "rs.water-volume", WATER_VOLUME)?;
-    set::<Rate<Dimensionless>>(p, "rs.lining-speed", LINING_SPEED)?;
+    set::<Rate<Volume>>(p, "rs.alveolar-ventilation", m / 2.0)?;
     set::<Dimensionless>(p, "rs.room-humidity", HUMIDITY)?;
     set::<Pressure>(p, "rs.room-vapour-pressure", ROOM_VAPOUR)?;
     set::<Water>(p, "fixture.water-set", INTERSTITIUM_WATER_SET)?;
@@ -827,7 +825,7 @@ fn the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the
 -> Result<(), InitializationFailure> {
     let unit = AT_REST;
     let settled = settled(unit)?;
-    let [_, dead, alveolar] = water_closed_form(unit, settled.alveolar_volume);
+    let [_, dead, alveolar] = water_closed_form(unit);
     let shares = [
         WATER_VOLUME * settled.water[0] / settled.alveolar_volume,
         WATER_VOLUME * settled.water[1] / settled.dead_volume,

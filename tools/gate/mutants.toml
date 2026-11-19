@@ -4684,10 +4684,9 @@ test = "-p ng-validate --test alveolar the_work_of_breathing_through_a_resistive
 [[mutant]]
 name = "lining-ignores-saturation"
 path = "crates/ng-respiratory/src/airway.rs"
-old = '''            let value = k.relax(saturated, held, pace);'''
-new = '''            let _ = held;
-            let none = k.zero();
-            let value = k.relax(saturated, none, pace);'''
+old = '''            let gap = k.subtract(saturated, given);'''
+new = '''            let _ = saturated;
+            let gap = given;'''
 test = "-p ng-validate --test alveolar the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the_water_to_the_room"
 
 [[mutant]]

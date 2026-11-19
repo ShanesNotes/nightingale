@@ -1161,7 +1161,7 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Conductance<Volume>>(packet, "rs.airway-conductance", body, AIRWAY_CONDUCTANCE)?;
     set::<Rate<Volume>>(packet, "rs.airway-mixing", body, MIXING)?;
     set::<Quotient<Volume, Water>>(packet, "rs.water-volume", body, 24_000.0)?;
-    set::<Rate<Dimensionless>>(packet, "rs.lining-speed", body, 10.0)?;
+    set::<Rate<Volume>>(packet, "rs.alveolar-ventilation", body, MIXING / 2.0)?;
     set::<Dimensionless>(packet, "rs.room-humidity", body, 0.5)?;
     set::<Pressure>(packet, "rs.room-vapour-pressure", body, 20.0)?;
     for (key, value) in [
