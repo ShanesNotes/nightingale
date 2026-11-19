@@ -428,7 +428,10 @@ fn coupled_loop() -> Result<CompiledBody, AdmissionError> {
         let (mut laws, _ports) = body.nervous()?.parts();
         let out: ShiverDrive<Defines<'_, Nervous>> = laws.emit();
         let back: CoreTemperature<Reads<'_, Nervous>> = laws.receive();
-        let b = laws.parameter::<Quotient<Dimensionless, Temperature>>(ParameterKey::new("bench.b"), Admissible::finite());
+        let b = laws.parameter::<Quotient<Dimensionless, Temperature>>(
+            ParameterKey::new("bench.b"),
+            Admissible::finite(),
+        );
         let drive = laws.kernel(|mut k| {
             let warmth = k.read(&back.core_temperature);
             let gain = k.parameter(&b);
@@ -482,7 +485,12 @@ fn a_loop_of_two_couplings_is_solved_as_one_coupled_step() -> Result<(), Initial
     let b = Measure::<Quotient<Dimensionless, Temperature>>::new(0.5)?;
     packet.synthetic(ParameterKey::new("bench.b"), Binding::Body, b, "synthetic")?;
     let degree = Measure::<Temperature>::new(1.0)?;
-    packet.synthetic(ParameterKey::new("bench.degree"), Binding::Body, degree, "synthetic")?;
+    packet.synthetic(
+        ParameterKey::new("bench.degree"),
+        Binding::Body,
+        degree,
+        "synthetic",
+    )?;
     let slope = Measure::<Rate<Dimensionless>>::new(3.0)?;
     packet.synthetic(
         ParameterKey::new("bench.slope"),

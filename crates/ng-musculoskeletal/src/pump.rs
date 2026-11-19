@@ -12,7 +12,10 @@ pub fn pump<'b>(
     let most = laws.parameter::<Pressure>(ParameterKey::new("ms.pump-pressure"), Admissible::nonnegative());
     let line: PumpForce<Defines<'b, Musculoskeletal>> = laws.emit();
     let force = laws.kernel(|mut k| {
-        let (most, effect) = (k.parameter(&most), k.at_landmark(Landmark::RespiratoryPump, &effect));
+        let (most, effect) = (
+            k.parameter(&most),
+            k.at_landmark(Landmark::RespiratoryPump, &effect),
+        );
         let value = k.scale(most, effect);
         k.finish(value, laws.every_mode(), class)
     });

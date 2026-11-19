@@ -13,7 +13,10 @@ pub(crate) fn declare<'b>(
 pub(crate) fn declare_with_the_pump<'b>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     ports: &NervousPorts<'b>,
-    traffics: (&AlgebraicSlot<'b, Nervous, Dimensionless>, &StateSlot<'b, Nervous, Dimensionless>),
+    traffics: (
+        &AlgebraicSlot<'b, Nervous, Dimensionless>,
+        &StateSlot<'b, Nervous, Dimensionless>,
+    ),
     reflex: RateClass,
 ) {
     release_by_shares::<Acetylcholine>(ns, ports, traffics, "ns.release-ach", reflex);

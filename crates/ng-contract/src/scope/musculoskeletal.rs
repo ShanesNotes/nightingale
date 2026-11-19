@@ -1,7 +1,7 @@
 use crate::law::{Brand, Family};
 use crate::{
-    Beds, Bone, Dimensionless, FragmentBuilder, Junction, Mineral, Musculoskeletal, PerSite, ReadPort, SiteRoute,
-    SiteSet, Substance, Wall,
+    Beds, Bone, Dimensionless, FragmentBuilder, Junction, Mineral, Musculoskeletal, PerSite, ReadPort,
+    SiteRoute, SiteSet, Substance, Wall,
 };
 use core::marker::PhantomData;
 

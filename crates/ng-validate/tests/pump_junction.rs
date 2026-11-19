@@ -57,7 +57,11 @@ fn effect(drive: f64) -> f64 {
 
 fn compiled() -> Result<CompiledBody, AdmissionError> {
     let origin = || -> Result<Position, AdmissionError> {
-        Ok(Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?))
+        Ok(Position::new(
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+        ))
     };
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin()?).id();
@@ -73,7 +77,8 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         let (mut ns, ports) = body.nervous()?.parts();
         let class = RateClass::new(RateBand::Reflex, SECOND)?;
         let vagal = ns.algebraic::<Dimensionless>("vagal traffic", Admissible::unit_interval());
-        let stated = ns.parameter::<Dimensionless>(ParameterKey::new("fixture.vagal"), Admissible::unit_interval());
+        let stated =
+            ns.parameter::<Dimensionless>(ParameterKey::new("fixture.vagal"), Admissible::unit_interval());
         let residual = ns.kernel(|mut k| {
             let (held, value) = (k.algebraic(&vagal), k.parameter(&stated));
             let residual = k.subtract(held, value);
@@ -134,8 +139,13 @@ fn packet(body: &CompiledBody, case: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Pressure>(p, "ms.pump-pressure", all, PIMAX)?;
     let [vesicle, cleft, bound] = steady(REST_DRIVE);
     let guess = |row: RowKind| match row {
-        RowKind::Amount { space: Space::Vesicle, .. } => vesicle,
-        RowKind::Amount { space: Space::Cleft, .. } => cleft,
+        RowKind::Amount {
+            space: Space::Vesicle,
+            ..
+        } => vesicle,
+        RowKind::Amount {
+            space: Space::Cleft, ..
+        } => cleft,
         RowKind::Amount { .. } => bound,
         RowKind::Memory(slot) if slot.law.local == "pump drive" => REST_DRIVE,
         RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
@@ -194,7 +204,8 @@ fn close(measured: f64, expected: f64, relative: f64) -> bool {
 /// At a held drive the junction sits where release from the vesicle meets reuptake and binding meets unbinding, so
 /// the effect is the closed form's at the pump drive alone, whatever the vagal traffic, and the force is `PImax E`.
 #[test]
-fn at_a_held_drive_the_pumps_effect_and_force_meet_the_junctions_closed_form() -> Result<(), InitializationFailure> {
+fn at_a_held_drive_the_pumps_effect_and_force_meet_the_junctions_closed_form()
+-> Result<(), InitializationFailure> {
     let expected = effect(REST_DRIVE);
     let readings = run(HELD, |body, session| {
         let (effect_row, force_row) = (
@@ -222,7 +233,8 @@ fn at_a_held_drive_the_pumps_effect_and_force_meet_the_junctions_closed_form() -
 /// junction's slowest mode is about 31 ms, so 0.1 s leaves about 4% of the step. Late in inspiration the drive holds
 /// at its peak and the effect meets the closed form there.
 #[test]
-fn the_pumps_effect_follows_a_step_in_the_drive_within_a_tenth_of_a_second() -> Result<(), InitializationFailure> {
+fn the_pumps_effect_follows_a_step_in_the_drive_within_a_tenth_of_a_second()
+-> Result<(), InitializationFailure> {
     let (low, high) = (effect(REST_DRIVE), effect(PEAK));
     let (stepped, late) = run(STEPPED, |body, session| {
         let effect_row = algebraic(body, Receptor::CARD, None);

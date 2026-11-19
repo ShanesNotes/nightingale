@@ -30,15 +30,21 @@ pub(crate) fn release<'b, Q: Substance>(
 pub(crate) fn release_by_shares<'b, Q: Substance>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     ports: &NervousPorts<'b>,
-    (traffic, drive): (&AlgebraicSlot<'b, Nervous, Dimensionless>, &StateSlot<'b, Nervous, Dimensionless>),
+    (traffic, drive): (
+        &AlgebraicSlot<'b, Nervous, Dimensionless>,
+        &StateSlot<'b, Nervous, Dimensionless>,
+    ),
     release_key: &'static str,
     class: RateClass,
 ) {
     let release = ports.release::<Q>(ns);
     let key = ParameterKey::new;
-    let released = ns.site_parameter::<Junction, Rate<Dimensionless>>(key(release_key), Admissible::positive());
-    let vagal = ns.site_parameter::<Junction, Dimensionless>(key("ns.vagal-share"), Admissible::unit_interval());
-    let motor = ns.site_parameter::<Junction, Dimensionless>(key("ns.motor-share"), Admissible::unit_interval());
+    let released =
+        ns.site_parameter::<Junction, Rate<Dimensionless>>(key(release_key), Admissible::positive());
+    let vagal =
+        ns.site_parameter::<Junction, Dimensionless>(key("ns.vagal-share"), Admissible::unit_interval());
+    let motor =
+        ns.site_parameter::<Junction, Dimensionless>(key("ns.motor-share"), Admissible::unit_interval());
     let out = ns.site_kernel(|mut k| {
         let store = k.at_site(&release.from_amount::<Q>());
         let (zero, speed) = (k.zero(), k.site_parameter(&released));

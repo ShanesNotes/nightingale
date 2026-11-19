@@ -373,13 +373,36 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     }
     set::<Elastance>(p, "rs.dead-space-elastance", DEAD_SPACE_ELASTANCE)?;
     let junctions = Binding::Class(Class::Junction);
-    for (key, value) in [("ns.vagal-share", 0.0), ("ns.motor-share", 1.0), ("rc.ach-efficacy", 1.0)] {
-        p.synthetic(ParameterKey::new(key), junctions, Measure::<Dimensionless>::new(value)?, NOTE)?;
+    for (key, value) in [
+        ("ns.vagal-share", 0.0),
+        ("ns.motor-share", 1.0),
+        ("rc.ach-efficacy", 1.0),
+    ] {
+        p.synthetic(
+            ParameterKey::new(key),
+            junctions,
+            Measure::<Dimensionless>::new(value)?,
+            NOTE,
+        )?;
     }
-    for (key, value) in [("ns.release-ach", RELEASE), ("ns.reuptake-ach", REUPTAKE), ("rc.ach-off", OFF)] {
-        p.synthetic(ParameterKey::new(key), junctions, Measure::<Rate<Dimensionless>>::new(value)?, NOTE)?;
+    for (key, value) in [
+        ("ns.release-ach", RELEASE),
+        ("ns.reuptake-ach", REUPTAKE),
+        ("rc.ach-off", OFF),
+    ] {
+        p.synthetic(
+            ParameterKey::new(key),
+            junctions,
+            Measure::<Rate<Dimensionless>>::new(value)?,
+            NOTE,
+        )?;
     }
-    p.synthetic(ParameterKey::new("rc.ach-sites"), junctions, Measure::<Acetylcholine>::new(SITES)?, NOTE)?;
+    p.synthetic(
+        ParameterKey::new("rc.ach-sites"),
+        junctions,
+        Measure::<Acetylcholine>::new(SITES)?,
+        NOTE,
+    )?;
     let on = Measure::<Affinity<Acetylcholine>>::new(ON)?;
     p.synthetic(ParameterKey::new("rc.ach-on"), junctions, on, NOTE)?;
     set::<Volume>(p, "rs.dead-space-volume", unit.dead_space)?;
@@ -627,7 +650,10 @@ fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
         BREATHING_SETTLED,
         |body, mut session| -> Result<Vec<Sample>, AdmissionError> {
             let (phase, drive) = (memory(body, "breath phase"), memory(body, "pump drive"));
-            let (work, force) = (algebraic(body, "work_of_breathing"), algebraic(body, "pump_force"));
+            let (work, force) = (
+                algebraic(body, "work_of_breathing"),
+                algebraic(body, "pump_force"),
+            );
             let (lung, airway) = (gas_rows(body, LUNG)?, gas_rows(body, AIRWAY)?);
             let water = [
                 amount_row(body, LUNG, Species::Water, Space::Gas)?,

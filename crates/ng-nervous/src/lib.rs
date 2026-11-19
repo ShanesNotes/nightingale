@@ -25,11 +25,16 @@ pub fn declare<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Adm
 }
 
 /// As `declare`, and the card owns the breath. Only the whole body's root calls it, so the slice keeps its model.
-pub fn declare_in_the_whole_body<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, AdmissionError> {
+pub fn declare_in_the_whole_body<'b>(
+    scope: NervousScope<'b>,
+) -> Result<Fragment<'b, Nervous>, AdmissionError> {
     declare_with(scope, true)
 }
 
-fn declare_with<'b>(scope: NervousScope<'b>, whole_body: bool) -> Result<Fragment<'b, Nervous>, AdmissionError> {
+fn declare_with<'b>(
+    scope: NervousScope<'b>,
+    whole_body: bool,
+) -> Result<Fragment<'b, Nervous>, AdmissionError> {
     let (mut ns, ports) = scope.parts();
     let reflex = RateClass::new(RateBand::Reflex, REFLEX_NS)?;
     let slow = RateClass::new(RateBand::Hours, SET_POINT_NS)?;

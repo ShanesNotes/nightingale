@@ -29,20 +29,16 @@ struct Breath<'b> {
 }
 
 impl<'b> Breath<'b> {
-    fn declare(
-        laws: &mut FragmentBuilder<'b, Nervous>,
-        class: RateClass,
-    ) -> Result<Self, AdmissionError> {
+    fn declare(laws: &mut FragmentBuilder<'b, Nervous>, class: RateClass) -> Result<Self, AdmissionError> {
         let key = ParameterKey::new;
         let [rest, inspiration, expiration] = laws.modes("breath", ["rest", "inspiration", "expiration"]);
         let phase = laws.state::<Dimensionless>("breath phase", Admissible::nonnegative());
         let drive = laws.state::<Dimensionless>("pump drive", Admissible::nonnegative());
         let share = laws.state::<Dimensionless>("mixing share", Admissible::unit_interval());
         let hazard = laws.state::<Dimensionless>("breath start", Admissible::nonnegative());
-        let speed =
-            |laws: &mut FragmentBuilder<'b, Nervous>, name| -> Bound<'b, Rate<Dimensionless>> {
-                laws.parameter(key(name), Admissible::positive())
-            };
+        let speed = |laws: &mut FragmentBuilder<'b, Nervous>, name| -> Bound<'b, Rate<Dimensionless>> {
+            laws.parameter(key(name), Admissible::positive())
+        };
         let rate = speed(laws, "ns.breath-rate");
         let rise = speed(laws, "ns.drive-rise");
         let fall = speed(laws, "ns.drive-fall");
