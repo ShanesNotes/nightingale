@@ -337,10 +337,10 @@ impl<'b> Ventilation<'b> {
     /// airway carries it as it carries each dry gas and it adds nothing to the volume the heads read. The lining
     /// feeds the alveolar gas the water the breath carries out, `V'_A (σ - i) / v_w`, with `V'_A` the alveolar
     /// ventilation the breath is fitted to, `σ = P_H2O / (P_B - P_H2O)` the saturated share and `i` the room's (research
-    /// 11, Guyton p. 285). It reads no gas row and no water pool: a lining that read the gas's water joined the gas
-    /// water to the elimination's largest block, at about 186 M of factoring a simulated second. The room takes the
-    /// dead space's water out and gives back its own at `i = h P_r / (P_B - h P_r)` of the dry gas, with `h` the
-    /// room's humidity and `P_r` its saturated vapour pressure.
+    /// 11, Guyton p. 285). It reads no gas row and no water pool, which keeps the gas's water out of the
+    /// elimination's largest block (native-contract 89). The room takes the dead space's water out and gives back its
+    /// own at `i = h P_r / (P_B - h P_r)` of the dry gas, with `h` the room's humidity and `P_r` its saturated vapour
+    /// pressure.
     pub fn water(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,

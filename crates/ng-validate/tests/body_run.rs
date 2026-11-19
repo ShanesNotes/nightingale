@@ -531,9 +531,6 @@ impl Watch {
     }
 }
 
-/// The breath has started once the alveolar oxygen pressure swings over the minute; then each whole breath swings
-/// both gases, and each moves venous return's beat means, since the central veins and the right atrium sit inside
-/// the pleural space and the beds that fill them outside it.
 /// The lining feeds the water at the alveolar ventilation the breath is fitted to, and the breath ventilates 3% under
 /// it (10b), so the alveolar gas holds 1.0221 of the saturated share over whole breaths from 20 s.
 const SATURATED: f64 = (700.0 - DRY) / DRY;
@@ -557,6 +554,9 @@ fn the_alveolar_gas_holds_near_saturation_over_whole_breaths(watch: &Watch) -> S
     )
 }
 
+/// The breath has started once the alveolar oxygen pressure swings over the minute; then each whole breath swings
+/// both gases, and each moves venous return's beat means, since the central veins and the right atrium sit inside
+/// the pleural space and the beds that fill them outside it.
 fn each_breath_swings_the_alveolar_gases_and_venous_return(watch: &Watch) -> String {
     let after = (watch.moments.iter())
         .position(|moment| moment.at >= 5 * SECOND)
