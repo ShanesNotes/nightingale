@@ -25,5 +25,6 @@ Fick's check over nine beats takes the blood's store change as slack (oxygen 0.8
 - [ ] A steady leak of each old size is refused at any breathing rate: oxygen 20 a second, nitrogen gas 20, carbon 9, vasopressin 3e-4, each shown at two rates, one that divides the window and one that does not
 - [ ] Fick's window runs over whole breaths, with the store change as a signed term in place of slack
 - [ ] When windows end on breath edges, the hydrogen bound at both paying beds, the coronary bed and the muscle bed, 0.2 each today, is restated. The muscle bed's is twice its worst ten-second change, 8.79e-2, of which the breath's ripple inside one breath is 6.59e-2, so the bound passes a steady leak up to 1.1e-2 a second there
+- [ ] It restates the breath's books after [body ticket 11](../../body/issues/11-breathing-is-controlled.md)'s second PR, 11b, with the loop moving the rate, and its two-rate leak tests set the rate by the packet with the drive scale held
 
 **Non-goals:** the breath's rate and its control (body ticket 11), and any bound outside the breath's books.
