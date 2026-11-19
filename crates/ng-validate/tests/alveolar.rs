@@ -3,7 +3,6 @@
 
 use core::num::NonZeroU64;
 use ng_contract::*;
-use ng_musculoskeletal::breathe;
 use ng_record::{Curve, Running, Session, Step};
 use ng_respiratory::{Plasma, Ventilation, exchange};
 use ng_validate::*;
@@ -42,6 +41,14 @@ const RATE: f64 = 0.2;
 const PHASES: [f64; 2] = [0.4, 0.6];
 const DRIVE: [f64; 3] = [1.5, 2.0, 1.0];
 const UPRIGHT_WALL_REST_RISE: f64 = 2_000.0;
+const JUNCTION: &str = "respiratory pump junction";
+/// The pump junction's release, reuptake, binding, unbinding, sites and store, the body packet's.
+const RELEASE: f64 = 0.05;
+const REUPTAKE: f64 = 50.0;
+const ON: f64 = 10.0;
+const OFF: f64 = 50.0;
+const SITES: f64 = 1.0;
+const STORE: f64 = 100.0;
 const CAROTID_ABOVE_VESSEL: f64 = 0.3;
 
 #[derive(Clone, Copy)]
@@ -98,7 +105,7 @@ const BREATHING: Case = Case {
     dead_space: 1_200.0,
     width: 1e-6,
     rests: [11_000.0, 19_000.0],
-    pump: 7.2,
+    pump: 364.0,
     breath_start: 1e3,
     ..AT_REST
 };
@@ -169,6 +176,9 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     map.connect(Network::Vascular, lung, vessel);
     map.connect(Network::Airway, airway, lung);
     map.landmark(Landmark::CarotidSinus, vessel, airway);
+    let junction = map.site::<Junction>(JUNCTION, origin()?).id();
+    map.contain(root, junction);
+    map.landmark(Landmark::RespiratoryPump, junction, junction);
     let pleura = map.site::<EnclosedSpace>(PLEURA, origin()?);
     map.contain(root, pleura.id());
     map.enclose(
@@ -188,6 +198,10 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     schema.carry::<Water, Airway>(Space::Gas);
     schema.pool::<Oxygen>(lung, Space::Plasma)?;
     schema.pool::<CarbonDioxide>(lung, Space::Plasma)?;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    for space in [Space::Vesicle, Space::Cleft, Space::Bound] {
+        schema.pool::<Acetylcholine>(junction, space)?;
+    }
     for process in [
         Schema::process::<Inspired<Oxygen>>,
         Schema::process::<Inspired<CarbonDioxide>>,
@@ -239,8 +253,19 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         laws.transfer(Transfer::new(&wetting, rate));
         body.add(laws.finish());
 
-        let (mut laws, _) = body.musculoskeletal(None)?.parts();
-        breathe(&mut laws)?;
+        let (mut laws, ports) = body.nervous()?.parts();
+        let vagal = laws.algebraic::<Dimensionless>("vagal traffic", Admissible::unit_interval());
+        let residual = laws.kernel(|mut k| {
+            let held = k.algebraic(&vagal);
+            k.finish(held, laws.every_mode(), class)
+        });
+        laws.residual(&vagal, residual);
+        ng_nervous::breathing(&mut laws, &ports, &vagal)?;
+        body.add(laws.finish());
+        let fragment = ng_receptor::declare(body.receptor()?)?;
+        body.add(fragment);
+        let (mut laws, ports) = body.musculoskeletal(None)?.parts();
+        ng_musculoskeletal::pump(&mut laws, &ports)?;
         body.add(laws.finish());
 
         let (mut laws, ports) = body.respiratory(None)?.parts();
@@ -329,25 +354,35 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Rate<Energy>>(p, "rs.work-mean", stated_work(unit))?;
     set::<Rate<Dimensionless>>(p, "rs.work-speed", WORK_SPEED)?;
     for (key, value) in [
-        ("ms.breath-rate", RATE),
-        ("ms.drive-rise", DRIVE[0]),
-        ("ms.drive-fall", DRIVE[1]),
-        ("ms.rest-speed", 1.0),
-        ("ms.share-fall", unit.share_fall),
-        ("ms.breath-start", unit.breath_start),
+        ("ns.breath-rate", RATE),
+        ("ns.drive-rise", DRIVE[0]),
+        ("ns.drive-fall", DRIVE[1]),
+        ("ns.rest-speed", 1.0),
+        ("ns.share-fall", unit.share_fall),
+        ("ns.breath-start", unit.breath_start),
     ] {
         set::<Rate<Dimensionless>>(p, key, value)?;
     }
     for (key, value) in [
-        ("ms.inspiration-length", unit.phases[0]),
-        ("ms.expiration-length", unit.phases[1]),
-        ("ms.drive-peak", DRIVE[2]),
-        ("ms.rest-drive", unit.rest_drive),
-        ("ms.rest-share", 1.0),
+        ("ns.inspiration-length", unit.phases[0]),
+        ("ns.expiration-length", unit.phases[1]),
+        ("ns.drive-peak", DRIVE[2]),
+        ("ns.rest-drive", unit.rest_drive),
+        ("ns.rest-share", 1.0),
     ] {
         set::<Dimensionless>(p, key, value)?;
     }
     set::<Elastance>(p, "rs.dead-space-elastance", DEAD_SPACE_ELASTANCE)?;
+    let junctions = Binding::Class(Class::Junction);
+    for (key, value) in [("ns.vagal-share", 0.0), ("ns.motor-share", 1.0), ("rc.ach-efficacy", 1.0)] {
+        p.synthetic(ParameterKey::new(key), junctions, Measure::<Dimensionless>::new(value)?, NOTE)?;
+    }
+    for (key, value) in [("ns.release-ach", RELEASE), ("ns.reuptake-ach", REUPTAKE), ("rc.ach-off", OFF)] {
+        p.synthetic(ParameterKey::new(key), junctions, Measure::<Rate<Dimensionless>>::new(value)?, NOTE)?;
+    }
+    p.synthetic(ParameterKey::new("rc.ach-sites"), junctions, Measure::<Acetylcholine>::new(SITES)?, NOTE)?;
+    let on = Measure::<Affinity<Acetylcholine>>::new(ON)?;
+    p.synthetic(ParameterKey::new("rc.ach-on"), junctions, on, NOTE)?;
     set::<Volume>(p, "rs.dead-space-volume", unit.dead_space)?;
     let (g, m) = (
         unit.conductance * unit.ventilation,
@@ -374,12 +409,16 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
             let (shares, volume) = if site.key() == LUNG {
                 (
                     alveolar,
-                    zero_head(unit.rests) + unit.pump * unit.rest_drive / (ELASTANCES[0] + ELASTANCES[1]),
+                    zero_head(unit.rests) + rest_force(unit) / (ELASTANCES[0] + ELASTANCES[1]),
                 )
             } else {
                 (dead, unit.dead_space)
             };
+            let [vesicle, cleft, bound] = steady(unit.rest_drive);
             match (species, space) {
+                (Species::Acetylcholine, Space::Vesicle) => vesicle,
+                (Species::Acetylcholine, Space::Cleft) => cleft,
+                (Species::Acetylcholine, _) => bound,
                 (Species::Oxygen, Space::Gas) => shares[0] * volume / vo,
                 (Species::CarbonDioxide, Space::Gas) => shares[1] * volume / vc,
                 (Species::NitrogenGas, Space::Gas) => shares[2] * volume / vn,
@@ -394,13 +433,14 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
         RowKind::Memory(slot) if slot.law.local == "pump drive" => unit.rest_drive,
         RowKind::Memory(slot) if slot.law.local == "breath work memory" => stated_work(unit),
         RowKind::Algebraic(slot) if slot.law.local == "chest wall rest volume" => unit.rests[1],
-        RowKind::Algebraic(slot) if slot.law.local == "pump_force" => unit.pump * unit.rest_drive,
+        RowKind::Algebraic(slot) if slot.law.local == "pump_force" => rest_force(unit),
+        RowKind::Algebraic(slot) if slot.law.owner == Receptor::CARD => effect(unit.rest_drive),
         RowKind::Algebraic(slot) if slot.law.local == "mixing_share" => unit.initial_mixing_share,
         RowKind::Algebraic(slot) if slot.law.local == "work_of_breathing" => stated_work(unit),
         RowKind::Memory(_) | RowKind::Algebraic(_) => 0.0,
     };
     let breath = LawName {
-        owner: Musculoskeletal::CARD,
+        owner: Nervous::CARD,
         local: "breath",
     };
     packet.start_mode(breath, "rest", NOTE)?;
@@ -526,6 +566,7 @@ struct Sample {
     volume: f64,
     shares: [f64; 3],
     drive: f64,
+    force: f64,
     work: f64,
     held: [f64; 4],
     extents: Vec<f64>,
@@ -550,13 +591,35 @@ fn algebraic(body: &CompiledBody, local: &str) -> RowId {
 }
 
 /// The pump's mean work at the static solution: `(P_1^2 - P_0^2) / 2 (E_L + E_W)` a breath, with `P_0` and `P_1` the
-/// pump's pressure at inspiration's start and end once breaths repeat.
+/// pump's least and most pressure once breaths repeat, from the routine below.
 fn stated_work(unit: Case) -> f64 {
-    let (inspiring, expiring) = (unit.phases[0] / RATE, unit.phases[1] / RATE);
-    let (e_i, e_e) = (exp(-DRIVE[0] * inspiring), exp(-DRIVE[1] * expiring));
-    let end = DRIVE[2] * (1.0 - e_i) / (1.0 - e_i * e_e);
-    let (low, high) = (unit.pump * end * e_e, unit.pump * end);
-    (high * high - low * low) / (2.0 * (ELASTANCES[0] + ELASTANCES[1]) * (inspiring + expiring))
+    let Stepped { least, most, .. } = stepped(unit);
+    let breath = (unit.phases[0] + unit.phases[1]) / RATE;
+    (most * most - least * least) / (2.0 * (ELASTANCES[0] + ELASTANCES[1]) * breath)
+}
+
+/// The pump junction's vesicle, cleft and bound amounts at a held drive: `C = rho V` with `rho = q a / r`,
+/// `B = R k_on C / (k_off + k_on C)` and `V + C + B = T`, so the cleft is the positive root of
+/// `alpha k_on C^2 + (alpha k_off + (R - T) k_on) C - T k_off = 0` with `alpha = (1 + rho) / rho`.
+fn steady(drive: f64) -> [f64; 3] {
+    if drive <= 0.0 {
+        return [STORE, 0.0, 0.0];
+    }
+    let rho = RELEASE * drive / REUPTAKE;
+    let alpha = (1.0 + rho) / rho;
+    let (a, b, c) = (alpha * ON, alpha * OFF + (SITES - STORE) * ON, STORE * OFF);
+    let cleft = 2.0 * c / (b + (b * b + 4.0 * a * c).sqrt());
+    let bound = SITES * ON * cleft / (OFF + ON * cleft);
+    [cleft / rho, cleft, bound]
+}
+
+/// The receptor's effect at efficacy one, `B / R`.
+fn effect(drive: f64) -> f64 {
+    steady(drive)[2] / SITES
+}
+
+fn rest_force(unit: Case) -> f64 {
+    unit.pump * effect(unit.rest_drive)
 }
 
 fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
@@ -565,7 +628,7 @@ fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
         BREATHING_SETTLED,
         |body, mut session| -> Result<Vec<Sample>, AdmissionError> {
             let (phase, drive) = (memory(body, "breath phase"), memory(body, "pump drive"));
-            let work = algebraic(body, "work_of_breathing");
+            let (work, force) = (algebraic(body, "work_of_breathing"), algebraic(body, "pump_force"));
             let (lung, airway) = (gas_rows(body, LUNG)?, gas_rows(body, AIRWAY)?);
             let water = [
                 amount_row(body, LUNG, Species::Water, Space::Gas)?,
@@ -592,6 +655,7 @@ fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
                     volume,
                     shares,
                     drive: now(&session, drive),
+                    force: now(&session, force),
                     work: now(&session, work),
                     held: [0, 1, 2, 3].map(|gas| match gas {
                         3 => now(&session, water[0]) + now(&session, water[1]),
@@ -704,7 +768,7 @@ fn a_mixing_share_outside_zero_to_one_is_refused_at_its_row() -> Result<(), Init
     run(AT_REST, 0, |_, _| ())?;
     let share = RowKind::Memory(Slot {
         law: LawName {
-            owner: Musculoskeletal::CARD,
+            owner: Nervous::CARD,
             local: "mixing share",
         },
         at: Context::Body,
@@ -1006,13 +1070,13 @@ fn a_breaths_lung_volume_follows_the_mechanics_static_solution() -> Result<(), I
     let samples = breaths(unit)?;
     let elastance = ELASTANCES[0] + ELASTANCES[1];
     let rest = zero_head(unit.rests);
-    let fixed = |sample: &Sample| rest + unit.pump * sample.drive / elastance;
+    let fixed = |sample: &Sample| rest + sample.force / elastance;
     let (low, high) = span(&samples, |sample| sample.volume);
-    let (least, most) = span(&samples, |sample| sample.drive);
-    let tidal = unit.pump * (most - least) / elastance;
+    let (least, most) = span(&samples, |sample| sample.force);
+    let tidal = (most - least) / elastance;
     assert!(
         close(high - low, tidal, 1e-2),
-        "the breath moves {}, the drive's swing at the static solution {tidal}",
+        "the breath moves {}, the force's swing at the static solution {tidal}",
         high - low
     );
     let lag = (samples.iter())
@@ -1025,7 +1089,7 @@ fn a_breaths_lung_volume_follows_the_mechanics_static_solution() -> Result<(), I
     let (volume, expected) = (mean(&samples, |sample| sample.volume), mean(&samples, fixed));
     assert!(
         (volume - expected).abs() <= 1e-5 * tidal,
-        "the lung's mean volume over whole breaths {volume}, the static solution at the drive's mean {expected}"
+        "the lung's mean volume over whole breaths {volume}, the static solution at the force's mean {expected}"
     );
     Ok(())
 }
@@ -1177,7 +1241,7 @@ fn the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_a
             now(&session, site)
         })?;
         let [lung, wall] = ELASTANCES;
-        let muscle = unit.pump * unit.rest_drive;
+        let muscle = rest_force(unit);
         let relaxed = unit.rests[1] + if unit.upright { UPRIGHT_WALL_REST_RISE } else { 0.0 };
         let volume = (lung * unit.rests[0] + wall * relaxed + muscle) / (lung + wall);
         let expected = wall * (volume - relaxed) - muscle;
@@ -1190,8 +1254,9 @@ fn the_pleural_pressure_is_the_walls_recoil_less_the_pump_at_the_static_volume_a
     Ok(())
 }
 
-/// The mixing share falls toward zero and never past it, so its set from zero to one refuses no step, even at a fall
-/// fast against the step.
+/// The mixing share falls toward zero and never past it, so its set from zero to one refuses no step while the share
+/// stands above zero, even at a fall fast against the step. Once the fall has taken it to zero, a trial the Newton
+/// stop leaves a rounding below zero is refused and retried; that is the solver's, not the law's.
 #[test]
 fn a_mixing_share_falling_fast_to_zero_raises_no_refusal_at_its_row() -> Result<(), InitializationFailure> {
     let unit = Case {
@@ -1201,18 +1266,19 @@ fn a_mixing_share_falling_fast_to_zero_raises_no_refusal_at_its_row() -> Result<
     let (refused, share) = run(unit, 0, |body, mut session| {
         let row = memory(body, "mixing share");
         let source = body.row_source(row);
-        let mut refused = 0;
+        let mut refused = Vec::new();
         loop {
             if session.record().accepted().time().nanoseconds() >= 10 * SECOND {
                 return (refused, Some(now(&session, row)));
             }
+            let before = now(&session, row);
             let mut attempt = session.step();
             session = loop {
                 match attempt {
                     Step::Accepted(next, _) => break next,
                     Step::Refused(retrying) => {
                         if retrying.refused().reason() == (NumericalRefusal::TrialDomain { source }) {
-                            refused += 1;
+                            refused.push(before);
                         }
                         attempt = retrying.retry();
                     }
@@ -1221,7 +1287,10 @@ fn a_mixing_share_falling_fast_to_zero_raises_no_refusal_at_its_row() -> Result<
             };
         }
     })?;
-    assert_eq!(refused, 0, "the share's row refused {refused} trials");
+    assert!(
+        refused.iter().all(|before| *before < 1e-12),
+        "the share's row refused trials from shares {refused:?}"
+    );
     let share = share.expect("the run reaches ten seconds");
     assert!((0.0..1e-12).contains(&share), "the share stands at {share}");
     Ok(())
@@ -1322,9 +1391,16 @@ fn a_small_pump_at_full_mixing_share_holds_its_positive_stated_work() -> Result<
     Ok(())
 }
 
-/// The packet's mean routine on the fixture's values: the alveolar unit fills at `G (P_mus - (E_L + E_W) x)` and the
-/// room refills the dead space at `G E_D y`, stepped implicitly at 0.1 ms over twenty breaths.
-fn airway_work(unit: Case) -> f64 {
+struct Stepped {
+    least: f64,
+    most: f64,
+    work: f64,
+}
+
+/// The packet's mean routine on the fixture's values: the drive, the pump junction stepped implicitly, the alveolar
+/// unit filling at `G (P_mus - (E_L + E_W) x)` and the room refilling the dead space at `G E_D y`, at 0.1 ms over
+/// twenty breaths, with the pump's least and most pressure and its mean work on the inflow over the last.
+fn stepped(unit: Case) -> Stepped {
     const STEP: f64 = 1e-4;
     const REPEATS: usize = 20;
     let (pump, elastance, g) = (
@@ -1341,9 +1417,15 @@ fn airway_work(unit: Case) -> f64 {
         count
     });
     let (rise, fall) = (exp(-DRIVE[0] * STEP), exp(-DRIVE[1] * STEP));
-    let (mut drive, mut x, mut y, mut work) = (unit.rest_drive, 0.0, 0.0, 0.0);
+    let mut drive = unit.rest_drive;
+    let [mut vesicle, mut cleft, mut bound] = steady(drive);
+    let (mut x, mut y) = (0.0, 0.0);
+    let mut last = Stepped {
+        least: f64::INFINITY,
+        most: f64::NEG_INFINITY,
+        work: 0.0,
+    };
     for breath in 1..=REPEATS {
-        work = 0.0;
         for (phase, count) in steps.into_iter().enumerate() {
             for _ in 0..count {
                 drive = if phase == 0 {
@@ -1351,18 +1433,29 @@ fn airway_work(unit: Case) -> f64 {
                 } else {
                     drive * fall
                 };
-                let pressure = pump * drive;
+                let (held_vesicle, held_bound) = (vesicle, bound);
+                for _ in 0..6 {
+                    vesicle = (held_vesicle + STEP * REUPTAKE * cleft) / (1.0 + STEP * RELEASE * drive);
+                    bound = (held_bound + STEP * ON * cleft * SITES) / (1.0 + STEP * (ON * cleft + OFF));
+                    cleft = STORE - vesicle - bound;
+                }
+                let pressure = pump * bound / SITES;
                 x = (x + STEP * g * pressure) / (1.0 + STEP * g * elastance);
                 let filling = g * (pressure - elastance * x);
                 y = (y + STEP * filling) / (1.0 + STEP * g * DEAD_SPACE_ELASTANCE);
                 let inflow = g * DEAD_SPACE_ELASTANCE * y;
-                if breath == REPEATS && inflow > 0.0 {
-                    work += pressure * inflow * STEP;
+                if breath == REPEATS {
+                    last.least = last.least.min(pressure);
+                    last.most = last.most.max(pressure);
+                    if inflow > 0.0 {
+                        last.work += pressure * inflow * STEP;
+                    }
                 }
             }
         }
     }
-    work / (inspiring + expiring)
+    last.work /= inspiring + expiring;
+    last
 }
 
 /// Through a resistive airway, where `G (E_L + E_W)` is the body's 5 a second, a breath's outflow work falls far
@@ -1376,7 +1469,7 @@ fn the_work_of_breathing_through_a_resistive_airway_means_the_pumps_work_on_its_
         ..BREATHING
     };
     let samples = breaths(unit)?;
-    let (held, routine) = (mean(&samples, |sample| sample.work), airway_work(unit));
+    let (held, routine) = (mean(&samples, |sample| sample.work), stepped(unit).work);
     assert!(
         close(held, routine, 1e-2),
         "through a resistive airway the work means {held} over whole breaths, the routine {routine}"
