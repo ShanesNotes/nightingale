@@ -1386,8 +1386,8 @@ fn the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_th
 const MIXING: f64 = 3_240.0;
 const WATER_VOLUME: f64 = 24_000.0;
 const ROOM_WATER: f64 = 0.5 * 20.0 / (700.0 - 0.5 * 20.0);
-/// At rest the lining feeds what the room takes, so once the gas's water settles the loss is the form.
-const WATER_AT_REST: (f64, f64) = (0.985, 1.015);
+/// The lining feeds the form at rest, and over the first millisecond the lungs lose 1.0111 of it.
+const WATER_AT_REST: (f64, f64) = (1.0, 1.02);
 
 fn at_rest_the_lungs_lose_water_as_research_11s_form_gives(start: &Start) {
     let body = &start.body;
@@ -1798,9 +1798,6 @@ const PAYER_MEAN: f64 = 1e-3;
 const PAYER_DEMAND: f64 = 8.0;
 const AT_REST: f64 = 2e-4;
 const AT_REST_LACTATE: f64 = 1e-9;
-/// A bed's inflow at rest keeps its resistance to the admission solve's noise. Since the lung's water leaves, the
-/// coronary bed owes 3.0e-17 oxygen a step on, which keeps 1 - 1.8e-15 of it, 8 units in the last place.
-const KEPT_AT_REST: f64 = 16.0 * f64::EPSILON;
 
 const SPECIATION_FORMS: f64 = 1e-9;
 const SOLUBILITY: f64 = 0.001;
@@ -1967,7 +1964,7 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             let whole = owed + half;
             let kept = (half + (owed - share * owed)) / whole;
             assert!(
-                (kept - 1.0).abs() <= KEPT_AT_REST,
+                (kept - 1.0).abs() <= 4.0 * f64::EPSILON,
                 "the {key}'s inflow {when} keeps {kept} of its resistance at a debt of {owed}"
             );
         }
