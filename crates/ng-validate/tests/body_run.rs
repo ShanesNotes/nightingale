@@ -2084,7 +2084,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         breath from 50.001 s: alveolar oxygen 99.128 swinging 3.129, carbon dioxide 28.979 swinging 1.907, venous return's beat means 74.02 to 84.47 around 77.98
         highest alveolar oxygen 102.575 (4.103 times P50) at 1.088 s: plasma oxygen pressure 93.081 (3.723 times P50), bound 0.963987 of capacity
         work of breathing: stated 5300.4, over two whole breaths from 45.001 s 5294.1
-        alveolar water over whole breaths from 20.001 s: 1.02214 of saturation
+        alveolar water over whole breaths from 20.001 s: 1.02214 of the saturated vapour share
         Energy: worst 1.4182e3, from admission 4.7296e0, steady 1.4191e3, inside a breath 7.0913e2
         Element(Carbon): worst 4.7447e1, from admission 3.6197e1, steady 4.4150e1, inside a breath 2.0167e2
         Element(Oxygen): worst 1.8251e3, from admission 1.8235e3, steady 5.1718e1, inside a breath 4.4882e3

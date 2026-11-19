@@ -20,3 +20,5 @@ Blocked by: 11, 12, 16, 17, 18, 23, 25, 27, 30, 33, ../../native-contract/issues
 From [ticket 08](08-blood-carries-gases.md): the body's gas drift bounds, oxygen's and carbon dioxide's, are fixture data for its undisturbed start, twice each gas's worst ten-second change over the first minute. A disturbed run goes far past them: after a 400 mL water bolus the check of the second PR read oxygen's worst window at 276 umol against its bound of 4. This ticket's measured day replaces them.
 
 From [ticket 10](10-lungs-breathe.md): nothing refuses inspired oxygen and carbon dioxide shares that sum above one, which would make nitrogen gas's inspired share negative. When this ticket states the room's gas as inputs, it holds that sum.
+
+From [ticket 10](10-lungs-breathe.md)'s last PR: when the day states the room's humidity and pressure, the lining and the expired water's route read them, and `rs.room-humidity` goes, with `rs.room-pressure` from 10a, so one fact has one source. The day's water intake also covers the lungs' 364.1 units a day; until it does, admission balances that loss with less urine.
