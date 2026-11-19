@@ -8,7 +8,7 @@ type Memory<'b> = StateSlot<'b, Nervous, Dimensionless>;
 /// peak, and then expiration's, while it falls. Two positive lengths leave every breath room to end.
 /// Admission solves one heartbeat, and a phase that ran free could not return to itself inside one, so the
 /// body admits in `rest`, where the phase rests at zero, the drive at the breath's mean and the mixing share
-/// at the rest share, and a hazard starts the first breath. The drive reaches the pump only as release at its junction.
+/// at the rest share, and a hazard starts the first breath.
 /// The mixing share rides line 86: the respiratory card's mixing exchange carries the breath's mean ventilation while
 /// the breath rests, and only the breath's modes say when it starts.
 pub(crate) fn breathe<'b>(laws: &mut FragmentBuilder<'b, Nervous>) -> Result<Memory<'b>, AdmissionError> {

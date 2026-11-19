@@ -42,7 +42,6 @@ const PHASES: [f64; 2] = [0.4, 0.6];
 const DRIVE: [f64; 3] = [1.5, 2.0, 1.0];
 const UPRIGHT_WALL_REST_RISE: f64 = 2_000.0;
 const JUNCTION: &str = "respiratory pump junction";
-/// The pump junction's release, reuptake, binding, unbinding, sites and store, the body packet's.
 const RELEASE: f64 = 0.05;
 const REUPTAKE: f64 = 50.0;
 const ON: f64 = 10.0;
@@ -591,7 +590,7 @@ fn algebraic(body: &CompiledBody, local: &str) -> RowId {
 }
 
 /// The pump's mean work at the static solution: `(P_1^2 - P_0^2) / 2 (E_L + E_W)` a breath, with `P_0` and `P_1` the
-/// pump's least and most pressure once breaths repeat, from the routine below.
+/// pump's least and most pressure once breaths repeat.
 fn stated_work(unit: Case) -> f64 {
     let Stepped { least, most, .. } = stepped(unit);
     let breath = (unit.phases[0] + unit.phases[1]) / RATE;

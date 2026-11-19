@@ -1321,7 +1321,6 @@ impl BreathRhythm {
         let Stepped { least, most, .. } = self.stepped();
         self.tidal() * (LUNG_ELASTANCE + WALL_ELASTANCE) / (most - least)
     }
-    /// The pump's force at rest, where the drive holds at its mean and the junction at its steady state.
     fn rest_force(&self) -> f64 {
         self.pump() * PUMP.effect(self.mean_drive())
     }
