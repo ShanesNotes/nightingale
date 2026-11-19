@@ -10,7 +10,7 @@ Blocked by: 05, 10, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
 - 86 carries the mixing share, dimensionless, from the nervous card to the respiratory card. Arrow 95 goes back to one field, the pump force.
 - 88 becomes an anatomy relation, release at the respiratory pump's junction, since the nervous card reaches the body only through its release (the coupling map's rule 2) and the musculoskeletal atlas card says junction transmission.
-- 83 is held at rung 0 by the respiratory card. Its reason in the catalog names no number: a resting day's breaths stay under the volume at which stretch slows the breath. The source is Guyton and Hall 12e p. 527, one paragraph read: in humans the inflation reflex is probably not active until the tidal volume passes about three times normal. Research 11 gives no form for stretch, and the loop held in every run of the plan without it.
+- 83 is held at rung 0 by the respiratory card. Its reason in the catalog names no number: a resting day's breaths stay under the volume at which stretch slows the breath. The source is Guyton and Hall 12e p. 506, one paragraph read: in humans the inflation reflex is probably not active until the tidal volume passes about three times normal. Research 11 gives no form for stretch, and the loop held in every run of the plan without it.
 
 The boxes, each with the PR that checks it and what shows it:
 
@@ -57,7 +57,7 @@ Ruled at planning: the ticket lands as three PRs, in order. 11a and native-contr
   - Tests: each sensor's response at stated points on the fixture, to 1e-12; the fixture's 10% production step against `0.1 / (1 + L)` and the held breath's return; the body's sign walk, with both closings printed. One body run of an hour under rate, outside the suite, as evidence in the PR.
   - Mutant rows: `central-arm-sign-flipped`, `peripheral-arm-sign-flipped`, `breath-rate-ignores-the-drive-scale`, `set-point-follows-in-seconds`.
   - Pins: the first minute moves, since rate moves the breath edges.
-  - Cost: the rest of the pick's 53.7 M a simulated second. The prototype kept 3 readout rows and arrow 95's second field that the build drops (about 4 rows fewer, inferred). The gas loop has about 89.6 M of ticket 26's budget left after 10c, less what 10d takes.
+  - Cost: the rest of the pick's 53.7 M a simulated second. The prototype kept 3 readout rows and arrow 95's second field that the build drops (about 4 rows fewer, inferred). The gas loop has about 88 M of ticket 26's budget left after 10c, less what 10d takes.
 - **11c, sleep.** The scale reads the sleep input. Every whole-body admission states awake at the anchor or meets `InputUnstated`: the body's run start, `tools/bench` and the generative-physiology driver each get a port that states it. Not a contract change.
   - Tests: the body's minute takes a sleep input from the checkpoint (the sleep box); the fixture's steady shift meets `W / (g G)`. One body run of an hour with sleep, outside the suite, as evidence in the PR.
   - Mutant rows: `sleep-lowers-no-gain`, `sleep-removes-no-wake-drive`.
