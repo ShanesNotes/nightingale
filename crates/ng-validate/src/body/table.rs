@@ -39,7 +39,6 @@ const CONSTANT: &str = "a constant rate from its packet parameter";
 const MEAL: &str = "the slice's absorption: a basal rate and the meal, straight into the portal vein";
 const KEPT_BACK: &str = "an interstitial amount the capillary wall keeps back";
 const UNCROSSED: &str = "a cell amount no membrane law moves";
-const ALVEOLAR: &str = "alveolar gas no exchange moves";
 const FEED: &str = "a restoring feed into the bed's cells toward a stated set amount";
 const DRAIN: &str = "a restoring drain of the bed's cell water toward a stated set amount";
 
@@ -78,13 +77,11 @@ const fn pool<Q: Substance, C: SiteSet>(
 }
 
 use Release::{Kept, Ticket};
-use Space::{Cells, Gas, Interstitium};
+use Space::{Cells, Interstitium};
 
 /// Every hold of the whole body, by card. Its rows equal the compiled body's coverage manifest.
 pub const HOLD_TABLE: &[Hold] = &[
-    route(RS, "expired water", CONSTANT, Ticket(10, RS), "01:63, 873"),
-    route(RS, "airway heat", CONSTANT, Ticket(10, RS), "01:171-172, 873"),
-    pool::<Water, Beds<Lung>>(RS, Gas, ALVEOLAR, Ticket(10, RS), "01:356, 532"),
+    route(RS, "airway heat", CONSTANT, Ticket(12, RS), "01:171-172, 873"),
     route(GI, "gut water", MEAL, Ticket(13, GI), "01:54, 876"),
     route(GI, "gut sodium", MEAL, Ticket(13, GI), "01:77, 876"),
     route(GI, "gut potassium", MEAL, Ticket(13, GI), "01:94, 876"),

@@ -4508,11 +4508,11 @@ test = "-p ng-validate --test alveolar the_airway_carries_each_ends_share_upwind
 
 [[mutant]]
 name = "dry-pressure-includes-water"
-path = "crates/ng-respiratory/src/membrane.rs"
-old = '''    let (room, vapour) = (k.parameter(room), k.parameter(vapour));
-    let dry = k.subtract(room, vapour);'''
-new = '''    let (room, _vapour) = (k.parameter(room), k.parameter(vapour));
-    let dry = room;'''
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''        let (room, vapour) = (k.parameter(&self.room), k.parameter(&self.vapour));
+        k.subtract(room, vapour)'''
+new = '''        let (room, _vapour) = (k.parameter(&self.room), k.parameter(&self.vapour));
+        room'''
 test = "-p ng-validate --test alveolar the_membrane_moves_each_gas_down_its_own_head_from_the_dry_alveolar_pressure"
 
 [[mutant]]
@@ -4680,6 +4680,30 @@ old = '''            let inflow = k.conductance_flow(g, inward);'''
 new = '''            let _ = inward;
             let inflow = k.conductance_flow(g, head);'''
 test = "-p ng-validate --test alveolar the_work_of_breathing_through_a_resistive_airway_means_the_pumps_work_on_its_inflow"
+
+[[mutant]]
+name = "lining-ignores-saturation"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let value = k.relax(saturated, held, pace);'''
+new = '''            let _ = held;
+            let none = k.zero();
+            let value = k.relax(saturated, none, pace);'''
+test = "-p ng-validate --test alveolar the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the_water_to_the_room"
+
+[[mutant]]
+name = "airway-water-rides-the-downstream-share"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''                self.share_of(&mut k, &per, up.1, up.0),'''
+new = '''                self.share_of(&mut k, &per, down.1, down.0),'''
+test = "-p ng-validate --test alveolar the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the_water_to_the_room"
+
+[[mutant]]
+name = "expired-water-ignores-the-room"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let value = k.subtract(leaving, entering);'''
+new = '''            let _ = entering;
+            let value = leaving;'''
+test = "-p ng-validate --test alveolar the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the_water_to_the_room"
 
 [[mutant]]
 name = "pump-force-ignores-the-drive"

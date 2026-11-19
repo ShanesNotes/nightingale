@@ -32,6 +32,14 @@ const SETTLED: u64 = 240;
 const TOLERANCE: f64 = 1e-6;
 const DEAD_SPACE_ELASTANCE: f64 = 1e-2;
 const DEAD_SPACE: f64 = 500.0;
+/// Water's vapour volume for each unit of water, the lining's speed, the room's humidity and its saturated vapour
+/// pressure, and the held interstitium's set amount and speed.
+const WATER_VOLUME: f64 = 10.0;
+const LINING: f64 = 2.0;
+const HUMIDITY: f64 = 0.5;
+const ROOM_VAPOUR: f64 = 20.0;
+const WATER_SET: f64 = 1_000.0;
+const WATER_SPEED: f64 = 1.0;
 
 const RATE: f64 = 0.2;
 const PHASES: [f64; 2] = [0.4, 0.6];
@@ -172,12 +180,13 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         },
     );
     let mut schema = Schema::new(map.finish()?)?;
-    for space in [Space::Interstitium, Space::Cells, Space::Lumen, Space::Fluid] {
+    for space in [Space::Cells, Space::Lumen, Space::Fluid] {
         schema.leave_out(space, "one alveolar unit and its plasma");
     }
     schema.carry::<Oxygen, Airway>(Space::Gas);
     schema.carry::<CarbonDioxide, Airway>(Space::Gas);
     schema.carry::<NitrogenGas, Airway>(Space::Gas);
+    schema.carry::<Water, Airway>(Space::Gas);
     schema.pool::<Oxygen>(lung, Space::Plasma)?;
     schema.pool::<CarbonDioxide>(lung, Space::Plasma)?;
     for process in [
@@ -187,12 +196,14 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         Schema::process::<Expired<Oxygen>>,
         Schema::process::<Expired<CarbonDioxide>>,
         Schema::process::<Expired<NitrogenGas>>,
+        Schema::process::<Expired<Water>>,
     ] {
         process(&mut schema, airway, Space::Gas)?;
     }
     let (into, out) = (BoundaryDirection::IntoBody, BoundaryDirection::OutOfBody);
     schema.boundary::<Oxygen>("oxygen use", out, lung, Space::Plasma)?;
     schema.boundary::<CarbonDioxide>("carbon dioxide made", into, lung, Space::Plasma)?;
+    schema.boundary::<Water>("water held", into, lung, Space::Interstitium)?;
     assemble(schema, |mut body| {
         let held = HeldDeclaration::<BloodChemistry>::new(Vec::new(), Vec::new(), NOTE)
             .pool::<Water, CapillaryBed>(Space::Plasma);
@@ -217,6 +228,16 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
             k.finish(value, laws.every_mode(), class)
         });
         laws.transfer(Transfer::new(&made, rate));
+        let BoundaryRoute { route: wetting, .. } = ports.route::<Water>("water held")?;
+        let held = wetting.amount::<Water>();
+        let set = laws.parameter::<Water>(key("fixture.water-set"), Admissible::positive());
+        let speed = laws.parameter::<Rate<Dimensionless>>(key("fixture.water-speed"), Admissible::positive());
+        let rate = laws.kernel(|mut k| {
+            let (set, held, speed) = (k.parameter(&set), k.read(&held), k.parameter(&speed));
+            let value = k.relax(set, held, speed);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.transfer(Transfer::new(&wetting, rate));
         body.add(laws.finish());
 
         let (mut laws, _) = body.musculoskeletal(None)?.parts();
@@ -232,6 +253,7 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         exchange(&mut laws, &ports, &ventilation, &plasma)?;
         ventilation.pleural(&mut laws, &ports)?;
         ventilation.work(&mut laws, &ports)?;
+        ventilation.water(&mut laws, &ports)?;
         body.add(laws.finish());
         body.compile()
     })
@@ -241,6 +263,14 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
 /// `B = G h- + M` out, and the net `G h` at each is the net uptake, so with `U_i` each gas's uptake into the plasma
 /// `f_D = (A F_I - U) / B` in the dead space and `f_A = (A f_D - U) / B` in the alveolar unit.
 fn closed_form(unit: Case) -> ([f64; 3], [f64; 3]) {
+    let (inward, outward) = coefficients(unit);
+    let uptake = [unit.oxygen_use, -unit.carbon_dioxide_made, 0.0];
+    let dead = [0, 1, 2].map(|i| (inward * INSPIRED[i] - uptake[i]) / outward);
+    let alveolar = [0, 1, 2].map(|i| (inward * dead[i] - uptake[i]) / outward);
+    (dead, alveolar)
+}
+
+fn coefficients(unit: Case) -> (f64, f64) {
     let (g, m) = (
         unit.conductance * unit.ventilation,
         unit.mixing * unit.ventilation,
@@ -249,11 +279,21 @@ fn closed_form(unit: Case) -> ([f64; 3], [f64; 3]) {
     let head = net / g;
     let width = unit.width;
     let smooth = |a: f64| 0.5 * (a + (a * a + width * width).sqrt());
-    let (inward, outward) = (g * smooth(head) + m, g * smooth(-head) + m);
-    let uptake = [unit.oxygen_use, -unit.carbon_dioxide_made, 0.0];
-    let dead = [0, 1, 2].map(|i| (inward * INSPIRED[i] - uptake[i]) / outward);
-    let alveolar = [0, 1, 2].map(|i| (inward * dead[i] - uptake[i]) / outward);
-    (dead, alveolar)
+    (g * smooth(head) + m, g * smooth(-head) + m)
+}
+
+/// Water's share `s` is its vapour's volume over the dry gas's. It crosses the room's side and the airway edge at the
+/// dry gases' two coefficients, the room gives back `i = h P_r / (P_B - h P_r)`, and the lining adds
+/// `q = k V_A (σ - s_A)` of vapour's volume to an alveolar unit of dry volume `V_A`, with `σ = P_H2O / (P_B - P_H2O)`.
+/// So `s_D = (A i + q) / B`, `s_A = (A s_D + q) / B`, and `q (1 + k V_A (A + B) / B^2) = k V_A (σ - A^2 i / B^2)`.
+fn water_closed_form(unit: Case, alveolar_volume: f64) -> [f64; 3] {
+    let (a, b) = coefficients(unit);
+    let saturated = VAPOUR / DRY;
+    let room = HUMIDITY * ROOM_VAPOUR / (ROOM - HUMIDITY * ROOM_VAPOUR);
+    let lined = LINING * alveolar_volume;
+    let q = lined * (saturated - a * a * room / (b * b)) / (1.0 + lined * (a + b) / (b * b));
+    let dead = (a * room + q) / b;
+    [q, dead, (a * dead + q) / b]
 }
 
 fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
@@ -320,6 +360,12 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Quotient<Volume, NitrogenGas>>(p, "rs.nitrogen-volume", vn)?;
     set::<Conductance<Volume>>(p, "rs.airway-conductance", g)?;
     set::<Rate<Volume>>(p, "rs.airway-mixing", m)?;
+    set::<Quotient<Volume, Water>>(p, "rs.water-volume", WATER_VOLUME)?;
+    set::<Rate<Dimensionless>>(p, "rs.lining-speed", LINING)?;
+    set::<Dimensionless>(p, "rs.room-humidity", HUMIDITY)?;
+    set::<Pressure>(p, "rs.room-vapour-pressure", ROOM_VAPOUR)?;
+    set::<Water>(p, "fixture.water-set", WATER_SET)?;
+    set::<Rate<Dimensionless>>(p, "fixture.water-speed", WATER_SPEED)?;
     for (gas, key) in [(0, "rs.oxygen-inspired"), (1, "rs.carbon-dioxide-inspired")] {
         set::<Dimensionless>(p, key, INSPIRED[gas])?;
     }
@@ -338,6 +384,8 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
                 (Species::Oxygen, Space::Gas) => shares[0] * volume / vo,
                 (Species::CarbonDioxide, Space::Gas) => shares[1] * volume / vc,
                 (Species::NitrogenGas, Space::Gas) => shares[2] * volume / vn,
+                (Species::Water, Space::Gas) => VAPOUR / DRY * volume / WATER_VOLUME,
+                (Species::Water, Space::Interstitium) => WATER_SET,
                 (Species::Oxygen, Space::Plasma) => DRY * alveolar[0] / PER_AMOUNT,
                 (Species::CarbonDioxide, Space::Plasma) => DRY * alveolar[1] / PER_AMOUNT,
                 _ => 100.0,
@@ -368,6 +416,7 @@ struct Settled {
     alveolar: [f64; 3],
     dead: [f64; 3],
     plasma: [f64; 2],
+    water: [f64; 2],
 }
 
 fn sitting_up() -> Result<Vec<BoundaryEvent>, AdmissionError> {
@@ -456,7 +505,9 @@ fn settled(unit: Case) -> Result<Settled, InitializationFailure> {
             let dead = gas_space(unit, &session, gas_rows(body, AIRWAY)?);
             let plasma =
                 |species| amount_row(body, LUNG, species, Space::Plasma).map(|row| now(&session, row));
+            let water = |key| amount_row(body, key, Species::Water, Space::Gas).map(|row| now(&session, row));
             Ok(Settled {
+                water: [water(LUNG)?, water(AIRWAY)?],
                 alveolar_volume: alveolar.volume,
                 dead_volume: dead.volume,
                 alveolar: alveolar.shares,
@@ -477,7 +528,7 @@ struct Sample {
     shares: [f64; 3],
     drive: f64,
     work: f64,
-    held: [f64; 3],
+    held: [f64; 4],
     extents: Vec<f64>,
 }
 
@@ -517,6 +568,10 @@ fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
             let (phase, drive) = (memory(body, "breath phase"), memory(body, "pump drive"));
             let work = algebraic(body, "work_of_breathing");
             let (lung, airway) = (gas_rows(body, LUNG)?, gas_rows(body, AIRWAY)?);
+            let water = [
+                amount_row(body, LUNG, Species::Water, Space::Gas)?,
+                amount_row(body, AIRWAY, Species::Water, Space::Gas)?,
+            ];
             let columns = every_column(body);
             let mut samples = Vec::new();
             let mut edges = 0;
@@ -539,7 +594,10 @@ fn breaths(unit: Case) -> Result<Vec<Sample>, InitializationFailure> {
                     shares,
                     drive: now(&session, drive),
                     work: now(&session, work),
-                    held: [0, 1, 2].map(|gas| now(&session, lung[gas]) + now(&session, airway[gas])),
+                    held: [0, 1, 2, 3].map(|gas| match gas {
+                        3 => now(&session, water[0]) + now(&session, water[1]),
+                        _ => now(&session, lung[gas]) + now(&session, airway[gas]),
+                    }),
                     extents: Vec::new(),
                 });
                 if wrapped {
@@ -766,6 +824,25 @@ fn doubling_ventilation_at_resting_use_meets_the_closed_form_of_the_two_exchange
     Ok(())
 }
 
+#[test]
+fn the_lining_wets_the_alveolar_gas_toward_saturation_and_the_airway_carries_the_water_to_the_room()
+-> Result<(), InitializationFailure> {
+    let unit = AT_REST;
+    let settled = settled(unit)?;
+    let [_, dead, alveolar] = water_closed_form(unit, settled.alveolar_volume);
+    let shares = [
+        WATER_VOLUME * settled.water[0] / settled.alveolar_volume,
+        WATER_VOLUME * settled.water[1] / settled.dead_volume,
+    ];
+    assert!(
+        close(shares[0], alveolar, TOLERANCE) && close(shares[1], dead, TOLERANCE),
+        "water's share is {} in the alveolar unit and {} in the dead space, the closed form's {alveolar} and {dead}",
+        shares[0],
+        shares[1]
+    );
+    Ok(())
+}
+
 fn count(body: &CompiledBody, column: ColumnId, on: impl Fn(SiteId, Species, Space) -> bool) -> f64 {
     (body.columns()[column.index()].terms().iter())
         .filter(|(row, _)| match body.rows()[row.index()].kind() {
@@ -857,6 +934,7 @@ fn a_breaths_lung_volume_follows_the_mechanics_static_solution() -> Result<(), I
     Ok(())
 }
 
+/// Water closes as each gas does, with the lining in place of the membrane: it moves water into the alveolar gas.
 #[test]
 fn each_gas_closes_over_whole_breaths() -> Result<(), InitializationFailure> {
     let unit = BREATHING;
@@ -864,7 +942,12 @@ fn each_gas_closes_over_whole_breaths() -> Result<(), InitializationFailure> {
     let samples = breaths(unit)?;
     let (first, last) = (&samples[0], &samples[samples.len() - 1]);
     let (airway, lung) = (site::<TissueSite>(AIRWAY)?, site::<CapillaryBed>(LUNG)?);
-    let gases = [Species::Oxygen, Species::CarbonDioxide, Species::NitrogenGas];
+    let gases = [
+        Species::Oxygen,
+        Species::CarbonDioxide,
+        Species::NitrogenGas,
+        Species::Water,
+    ];
     for (at, gas) in gases.into_iter().enumerate() {
         let (mut inspired, mut expired, mut across) = (0.0, 0.0, 0.0);
         for column in every_column(&body) {
@@ -881,6 +964,7 @@ fn each_gas_closes_over_whole_breaths() -> Result<(), InitializationFailure> {
                 (true, 1.0, 0.0) => inspired += moved,
                 (true, -1.0, 0.0) => expired += moved,
                 (false, 0.0, -1.0) => across += moved,
+                (false, 0.0, 1.0) => across -= moved,
                 _ => {}
             }
         }
@@ -1151,7 +1235,11 @@ fn a_small_pump_at_full_mixing_share_holds_its_positive_stated_work() -> Result<
 fn airway_work(unit: Case) -> f64 {
     const STEP: f64 = 1e-4;
     const REPEATS: usize = 20;
-    let (pump, elastance, g) = (unit.pump, ELASTANCES[0] + ELASTANCES[1], unit.conductance * unit.ventilation);
+    let (pump, elastance, g) = (
+        unit.pump,
+        ELASTANCES[0] + ELASTANCES[1],
+        unit.conductance * unit.ventilation,
+    );
     let (inspiring, expiring) = (unit.phases[0] / RATE, unit.phases[1] / RATE);
     let steps = [inspiring, expiring].map(|length| {
         let mut count = 0_u32;
@@ -1166,7 +1254,11 @@ fn airway_work(unit: Case) -> f64 {
         work = 0.0;
         for (phase, count) in steps.into_iter().enumerate() {
             for _ in 0..count {
-                drive = if phase == 0 { DRIVE[2] + (drive - DRIVE[2]) * rise } else { drive * fall };
+                drive = if phase == 0 {
+                    DRIVE[2] + (drive - DRIVE[2]) * rise
+                } else {
+                    drive * fall
+                };
                 let pressure = pump * drive;
                 x = (x + STEP * g * pressure) / (1.0 + STEP * g * elastance);
                 let filling = g * (pressure - elastance * x);

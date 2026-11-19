@@ -47,8 +47,6 @@ pub fn exchange<'b>(
     plasma: &impl Plasma<'b>,
 ) -> Result<(), AdmissionError> {
     let key = ParameterKey::new;
-    let room = laws.parameter::<Pressure>(key("rs.room-pressure"), Admissible::positive());
-    let vapour = laws.parameter::<Pressure>(key("rs.water-vapour-pressure"), Admissible::nonnegative());
     let oxygen_diffusing =
         laws.parameter::<Conductance<Oxygen>>(key("rs.oxygen-diffusing"), Admissible::positive());
     let carbon_dioxide_diffusing = laws
@@ -65,9 +63,8 @@ pub fn exchange<'b>(
         carbon_dioxide.to_amount::<CarbonDioxide>(),
     );
     let class = class()?;
-    let dry = (&room, &vapour);
     let rate = laws.site_kernel(|mut k| {
-        let gas = alveolar::<Oxygen>(&mut k, ventilation, &held, dry);
+        let gas = alveolar::<Oxygen>(&mut k, ventilation, &held);
         let blood = plasma.oxygen(&mut k, &oxygen_plasma);
         let head = k.subtract(gas, blood);
         let d = k.parameter(&oxygen_diffusing);
@@ -76,7 +73,7 @@ pub fn exchange<'b>(
     });
     laws.transfer_at(&oxygen, rate);
     let rate = laws.site_kernel(|mut k| {
-        let gas = alveolar::<CarbonDioxide>(&mut k, ventilation, &held, dry);
+        let gas = alveolar::<CarbonDioxide>(&mut k, ventilation, &held);
         let blood = plasma.carbon_dioxide(&mut k, &carbon_dioxide_plasma);
         let head = k.subtract(gas, blood);
         let d = k.parameter(&carbon_dioxide_diffusing);
@@ -97,14 +94,9 @@ fn alveolar<'b, 'k, Q: Dry>(
     k: &mut AtLung<'b, 'k>,
     ventilation: &Ventilation<'b>,
     held: &Held<'b>,
-    (room, vapour): (
-        &Parameter<'b, Respiratory, Pressure>,
-        &Parameter<'b, Respiratory, Pressure>,
-    ),
 ) -> Expr<'b, 'k, Respiratory, Pressure> {
     let lung = (k.at_site(&held.0), k.at_site(&held.1), k.at_site(&held.2));
     let share = ventilation.share::<_, Q>(k, lung);
-    let (room, vapour) = (k.parameter(room), k.parameter(vapour));
-    let dry = k.subtract(room, vapour);
+    let dry = ventilation.dry(k);
     k.scale(dry, share)
 }
