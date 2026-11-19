@@ -3027,7 +3027,7 @@ def part_cases() -> list[Violation]:
     return out
 
 
-SWEEP_OF = "sweep of 0123abc, 3 rows, budget 420 s"
+SWEEP_OF = "sweep of 0123abc, 3 rows, a row's limit 2 times its baseline and at least 420 s, a baseline's 1680 s"
 BASELINE = "baseline  12 s  cargo test -p ng-a --test alpha"
 LINE_CASES: tuple[tuple[tuple[str, ...], tuple[str, str] | None, int], ...] = (
     (
@@ -3053,7 +3053,7 @@ LINE_CASES: tuple[tuple[tuple[str, ...], tuple[str, str] | None, int], ...] = (
         ("b", "SURVIVED"),
         3,
     ),
-    ((SWEEP_OF, BASELINE, f"{'UNCLEAR':<15}  a  420 s  over 420 s"), ("a", "UNCLEAR"), 4),
+    ((SWEEP_OF, BASELINE, f"{'UNCLEAR':<15}  a  420 s  limit 420 s  over 420 s"), ("a", "UNCLEAR"), 4),
     ((SWEEP_OF, f"{'NOT APPLIED':<15}  c  0 s  0 matches in crates/ng-a/src/one.rs"), ("c", "NOT APPLIED"), 4),
     (("no row is touched after 0123abc",), None, 5),
     ((SWEEP_OF, "mutate: `cargo test -p ng-a --test alpha` must pass some test on the unmutated tree"), None, 5),
@@ -3384,6 +3384,67 @@ def sweep_case() -> list[Violation]:
     return out
 
 
+LIMIT_TABLE = """\
+[[mutant]]
+name = "slow"
+path = "crates/ng-a/src/one.rs"
+old = "a"
+new = "b"
+test = "-p ng-a --test alpha"
+
+[[mutant]]
+name = "stuck"
+path = "crates/ng-a/src/one.rs"
+old = "a"
+new = "c"
+test = "-p ng-a --test alpha"
+
+[[mutant]]
+name = "unseen"
+path = "crates/ng-a/src/one.rs"
+old = "a"
+new = "d"
+test = "-p ng-b --test beta"
+"""
+TAKES = (
+    "case \"$*\" in *--no-run*) exit 0 ;; esac\n"
+    "case $(cat crates/ng-a/src/one.rs) in\n"
+    "  a) sleep 2; echo 'test t ... ok' ;;\n"
+    "  c) sleep 8 ;;\n"
+    "  *) sleep 2.5; echo 'test t ... FAILED'; exit 101 ;;\n"
+    "esac\n"
+)
+LIMITS = {"slow": "CAUGHT", "stuck": "UNCLEAR", "unseen": "CAUGHT"}
+
+
+def limit_case() -> list[Violation]:
+    out = []
+    with _scratch_git(), tempfile.TemporaryDirectory(prefix="gate-limit-") as tmp:
+        root = _fixture(pathlib.Path(tmp))
+        _commit(root, "mutants.toml", LIMIT_TABLE)
+        stub = pathlib.Path(tmp) / "bin"
+        stub.mkdir()
+        (stub / "cargo").write_text(f"#!/bin/sh\n{TAKES}", encoding="utf-8")
+        (stub / "cargo").chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}"}):
+            os.environ.pop("UPDATE_EXPECT", None)
+            with contextlib.redirect_stdout(io.StringIO()):
+                tested(["-p", "ng-b"], root)
+            argv = [sys.executable, "-I", MUTATE, "mutants.toml", "--budget", "1", "--tested", str(root / TESTED)]
+            run = subprocess.run(argv, cwd=root, capture_output=True, text=True, env=dict(os.environ))
+    lines = run.stdout.splitlines()
+    for name, verdict in LIMITS.items():
+        said = [line for line in lines if (m := VERDICT_LINE.match(line)) and m[2] == name]
+        given = re.search(r"  limit (\d+) s", said[0]) if said else None
+        if not given or VERDICT_LINE.match(said[0])[1].rstrip() != verdict or int(given[1]) < 4:
+            out.append(
+                Violation("sweep", f"a row {name}", f"reads {said}; want {verdict} with twice its 2 s baseline as its limit")
+            )
+    if run.returncode != 1:
+        out.append(Violation("sweep", "a row over twice its baseline", f"exit {run.returncode}; it fails the sweep"))
+    return out
+
+
 def cargo_config_case() -> list[Violation]:
     out = []
     with _scratch_git():
@@ -3479,6 +3540,7 @@ DRIVER_CASES: tuple[Callable[[], list[Violation]], ...] = (
     argv_cases,
     writer_cases,
     sweep_case,
+    limit_case,
     cargo_config_case,
     hook_env_case,
     step_cases,
