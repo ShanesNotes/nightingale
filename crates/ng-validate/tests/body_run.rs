@@ -379,6 +379,7 @@ struct Moment {
     venous: f64,
     aortic: f64,
     alveolar: [f64; 2],
+    volume: f64,
     wet: f64,
     plasma: [f64; 3],
     work: f64,
@@ -482,6 +483,7 @@ impl Watch {
             venous: at(self.venous),
             aortic: at(self.aortic),
             alveolar: [DRY * o / dry, DRY * c / dry],
+            volume: dry,
             wet: WATER_VOLUME * at(self.lung_water) / dry,
             plasma: [oxygen / water, carrier / water, pressure],
             work: at(self.work),
@@ -619,6 +621,9 @@ fn each_breath_swings_the_alveolar_gases_and_venous_return(watch: &Watch) -> Str
             high - low
         };
         let (oxygen, carbon_dioxide) = (swing(0), swing(1));
+        let (shallow, deep) = (watch.moments[from..=to].iter())
+            .map(|moment| moment.volume)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
         let at = watch.moments[from].at as f64 / SECOND as f64;
         assert!(
             oxygen >= 1.0 && carbon_dioxide >= 0.5,
@@ -639,8 +644,8 @@ fn each_breath_swings_the_alveolar_gases_and_venous_return(watch: &Watch) -> Str
         let means = [0, 1].map(|gas| watch.mean(from, to, |moment| moment.alveolar[gas]));
         writeln!(
             report,
-            "breath from {at:.3} s: alveolar oxygen {:.3} swinging {oxygen:.3}, carbon dioxide {:.3} swinging {carbon_dioxide:.3}, venous return's beat means {low:.2} to {high:.2} around {mean:.2}",
-            means[0], means[1]
+            "breath from {at:.3} s: alveolar oxygen {:.3} swinging {oxygen:.3}, carbon dioxide {:.3} swinging {carbon_dioxide:.3}, venous return's beat means {low:.2} to {high:.2} around {mean:.2}, tidal volume {:.1}",
+            means[0], means[1], deep - shallow
         )
         .expect("a string takes it");
     }
@@ -2103,16 +2108,16 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
         before the first breath edge: alveolar oxygen 101.296, carbon dioxide 28.354, venous return 77.32
-        breath from 5.000 s: alveolar oxygen 100.761 swinging 3.060, carbon dioxide 28.699 swinging 1.988, venous return's beat means 74.21 to 84.51 around 78.01
-        breath from 10.000 s: alveolar oxygen 100.435 swinging 3.044, carbon dioxide 28.831 swinging 1.933, venous return's beat means 74.06 to 84.47 around 77.98
-        breath from 15.000 s: alveolar oxygen 100.170 swinging 3.042, carbon dioxide 28.893 swinging 1.909, venous return's beat means 74.06 to 84.44 around 77.96
-        breath from 20.001 s: alveolar oxygen 99.951 swinging 3.079, carbon dioxide 28.923 swinging 1.916, venous return's beat means 74.07 to 84.44 around 77.97
-        breath from 25.001 s: alveolar oxygen 99.766 swinging 3.109, carbon dioxide 28.937 swinging 1.922, venous return's beat means 73.98 to 84.44 around 77.97
-        breath from 30.001 s: alveolar oxygen 99.608 swinging 3.136, carbon dioxide 28.947 swinging 1.925, venous return's beat means 73.99 to 84.44 around 77.97
-        breath from 35.001 s: alveolar oxygen 99.472 swinging 3.159, carbon dioxide 28.954 swinging 1.927, venous return's beat means 73.99 to 84.44 around 77.96
-        breath from 40.001 s: alveolar oxygen 99.353 swinging 3.178, carbon dioxide 28.961 swinging 1.929, venous return's beat means 73.99 to 84.44 around 77.96
-        breath from 45.001 s: alveolar oxygen 99.247 swinging 3.196, carbon dioxide 28.967 swinging 1.931, venous return's beat means 73.99 to 84.44 around 77.97
-        breath from 50.001 s: alveolar oxygen 99.154 swinging 3.211, carbon dioxide 28.972 swinging 1.933, venous return's beat means 73.99 to 84.44 around 77.97
+        breath from 5.000 s: alveolar oxygen 100.761 swinging 3.060, carbon dioxide 28.699 swinging 1.988, venous return's beat means 74.21 to 84.51 around 78.01, tidal volume 11006.4
+        breath from 10.000 s: alveolar oxygen 100.435 swinging 3.044, carbon dioxide 28.831 swinging 1.933, venous return's beat means 74.06 to 84.47 around 77.98, tidal volume 11008.2
+        breath from 15.000 s: alveolar oxygen 100.170 swinging 3.042, carbon dioxide 28.893 swinging 1.909, venous return's beat means 74.06 to 84.44 around 77.96, tidal volume 11008.4
+        breath from 20.001 s: alveolar oxygen 99.951 swinging 3.079, carbon dioxide 28.923 swinging 1.916, venous return's beat means 74.07 to 84.44 around 77.97, tidal volume 11008.2
+        breath from 25.001 s: alveolar oxygen 99.766 swinging 3.109, carbon dioxide 28.937 swinging 1.922, venous return's beat means 73.98 to 84.44 around 77.97, tidal volume 11008.0
+        breath from 30.001 s: alveolar oxygen 99.608 swinging 3.136, carbon dioxide 28.947 swinging 1.925, venous return's beat means 73.99 to 84.44 around 77.97, tidal volume 11007.8
+        breath from 35.001 s: alveolar oxygen 99.472 swinging 3.159, carbon dioxide 28.954 swinging 1.927, venous return's beat means 73.99 to 84.44 around 77.96, tidal volume 11007.5
+        breath from 40.001 s: alveolar oxygen 99.353 swinging 3.178, carbon dioxide 28.961 swinging 1.929, venous return's beat means 73.99 to 84.44 around 77.96, tidal volume 11007.3
+        breath from 45.001 s: alveolar oxygen 99.247 swinging 3.196, carbon dioxide 28.967 swinging 1.931, venous return's beat means 73.99 to 84.44 around 77.97, tidal volume 11007.1
+        breath from 50.001 s: alveolar oxygen 99.154 swinging 3.211, carbon dioxide 28.972 swinging 1.933, venous return's beat means 73.99 to 84.44 around 77.97, tidal volume 11006.8
         highest alveolar oxygen 102.524 (4.101 times P50) at 2.024 s: plasma oxygen pressure 100.886 (4.035 times P50), bound 0.971026 of capacity
         work of breathing: stated 5331.3, over two whole breaths from 45.001 s 5323.0
         alveolar water over whole breaths from 20.001 s: 1.02188 of the saturated vapour share

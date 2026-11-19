@@ -911,11 +911,12 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
     let basis = body.conserved_basis();
     let stated = body.bind(body_packet(&body)?)?.packet_hash().digest();
     let pin = format!(
-        "rows {} {kinds:?}, columns {}, jacobian nonzeros {}, blocks {}, parameter slots {}, conserved combinations {}, held pools {}, held route columns {}\nmodel hash {}\nconserved basis {}\nstated packet {}\n",
+        "rows {} {kinds:?}, columns {}, jacobian nonzeros {}, blocks {}, largest block {}, parameter slots {}, conserved combinations {}, held pools {}, held route columns {}\nmodel hash {}\nconserved basis {}\nstated packet {}\n",
         body.rows().len(),
         body.columns().len(),
         body.sparsity().unknowns().len(),
         body.blocks().len(),
+        (body.blocks().iter()).map(|block| block.rows().len()).max().unwrap_or(0),
         body.parameters().len(),
         basis.combinations().len(),
         basis.coverage().pools().len(),
@@ -925,7 +926,7 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1457 {"algebraic": 190, "amount": 1251, "memory": 16}, columns 1463, jacobian nonzeros 10107, blocks 427, parameter slots 737, conserved combinations 398, held pools 318, held route columns 88
+        rows 1457 {"algebraic": 190, "amount": 1251, "memory": 16}, columns 1463, jacobian nonzeros 10107, blocks 427, largest block 651, parameter slots 737, conserved combinations 398, held pools 318, held route columns 88
         model hash 7b6c75ce8f42fe14d3b1ea842d42a92c86aa614b304709a05fe038ec504a545f
         conserved basis de45607d7612d7f3cad530d632e838b8a6dc0395dbc0d6d85da7f1222b42267d
         stated packet 28a81ece02c47561e9353f184bc88e7808429a28e1acb17ec3ec3bf4372ed05e
