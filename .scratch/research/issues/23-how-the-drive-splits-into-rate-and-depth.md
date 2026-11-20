@@ -2,7 +2,10 @@
 
 Type: research
 Status: open
-Blocked by: 11
+Blocked by: none
+Blocks: ../../body/issues/38-the-drive-moves-the-breaths-depth.md
+
+[Body ticket 38](../../body/issues/38-the-drive-moves-the-breaths-depth.md) waits on this Answer to build depth on the whole body. The question reads the literature and needs no merged code.
 
 **Question:** As chemical drive rises from rest in a healthy adult, how much of the rise in ventilation comes from the breath's rate and how much from its depth, and in what form? [Research 11](11-law-forms-gas-loop.md) gives the controller's output as release and no split, and [research 20](20-the-breaths-rhythm.md) asks for the resting rhythm and leaves the controller out. [Body ticket 11](../../body/issues/11-breathing-is-controlled.md) moves only the rate, for cost, with no source for the split.
 
@@ -12,5 +15,7 @@ Today's form, from body 11's plan: the drive scale multiplies the breath's rate 
 - [ ] Whether inspiration's length or expiration's carries the rate change
 - [ ] Whether the split differs between the central and the peripheral arm, or between waking and NREM sleep
 - [ ] Each constant's row for [research 16](16-constants-and-what-binds-them.md)'s list: what measurable quantity binds it
+- [ ] For body 38: the split in a form a law can state, depth and rate each a function of the drive, with typed parameters
+- [ ] What bounds depth as the drive rises, and where rate carries the rest of the rise, with the population and the method
 
 **Non-goals:** exercise, and the contract form that would let depth move once a breath ([native-contract 87](../../native-contract/issues/87-a-firing-sets-a-memory-to-a-kernels-value.md)).
