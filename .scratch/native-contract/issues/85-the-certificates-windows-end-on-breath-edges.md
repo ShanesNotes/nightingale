@@ -4,7 +4,9 @@ Spec: [solver contract](../../../docs/architecture/solver-contract.md), section 
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc85a-build
 
 Blocked by: none
 
