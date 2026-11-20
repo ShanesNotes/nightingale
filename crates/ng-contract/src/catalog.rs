@@ -7,8 +7,8 @@ use crate::{
     Acidity, Ammonia, Beds, BloodChemistry, Brain, CapillaryBed, CarbonDioxidePartialPressure,
     Cardiovascular, Class, Concentration, Dimensionless, Endocrine, Energy, Fluids, Gastrointestinal,
     Hematology, Hepatic, Immune, Includes, LawName, Lung, Metabolism, Musculoskeletal, Nervous, Owner,
-    Oxygen, OxygenPartialPressure, PerSite, Phase, Pressure, Rate, Renal, Renin, Respiratory, SiteSet, Sites,
-    Speciated, Speciation, Temperature, Tissue, Tubule, Viscosity, Volume,
+    Oxygen, OxygenPartialPressure, OxygenSaturation, PerSite, Phase, Pressure, Rate, Renal, Renin,
+    Respiratory, SiteSet, Sites, Speciated, Speciation, Temperature, Tissue, Tubule, Viscosity, Volume,
 };
 use core::marker::PhantomData;
 
@@ -797,17 +797,30 @@ const fn field_count() -> FieldCount {
 ///     ports.speciation(bc)
 /// }
 /// ```
-/// A held row has no payload: the nervous system reads no arterial gases until its row is wired.
+/// The nervous system reads the arterial saturation, not the oxygen partial pressure.
+/// ```compile_fail,E0609
+/// use ng_contract::{catalog::*, *};
+/// fn read<'b>(gases: ArterialGases<Reads<'b, Nervous>>) -> ReadPort<'b, Nervous, PerSite<Speciated, Pressure>> {
+///     gases.oxygen_partial_pressure
+/// }
+/// ```
+/// ```
+/// use ng_contract::{catalog::*, *};
+/// fn read<'b>(gases: ArterialGases<Reads<'b, Nervous>>) -> ReadPort<'b, Nervous, PerSite<Speciated, Dimensionless>> {
+///     gases.oxygen_saturation
+/// }
+/// ```
+/// A held row has no payload: the kidney reads no peritubular acidity until its row is wired.
 /// ```compile_fail,E0425
 /// use ng_contract::{catalog::*, *};
-/// fn received<'b>(ns: &FragmentBuilder<'b, Nervous>) -> ArterialGases<Reads<'b, Nervous>> {
-///     ns.receive()
+/// fn received<'b>(rn: &FragmentBuilder<'b, Renal>) -> PeritubularAcidity<Reads<'b, Renal>> {
+///     rn.receive()
 /// }
 /// ```
 /// ```
 /// use ng_contract::catalog::*;
 /// fn held() -> &'static [HeldRead] {
-///     SPECIATION_READERS[3].held
+///     SPECIATION_READERS[4].held
 /// }
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -982,10 +995,12 @@ speciation_readers! {
             carbon_dioxide_partial_pressure: CarbonDioxidePartialPressure => 10,
         });
     Nervous at Beds<Brain>, "the brain bed's acidity, at the central chemoreceptor",
-        held [Acidity "no central sensor until ticket 11"];
+        wired (BrainAcidity { acidity: Acidity => 11 });
     Nervous at Speciated, "arterial gases, at the peripheral chemoreceptor",
-        held [OxygenPartialPressure "no peripheral sensor until ticket 11, which samples the systemic arteries",
-            CarbonDioxidePartialPressure "the same sensor"];
+        wired (ArterialGases {
+            oxygen_saturation: OxygenSaturation => 11,
+            carbon_dioxide_partial_pressure: CarbonDioxidePartialPressure => 11,
+        });
     Renal at Beds<Tubule>, "the peritubular bed's acidity, for the kidney's acid feedback",
         held [Acidity "ticket 18's text names the strong ion difference as what the kidney's feedback reads"];
 }
@@ -1006,7 +1021,7 @@ const fn read_count() -> ReadCount {
     count
 }
 const READ: ReadCount = read_count();
-const _: () = assert!(READ.wired == 4 && READ.held == 4);
+const _: () = assert!(READ.wired == 7 && READ.held == 1);
 const _: () = assert!(SpeciationReader::one_row_per_reader_and_set(&SPECIATION_READERS));
 const _: () = {
     let mut i = 0;
@@ -1027,7 +1042,7 @@ const _: () = {
     }
 };
 const _: () = {
-    let plan: [(&str, Sites, &str, u8); 4] = [
+    let plan: [(&str, Sites, &str, u8); 7] = [
         (
             "MT",
             Sites::Class(Class::CapillaryBed),
@@ -1047,6 +1062,9 @@ const _: () = {
             "carbon dioxide partial pressure",
             10,
         ),
+        ("NS", Sites::Tissue(Tissue::Brain), "acidity", 11),
+        ("NS", Sites::Speciated, "oxygen saturation", 11),
+        ("NS", Sites::Speciated, "carbon dioxide partial pressure", 11),
     ];
     let (mut i, mut n) = (0, 0);
     while i < READERS {
@@ -1069,12 +1087,7 @@ const _: () = {
     assert!(n == plan.len());
 };
 const _: () = {
-    let plan: [(&str, Sites, &str); 4] = [
-        ("NS", Sites::Tissue(Tissue::Brain), "acidity"),
-        ("NS", Sites::Speciated, "oxygen partial pressure"),
-        ("NS", Sites::Speciated, "carbon dioxide partial pressure"),
-        ("RN", Sites::Tissue(Tissue::Tubule), "acidity"),
-    ];
+    let plan: [(&str, Sites, &str); 1] = [("RN", Sites::Tissue(Tissue::Tubule), "acidity")];
     let (mut i, mut n) = (0, 0);
     while i < READERS {
         let row = &SPECIATION_READERS[i];

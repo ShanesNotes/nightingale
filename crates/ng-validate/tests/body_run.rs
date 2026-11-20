@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "b98249ca0dca9b05cbb58c1d0f49c6dc5a66b60a006ab5529bd5ef4cecfb27c7";
-const ADMITTED_SEAL: &str = "24dd320b4893928ddbbcfadaa1a22fc145e62f08e1229ff6a5374ed864288a16";
+const PACKET: &str = "944d90e8b323ba4856346826c5b85a43fc9c0715e6cd114e107050f9bd98aee6";
+const ADMITTED_SEAL: &str = "a8b0d0d25e18abc99d0b03daa707178bb3150245be922ca21bd67db8d43b6d6c";
 
 struct Counted {
     core: ng_solver::Core,
@@ -107,21 +107,26 @@ struct Start {
     saved: Checkpoint,
     identity: RunIdentity,
     links: MemoryStore,
-    closings: String,
+    provenance: InitializationProvenance,
 }
 impl Start {
     fn admitted() -> Self {
+        Self::admitted_with(|body| body_packet(body).expect("a packet"))
+    }
+    /// The held run's own admission: admission seals the packet it admits and a run resumes only under its own, so
+    /// the held run cannot branch from the controlled run's state.
+    fn held() -> Self {
+        Self::admitted_with(|body| body_packet_with_the_drive_scale_held(body).expect("a packet"))
+    }
+    fn admitted_with(packet: impl FnOnce(&CompiledBody) -> ParameterPacket<SyntheticFixture>) -> Self {
         let body = whole_body().expect("compiled");
         let core = Counted {
             core: ng_solver::Core::new(10 * MILLISECOND),
             solves: Cell::new(0),
         };
         let links = MemoryStore::default();
-        let (saved, identity, closings) = {
-            let (packet, lens) = (
-                body_packet(&body).expect("a packet"),
-                body_lens(&body).expect("a lens"),
-            );
+        let (saved, identity, provenance) = {
+            let (packet, lens) = (packet(&body), body_lens(&body).expect("a lens"));
             let port = BoundaryPort::new(Vec::new()).expect("no event");
             let admitted = admit_at(&body, packet, port, &core, &lens, anchor_moment(), &links);
             let Admitted { session, provenance } =
@@ -129,7 +134,7 @@ impl Start {
             (
                 session.checkpoint().expect("a checkpoint"),
                 session.record().identity().clone(),
-                closings(&provenance),
+                provenance,
             )
         };
         Self {
@@ -138,7 +143,7 @@ impl Start {
             saved,
             identity,
             links,
-            closings,
+            provenance,
         }
     }
     fn session(&self) -> Session<'_, Running> {
@@ -291,13 +296,168 @@ fn the_body_admits_at_06_55(start: &Start) {
     expect![[r#"
         aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
     "#]]
-    .assert_eq(&start.closings);
+    .assert_eq(&closings(&start.provenance));
     let force = value(start, &start.session(), field("MS", "pump_force", Context::Body));
     let fitted = lead(Compensated::of(&body_breath().expect("the breath").rest_force));
     assert!(
         (force - fitted).abs() <= 1e-9 * fitted,
         "the pump's force at admission is {force}, the fitted rest {fitted}"
     );
+}
+
+fn smooth_max(a: f64, b: f64, width: f64) -> f64 {
+    0.5 * (a + b + ((a - b) * (a - b) + width * width).sqrt())
+}
+
+fn parameter(start: &Start, name: &'static str) -> Compensated {
+    (start.provenance.values().iter())
+        .find_map(|record| match record.name {
+            ValueName::Parameter { key, .. } if key == ParameterKey::new(name) => Some(record.value),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no parameter {name}"))
+}
+
+fn named(start: &Start, owner: &str, local: &str) -> RowId {
+    (start.body.rows().iter())
+        .find(|row| match row.kind() {
+            RowKind::Memory(slot) | RowKind::Algebraic(slot) => {
+                slot.law.owner == owner && slot.law.local == local
+            }
+            _ => false,
+        })
+        .unwrap_or_else(|| panic!("no row {local}"))
+        .id()
+}
+
+struct Chemoreflex {
+    scale: RowId,
+    brain: RowId,
+    arteries: [RowId; 4],
+    set_points: [RowId; 2],
+    rest: Compensated,
+    gains: [f64; 2],
+    widths: [f64; 2],
+    offset: f64,
+    smoothing: f64,
+}
+
+#[derive(Clone, Copy)]
+struct Sensed {
+    scale: Compensated,
+    acidity: f64,
+    saturation: f64,
+    oxygen: f64,
+    pressure: f64,
+    measure: f64,
+    set_points: [f64; 2],
+}
+
+impl Chemoreflex {
+    fn of(start: &Start) -> Self {
+        let find = |kind: RowKind| {
+            (start.body.rows().iter())
+                .find(|row| row.kind() == kind)
+                .unwrap_or_else(|| panic!("no row {kind:?}"))
+                .id()
+        };
+        let arteries = Context::Site(site::<VesselSegment>("systemic arteries"));
+        let value = |name| lead(parameter(start, name));
+        Self {
+            scale: named(start, "NS", "drive scale"),
+            brain: find(field(
+                "BC",
+                "acidity",
+                Context::Site(site::<CapillaryBed>("brain bed")),
+            )),
+            arteries: [
+                "oxygen saturation",
+                "bicarbonate",
+                "acidity",
+                "oxygen partial pressure",
+            ]
+            .map(|local| find(field("BC", local, arteries))),
+            set_points: [
+                named(start, "NS", "central set point"),
+                named(start, "NS", "peripheral set point"),
+            ],
+            rest: parameter(start, "ns.drive-scale-rest"),
+            gains: ["ns.central-gain", "ns.peripheral-gain"].map(value),
+            widths: ["ns.central-width", "ns.peripheral-width"].map(value),
+            offset: value("ns.peripheral-offset"),
+            smoothing: value("ns.peripheral-smoothing"),
+        }
+    }
+    fn read(&self, view: &AcceptedStateView<'_>) -> Sensed {
+        let at = |row: RowId| lead(view.value(row));
+        let [saturation, bicarbonate, acidity, oxygen] = self.arteries.map(at);
+        let pressure =
+            bicarbonate / exp((acidity - PK) * core::f64::consts::LN_10) / CARBON_DIOXIDE_SOLUBILITY;
+        let smooth = smooth_max(pressure - self.offset, 0.0, self.smoothing);
+        Sensed {
+            scale: view.value(self.scale),
+            acidity: at(self.brain),
+            saturation,
+            oxygen,
+            pressure,
+            measure: (1.0 - saturation) * smooth,
+            set_points: self.set_points.map(at),
+        }
+    }
+    fn arms(&self, sensed: &Sensed) -> [f64; 2] {
+        let [central, peripheral] = sensed.set_points;
+        [
+            -self.gains[0] * (sensed.acidity - central) / self.widths[0],
+            self.gains[1] * (sensed.measure - peripheral) / self.widths[1],
+        ]
+    }
+}
+
+/// Admission makes the drive scale one in the admitted beat's mean, through each set point's mean over the beat, and
+/// not at an instant: the brain bed's acidity swings with the beat, so a fit at the instant would miss one by that
+/// ripple, 7e-3. The run's first beat, to the heart's first phase reset, is not the admitted orbit's, since the breath
+/// starts inside it, so its mean, by the trapezoid over accepted states, is held to 1e-4 of the rest. The set points'
+/// change gives the mean on the solver's own quadrature, since each set point follows its sensor at the stated speed
+/// and the scale is linear in each sensor's distance from its set point, and the two methods differ by 1.6e-5.
+fn the_drive_scale_at_admission_and_over_the_first_beat(start: &Start) -> String {
+    let reflex = Chemoreflex::of(start);
+    let beat = named(start, "CV", "phase");
+    let held = |session: &Session<'_, Running>, row: RowId| session.record().accepted().value(row);
+    let mut session = start.session();
+    let sensed = reflex.read(&session.record().accepted());
+    let (rest, admitted) = (lead(reflex.rest), lead(sensed.scale));
+    let form = rest + reflex.arms(&sensed).iter().sum::<f64>();
+    assert!(
+        (admitted - form).abs() <= 1e-12,
+        "the drive scale admits at {admitted}, its form at the admitted rows {form}"
+    );
+    let from = reflex.set_points.map(|row| held(&session, row));
+    let (mut area, mut last) = (0.0, (0, admitted));
+    loop {
+        let phase = lead(held(&session, beat));
+        session = until(session, last.0 + 1);
+        let now = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+        let value = lead(held(&session, reflex.scale));
+        area += 0.5 * (last.1 + value) * (now - last.0) as f64;
+        last = (now, value);
+        if lead(held(&session, beat)) < phase {
+            break;
+        }
+    }
+    let seconds = last.0 as f64 / SECOND as f64;
+    let speed = lead(parameter(start, "ns.chemo-set-point-speed"));
+    let [central, peripheral] =
+        [0, 1].map(|at| lead(held(&session, reflex.set_points[at]).minus(from[at])) / (speed * seconds));
+    let followed =
+        rest + reflex.gains[1] * peripheral / reflex.widths[1] - reflex.gains[0] * central / reflex.widths[0];
+    let mean = area / last.0 as f64;
+    assert!(
+        (mean - rest).abs() <= 1e-4,
+        "the drive scale's mean over the first beat is {mean}, its rest {rest}"
+    );
+    format!(
+        "drive scale at admission {admitted:.12}; over the first beat, to {seconds:.9} s, {mean:.12} by the trapezoid and {followed:.12} from the set points\n"
+    )
 }
 
 #[derive(Default)]
@@ -384,6 +544,7 @@ struct Moment {
     plasma: [f64; 3],
     work: f64,
     inventories: Vec<f64>,
+    sensed: Sensed,
 }
 
 struct Watch {
@@ -395,6 +556,7 @@ struct Watch {
     plasma: [RowId; 4],
     work: RowId,
     books: Vec<(Book, Vec<(RowId, i64)>)>,
+    reflex: Chemoreflex,
     moments: Vec<Moment>,
 }
 impl Watch {
@@ -465,6 +627,7 @@ impl Watch {
             ],
             work: algebraic("work_of_breathing"),
             books,
+            reflex: Chemoreflex::of(start),
             moments: Vec::new(),
         }
     }
@@ -488,6 +651,7 @@ impl Watch {
             plasma: [oxygen / water, carrier / water, pressure],
             work: at(self.work),
             inventories,
+            sensed: self.reflex.read(&view),
         });
     }
     fn edges(&self) -> Vec<usize> {
@@ -725,18 +889,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
     minute: &Session<'_, Running>,
     watch: &Watch,
 ) -> String {
-    let reached = minute.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
-    let window = NonZeroU64::new(10 * SECOND).expect("a window");
-    let windows = SlidingWindows::new(window, reached).expect("windows");
-    let policy = body_certificate(&start.body, windows).expect("a policy");
-    let certificate = certify(&minute.conservation(), &policy).unwrap_or_else(|failed| {
-        panic!(
-            "{:?} {:?} {:?}",
-            failed.check(),
-            failed.quantity(),
-            failed.window()
-        )
-    });
+    let certificate = certified(start, minute);
     let mut report = format!(
         "steps {}, quantities {}, held routes {}\n",
         minute.record().revision(),
@@ -750,7 +903,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11679, quantities 398, held routes 88
+        steps 11666, quantities 398, held routes 88
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -793,46 +946,14 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT skin bed glucose feed moved
     "#]]
     .assert_eq(&report);
-    let payer = |terms: &[(RowId, i64)]| paid_by_a_works_payer(&start.body, terms);
-    let rule = [
-        (Book::Energy, false, 2e3, 3e3),
-        (Book::Element(Element::Carbon), false, 4e2, 5e2),
-        (Book::Element(Element::Oxygen), false, 8e3, 9e3),
-        (Book::Element(Element::Hydrogen), false, 6e-5, 7e-5),
-        (Book::Element(Element::Hydrogen), true, 0.1, 0.2),
-        (Book::Of(Species::NitrogenGas), false, 1e4, 2e4),
-        (Book::Of(Species::Water), false, 0.04, 0.05),
-        (Book::Of(Species::Sodium), false, 2e-4, 3e-4),
-        (Book::Of(Species::Chloride), false, 2e-4, 3e-4),
-        (Book::Of(Species::Potassium), false, 1e-5, 2e-5),
-        (Book::Of(Species::Vasopressin), false, 4e-2, 5e-2),
-    ];
     let figures = watch.figures();
     let mut report = String::new();
     let mut refused = Vec::new();
-    for (book, at_payer, below, bound) in rule {
-        let worst = (certificate.results().iter())
-            .filter(|result| {
-                let combination = &start.body.conserved_basis().combinations()[result.quantity().index()];
-                combination.book() == book && payer(combination.terms()) == at_payer
-            })
-            .map(|result| lead(result.worst_drift()).abs())
-            .fold(0.0, |most, x| if x > most { x } else { most });
+    for (book, at_payer, below, bound) in RULE {
+        let worst = worst_change(start, &certificate, book, at_payer);
         let breathing = figures.iter().find(|(of, _)| *of == book && !at_payer);
-        if let Some((
-            _,
-            Figures {
-                from_admission: start,
-                steady,
-                inside_a_breath: swing,
-            },
-        )) = breathing
-        {
-            writeln!(
-                report,
-                "{book:?}: worst {worst:.4e}, from admission {start:.4e}, steady {steady:.4e}, inside a breath {swing:.4e}"
-            )
-            .expect("a string takes it");
+        if let Some((_, figures)) = breathing {
+            writeln!(report, "{book:?}: {}", line(worst, figures)).expect("a string takes it");
         }
         let figure = breathing.map_or(worst, |(_, figures)| larger(worst, figures.inside_a_breath));
         if !(below < 2.0 * figure && 2.0 * figure <= bound) {
@@ -843,6 +964,254 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         }
     }
     assert!(refused.is_empty(), "{}", refused.join("\n"));
+    report
+}
+
+const RULE: [(Book, bool, f64, f64); 11] = [
+    (Book::Energy, false, 3e3, 4e3),
+    (Book::Element(Element::Carbon), false, 4e2, 5e2),
+    (Book::Element(Element::Oxygen), false, 8e3, 9e3),
+    (Book::Element(Element::Hydrogen), false, 6e-5, 7e-5),
+    (Book::Element(Element::Hydrogen), true, 0.1, 0.2),
+    (Book::Of(Species::NitrogenGas), false, 1e4, 2e4),
+    (Book::Of(Species::Water), false, 0.04, 0.05),
+    (Book::Of(Species::Sodium), false, 2e-4, 3e-4),
+    (Book::Of(Species::Chloride), false, 2e-4, 3e-4),
+    (Book::Of(Species::Potassium), false, 1e-5, 2e-5),
+    (Book::Of(Species::Vasopressin), false, 4e-2, 5e-2),
+];
+
+fn certified(start: &Start, minute: &Session<'_, Running>) -> Certificate {
+    let reached = minute.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+    let window = NonZeroU64::new(10 * SECOND).expect("a window");
+    let windows = SlidingWindows::new(window, reached).expect("windows");
+    let policy = body_certificate(&start.body, windows).expect("a policy");
+    certify(&minute.conservation(), &policy).unwrap_or_else(|failed| {
+        panic!(
+            "{:?} {:?} {:?}",
+            failed.check(),
+            failed.quantity(),
+            failed.window()
+        )
+    })
+}
+
+fn worst_change(start: &Start, certificate: &Certificate, book: Book, at_payer: bool) -> f64 {
+    (certificate.results().iter())
+        .filter(|result| {
+            let combination = &start.body.conserved_basis().combinations()[result.quantity().index()];
+            combination.book() == book && paid_by_a_works_payer(&start.body, combination.terms()) == at_payer
+        })
+        .map(|result| lead(result.worst_drift()).abs())
+        .fold(0.0, |most, x| if x > most { x } else { most })
+}
+
+fn line(worst: f64, figures: &Figures) -> String {
+    let Figures {
+        from_admission,
+        steady,
+        inside_a_breath,
+    } = figures;
+    format!(
+        "worst {worst:.4e}, from admission {from_admission:.4e}, steady {steady:.4e}, inside a breath {inside_a_breath:.4e}"
+    )
+}
+
+const MAIN_CLOSINGS: &str = "aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s\n";
+
+/// No rest law reads the drive scale, so both admissions shut each valve at main's instants, and every row but the
+/// scale admits within admission's tolerance of the controlled run's.
+fn the_held_body_admits_where_the_controlled_body_does(start: &Start, held: &Start) -> String {
+    let [controlled, holding] = [start, held].map(|each| closings(&each.provenance));
+    assert_eq!([controlled.as_str(), holding.as_str()], [MAIN_CLOSINGS; 2]);
+    let tolerance = *start.provenance.tolerance();
+    let scale = Chemoreflex::of(start).scale;
+    let (ours, theirs) = (start.session(), held.session());
+    let (ours, theirs) = (ours.record().accepted(), theirs.record().accepted());
+    let mut most = (0.0, 0.0, None);
+    for row in (start.body.rows().iter()).filter(|row| row.id() != scale) {
+        let (x, y) = (lead(ours.value(row.id())), lead(theirs.value(row.id())));
+        // Read at a unit size, which is stricter than admission's for the rows the packet sizes larger.
+        let share = (x - y).abs() / tolerance.at(x, 1.0);
+        if share > most.0 {
+            most = (share, (x - y).abs(), Some(row.kind()));
+        }
+    }
+    let (share, difference, at) = most;
+    assert!(
+        share <= 1.0,
+        "the held admission's {at:?} is {difference} from the controlled one's, {share} of admission's tolerance"
+    );
+    format!(
+        "controlled admission: {controlled}held admission: {holding}largest difference over every row but the drive scale {difference:.3e}, {share:.3e} of admission's tolerance, at {at:?}\n"
+    )
+}
+
+fn the_held_minute(held: &Start) -> (Session<'_, Running>, Watch) {
+    let (mut minute, mut watch) = (Minute::default(), Watch::new(held));
+    let session = held.session();
+    watch.see(&session);
+    let session = counted_until(held, session, WALK[1] * SECOND, &mut minute, &mut watch);
+    (session, watch)
+}
+
+fn the_held_runs_drive_scale_is_its_rest_at_every_step(held: &Start, watch: &Watch) -> String {
+    let rest = parameter(held, "ns.drive-scale-rest").bits();
+    let off: Vec<f64> = (watch.moments.iter())
+        .filter(|moment| moment.sensed.scale.bits() != rest)
+        .map(|moment| moment.at as f64 / SECOND as f64)
+        .collect();
+    assert!(
+        off.is_empty(),
+        "the held run's drive scale leaves its rest at {off:?} s"
+    );
+    format!(
+        "held run: the drive scale is its rest's bits at all {} accepted steps\n",
+        watch.moments.len()
+    )
+}
+
+/// By 30 s the drive scale has stood over one for ten seconds, so the controlled run has ventilated more than the held
+/// run long enough to bring its carbon dioxide under the held run's.
+const WALK: [u64; 2] = [30, 60];
+
+struct Walked {
+    breaths: usize,
+    length: f64,
+    ventilation: f64,
+    alveolar: [f64; 2],
+    arterial: f64,
+    oxygen: [f64; 2],
+    scale: f64,
+    deviations: [f64; 2],
+    arms: [f64; 2],
+}
+
+fn walked(watch: &Watch) -> Walked {
+    let inside = |at: &usize| (WALK[0] * SECOND..=WALK[1] * SECOND).contains(&watch.moments[*at].at);
+    let edges: Vec<usize> = watch.edges().into_iter().filter(inside).collect();
+    let (from, to) = (edges[0], edges[edges.len() - 1]);
+    let span = (watch.moments[to].at - watch.moments[from].at) as f64 / SECOND as f64;
+    let tidal: f64 = (edges.windows(2))
+        .map(|pair| {
+            let (shallow, deep) = (watch.moments[pair[0]..=pair[1]].iter())
+                .map(|moment| moment.volume)
+                .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
+            deep - shallow
+        })
+        .sum();
+    let mean = |of: &dyn Fn(&Sensed) -> f64| watch.mean(from, to, |moment| of(&moment.sensed));
+    let arm = |at: usize| mean(&|sensed| watch.reflex.arms(sensed)[at]);
+    Walked {
+        breaths: edges.len() - 1,
+        length: span / (edges.len() - 1) as f64,
+        ventilation: tidal / span,
+        alveolar: [0, 1].map(|gas| watch.mean(from, to, |moment| moment.alveolar[gas])),
+        arterial: mean(&|sensed| sensed.pressure),
+        oxygen: [mean(&|sensed| sensed.oxygen), mean(&|sensed| sensed.saturation)],
+        scale: mean(&|sensed| lead(sensed.scale)),
+        deviations: [
+            mean(&|sensed| sensed.acidity - sensed.set_points[0]),
+            mean(&|sensed| sensed.measure - sensed.set_points[1]),
+        ],
+        arms: [arm(0), arm(1)],
+    }
+}
+
+/// The breath's own under-ventilation is the perturbation. Each link is judged by means over whole breaths, since the
+/// scale's ripple with the beat, 0.74%, is more than the central arm moves it in a minute, 0.2%.
+fn every_link_moves_its_reader_the_way_the_loop_needs(
+    start: &Start,
+    controlled: &Watch,
+    held: &Watch,
+) -> String {
+    let period = (lead(parameter(start, "ns.inspiration-length"))
+        + lead(parameter(start, "ns.expiration-length")))
+        / lead(parameter(start, "ns.breath-rate"));
+    let (ours, theirs) = (walked(controlled), walked(held));
+    let [central, peripheral] = ours.deviations;
+    let links = [
+        (
+            "under-ventilation to the central sensor",
+            format!("acidity {central:+.3e} from its set point"),
+            central < 0.0,
+        ),
+        (
+            "under-ventilation to the peripheral sensor",
+            format!("x_p {peripheral:+.3e} from its set point"),
+            peripheral > 0.0,
+        ),
+        (
+            "the sensors to the drive scale",
+            format!(
+                "{:.6}, its central arm {:+.3e} and peripheral arm {:+.3e}",
+                ours.scale, ours.arms[0], ours.arms[1]
+            ),
+            ours.scale > 1.0 && ours.arms.iter().all(|arm| *arm > 0.0),
+        ),
+        (
+            "the drive scale to the breath",
+            format!(
+                "{:.4} s a breath against the period {period:.4} s, held {:.4} s",
+                ours.length, theirs.length
+            ),
+            ours.length < period && (theirs.length - period).abs() <= 1e-3,
+        ),
+        (
+            "the breath to ventilation",
+            format!(
+                "{:.2} a second against held {:.2}",
+                ours.ventilation, theirs.ventilation
+            ),
+            ours.ventilation > theirs.ventilation,
+        ),
+        (
+            "ventilation to alveolar carbon dioxide",
+            format!(
+                "{:.4} against held {:.4}; alveolar oxygen {:.4} against held {:.4}",
+                ours.alveolar[1], theirs.alveolar[1], ours.alveolar[0], theirs.alveolar[0]
+            ),
+            ours.alveolar[1] < theirs.alveolar[1],
+        ),
+        (
+            "alveolar to arterial carbon dioxide",
+            format!(
+                "{:.4} against held {:.4}; arterial oxygen pressure {:.4} against held {:.4}, saturation {:.6} against held {:.6}",
+                ours.arterial,
+                theirs.arterial,
+                ours.oxygen[0],
+                theirs.oxygen[0],
+                ours.oxygen[1],
+                theirs.oxygen[1]
+            ),
+            ours.arterial < theirs.arterial,
+        ),
+    ];
+    let mut report = format!(
+        "sign walk over whole breaths from {} s to {} s: {} controlled breaths, {} held\n",
+        WALK[0], WALK[1], ours.breaths, theirs.breaths
+    );
+    for (link, reading, _) in &links {
+        writeln!(report, "{link}: {reading}").expect("a string takes it");
+    }
+    let wrong: Vec<&str> = (links.iter())
+        .filter(|(_, _, right)| !right)
+        .map(|(link, _, _)| *link)
+        .collect();
+    assert!(wrong.is_empty(), "{report}wrong way: {wrong:?}");
+    report
+}
+
+fn the_held_runs_breathing_books(held: &Start, minute: &Session<'_, Running>, watch: &Watch) -> String {
+    let certificate = certified(held, minute);
+    let figures = watch.figures();
+    let mut report = String::new();
+    for (book, at_payer, _, _) in RULE {
+        if let Some((_, figures)) = figures.iter().find(|(of, _)| *of == book && !at_payer) {
+            let worst = worst_change(held, &certificate, book, at_payer);
+            writeln!(report, "held {book:?}: {}", line(worst, figures)).expect("a string takes it");
+        }
+    }
     report
 }
 
@@ -1032,8 +1401,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet b98249ca0dca9b05cbb58c1d0f49c6dc5a66b60a006ab5529bd5ef4cecfb27c7
-        seal 35d566823b059e4af67f4bf62ff950b2a9eddcdd0ec19b947ecae7e321a3fb5a
+        packet 944d90e8b323ba4856346826c5b85a43fc9c0715e6cd114e107050f9bd98aee6
+        seal 14753e3e586ee283e9e6fbde3f18f24cf65a9b41f669e31d77c34c37bc16c992
         steps 198
         viscosity over its reference at the start 1.000092324
     "#]]
@@ -2100,39 +2469,67 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     report += &the_work_of_breathing_follows_the_pump_from_the_stated_mean(&watch);
     report += &the_alveolar_water_share_over_whole_breaths(&watch);
     the_body_admits_at_06_55(&start);
+    report += &the_drive_scale_at_admission_and_over_the_first_beat(&start);
     the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
     report += &the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
         &start, &minute, &watch,
     );
+    let held = Start::held();
+    report += &the_held_body_admits_where_the_controlled_body_does(&start, &held);
+    let (held_minute, held_watch) = the_held_minute(&held);
+    report += &the_held_runs_drive_scale_is_its_rest_at_every_step(&held, &held_watch);
+    report += &the_held_runs_breathing_books(&held, &held_minute, &held_watch);
+    report += &every_link_moves_its_reader_the_way_the_loop_needs(&start, &watch, &held_watch);
     the_lining_moves_research_11s_form_over_the_first_minute(&start, &minute);
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
-        before the first breath edge: alveolar oxygen 101.296, carbon dioxide 28.354, venous return 77.32
-        breath from 5.000 s: alveolar oxygen 100.761 swinging 3.060, carbon dioxide 28.699 swinging 1.988, venous return's beat means 74.21 to 84.51 around 78.01, tidal volume 11006.4
-        breath from 10.000 s: alveolar oxygen 100.435 swinging 3.044, carbon dioxide 28.831 swinging 1.933, venous return's beat means 74.06 to 84.47 around 77.98, tidal volume 11008.2
-        breath from 15.000 s: alveolar oxygen 100.170 swinging 3.042, carbon dioxide 28.893 swinging 1.909, venous return's beat means 74.06 to 84.44 around 77.96, tidal volume 11008.4
-        breath from 20.001 s: alveolar oxygen 99.951 swinging 3.079, carbon dioxide 28.923 swinging 1.916, venous return's beat means 74.07 to 84.44 around 77.97, tidal volume 11008.2
-        breath from 25.001 s: alveolar oxygen 99.766 swinging 3.109, carbon dioxide 28.937 swinging 1.922, venous return's beat means 73.98 to 84.44 around 77.97, tidal volume 11008.0
-        breath from 30.001 s: alveolar oxygen 99.608 swinging 3.136, carbon dioxide 28.947 swinging 1.925, venous return's beat means 73.99 to 84.44 around 77.97, tidal volume 11007.8
-        breath from 35.001 s: alveolar oxygen 99.472 swinging 3.159, carbon dioxide 28.954 swinging 1.927, venous return's beat means 73.99 to 84.44 around 77.96, tidal volume 11007.5
-        breath from 40.001 s: alveolar oxygen 99.353 swinging 3.178, carbon dioxide 28.961 swinging 1.929, venous return's beat means 73.99 to 84.44 around 77.96, tidal volume 11007.3
-        breath from 45.001 s: alveolar oxygen 99.247 swinging 3.196, carbon dioxide 28.967 swinging 1.931, venous return's beat means 73.99 to 84.44 around 77.97, tidal volume 11007.1
-        breath from 50.001 s: alveolar oxygen 99.154 swinging 3.211, carbon dioxide 28.972 swinging 1.933, venous return's beat means 73.99 to 84.44 around 77.97, tidal volume 11006.8
+        before the first breath edge: alveolar oxygen 101.294, carbon dioxide 28.356, venous return 77.29
+        breath from 5.006 s: alveolar oxygen 100.752 swinging 3.062, carbon dioxide 28.705 swinging 1.990, venous return's beat means 74.07 to 84.51 around 77.81, tidal volume 11021.5
+        breath from 10.037 s: alveolar oxygen 100.410 swinging 3.057, carbon dioxide 28.844 swinging 1.931, venous return's beat means 73.96 to 84.47 around 77.61, tidal volume 11026.1
+        breath from 15.074 s: alveolar oxygen 100.133 swinging 3.150, carbon dioxide 28.907 swinging 1.945, venous return's beat means 73.98 to 84.41 around 77.77, tidal volume 11016.8
+        breath from 20.091 s: alveolar oxygen 99.916 swinging 3.201, carbon dioxide 28.930 swinging 1.965, venous return's beat means 74.00 to 84.39 around 78.08, tidal volume 11002.1
+        breath from 25.079 s: alveolar oxygen 99.749 swinging 3.214, carbon dioxide 28.935 swinging 1.961, venous return's beat means 74.01 to 84.38 around 78.36, tidal volume 10988.0
+        breath from 30.039 s: alveolar oxygen 99.621 swinging 3.186, carbon dioxide 28.932 swinging 1.938, venous return's beat means 74.12 to 84.39 around 78.39, tidal volume 10975.2
+        breath from 34.975 s: alveolar oxygen 99.519 swinging 3.089, carbon dioxide 28.928 swinging 1.909, venous return's beat means 74.10 to 84.41 around 78.27, tidal volume 10958.6
+        breath from 39.892 s: alveolar oxygen 99.435 swinging 3.017, carbon dioxide 28.924 swinging 1.920, venous return's beat means 74.07 to 84.33 around 78.13, tidal volume 10949.3
+        breath from 44.795 s: alveolar oxygen 99.366 swinging 3.019, carbon dioxide 28.922 swinging 1.969, venous return's beat means 74.07 to 83.91 around 77.64, tidal volume 10942.6
+        breath from 49.687 s: alveolar oxygen 99.308 swinging 3.131, carbon dioxide 28.919 swinging 2.015, venous return's beat means 74.08 to 83.26 around 76.74, tidal volume 10938.5
+        breath from 54.570 s: alveolar oxygen 99.259 swinging 3.238, carbon dioxide 28.918 swinging 2.047, venous return's beat means 74.10 to 83.61 around 75.80, tidal volume 10935.4
         highest alveolar oxygen 102.524 (4.101 times P50) at 2.024 s: plasma oxygen pressure 100.886 (4.035 times P50), bound 0.971026 of capacity
-        work of breathing: stated 5331.3, over two whole breaths from 45.001 s 5323.0
-        alveolar water over whole breaths from 20.001 s: 1.02188 of the saturated vapour share
-        Energy: worst 1.4583e3, from admission 8.4422e0, steady 1.4594e3, inside a breath 7.3025e2
-        Element(Carbon): worst 4.6100e1, from admission 3.8271e1, steady 4.3161e1, inside a breath 2.0145e2
-        Element(Oxygen): worst 1.8508e3, from admission 1.8470e3, steady 5.2877e1, inside a breath 4.4965e3
-        Element(Hydrogen): worst 3.3523e-5, from admission 7.7904e-6, steady 3.3547e-5, inside a breath 1.6847e-5
-        Of(NitrogenGas): worst 3.4629e3, from admission 3.4604e3, steady 7.7951e1, inside a breath 8.6213e3
-        Of(Water): worst 1.9155e-2, from admission 1.9154e-2, steady 1.1407e-2, inside a breath 2.0097e-2
-        Of(Vasopressin): worst 3.0454e-3, from admission 3.9430e-4, steady 2.0234e-3, inside a breath 2.0981e-2
-        two breaths from 60.001 s to 70.001 s
-        Oxygen: in 4598.7228, out 3659.8661, across 950.6467, along 939.5306, gained -1.1790e1
-        CarbonDioxide: in 8.7595, out 687.3534, across -679.2904, along -678.6404, gained 6.9647e-1
-        NitrogenGas: in 17291.1979, out 17280.0809, across 0.0000, along 10.4688, gained 1.1117e1
-        Water: in 0.0000, out 0.0414, across -0.0421, along -0.0414, gained 7.8197e-4
+        work of breathing: stated 5331.3, over two whole breaths from 49.687 s 5367.6
+        alveolar water over whole breaths from 20.091 s: 1.02166 of the saturated vapour share
+        drive scale at admission 1.007406222041; over the first beat, to 0.998962223 s, 0.999997735918 by the trapezoid and 1.000013756971 from the set points
+        Energy: worst 1.5287e3, from admission 7.0243e0, steady 1.5296e3, inside a breath 7.6119e2
+        Element(Carbon): worst 6.6534e1, from admission 3.8811e1, steady 5.0087e1, inside a breath 2.0096e2
+        Element(Oxygen): worst 1.8721e3, from admission 1.8458e3, steady 1.0175e3, inside a breath 4.4957e3
+        Element(Hydrogen): worst 3.1838e-5, from admission 7.8286e-6, steady 3.1872e-5, inside a breath 1.5646e-5
+        Of(NitrogenGas): worst 3.4950e3, from admission 3.4590e3, steady 2.0239e3, inside a breath 8.6200e3
+        Of(Water): worst 1.9184e-2, from admission 1.9184e-2, steady 1.5519e-2, inside a breath 2.0007e-2
+        Of(Vasopressin): worst 3.4251e-3, from admission 5.4883e-4, steady 3.2924e-3, inside a breath 2.0938e-2
+        controlled admission: aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
+        held admission: aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
+        largest difference over every row but the drive scale 8.052e-10, 8.260e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "systemic arteries", class: VesselSegment }, space: Lumen, species: Vasopressin })
+        held run: the drive scale is its rest's bits at all 11680 accepted steps
+        held Energy: worst 1.4583e3, from admission 8.4422e0, steady 1.4594e3, inside a breath 7.3025e2
+        held Element(Carbon): worst 4.6100e1, from admission 3.8271e1, steady 4.3161e1, inside a breath 2.0145e2
+        held Element(Oxygen): worst 1.8508e3, from admission 1.8470e3, steady 5.2877e1, inside a breath 4.4965e3
+        held Element(Hydrogen): worst 3.3523e-5, from admission 7.7904e-6, steady 3.3547e-5, inside a breath 1.6847e-5
+        held Of(NitrogenGas): worst 3.4629e3, from admission 3.4604e3, steady 7.7951e1, inside a breath 8.6213e3
+        held Of(Water): worst 1.9155e-2, from admission 1.9154e-2, steady 1.1407e-2, inside a breath 2.0097e-2
+        held Of(Vasopressin): worst 3.0454e-3, from admission 3.9430e-4, steady 2.0234e-3, inside a breath 2.0981e-2
+        sign walk over whole breaths from 30 s to 60 s: 6 controlled breaths, 5 held
+        under-ventilation to the central sensor: acidity -3.120e-4 from its set point
+        under-ventilation to the peripheral sensor: x_p +1.649e-2 from its set point
+        the sensors to the drive scale: 1.020160, its central arm +1.847e-3 and peripheral arm +1.831e-2
+        the drive scale to the breath: 4.9012 s a breath against the period 5.0000 s, held 5.0001 s
+        the breath to ventilation: 2234.14 a second against held 2201.44
+        ventilation to alveolar carbon dioxide: 28.9237 against held 28.9602; alveolar oxygen 99.4185 against held 99.3669
+        alveolar to arterial carbon dioxide: 30.0003 against held 30.0020; arterial oxygen pressure 90.1278 against held 90.1683, saturation 0.958949 against held 0.958989
+        two breaths from 64.316 s to 74.045 s
+        Oxygen: in 4560.2375, out 3637.1692, across 899.2353, along 922.1879, gained 2.3833e1
+        CarbonDioxide: in 8.6862, out 679.7044, across -667.3050, along -671.3639, gained -3.7132e0
+        NitrogenGas: in 17146.4932, out 17140.9561, across 0.0000, along -0.9528, gained 5.5371e0
+        Water: in 0.0000, out 0.0407, across -0.0410, along -0.0407, gained 3.1313e-4
     "#]].assert_eq(&report);
     let mut minute = format!(
         "steps {}, solves {}: ordinary {}, landing {}\n",
@@ -2145,12 +2542,11 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
     expect![[r#"
-        steps 11679, solves 14387: ordinary 12350, landing 2037
-        refused 74 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
-        refused 1 Accuracy Amount { site: SiteId { key: "body", class: TissueSite }, space: Elastic, species: Energy }
-        refused 242 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
-        refused 295 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
-        refused 59 IterationLimit
+        steps 11666, solves 14397: ordinary 12343, landing 2054
+        refused 76 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
+        refused 243 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
+        refused 297 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
+        refused 61 IterationLimit
     "#]]
     .assert_eq(&minute);
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");
