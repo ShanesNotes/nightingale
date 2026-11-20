@@ -293,6 +293,8 @@ fn start_guess(row: RowKind) -> f64 {
         }
         RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.0,
+        RowKind::Memory(slot) if slot.law.local == "central set point" => blood("brain bed").acidity,
+        RowKind::Memory(slot) if slot.law.local == "peripheral set point" => peripheral_guess(),
         RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "pump drive" => BODY_RHYTHM.mean_drive(),
         RowKind::Memory(slot) if slot.law.local == "breath work memory" => BODY_RHYTHM.work(),
@@ -543,6 +545,22 @@ pub fn body_packet_at_viscosity_exponent(
     body: &CompiledBody,
     exponent: Measure<Dimensionless>,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    packet_of(body, exponent, [CENTRAL_GAIN, PERIPHERAL_GAIN])
+}
+
+/// The body's packet with both chemoreflex gains zero, so the drive scale is its rest exactly while `ns.breath-rate`
+/// and the breath's two lengths set the rate.
+pub fn body_packet_with_the_drive_scale_held(
+    body: &CompiledBody,
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    packet_of(body, Measure::new(-1.0)?, [0.0, 0.0])
+}
+
+fn packet_of(
+    body: &CompiledBody,
+    exponent: Measure<Dimensionless>,
+    [central, peripheral]: [f64; 2],
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let rate = AnchorId::new("heart rate");
     let phase = LawName {
         owner: Cardiovascular::CARD,
@@ -635,6 +653,8 @@ pub fn body_packet_at_viscosity_exponent(
     packet.start_mode(breath, "rest", NOTE)?;
 
     table(&mut packet, exponent)?;
+    set::<Dimensionless>(&mut packet, "ns.central-gain", Binding::Body, central)?;
+    set::<Dimensionless>(&mut packet, "ns.peripheral-gain", Binding::Body, peripheral)?;
     oxygen_per_lactate(&mut packet, body)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
@@ -1118,7 +1138,7 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// the first ten seconds and which falls a steady 0.22 to 0.26 in each ten seconds after, following the gas volume as
 /// the net exchange settles with the body's stores. Oxygen and carbon dioxide as species keep only held
 /// pools that never move, so the slice's bound for an unmoved species holds them.
-const ENERGY_DRIFT: f64 = 3e3;
+const ENERGY_DRIFT: f64 = 4e3;
 const ELEMENT_DRIFTS: [(Element, f64); 3] = [
     (Element::Carbon, 5e2),
     (Element::Hydrogen, 7e-5),
@@ -1211,7 +1231,37 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Rate<Dimensionless>>(packet, "rs.work-speed", body, BREATH_WORK_SPEED)?;
     set::<Volume>(packet, "rs.wall-rest-rise", body, 10_000.0)?;
     set::<Length>(packet, "rs.trunk-length", body, CAROTID_ABOVE_ARTERIES)?;
-    Ok(())
+    chemoreflex(packet)
+}
+
+/// Research 11's chemoreflex at relative gains 2 (central) and 1 (peripheral), each raised by 1 / 0.778, alveolar
+/// ventilation's sensitivity to the breath's rate. Each width is what a unit relative change in arterial carbon dioxide
+/// moves its sensor by at the packet's arterial guess, so a gain is the scale's move for that change. Research 22.
+const CENTRAL_GAIN: f64 = 2.0 / 0.778;
+const PERIPHERAL_GAIN: f64 = 1.0 / 0.778;
+const PERIPHERAL_OFFSET: f64 = 20.0;
+const PERIPHERAL_SMOOTHING: f64 = 0.5;
+
+fn chemoreflex(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    let arterial = blood("systemic arteries");
+    set::<Deviation<Dimensionless>>(packet, "ns.central-width", body, core::f64::consts::LOG10_E)?;
+    let width = (1.0 - arterial.saturation) * arterial.carbon_dioxide_pressure;
+    set::<Deviation<Pressure>>(packet, "ns.peripheral-width", body, width)?;
+    set::<Pressure>(packet, "ns.peripheral-offset", body, PERIPHERAL_OFFSET)?;
+    set::<Pressure>(packet, "ns.peripheral-smoothing", body, PERIPHERAL_SMOOTHING)?;
+    set::<Rate<Dimensionless>>(packet, "ns.chemo-set-point-speed", body, 1e-6)?;
+    set::<Dimensionless>(packet, "ns.drive-scale-rest", body, 1.0)
+}
+
+fn peripheral_guess() -> f64 {
+    let arterial = blood("systemic arteries");
+    let above = arterial.carbon_dioxide_pressure - PERIPHERAL_OFFSET;
+    (1.0 - arterial.saturation) * smooth_max(above, 0.0, PERIPHERAL_SMOOTHING)
+}
+
+fn smooth_max(a: f64, b: f64, width: f64) -> f64 {
+    0.5 * (a + b + ((a - b) * (a - b) + width * width).sqrt())
 }
 
 const LUNG_ELASTANCE: f64 = 1.6e-4;

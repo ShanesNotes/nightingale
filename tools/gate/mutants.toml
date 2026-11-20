@@ -4847,3 +4847,42 @@ path = "crates/ng-nervous/src/shared.rs"
 old = '''        let firing = k.scale(firing, vagal);'''
 new = '''        let _ = vagal;'''
 test = "-p ng-validate --test pump_junction at_a_held_drive_the_pumps_effect_and_force_meet_the_junctions_closed_form"
+
+[[mutant]]
+name = "central-arm-sign-flipped"
+path = "crates/ng-nervous/src/chemoreflex.rs"
+old = '''        let value = k.subtract(raised, falling);'''
+new = '''        let value = k.add(raised, falling);'''
+test = "-p ng-validate --test chemoreflex each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_peripheral_offset"
+
+[[mutant]]
+name = "peripheral-arm-sign-flipped"
+path = "crates/ng-nervous/src/chemoreflex.rs"
+old = '''        let raised = k.add(rest, rising);'''
+new = '''        let raised = k.subtract(rest, rising);'''
+test = "-p ng-validate --test chemoreflex each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_peripheral_offset"
+
+[[mutant]]
+name = "breath-rate-ignores-the-drive-scale"
+path = "crates/ng-nervous/src/breath.rs"
+old = '''                let value = k.scale(rate, scale);'''
+new = '''                let (value, _) = (rate, scale);'''
+test = "-p ng-validate --test chemoreflex a_tenth_more_carbon_dioxide_made_raises_its_pressure_by_a_tenth_over_one_and_the_loops_gain"
+
+[[mutant]]
+name = "set-point-follows-in-seconds"
+path = "crates/ng-nervous/src/chemoreflex.rs"
+old = '''
+    let following = ns.kernel(|mut k| {
+        let (measured, reference) = (sensors.measure(&mut k), k.state(&peripheral));
+        let off = k.deviation(measured, reference);
+        let pace = k.parameter(&speed);
+'''
+new = '''
+    let fast = ns.parameter::<Rate<Dimensionless>>(key("ns.rest-speed"), Admissible::positive());
+    let following = ns.kernel(|mut k| {
+        let (measured, reference) = (sensors.measure(&mut k), k.state(&peripheral));
+        let off = k.deviation(measured, reference);
+        let pace = k.parameter(&fast);
+'''
+test = "-p ng-validate --test chemoreflex a_tenth_more_carbon_dioxide_made_raises_its_pressure_by_a_tenth_over_one_and_the_loops_gain"

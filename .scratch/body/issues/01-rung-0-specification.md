@@ -121,7 +121,7 @@ Cells hold no chloride at rung 0. The cell anion, a species that never crosses t
 
 #### Oxygen
 
-Pass 1. Ventilation under the chemoreflex controls it, through a peripheral sensor on arterial oxygen (11), and so does each bed's flow under its oxygen debt (09).
+Pass 1. Ventilation under the chemoreflex controls it, through a peripheral sensor on arterial saturation (11), and so does each bed's flow under its oxygen debt (09).
 
 | Term | Kind | Where | Law | Owner | Ticket |
 |---|---|---|---|---|---|
@@ -367,7 +367,7 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
 | dynamic | The baroreflex: stretch afferents, and norepinephrine and acetylcholine release, reuptake and clearance at every junction | the slice's laws (arrow 77) | slice |
-| dynamic | The chemoreflex: a central sensor on the brain bed's acidity, which BC states from ticket 08, and a peripheral sensor on arterial oxygen and carbon dioxide, driving the pump's junction. Sleep shifts its set point and lowers its gain | arrows 86 and 88 | 11 |
+| dynamic | The chemoreflex: a central sensor on the brain bed's acidity, which BC states from ticket 08, and a peripheral sensor on arterial saturation and carbon dioxide at the sampled systemic arteries, driving the pump's junction. Sleep shifts its set point and lowers its gain | arrows 86 and 88 | 11 |
 | dynamic | The thermostat: core temperature (arrow 91) and skin temperature against a set point that follows the clock and steps down in sleep, driving release on skin vessels and sweat glands at the skin junction, and the shiver drive | arrows 87 and 91 | 12 |
 | dynamic | The osmoreceptor and the volume drive to vasopressin | arrow 89's vasopressin field | 17 |
 | dynamic | Sleep's gain on sympathetic traffic | the sleep state input (05) | 25 |
