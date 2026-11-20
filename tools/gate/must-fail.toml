@@ -231,3 +231,25 @@ doctests = [
   { path = "crates/ng-contract/src/law.rs", code = "E0277", text = "PerSite<Beds<Muscle>, Dimensionless>" },
   { path = "crates/ng-contract/src/law.rs", code = "E0308", text = "Kernel<'b, 'k, Cardiovascular, TubuleEdge>" },
 ]
+
+[[row]]
+core = "A rhythm declared on a phase no guard resets at one of its places, or declared twice"
+mutants = ["unreset-rhythm-compiles", "rhythm-declared-twice-compiles"]
+
+[[row]]
+core = "A body that leaks a conserved quantity steadily inside the bound its sliding windows set, at a rhythm whose edges cut those windows"
+mutants = [
+  "edge-windows-take-every-segment-as-an-edge",
+  "edge-allowance-whole-seconds-only",
+  "edge-allowance-on-the-policys-length",
+  "edge-window-closes-past-its-length",
+  "edge-close-judges-only-the-youngest-opening",
+]
+
+[[row]]
+core = "A rhythm that stops, so a stretch with no edge outlasts the policy's bound, from admission, between edges or after the last window closed"
+mutants = ["edge-tail-from-the-last-edge", "edge-stretch-at-its-bound-fails", "edge-drift-before-a-stopped-rhythm"]
+
+[[row]]
+core = "A body that resets a phase it does not declare a rhythm, under a policy that names that phase as a rhythm's clock"
+mutants = ["edge-clock-takes-any-declared-rhythm", "undeclared-clock-refused-as-coverage"]

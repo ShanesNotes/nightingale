@@ -449,6 +449,10 @@ A gate counts only if it rejects a core built to fail it. Each one below is part
 | A body that names a bed to pay its work while compile still ends the work at the receipt | `Assembly::compile` starts the work at the named bed's thermal pool, so the receipt takes nothing |
 | A body that names a bed to pay a work its laws request while the schema holds no elastic store for the work to end at | `Assembly::compile` refuses it (`PaidWorkHasNoStore`) and names the work, where the work's route would otherwise drop out unseen |
 | An edge's law reads a narrower set at an end that can never be in it | Does not compile where the end's set does not include the port's: E0277 at a blood end, E0308 at a tubule's. `Assembly::compile` refuses a law or a guard none of whose edges ends in the set (`EndOffSet`) and names it |
+| A rhythm declared on a phase no guard resets at one of its places, or declared twice | `Assembly::compile` refuses it and names the phase (`UnresetRhythm`, `RhythmTwice`) |
+| A body that leaks a conserved quantity steadily inside the bound its sliding windows set, at a rhythm whose edges cut those windows | The windows between the rhythm's edges (`EdgeDrift`): the certificate names the quantity and the window's two edges, with the change beside its edge rate times the window's length |
+| A rhythm that stops, so a stretch with no edge outlasts the policy's bound, from admission, between edges or after the last window closed | `RhythmStopped`, which outranks a window between edges past its allowance. The last stretch runs from the close of the last window judged, not from the last edge |
+| A body that resets a phase it does not declare a rhythm, under a policy that names that phase as a rhythm's clock | `certify` refuses it by name (`UndeclaredRhythm`) after the basis check and before any link is read |
 
 ### 8. Diagram source
 
