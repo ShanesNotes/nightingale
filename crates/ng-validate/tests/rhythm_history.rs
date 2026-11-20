@@ -185,7 +185,7 @@ impl CoupledSolver for Refusing {
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         self.calls.set(self.calls.get() + 1);
-        if ticket.attempt() == 0 && self.calls.get() % 4 == 0 {
+        if ticket.attempt() == 0 && self.calls.get().is_multiple_of(4) {
             return Err(ticket.refuse(NumericalRefusal::IterationLimit));
         }
         self.core.solve(problem, ticket)
