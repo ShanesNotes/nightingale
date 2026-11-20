@@ -39,6 +39,99 @@
 //!     QuantityPolicy::charge(quantity, floor, relative)
 //! }
 //! ```
+//! A window between edges allows a rate times its own length, so an edge rate is a rate and not an amount.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! use ng_validate::EdgeRate;
+//! fn amount(quantity: QuantityId, amount: Measure<Water>) -> Result<EdgeRate, AdmissionError> {
+//!     EdgeRate::new(quantity, amount, None)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_validate::EdgeRate;
+//! fn rate(quantity: QuantityId, rate: Measure<Rate<Water>>) -> Result<EdgeRate, AdmissionError> {
+//!     EdgeRate::new(quantity, rate, None)
+//! }
+//! ```
+//! The rate before the settling time is in the settled rate's units.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! use ng_validate::EdgeRate;
+//! fn mixed(quantity: QuantityId, settled: Measure<Rate<Water>>, settling: Measure<Rate<Sodium>>)
+//!     -> Result<EdgeRate, AdmissionError> {
+//!     EdgeRate::new(quantity, settled, Some(settling))
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_validate::EdgeRate;
+//! fn settling(quantity: QuantityId, settled: Measure<Rate<Water>>, settling: Measure<Rate<Water>>)
+//!     -> Result<EdgeRate, AdmissionError> {
+//!     EdgeRate::new(quantity, settled, Some(settling))
+//! }
+//! ```
+//! An element's rate is its atoms a second, not its carrier's molecules.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! use ng_validate::EdgeRate;
+//! fn molecules(quantity: QuantityId, rate: Measure<Rate<Oxygen>>) -> Result<EdgeRate, AdmissionError> {
+//!     EdgeRate::element(quantity, rate, None)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_validate::EdgeRate;
+//! fn atoms(quantity: QuantityId, rate: Measure<Rate<Atoms>>) -> Result<EdgeRate, AdmissionError> {
+//!     EdgeRate::element(quantity, rate, None)
+//! }
+//! ```
+//! Charge holds to its closure bound, so it has no rate between edges.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! use ng_validate::EdgeRate;
+//! fn charge(quantity: QuantityId, rate: Measure<Rate<Charge>>) -> Result<EdgeRate, AdmissionError> {
+//!     EdgeRate::new(quantity, rate, None)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_validate::EdgeRate;
+//! fn sodium(quantity: QuantityId, rate: Measure<Rate<Sodium>>) -> Result<EdgeRate, AdmissionError> {
+//!     EdgeRate::new(quantity, rate, None)
+//! }
+//! ```
+//! A policy names a rhythm's clock by its phase's slot, as a paced cycle does, so one policy serves every model of
+//! its basis; a window has a length.
+//! ```compile_fail,E0308
+//! use ng_contract::RhythmId;
+//! use ng_validate::EdgeWindows;
+//! use core::num::NonZeroU64;
+//! fn by_body(rhythm: RhythmId, length: NonZeroU64) -> EdgeWindows { EdgeWindows::new(rhythm, 0, length, 0) }
+//! ```
+//! ```compile_fail,E0308
+//! use ng_contract::Slot;
+//! use ng_validate::EdgeWindows;
+//! fn empty(clock: Slot) -> EdgeWindows { EdgeWindows::new(clock, 0, 0, 0) }
+//! ```
+//! ```
+//! use ng_contract::Slot;
+//! use ng_validate::EdgeWindows;
+//! use core::num::NonZeroU64;
+//! fn named(clock: Slot, length: NonZeroU64) -> EdgeWindows { EdgeWindows::new(clock, 0, length, 0) }
+//! ```
+//! What the windows between edges found comes only from `certify`.
+//! ```compile_fail,E0451
+//! use ng_contract::{Interval, SimTime};
+//! use ng_validate::{EdgeWindows, RhythmResult};
+//! fn forged(windows: EdgeWindows, widest: Interval) -> RhythmResult {
+//!     RhythmResult { windows, judged: 0, results: Vec::new(), widest, last_close: None::<SimTime> }
+//! }
+//! ```
+//! ```
+//! use ng_validate::{Certificate, RhythmResult};
+//! fn found(certificate: &Certificate) -> Option<&RhythmResult> { certificate.rhythm() }
+//! ```
 //! A pace is when a host calls `step`, and `step` takes nothing, so a caller's stop cannot cut a step.
 //! ```compile_fail,E0061
 //! use ng_contract::SimTime;
@@ -281,8 +374,8 @@ pub use body::{
 };
 pub use burning::BurningBeds;
 pub use certificate::{
-    Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, HeldSupport,
-    QuantityPolicy, QuantityResult, SlidingWindows, certify,
+    Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, EdgeRate, EdgeResult, EdgeWindows,
+    ExpectedDrift, HeldSupport, QuantityPolicy, QuantityResult, RhythmResult, SlidingWindows, certify,
 };
 pub use day::{
     DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict, day_checks,

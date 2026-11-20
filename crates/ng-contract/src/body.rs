@@ -326,6 +326,14 @@ impl From<LawName> for Slot {
         }
     }
 }
+impl Slot {
+    /// The slot sealed whole, its law and its place, so a policy that names a clock by its slot seals that name.
+    pub fn digest(&self) -> Digest {
+        let mut out = Canonical::new("slot");
+        self.seal(&mut out);
+        out.digest()
+    }
+}
 impl Seal for Slot {
     fn seal(&self, out: &mut Canonical) {
         let Self { law, at } = self;
