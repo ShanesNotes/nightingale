@@ -836,6 +836,127 @@ impl<'r> ConservationView<'r> {
             walk: self.history.before_head(self.store),
         }
     }
+    /// Walks and checks every link once, newest first, and keeps a mark for each page of links so a cursor reads a
+    /// page again only when it reaches it. Fails with the first error a walk newest first meets.
+    pub fn in_time_order(&self) -> Result<TimeOrder<'r>, CheckpointError> {
+        let history = self.history;
+        let mut order = TimeOrder {
+            store: self.store,
+            format: history.format,
+            shape: (0, 0),
+            origin: history.origin.seal,
+            marks: Vec::new(),
+            head: None,
+        };
+        let Chain::Grown { revision, head, .. } = &history.chain else {
+            return Ok(order);
+        };
+        order.shape = head.chunk.shape();
+        let mut page: Option<Mark> = None;
+        for (count, walked) in (0..).zip(history.before_head(self.store).into_iter().flatten()) {
+            let walked = walked?;
+            let start = walked.chunk.interval.start();
+            match &mut page {
+                Some(mark) if mark.links < PAGE => {
+                    mark.links += 1;
+                    mark.start = start;
+                }
+                _ => {
+                    order.marks.extend(page.take());
+                    page = Some(Mark {
+                        seal: walked.seal,
+                        revision: revision.get() - 1 - count,
+                        links: 1,
+                        start,
+                    });
+                }
+            }
+        }
+        order.marks.extend(page);
+        order.marks.reverse();
+        order.head = self.head().map(|segment| (revision.get(), segment));
+        Ok(order)
+    }
+}
+
+const PAGE: u64 = 64;
+
+/// A page's newest link, how many links it holds and when its oldest segment starts.
+struct Mark {
+    seal: Digest,
+    revision: u64,
+    links: u64,
+    start: SimTime,
+}
+
+/// A complete history, checked once from the head to admission, that lends its accepted segments in the order a
+/// session accepted them. It holds one mark for each page of links and the head.
+pub struct TimeOrder<'r> {
+    store: &'r dyn HistoryStore,
+    format: RecordFormat,
+    shape: (usize, usize),
+    origin: Digest,
+    marks: Vec<Mark>,
+    head: Option<(u64, HistorySegment)>,
+}
+impl TimeOrder<'_> {
+    /// Each accepted segment with its revision, oldest first, from the oldest of the last page whose oldest segment
+    /// starts before `instant`, or from admission when none does. It reads each link of a page through the store
+    /// again, checked as `newest_first` checks it, when it reaches that page, and holds one page at most.
+    pub fn from(&self, instant: SimTime) -> OldestFirst<'_> {
+        let before = |start: SimTime| start < instant;
+        let page = match &self.head {
+            Some((_, head)) if before(head.interval().start()) => self.marks.len(),
+            _ => (self.marks.partition_point(|mark| before(mark.start))).saturating_sub(1),
+        };
+        OldestFirst {
+            order: self,
+            page,
+            held: Vec::new(),
+            head: self.head.clone(),
+        }
+    }
+}
+pub struct OldestFirst<'t> {
+    order: &'t TimeOrder<'t>,
+    page: usize,
+    held: Vec<(u64, HistorySegment)>,
+    head: Option<(u64, HistorySegment)>,
+}
+impl Iterator for OldestFirst<'_> {
+    type Item = Result<(u64, HistorySegment), CheckpointError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(held) = self.held.pop() {
+            return Some(Ok(held));
+        }
+        let order = self.order;
+        let Some(mark) = order.marks.get(self.page) else {
+            return self.head.take().map(Ok);
+        };
+        self.page += 1;
+        let walk = Walk {
+            store: order.store,
+            format: order.format,
+            shape: order.shape,
+            origin: order.origin,
+            at: mark.seal,
+            revision: mark.revision,
+            done: false,
+        };
+        let mut revision = mark.revision;
+        for walked in walk.take(usize::try_from(mark.links).unwrap_or(usize::MAX)) {
+            match walked {
+                Ok(walked) => self.held.push((revision, HistorySegment { chunk: walked.chunk })),
+                Err(error) => {
+                    (self.page, self.head) = (order.marks.len(), None);
+                    self.held.clear();
+                    return Some(Err(error));
+                }
+            }
+            revision -= 1;
+        }
+        self.held.pop().map(Ok)
+    }
 }
 pub struct NewestFirst<'r> {
     head: Option<HistorySegment>,

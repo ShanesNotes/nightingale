@@ -192,7 +192,8 @@ mod session;
 
 pub use checkpoint::{BranchFork, BranchId, Checkpoint, CheckpointError, HistoryStore};
 pub use history::{
-    CompactLink, ConservationView, Curve, HistorySeal, HistorySegment, NewestFirst, compact, expand,
+    CompactLink, ConservationView, Curve, HistorySeal, HistorySegment, NewestFirst, OldestFirst, TimeOrder,
+    compact, expand,
 };
 pub use observation::{ObservationRefusal, ObservationView};
 pub use record::{AuthorizedInput, InputReceipt, NextImage, PatientRecord, RecordDigests, Seal, StepReceipt};
