@@ -123,7 +123,9 @@ impl<'m> PatientRecord<'m> {
             |problem, ticket| solver.solve(problem, ticket),
             |step| self.validate(step),
         )?;
-        let link = self.history.linked(chunk, head.image_digest());
+        let link = self
+            .history
+            .linked(chunk.edged(head.rhythm_edges()), head.image_digest());
         Ok(NextImage { head, link })
     }
     fn validate(&self, step: &VerifiedStep) -> Result<LedgerChunk, TrialFailure> {
@@ -186,7 +188,7 @@ impl<'m> PatientRecord<'m> {
         ConservationView {
             history: &self.history,
             store,
-            basis: self.body.conserved_basis(),
+            body: self.body,
             seal: HistorySeal {
                 run: self.identity.digest(),
                 branch: self.branch.id(),

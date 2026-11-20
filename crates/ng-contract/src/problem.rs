@@ -6,7 +6,7 @@ use crate::identity::{Canonical, Seal};
 use crate::quadrature::{StageEvaluation, VerifiedStep};
 use crate::{
     AcceptedStateView, BoundParameters, Candidate, CompiledBody, Digest, EngineFault, EngineFaultKind,
-    InputId, Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, SimTime, TrialFailure,
+    InputId, Interval, NumericalRefusal, Ratio, Refused, RhythmId, RowId, RunIdentity, SimTime, TrialFailure,
 };
 use core::num::NonZeroU64;
 
@@ -239,13 +239,14 @@ impl<'r> CoupledProblem<'r> {
     }
     /// A firing's whole effect: hazards as `Chance::fired` has them, then every plain guard armed before any fired and
     /// crossed here sets its mode and resets its row. Plain firings are no chance event, so they make no `Fired`, and
-    /// `fired` on the state is what the next ticket reads as a breakpoint.
+    /// `fired` on the state is what the next ticket reads as a breakpoint. Last, each rhythm whose phase a guard
+    /// reset, once, in `RhythmId` order.
     pub(crate) fn fired(
         &self,
         ticket: &StepTicket,
         state: Candidate,
         at: SimTime,
-    ) -> Result<(Candidate, Vec<crate::Fired>), TrialFailure> {
+    ) -> Result<(Candidate, Vec<crate::Fired>, Vec<RhythmId>), TrialFailure> {
         let guards = &self.body.layout.guards;
         let armed: Vec<bool> = guards.iter().map(|guard| guard.armed(&state.modes)).collect();
         let mut crossed = Vec::with_capacity(guards.len());
@@ -253,14 +254,18 @@ impl<'r> CoupledProblem<'r> {
             crossed.push(armed && self.gap(ticket, &state, Trigger::Plain(guard))? >= 0.0);
         }
         let (mut state, fired) = self.chance.fired(self.body, state, at);
+        let mut edges = Vec::new();
         for guard in self.body.layout.fire(&mut state.modes, &crossed) {
             if let Some(row) = guard.resets {
                 let first_memory = state.amounts.len();
                 state.memory[row.index() - first_memory] = 0.0;
+                edges.extend(self.body.layout.rhythm_of(row));
             }
             state.fired = true;
         }
-        Ok((state, fired))
+        edges.sort_unstable();
+        edges.dedup();
+        Ok((state, fired, edges))
     }
     /// The longest span the record lets a step run: no law's interval and no forcing's knot period, because a
     /// span past a knot period aliases the forcing: its stages read the curve and nothing between them.
