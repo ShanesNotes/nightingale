@@ -9,7 +9,7 @@ pub use anatomy::body_anatomy;
 pub use keep_back::{FluidRoute, KEEP_BACKS, KeepBack};
 pub use packet::{
     BodyBreath, body_breath, body_certificate, body_lens, body_packet, body_packet_at_viscosity_exponent,
-    body_start_guess,
+    body_packet_with_the_drive_scale_held, body_start_guess,
 };
 pub use schema::body_schema;
 pub use table::{HOLD_TABLE, Held, Hold, Release};

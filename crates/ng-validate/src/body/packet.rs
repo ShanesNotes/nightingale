@@ -545,6 +545,22 @@ pub fn body_packet_at_viscosity_exponent(
     body: &CompiledBody,
     exponent: Measure<Dimensionless>,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    packet_of(body, exponent, [CENTRAL_GAIN, PERIPHERAL_GAIN])
+}
+
+/// The body's packet with both chemoreflex gains zero, so the drive scale is its rest exactly while `ns.breath-rate`
+/// and the breath's two lengths set the rate.
+pub fn body_packet_with_the_drive_scale_held(
+    body: &CompiledBody,
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    packet_of(body, Measure::new(-1.0)?, [0.0, 0.0])
+}
+
+fn packet_of(
+    body: &CompiledBody,
+    exponent: Measure<Dimensionless>,
+    [central, peripheral]: [f64; 2],
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let rate = AnchorId::new("heart rate");
     let phase = LawName {
         owner: Cardiovascular::CARD,
@@ -637,6 +653,8 @@ pub fn body_packet_at_viscosity_exponent(
     packet.start_mode(breath, "rest", NOTE)?;
 
     table(&mut packet, exponent)?;
+    set::<Dimensionless>(&mut packet, "ns.central-gain", Binding::Body, central)?;
+    set::<Dimensionless>(&mut packet, "ns.peripheral-gain", Binding::Body, peripheral)?;
     oxygen_per_lactate(&mut packet, body)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
@@ -1227,8 +1245,6 @@ const PERIPHERAL_SMOOTHING: f64 = 0.5;
 fn chemoreflex(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
     let body = Binding::Body;
     let arterial = blood("systemic arteries");
-    set::<Dimensionless>(packet, "ns.central-gain", body, CENTRAL_GAIN)?;
-    set::<Dimensionless>(packet, "ns.peripheral-gain", body, PERIPHERAL_GAIN)?;
     set::<Deviation<Dimensionless>>(packet, "ns.central-width", body, core::f64::consts::LOG10_E)?;
     let width = (1.0 - arterial.saturation) * arterial.carbon_dioxide_pressure;
     set::<Deviation<Pressure>>(packet, "ns.peripheral-width", body, width)?;
