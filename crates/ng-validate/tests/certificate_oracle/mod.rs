@@ -35,7 +35,7 @@ fn limits(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> Qua
 }
 
 pub struct Ledger {
-    policy: CertificatePolicy,
+    pub policy: CertificatePolicy,
     basis: Digest,
     window_ns: u64,
     coverage_ns: u64,
@@ -77,7 +77,7 @@ impl Ledger {
         self.policy.digest()
     }
     /// Each column term on a row of a combination is one update of that combination's rows a step.
-    fn admit_row_rounding(&mut self, body: &CompiledBody, per_update: u64) {
+    pub fn admit_row_rounding(&mut self, body: &CompiledBody, per_update: u64) {
         let combinations = body.conserved_basis().combinations();
         let column_terms = || body.columns().iter().flat_map(|column| column.terms());
         let updates = |combination: &Combination| {
