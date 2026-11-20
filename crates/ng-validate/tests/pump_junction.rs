@@ -86,7 +86,8 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         });
         ns.residual(&vagal, residual);
         let scale = ns.algebraic::<Dimensionless>("drive scale", Admissible::positive());
-        let stated = ns.parameter::<Dimensionless>(ParameterKey::new("fixture.drive-scale"), Admissible::positive());
+        let stated =
+            ns.parameter::<Dimensionless>(ParameterKey::new("fixture.drive-scale"), Admissible::positive());
         let residual = ns.kernel(|mut k| {
             let (held, value) = (k.algebraic(&scale), k.parameter(&stated));
             let residual = k.subtract(held, value);

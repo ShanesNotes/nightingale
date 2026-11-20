@@ -18,13 +18,11 @@ pub(crate) fn declare<'b>(
     let central = ns.set_point::<Dimensionless>("central set point", Admissible::finite());
     let peripheral = ns.set_point::<Pressure>("peripheral set point", Admissible::finite());
     let scale = ns.algebraic::<Dimensionless>("drive scale", Admissible::positive());
-    let speed =
-        ns.parameter::<Rate<Dimensionless>>(key("ns.chemo-set-point-speed"), Admissible::positive());
+    let speed = ns.parameter::<Rate<Dimensionless>>(key("ns.chemo-set-point-speed"), Admissible::positive());
     let offset = ns.parameter::<Pressure>(key("ns.peripheral-offset"), Admissible::finite());
     let smoothing = ns.parameter::<Pressure>(key("ns.peripheral-smoothing"), Admissible::positive());
     let central_gain = ns.parameter::<Dimensionless>(key("ns.central-gain"), Admissible::nonnegative());
-    let peripheral_gain =
-        ns.parameter::<Dimensionless>(key("ns.peripheral-gain"), Admissible::nonnegative());
+    let peripheral_gain = ns.parameter::<Dimensionless>(key("ns.peripheral-gain"), Admissible::nonnegative());
     let central_width =
         ns.parameter::<Deviation<Dimensionless>>(key("ns.central-width"), Admissible::positive());
     let peripheral_width =

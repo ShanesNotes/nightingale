@@ -260,7 +260,8 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         });
         laws.residual(&vagal, residual);
         let scale = laws.algebraic::<Dimensionless>("drive scale", Admissible::positive());
-        let stated = laws.parameter::<Dimensionless>(ParameterKey::new("fixture.drive-scale"), Admissible::positive());
+        let stated =
+            laws.parameter::<Dimensionless>(ParameterKey::new("fixture.drive-scale"), Admissible::positive());
         let residual = laws.kernel(|mut k| {
             let (held, value) = (k.algebraic(&scale), k.parameter(&stated));
             let residual = k.subtract(held, value);
