@@ -20,3 +20,7 @@ Blocked by: none
 - [ ] What the recommendation saves, measured in landings a beat and in wall time for each simulated second, with the machine, the run count and the spread
 
 **Non-goals:** changing the law or its numbers in this ticket. Tuning a number until the count looks right with no cause named. The step plan of [body ticket 27](../../body/issues/27-step-plan.md), which takes this answer as one of its inputs.
+
+## Comments
+
+From the solver explorations, read from [body ticket 07](../../body/issues/07-what-limits-the-step.md)'s traces of the slice (`~/lanes/logs/ng-body-wave-1/07-step-limit`; the counts are in `~/lanes/logs/ng-explore-solver/valve-counts.txt` and `valve-shuts.txt`): the aortic valve shuts three times a beat and the pulmonary twice in all eight variants of the halved step, with caps from 5 to 40 ms and aims from 0.35 to 0.9. The two aortic shuts inside ejection sit 77 to 78 ms apart in every variant, a ring near 12.8 Hz, and the second shut lasts 4.0 to 7.7 ms. A period that holds while the cap moves eightfold points the third box at the law's form or the synthetic parameters, not at the guards or the landing (inferred: no input was changed). One caution for the second box's trace: the halved step takes about `w^2 h / 4` a second off an oscillation ([native-contract 91](91-the-accuracy-gate-holds-no-oscillation.md)), which is 16 a second at 12.8 Hz and a 10 ms step. The ring a trace shows is what is left after that, and a plan that damps less would show more of it.
