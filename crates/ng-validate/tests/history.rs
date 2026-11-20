@@ -130,7 +130,6 @@ impl HistoryStore for Counting {
 
 const STEP: u64 = 100 * MILLISECOND;
 
-/// Twelve thousand steps of 0.1 s.
 fn twenty_minutes() -> TwoReservoirs {
     let end = SimTime::from_ns(1_200 * SECOND);
     let inflow = Delivery {
@@ -145,7 +144,6 @@ fn twenty_minutes() -> TwoReservoirs {
         .until(end)
 }
 
-/// The seals of the heads at `marks` seconds, and the session at the case's end.
 fn run_marked<'s>(
     case: &'s TwoReservoirs,
     store: &'s Counting,

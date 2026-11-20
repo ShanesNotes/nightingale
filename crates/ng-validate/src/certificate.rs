@@ -451,8 +451,6 @@ struct Balance {
     outcome: Outcome,
 }
 
-/// One window of one combination, from its inventory at the window's late and early ends, the gross inflow and
-/// outflow between them and the last places its rows' rounding may take.
 fn balance(
     limits: &QuantityPolicy,
     (closing, opening): (Compensated, Compensated),
@@ -576,9 +574,6 @@ fn finite(value: Compensated) -> bool {
     value.at_most(value)
 }
 
-/// The most a held route carried one way, over windows seen in time order: the earliest of the largest finite
-/// flows, unless the last window's flow is not finite. Held support has no bound, so nothing refuses such a flow,
-/// and the certificate has always reported it when the last window carried it.
 #[derive(Clone, Copy)]
 struct Most {
     kept: (Compensated, Interval),
@@ -622,7 +617,6 @@ fn keep_the_earliest_most(most: &mut [Option<[Most; 2]>], carried: Vec<Carried>)
     }
 }
 
-/// `windows` came later in time than every window `worst` has seen, so only a larger one replaces.
 fn keep_the_earliest_worst(
     worst: &mut [Option<QuantityResult>],
     policy: &CertificatePolicy,
@@ -668,9 +662,6 @@ enum Need {
     Leading,
 }
 
-/// Judges the sliding windows piece by piece, in time order, as the history's segments reach it. A piece is a
-/// stretch of window starts whose windows start in one segment and end in one segment; adjacent pieces share an
-/// endpoint, and each judges it with its own segments and steps.
 struct Windows<'p> {
     policy: &'p CertificatePolicy,
     routes: &'p [HeldRoute],
@@ -700,9 +691,6 @@ impl<'p> Windows<'p> {
             done: false,
         }
     }
-    /// Judges each piece that the trailing segment, which holds the next start, and the leading segment, which holds
-    /// that start's window end, reach, then names the segment it needs next: `None` once the last start is judged or
-    /// a window failed closure.
     fn offer(
         &mut self,
         (behind, trailing): (u64, &HistorySegment),

@@ -76,7 +76,6 @@ impl Ledger {
     pub fn digest(&self) -> Digest {
         self.policy.digest()
     }
-    /// Each column term on a row of a combination is one update of that combination's rows a step.
     pub fn admit_row_rounding(&mut self, body: &CompiledBody, per_update: u64) {
         let combinations = body.conserved_basis().combinations();
         let column_terms = || body.columns().iter().flat_map(|column| column.terms());
@@ -89,8 +88,6 @@ impl Ledger {
     }
 }
 
-/// 2^-105 of the power of two at or below the larger part, never below the smallest float, and zero when that part
-/// is not finite.
 fn last_place(total: Compensated) -> Compensated {
     let larger = f64::from_bits(total.bits()[0]);
     let place = if larger.is_finite() {

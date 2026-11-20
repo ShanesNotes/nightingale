@@ -881,7 +881,6 @@ impl<'r> ConservationView<'r> {
 
 const PAGE: u64 = 64;
 
-/// A page's newest link, how many links it holds and when its oldest segment starts.
 struct Mark {
     seal: Digest,
     revision: u64,

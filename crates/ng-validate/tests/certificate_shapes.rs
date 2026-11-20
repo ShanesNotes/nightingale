@@ -25,9 +25,6 @@ fn start_of(failure: &CertificateFailure) -> u64 {
     failure.window().expect("a window").start().nanoseconds()
 }
 
-/// The bulk moves the inventory in the first ten minutes, so the windows over it drift. From two hours an extent
-/// far below the pair's precision crosses the boundary while the inventory, whose low limb holds the bulk's
-/// remainder, stands still, so every window over it fails closure.
 fn drifts_then_opens() -> TwoReservoirs {
     let bulk = Delivery {
         id: b"bulk",
@@ -151,8 +148,6 @@ fn a_history_error_outranks_a_closure_failure_and_the_newer_of_two_bad_links_is_
 
 #[test]
 fn a_shared_start_is_judged_by_both_of_its_pieces_and_the_earlier_ones_steps_are_reported() {
-    // Each step is 0.1 s and the window is 3 h and 50 ms, so the starts alternate between step boundaries and
-    // instants 50 ms off them, and the two pieces that share a start take different counts of steps.
     let (span, length) = (6 * HOUR, 3 * HOUR + 50 * MILLISECOND);
     let start = [measure(600.0), measure(424.0)];
     let case = TwoReservoirs::delivering(start, Vec::new())
@@ -196,8 +191,6 @@ fn a_shared_start_is_judged_by_both_of_its_pieces_and_the_earlier_ones_steps_are
 
 #[test]
 fn the_worst_closure_reports_the_place_of_its_own_windows_closing_total() {
-    // The rows round their transfer from the start. The first window closes before the inflow starts, on a total
-    // of 1,024, and later ones on totals up to 2^20 and 1,024.
     let (span, length, from) = (6 * HOUR, 2 * HOUR, 10_200 * SECOND);
     let inflow = Delivery {
         id: b"inflow",
