@@ -12,7 +12,7 @@ Blocks: none
 
 **Why.** Cost and the body's anatomy both bound the first milestone (SRS invariant I19). Since [body 11](../../body/issues/11-breathing-is-controlled.md)'s first PR the whole body releases acetylcholine at every junction that holds it by two traffics in that junction's shares, `q_i (s_v f_v + s_m a)`: the vagal traffic `f_v` and the pump drive `a`. Each junction's shares are 1 and 0, or 0 and 1. Three things follow.
 
-- Which nerve serves a junction is anatomy, but the shares state it in packet values. A packet can state a release that anatomy forbids, such as the vagal traffic at the respiratory pump's junction, and only tests refuse it.
+- Which nerve serves a junction is anatomy, but the shares state it in packet values. A packet can state a release that anatomy forbids, such as the vagal traffic at the respiratory pump's junction, and only tests refuse it. A run at main `446e29f9` shows it. On `crates/ng-validate/tests/pump_junction.rs`'s fixture with the pump's shares swapped (vagal 1, motor 0), vagal traffic 0.2 and 0.8 gave pump forces 0.2390 and 0.9440, where the motor-only form gives 0.4760, and admission refused neither. Only the shares' unit interval guards a share. No fixture test reads the body packet's shares: in the whole body a swapped pair is seen by `body.rs`'s stated-packet pin and judged only by `body_run.rs`'s admission check that the pump force is the fitted rest.
 - Every junction's release reads both traffics in the sparsity, whatever its shares. The vagal traffic reads the circulation's stretch through the baroreflex, the pump junction's release reads the vagal traffic, and the pump's force reaches the circulation through the pleural pressure, so a loop closes and the pump's chain joins the circulation's block: the largest block grows from 644 to 651 rows. The seven rows that joined are the vagal traffic, the pump junction's acetylcholine in vesicle, cleft and bound, its receptor effect, the pump force and the pleural space's pressure. Body 11a measured 4,048.7 M instructions a simulated second at its base and 4,049.5 M at its head, back to back on the beelink, and about 5.9 M over the base at the base's solve count (inferred).
 - A fixture with no baroreflex, such as `crates/ng-validate/tests/pump_junction.rs`, states a vagal traffic that nothing uses.
 
@@ -30,5 +30,10 @@ Each is a contract interface, so the ticket starts with a design round. It is we
 - [ ] The pinned largest block in `crates/ng-validate/tests/body.rs` is smaller by the pump's chain
 - [ ] The mutant rows that hold the release's wiring still read `CAUGHT`
 - [ ] `pump_junction.rs` states no vagal traffic
+
+**Low notes.**
+
+- "Release share" is a third sense of "share", beside a gas's share and the mixing share. The keys say `ns.vagal-share` and `ns.motor-share`, and no _Avoid_ line is broken. The share parameters leave with this ticket.
+- The junction's six constants in `crates/ng-validate/tests/alveolar.rs` and `pump_junction.rs` copy the body packet's `PUMP` (`crates/ng-validate/src/body/packet.rs`) with no check that they match.
 
 **Non-goals:** a second nerve at one junction, and the norepinephrine release, which reads one traffic today.
