@@ -20,7 +20,7 @@ A run at main `446e29f9` shows it. The test below fails there with `the missing 
 - [ ] The same refusal for the sinoatrial junction without its vesicle, on a fixture of the slice
 - [ ] A junction that declares none of a transmitter's pools still compiles, so a junction with no acetylcholine stays legal
 - [ ] A mutant row that puts back the silent drop, CAUGHT by the test
-- [ ] No pin moves: every body that compiles on main compiles to the same model hash
+- [ ] No pin moves: every body that still compiles has the model hash it has on main
 
 The test. Its helper takes the pump's spaces, so the control keeps all three and the test leaves out the vesicle:
 
@@ -54,5 +54,7 @@ fn a_pump_without_a_vesicle_names_the_missing_release_pool() -> Result<(), Initi
     Ok(())
 }
 ```
+
+The test reads the refusal after `bind`, so a refusal `bind` gave under that name would pass it too. The build also asserts on `compiled_with_pump_spaces` alone, to show that compile is what refuses.
 
 **Non-goals:** which nerve serves a junction, which is [native-contract 90](90-a-release-reads-the-nerve-that-serves-its-junction.md), and a junction's transmitter amounts, which [native-contract 93](93-the-receptors-effect-stays-in-its-unit-interval.md) bounds.

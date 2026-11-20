@@ -12,7 +12,7 @@ Blocked by: none
 
 - [ ] Serial and K = 2, 3 and 4 sweeps of every row at one head, timed twice each, with ryzen's load and free memory beside each number
 - [ ] Every lane run gives each row the serial verdict, by name, and a script compares the lists
-- [ ] `timed-run-knows-no-input` and the ten slowest rows of [ticket 14](14-slow-mutant-rows-run-long-tests.md) are timed at each K against their 420 s budget, and any that would read UNCLEAR is named
+- [ ] `timed-run-knows-no-input` and the ten slowest rows of [ticket 14](14-slow-mutant-rows-run-long-tests.md) are timed at each K against each row's own limit, the larger of the 420 s budget and twice its test's baseline, and any that would read UNCLEAR is named
 - [ ] Ryzen's filesystem is read, and the copy of a lane's target is shown to share blocks, or its full size is stated
 - [ ] The Answer says which K halves the sweep, or that none does. If one does, ticket 13's `Blocked by:` line is set to `none` with this ticket's figures. If none does, ticket 14 becomes the next lever, with its expected saving per proof
 

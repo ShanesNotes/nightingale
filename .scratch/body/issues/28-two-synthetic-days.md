@@ -2,7 +2,7 @@
 
 Type: task
 Status: open
-Blocked by: 19, 20, 21, 22, 24
+Blocked by: 19, 20, 21, 22, 24, `.scratch/native-contract/issues/95-the-record-trims-its-history.md`
 
 **What to build:** Both passes together, over 48 hours of the synthetic day on one named build worker. This is the map's destination. Every number is synthetic, so it is not the first milestone: it is the body that [foundation 01](../../foundation/issues/01-arena-and-milestone.md), step 4, binds the reviewed packet to.
 
