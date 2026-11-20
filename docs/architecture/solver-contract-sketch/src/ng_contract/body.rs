@@ -143,6 +143,11 @@ impl UnknownId {
         todo!()
     }
 }
+/// One rhythm of a compiled body, numbered in its phase's row order. Only the compiler makes one.
+#[derive(Clone, Copy)]
+pub struct RhythmId {
+    _index: u32,
+}
 
 /// A full state in one compiled layout: amounts, memory, algebraic values and modes. No public
 /// constructor: admission makes the first and `verify` every other.
