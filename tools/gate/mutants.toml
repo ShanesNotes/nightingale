@@ -3548,9 +3548,9 @@ test = "-p ng-validate --test closure_rounding"
 [[mutant]]
 name = "closure-result-keeps-its-first-windows-place"
 path = "crates/ng-validate/src/certificate.rs"
-old = '''            result.closure_last_places = last_places;
-            result.closure_place = place;'''
-new = '''            let _ = (last_places, place);'''
+old = '''                result.closure_last_places = last_places;
+                result.closure_place = place;'''
+new = '''                let _ = (last_places, place);'''
 test = "-p ng-validate --test certificate_shapes the_worst_closure_reports_the_place_of_its_own_windows_closing_total"
 
 [[mutant]]
@@ -3650,6 +3650,14 @@ path = "crates/ng-validate/src/certificate.rs"
 old = '''if finite(flow) && !flow.at_most(self.kept.0) {'''
 new = '''if finite(flow) && self.kept.0.at_most(flow) {'''
 test = "-p ng-validate --lib certificate::tests::held_support_keeps_the_earliest_largest_finite_flow_unless_the_last_is_not_finite"
+
+[[mutant]]
+name = "certificate-coverage-outranks-a-bad-link"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''    let span = view.span().ok_or(coverage)?;'''
+new = '''    view.in_time_order().map_err(|error| of_history(CertificateCheck::History(error)))?;
+    let span = view.span().ok_or(coverage)?;'''
+test = "-p ng-validate --test certificate_shapes a_history_shorter_than_its_coverage_fails_coverage_before_a_bad_link_is_read"
 
 [[mutant]]
 name = "time-order-refuses-a-bad-link"

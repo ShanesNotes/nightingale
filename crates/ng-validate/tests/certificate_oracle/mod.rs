@@ -88,12 +88,16 @@ impl Ledger {
     }
 }
 
+const EXPONENT_BITS: u64 = 0x7ff << 52;
+const TWO_TO_MINUS_105: f64 = f64::from_bits((1023 - 105) << 52);
+const SMALLEST_FLOAT: f64 = f64::from_bits(1);
+
 fn last_place(total: Compensated) -> Compensated {
     let larger = f64::from_bits(total.bits()[0]);
     let place = if larger.is_finite() {
-        let power = f64::from_bits(larger.to_bits() & (0x7ff << 52));
-        let scaled = power * f64::from_bits((1023 - 105) << 52);
-        if scaled > 0.0 { scaled } else { f64::from_bits(1) }
+        let power = f64::from_bits(larger.to_bits() & EXPONENT_BITS);
+        let scaled = power * TWO_TO_MINUS_105;
+        if scaled > 0.0 { scaled } else { SMALLEST_FLOAT }
     } else {
         0.0
     };

@@ -9,6 +9,8 @@ use ng_validate::*;
 const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
 const HOUR: u64 = 3_600 * SECOND;
+const STEP: u64 = 100 * MILLISECOND;
+const PAIR_PRECISION: f64 = f64::EPSILON * f64::EPSILON / 2.0;
 
 fn measure<U>(value: f64) -> Measure<U> {
     Measure::new(value).expect("finite")
@@ -26,6 +28,7 @@ fn start_of(failure: &CertificateFailure) -> u64 {
 }
 
 fn drifts_then_opens() -> TwoReservoirs {
+    let held = 1e18;
     let bulk = Delivery {
         id: b"bulk",
         from: SimTime::from_ns(0),
@@ -36,9 +39,9 @@ fn drifts_then_opens() -> TwoReservoirs {
         id: b"below the pair's precision",
         from: SimTime::from_ns(2 * HOUR),
         to: SimTime::from_ns(4 * HOUR),
-        amount: measure(1e-18 * 7_200.0),
+        amount: measure(held * PAIR_PRECISION / 4.0),
     };
-    TwoReservoirs::delivering([measure(1e18), measure(1e18)], vec![bulk, tiny]).expect("a body")
+    TwoReservoirs::delivering([measure(held), measure(held)], vec![bulk, tiny]).expect("a body")
 }
 
 #[test]
@@ -147,13 +150,42 @@ fn a_history_error_outranks_a_closure_failure_and_the_newer_of_two_bad_links_is_
 }
 
 #[test]
+fn a_history_shorter_than_its_coverage_fails_coverage_before_a_bad_link_is_read() {
+    let (case, store) = (drifts_then_opens(), Damaged::default());
+    let core = ReferenceIntegrator::new(60 * SECOND);
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(HOUR),
+    );
+    let lost = session.record().seal().digest();
+    let session = to(session, SimTime::from_ns(4 * HOUR));
+    let view = session.conservation();
+    *store.lost.borrow_mut() = vec![lost];
+    let covering = |coverage| Ledger::sliding(view.basis(), HOUR, coverage, 1e-24, 1e-9, 1.0);
+    assert_eq!(
+        certified(&view, &covering(4 * HOUR))
+            .expect_err("a bad link")
+            .check(),
+        CertificateCheck::History(CheckpointError::HistoryMissing { seal: lost }),
+        "a coverage the history spans reads the lost link"
+    );
+    assert_eq!(
+        certified(&view, &covering(5 * HOUR))
+            .expect_err("too short")
+            .check(),
+        CertificateCheck::Coverage,
+        "a coverage longer than the history fails before any link is read"
+    );
+}
+
+#[test]
 fn a_shared_start_is_judged_by_both_of_its_pieces_and_the_earlier_ones_steps_are_reported() {
-    let (span, length) = (6 * HOUR, 3 * HOUR + 50 * MILLISECOND);
+    let (span, length) = (6 * HOUR, 3 * HOUR + STEP / 2);
     let start = [measure(600.0), measure(424.0)];
     let case = TwoReservoirs::delivering(start, Vec::new())
         .expect("a body")
         .until(SimTime::from_ns(span));
-    let (store, core) = (MemoryStore::default(), ng_solver::Core::new(100 * MILLISECOND));
+    let (store, core) = (MemoryStore::default(), ng_solver::Core::new(STEP));
     let session = to(case.admit(&core, &store).expect("admitted"), case.end());
     let view = session.conservation();
     let mut ledger = Ledger::sliding(view.basis(), length, span, 0.0, 1e-12, 1e9);
@@ -198,10 +230,11 @@ fn the_worst_closure_reports_the_place_of_its_own_windows_closing_total() {
         to: SimTime::from_ns(span),
         amount: measure(f64::from(1 << 20)),
     };
-    let case = TwoReservoirs::delivering([measure(600.0), measure(424.0)], vec![inflow])
+    let start = [600.0, 424.0];
+    let case = TwoReservoirs::delivering(start.map(measure), vec![inflow])
         .expect("a body")
         .until(SimTime::from_ns(span));
-    let (store, core) = (MemoryStore::default(), ng_solver::Core::new(100 * MILLISECOND));
+    let (store, core) = (MemoryStore::default(), ng_solver::Core::new(STEP));
     let session = to(case.admit(&core, &store).expect("admitted"), case.end());
     let view = session.conservation();
     let mut ledger = Ledger::sliding(view.basis(), length, span, 0.0, 1e-12, 1e9);
@@ -212,7 +245,8 @@ fn the_worst_closure_reports_the_place_of_its_own_windows_closing_total() {
     let certificate = certified(&view, &ledger).expect("within seven last places per row update");
     let water = certificate.results()[0];
     let end = water.closure_window().end().nanoseconds();
-    let total = 1_024.0 + f64::from(1 << 20) * (end.saturating_sub(from) as f64 / (span - from) as f64);
+    let total =
+        start[0] + start[1] + f64::from(1 << 20) * (end.saturating_sub(from) as f64 / (span - from) as f64);
     let place = ((total.to_bits() >> 52) - 105) << 52;
     assert!(
         total >= 2_048.0,

@@ -148,12 +148,12 @@ fn run_marked<'s>(
     case: &'s TwoReservoirs,
     store: &'s Counting,
     core: &'s Core,
-    marks: &[u64],
+    marks: &[SimTime],
 ) -> (Session<'s, Running>, Vec<Digest>) {
     let mut session = case.admit(core, store).expect("admitted");
     let mut seals = Vec::new();
     for &mark in marks {
-        let Ok(at) = run_until(session, SimTime::from_ns(mark * SECOND)) else {
+        let Ok(at) = run_until(session, mark) else {
             panic!("the run faulted");
         };
         seals.push(at.record().seal().digest());
@@ -275,7 +275,12 @@ fn a_cursor_starts_before_its_instant_and_reaches_the_step_that_holds_it_within_
 #[test]
 fn a_walk_in_time_order_refuses_the_link_a_walk_newest_first_refuses() {
     let (case, store, core) = (twenty_minutes(), Counting::default(), Core::new(STEP));
-    let (session, seals) = run_marked(&case, &store, &core, &[300, 900]);
+    let (session, seals) = run_marked(
+        &case,
+        &store,
+        &core,
+        &[SimTime::from_ns(300 * SECOND), SimTime::from_ns(900 * SECOND)],
+    );
     let view = session.conservation();
     let (older, newer) = (seals[0], seals[1]);
     let refusal = |lost: &[Digest], altered: &[Digest]| {

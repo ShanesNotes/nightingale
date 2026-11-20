@@ -597,69 +597,10 @@ impl Most {
     }
 }
 
-fn keep_the_earliest_most(most: &mut [Option<[Most; 2]>], carried: Vec<Carried>) {
-    for window in carried {
-        let Carried {
-            route,
-            interval,
-            inflow,
-            outflow,
-        } = window;
-        let flows = [inflow, outflow];
-        match &mut most[route] {
-            Some(held) => {
-                for (held, flow) in held.iter_mut().zip(flows) {
-                    held.see(flow, interval);
-                }
-            }
-            unseen => *unseen = Some(flows.map(|flow| Most::new(flow, interval))),
-        }
-    }
-}
-
-fn keep_the_earliest_worst(
-    worst: &mut [Option<QuantityResult>],
-    policy: &CertificatePolicy,
-    windows: Vec<Window>,
-) {
-    for window in windows {
-        let Window {
-            quantity,
-            interval,
-            closure,
-            last_places,
-            place,
-            drift,
-        } = window;
-        let limits = &policy.quantities[quantity];
-        let result = worst[quantity].get_or_insert(QuantityResult {
-            quantity: limits.quantity,
-            closure_floor: limits.absolute,
-            closure_relative: Compensated::of(&limits.relative),
-            row_rounding: policy.rounding.last_places_an_update,
-            worst_closure: closure,
-            closure_window: interval,
-            closure_last_places: last_places,
-            closure_place: place,
-            worst_drift: drift,
-            drift_window: interval,
-        });
-        if !closure.at_most(result.worst_closure) {
-            result.worst_closure = closure;
-            result.closure_window = interval;
-            result.closure_last_places = last_places;
-            result.closure_place = place;
-        }
-        if !drift.at_most(result.worst_drift) {
-            result.worst_drift = drift;
-            result.drift_window = interval;
-        }
-    }
-}
-
 enum Need {
     Trailing,
     Leading,
+    Finish,
 }
 
 struct Windows<'p> {
@@ -695,13 +636,13 @@ impl<'p> Windows<'p> {
         &mut self,
         (behind, trailing): (u64, &HistorySegment),
         (ahead, leading): (u64, &HistorySegment),
-    ) -> Option<Need> {
+    ) -> Need {
         let length = self.policy.windows.window_ns.get();
         let end = |segment: &HistorySegment| segment.interval().end().nanoseconds();
         let one_window = self.first == self.last;
         while !self.done {
             if end(trailing) <= self.from {
-                return Some(Need::Trailing);
+                return Need::Trailing;
             }
             let reaches = if one_window {
                 self.first + length <= end(leading)
@@ -709,7 +650,7 @@ impl<'p> Windows<'p> {
                 self.from + length < end(leading)
             };
             if !reaches {
-                return Some(Need::Leading);
+                return Need::Leading;
             }
             let steps = behind.abs_diff(ahead) + 1;
             let to = (end(trailing).min(end(leading) - length)).min(self.last);
@@ -723,14 +664,69 @@ impl<'p> Windows<'p> {
                 Err(failure) => (self.failed, self.done) = (Some(failure), true),
                 Ok(pair) => {
                     self.drifted = self.drifted.or(pair.drifted);
-                    keep_the_earliest_worst(&mut self.worst, self.policy, pair.windows);
-                    keep_the_earliest_most(&mut self.most, pair.carried);
+                    self.keep_the_earliest_worst(pair.windows);
+                    self.keep_the_earliest_most(pair.carried);
                 }
             }
             self.from = to;
             self.done |= to == self.last;
         }
-        None
+        Need::Finish
+    }
+    fn keep_the_earliest_worst(&mut self, windows: Vec<Window>) {
+        let policy = self.policy;
+        for window in windows {
+            let Window {
+                quantity,
+                interval,
+                closure,
+                last_places,
+                place,
+                drift,
+            } = window;
+            let limits = &policy.quantities[quantity];
+            let result = self.worst[quantity].get_or_insert(QuantityResult {
+                quantity: limits.quantity,
+                closure_floor: limits.absolute,
+                closure_relative: Compensated::of(&limits.relative),
+                row_rounding: policy.rounding.last_places_an_update,
+                worst_closure: closure,
+                closure_window: interval,
+                closure_last_places: last_places,
+                closure_place: place,
+                worst_drift: drift,
+                drift_window: interval,
+            });
+            if !closure.at_most(result.worst_closure) {
+                result.worst_closure = closure;
+                result.closure_window = interval;
+                result.closure_last_places = last_places;
+                result.closure_place = place;
+            }
+            if !drift.at_most(result.worst_drift) {
+                result.worst_drift = drift;
+                result.drift_window = interval;
+            }
+        }
+    }
+    fn keep_the_earliest_most(&mut self, carried: Vec<Carried>) {
+        for window in carried {
+            let Carried {
+                route,
+                interval,
+                inflow,
+                outflow,
+            } = window;
+            let flows = [inflow, outflow];
+            match &mut self.most[route] {
+                Some(held) => {
+                    for (held, flow) in held.iter_mut().zip(flows) {
+                        held.see(flow, interval);
+                    }
+                }
+                unseen => *unseen = Some(flows.map(|flow| Most::new(flow, interval))),
+            }
+        }
     }
     fn finish(self, view: &ConservationView<'_>, span: Interval) -> Result<Certificate, CertificateFailure> {
         if let Some(failure) = self.failed.or(self.drifted) {
@@ -794,13 +790,13 @@ pub fn certify(
     let mut early = order.from(span.start());
     let mut late = order.from(SimTime::from_ns(first + length));
     let (mut trailing, mut leading) = (read(&mut early)?, read(&mut late)?);
-    while let Some(need) = windows.offer((trailing.0, &trailing.1), (leading.0, &leading.1)) {
-        match need {
+    loop {
+        match windows.offer((trailing.0, &trailing.1), (leading.0, &leading.1)) {
             Need::Trailing => trailing = read(&mut early)?,
             Need::Leading => leading = read(&mut late)?,
+            Need::Finish => return windows.finish(view, span),
         }
     }
-    windows.finish(view, span)
 }
 
 #[cfg(test)]

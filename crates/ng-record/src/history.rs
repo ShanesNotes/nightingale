@@ -859,15 +859,15 @@ impl<'r> ConservationView<'r> {
             match &mut page {
                 Some(mark) if mark.links < PAGE => {
                     mark.links += 1;
-                    mark.start = start;
+                    mark.oldest_start = start;
                 }
                 _ => {
                     order.marks.extend(page.take());
                     page = Some(Mark {
-                        seal: walked.seal,
+                        newest: walked.seal,
                         revision: revision.get() - 1 - count,
                         links: 1,
-                        start,
+                        oldest_start: start,
                     });
                 }
             }
@@ -882,10 +882,10 @@ impl<'r> ConservationView<'r> {
 const PAGE: u64 = 64;
 
 struct Mark {
-    seal: Digest,
+    newest: Digest,
     revision: u64,
     links: u64,
-    start: SimTime,
+    oldest_start: SimTime,
 }
 
 /// A complete history, checked once from the head to admission, that lends its accepted segments in the order a
@@ -906,7 +906,7 @@ impl TimeOrder<'_> {
         let before = |start: SimTime| start < instant;
         let page = match &self.head {
             Some((_, head)) if before(head.interval().start()) => self.marks.len(),
-            _ => (self.marks.partition_point(|mark| before(mark.start))).saturating_sub(1),
+            _ => (self.marks.partition_point(|mark| before(mark.oldest_start))).saturating_sub(1),
         };
         OldestFirst {
             order: self,
@@ -938,7 +938,7 @@ impl Iterator for OldestFirst<'_> {
             format: order.format,
             shape: order.shape,
             origin: order.origin,
-            at: mark.seal,
+            at: mark.newest,
             revision: mark.revision,
             done: false,
         };
