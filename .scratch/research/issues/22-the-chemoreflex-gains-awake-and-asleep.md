@@ -17,5 +17,6 @@ Today's forms, from body 11's plan:
 - [ ] The wake drive's size, read as the shift of the apnoeic level between waking and NREM sleep, and each arm's sleep factor
 - [ ] Whether a gain that meets these slopes makes the loop swing at rest, since periodic breathing is a non-goal
 - [ ] Each constant's row for [research 16](16-constants-and-what-binds-them.md)'s list: what measurable quantity binds it
+- [ ] The steady change in arterial carbon dioxide a healthy adult shows for a stated change in carbon dioxide production or in inspired carbon dioxide, with the population and the method, so that once [body 38](../../body/issues/38-the-drive-moves-the-breaths-depth.md) has built depth, the whole loop, depth and rate together, can be sized against a cited figure and not by its slopes alone
 
 **Non-goals:** REM sleep, the transport delays research 11 dropped, and how the drive splits into rate and depth ([research 23](23-how-the-drive-splits-into-rate-and-depth.md)).
