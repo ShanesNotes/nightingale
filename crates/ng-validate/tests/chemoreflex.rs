@@ -1040,6 +1040,34 @@ fn awake_the_wake_drive_and_the_gains_fall_leave_every_bit_of_the_drive_scale()
     Ok(())
 }
 
+/// The test above compares two runs of one law, so it cannot see the arms added to each other first, which moves a
+/// rounding at 456 of this packet's 6,003 accepted states. So one of them is pinned to the bits 11b's law gives on the
+/// same packet, with no wake drive and no gain's fall stated, since 11b's law reads neither.
+#[test]
+fn awake_the_drive_scale_adds_the_peripheral_arm_to_its_rest_before_it_takes_the_central_arm_away()
+-> Result<(), InitializationFailure> {
+    let unit = Case {
+        steps: Steps {
+            acidity: 0.01,
+            ..STILL
+        },
+        ..SENSED
+    };
+    let floor = NonZeroU64::MIN.saturating_add(SECOND / 100_000 - 1);
+    let reference = ReferenceIntegrator::new(SECOND / 1_000).with_floor(floor);
+    let samples = trace(unit, &reference)?;
+    let pinned = (samples.iter())
+        .find(|sample| sample.at.to_bits() == 3.025_f64.to_bits())
+        .expect("an accepted state at 3.025 s");
+    assert!(
+        pinned.scale.to_bits() == 0x3ff0_2b16_e240_9068,
+        "at 3.025 s the drive scale is {} ({:016x})",
+        pinned.scale,
+        pinned.scale.to_bits()
+    );
+    Ok(())
+}
+
 /// The step's time and half the run: the closed loop's slowest mode is near fifty seconds (inferred from the drift of
 /// the breath means), so 900 s leaves under 1e-7 of a start or a step.
 const SETTLED: u64 = 900;

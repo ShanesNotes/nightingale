@@ -4852,15 +4852,26 @@ test = "-p ng-validate --test pump_junction at_a_held_drive_the_pumps_effect_and
 name = "sleep-lowers-no-gain"
 path = "crates/ng-nervous/src/chemoreflex.rs"
 old = '''    let gain = k.subtract(gain, lowered);'''
-new = '''    let (gain, _) = (gain, lowered);'''
+new = '''    let nothing = k.subtract(lowered, lowered);
+    let gain = k.add(gain, nothing);'''
 test = "-p ng-validate --test chemoreflex asleep_each_sensor_moves_the_drive_scale_by_its_form_less_the_wake_drive_and_the_gains_fall"
 
 [[mutant]]
 name = "sleep-removes-no-wake-drive"
 path = "crates/ng-nervous/src/chemoreflex.rs"
 old = '''        let rest = k.subtract(rest, lost);'''
-new = '''        let (rest, _) = (rest, lost);'''
+new = '''        let nothing = k.subtract(lost, lost);
+        let rest = k.add(rest, nothing);'''
 test = "-p ng-validate --test chemoreflex asleep_with_its_sensors_steady_the_drive_scale_admits_at_its_rest_less_the_wake_drive"
+
+[[mutant]]
+name = "drive-scale-groups-its-arms"
+path = "crates/ng-nervous/src/chemoreflex.rs"
+old = '''        let raised = k.add(rest, rising);
+        let value = k.subtract(raised, falling);'''
+new = '''        let arms = k.subtract(rising, falling);
+        let value = k.add(rest, arms);'''
+test = "-p ng-validate --test chemoreflex awake_the_drive_scale_adds_the_peripheral_arm_to_its_rest_before_it_takes_the_central_arm_away"
 
 [[mutant]]
 name = "central-arm-sign-flipped"
