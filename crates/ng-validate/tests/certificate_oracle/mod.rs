@@ -42,6 +42,8 @@ pub struct Ledger {
     absolute: Compensated,
     relative: Measure<Dimensionless>,
     drift: Compensated,
+    per_update: u64,
+    updates_a_step: Vec<u64>,
 }
 impl Ledger {
     pub fn sliding(
@@ -67,11 +69,38 @@ impl Ledger {
             absolute: plain(absolute),
             relative: Measure::<Dimensionless>::new(relative).expect("finite"),
             drift: plain(drift),
+            per_update: 0,
+            updates_a_step: vec![0; basis.combinations().len()],
         }
     }
     pub fn digest(&self) -> Digest {
         self.policy.digest()
     }
+    /// Each column term on a row of a combination is one update of that combination's rows a step.
+    fn admit_row_rounding(&mut self, body: &CompiledBody, per_update: u64) {
+        let combinations = body.conserved_basis().combinations();
+        let column_terms = || body.columns().iter().flat_map(|column| column.terms());
+        let updates = |combination: &Combination| {
+            let member = |row: &RowId| combination.terms().iter().any(|(held, _)| held == row);
+            column_terms().filter(|(row, _)| member(row)).count() as u64
+        };
+        self.updates_a_step = combinations.iter().map(updates).collect();
+        self.per_update = per_update;
+    }
+}
+
+/// 2^-105 of the power of two at or below the larger part, never below the smallest float, and zero when that part
+/// is not finite.
+fn last_place(total: Compensated) -> Compensated {
+    let larger = f64::from_bits(total.bits()[0]);
+    let place = if larger.is_finite() {
+        let power = f64::from_bits(larger.to_bits() & (0x7ff << 52));
+        let scaled = power * f64::from_bits((1023 - 105) << 52);
+        if scaled > 0.0 { scaled } else { f64::from_bits(1) }
+    } else {
+        0.0
+    };
+    Compensated::of(&Measure::<Dimensionless>::new(place).expect("finite"))
 }
 
 #[derive(Debug, PartialEq)]
@@ -79,6 +108,8 @@ struct Worst {
     quantity: QuantityId,
     closure: [u64; 2],
     closure_window: Interval,
+    closure_last_places: u64,
+    closure_place: [u64; 2],
     drift: [u64; 2],
     drift_window: Interval,
 }
@@ -112,6 +143,8 @@ pub fn certified(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Certifi
             quantity: result.quantity(),
             closure: result.worst_closure().bits(),
             closure_window: result.closure_window(),
+            closure_last_places: result.closure_last_places(),
+            closure_place: result.closure_place().bits(),
             drift: result.worst_drift().bits(),
             drift_window: result.drift_window(),
         });
@@ -199,6 +232,16 @@ fn differences(
 
 type Walked = (Vec<Worst>, Vec<Most>, u64);
 
+#[derive(Clone)]
+struct Held {
+    closure: Compensated,
+    closure_window: Interval,
+    last_places: u64,
+    place: Compensated,
+    drift: Compensated,
+    drift_window: Interval,
+}
+
 fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked, Failed> {
     let coverage = || failed(CertificateCheck::Coverage);
     if ledger.basis != view.basis().digest() {
@@ -221,7 +264,7 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
     let starts = window_starts(&segments, first, last, length);
     let quantities: Vec<QuantityId> = view.basis().ids().collect();
     let routes = view.basis().coverage().held_routes();
-    let mut worst: Vec<Option<(Compensated, Interval, Compensated, Interval)>> = vec![None; quantities.len()];
+    let mut worst: Vec<Option<Held>> = vec![None; quantities.len()];
     let mut most: Vec<Option<(Compensated, Interval, Compensated, Interval)>> = vec![None; routes.len()];
     let mut drifted: Option<Failed> = None;
     let (mut trail, mut lead) = (0, 0);
@@ -231,7 +274,7 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
         _ => starts.windows(2).collect(),
     };
     for pair in stretches {
-        let (trailing, leading, pieces_of) = match *pair {
+        let (trailing, leading, pieces_of, steps) = match *pair {
             [from, to] => {
                 let early =
                     Interval::new(SimTime::from_ns(from), SimTime::from_ns(to)).ok_or_else(coverage)?;
@@ -243,12 +286,24 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
                 while segments[lead].interval().end() <= late.start() {
                     lead += 1;
                 }
-                (&segments[trail], &segments[lead], Some((early, late)))
+                let steps = (lead - trail + 1) as u64;
+                (&segments[trail], &segments[lead], Some((early, late)), steps)
             }
             _ => {
                 let end = SimTime::from_ns(first + length);
-                let leading = segments.iter().find(|segment| segment.interval().end() >= end);
-                (&segments[0], leading.ok_or_else(coverage)?, None)
+                let leading = segments
+                    .iter()
+                    .position(|segment| segment.interval().end() >= end);
+                let leading = leading.ok_or_else(coverage)?;
+                (&segments[0], &segments[leading], None, leading as u64 + 1)
+            }
+        };
+        let closing = |later: &Curve<'_>| match pieces_of {
+            Some((_, late)) => later.on(late),
+            None => {
+                let end = SimTime::from_ns(first + length);
+                let end = later.on(Interval::new(leading.interval().start(), end)?)?;
+                Some(vec![*end.last()?])
             }
         };
         let differences = |later: &Curve<'_>, earlier: &Curve<'_>| match pieces_of {
@@ -261,19 +316,27 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
             }
         };
         pieces += 1;
-        for (&quantity, held) in quantities.iter().zip(&mut worst) {
+        for ((&quantity, held), updates) in quantities.iter().zip(&mut worst).zip(&ledger.updates_a_step) {
             let pick = |curve: fn(&HistorySegment, QuantityId) -> Curve<'_>| {
                 differences(&curve(leading, quantity), &curve(trailing, quantity))
             };
             let change = pick(HistorySegment::inventory).ok_or_else(coverage)?;
             let inflow = pick(HistorySegment::inflow).ok_or_else(coverage)?;
             let outflow = pick(HistorySegment::outflow).ok_or_else(coverage)?;
+            let closing = closing(&leading.inventory(quantity)).ok_or_else(coverage)?;
+            let last_places = [*updates, steps]
+                .into_iter()
+                .try_fold(ledger.per_update, u64::checked_mul)
+                .unwrap_or(u64::MAX);
+            let rounding = i64::try_from(last_places).unwrap_or(i64::MAX);
             for (index, &start) in pair.iter().enumerate() {
                 let window = Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length))
                     .ok_or_else(coverage)?;
                 let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
                 let gross = inflow[index].plus(outflow[index]);
-                let allowed = ledger.absolute.plus(gross.times(&ledger.relative));
+                let place = last_place(closing[index]);
+                let allowed =
+                    (ledger.absolute.plus(gross.times(&ledger.relative))).plus(place.scaled(rounding));
                 if !closure.at_most(allowed) {
                     return Err(Failed {
                         check: CertificateCheck::Closure,
@@ -295,13 +358,20 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
                         residual: drift.bits(),
                     });
                 }
-                let (worst_closure, closure_window, worst_drift, drift_window) =
-                    held.get_or_insert((closure, window, drift, window));
-                if !closure.at_most(*worst_closure) {
-                    (*worst_closure, *closure_window) = (closure, window);
+                let held = held.get_or_insert(Held {
+                    closure,
+                    closure_window: window,
+                    last_places,
+                    place,
+                    drift,
+                    drift_window: window,
+                });
+                if !closure.at_most(held.closure) {
+                    (held.closure, held.closure_window) = (closure, window);
+                    (held.last_places, held.place) = (last_places, place);
                 }
-                if !drift.at_most(*worst_drift) {
-                    (*worst_drift, *drift_window) = (drift, window);
+                if !drift.at_most(held.drift) {
+                    (held.drift, held.drift_window) = (drift, window);
                 }
             }
         }
@@ -336,13 +406,15 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
     }
     let results = (quantities.iter().zip(worst))
         .map(|(&quantity, held)| {
-            let (closure, closure_window, drift, drift_window) = held?;
+            let held = held?;
             Some(Worst {
                 quantity,
-                closure: closure.bits(),
-                closure_window,
-                drift: drift.bits(),
-                drift_window,
+                closure: held.closure.bits(),
+                closure_window: held.closure_window,
+                closure_last_places: held.last_places,
+                closure_place: held.place.bits(),
+                drift: held.drift.bits(),
+                drift_window: held.drift_window,
             })
         })
         .collect::<Option<Vec<_>>>()
@@ -361,4 +433,32 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
         .collect::<Option<Vec<_>>>()
         .ok_or_else(coverage)?;
     Ok((results, support, pieces))
+}
+
+#[test]
+fn the_forward_oracle_accepts_the_same_row_rounding_as_certify() {
+    let end = SimTime::from_ns(6 * 3_600 * 1_000_000_000);
+    let start = [600.0, 424.0].map(|amount| Measure::new(amount).expect("a start"));
+    let case = TwoReservoirs::delivering(start, Vec::new())
+        .expect("a body")
+        .until(end);
+    let (store, core) = (MemoryStore::default(), ng_solver::Core::new(100_000_000));
+    let session = case.admit(&core, &store).expect("admitted");
+    let Ok(session) = run_until(session, case.end()) else {
+        panic!("the run faulted");
+    };
+    let view = session.conservation();
+    let span = end.nanoseconds();
+    let mut ledger = Ledger::sliding(view.basis(), span / 2, span, 0.0, 1e-12, 1e9);
+    ledger.policy = ledger
+        .policy
+        .admitting_row_rounding(case.body(), 7)
+        .expect("a policy");
+    ledger.admit_row_rounding(case.body(), 7);
+    let passed = certify(&view, &ledger.policy).expect("within seven last places per row update");
+    assert_eq!(passed.results()[0].closure_last_places(), 2_268_021);
+    let oracle = in_time_order(&view, &ledger)
+        .map(|_| ())
+        .map_err(|failure| failure.check);
+    assert_eq!(oracle, Ok(()), "the forward oracle must accept the same policy");
 }
