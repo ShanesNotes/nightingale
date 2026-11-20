@@ -13,3 +13,7 @@ Blocked by: 06, 27
 - [ ] Every number carries its machine, its run count and its spread (pstack `benchmark-checklist`)
 
 **Non-goals:** the arena's pick between cores, and any gain bought by dropping a law.
+
+## Comments
+
+From the solver explorations: the plans this ticket compares differ in something none of its boxes reads. A backward Euler step damps an oscillation, the halved step by about `w^2 h / 4` a second and a one-stage step by twice that, with no refusal and inside every gate ([native-contract 91](../../native-contract/issues/91-the-accuracy-gate-holds-no-oscillation.md) has the measurement). [Ticket 27](27-step-plan.md) counted four fewer valve mode changes a beat under the one-stage plan, which is what more damping would do (inferred). So a plan can cost less because it damps more. Each plan's run here could also report, against the same plan at half its cap: the valve mode changes a beat, the pulse pressure, and the largest change in any route's forward or reverse exchange over a beat. Two-stage Radau IIA is third order and damps far less at the same step, so its place in the comparison is not only its cost.
