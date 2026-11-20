@@ -8,6 +8,8 @@ Status: open
 
 Blocked by: [native-contract 94](94-the-certificate-folds-as-the-run-goes.md)
 
+The first PR needs only native-contract 94's first PR, the evaluator.
+
 Blocks: [body ticket 11](../../body/issues/11-breathing-is-controlled.md)
 
 **Why.** The first milestone (SRS invariant I19) holds the whole body for 48 hours under its certificate, and the certificate is what refuses a slow leak. Once the body breathes, a ten-second window that does not hold whole breaths can catch most of a breath's swing in the gas the lungs hold, so [body ticket 10](../../body/issues/10-lungs-breathe.md)'s second PR set the bounds of the breath's books by that swing, to hold at any breathing rate. A bound that size lets through a steady leak far larger than the steady figures would.
@@ -31,7 +33,7 @@ Fick's check over nine beats takes the blood's store change as slack (oxygen 0.8
 
 ## The design
 
-Ruled at design. The design keeps every book's fixed sliding windows and adds, for the breathing books, windows between breath edges with a tight bound. It lands as two PRs after [native-contract 94](94-the-certificate-folds-as-the-run-goes.md), and the tests below hold it.
+Ruled at design. The design keeps every book's fixed sliding windows and adds, for the breathing books, windows between breath edges with a tight bound. It lands as two PRs, the first after [native-contract 94](94-the-certificate-folds-as-the-run-goes.md)'s first PR, and the tests below hold it.
 
 **The edge.** A breath edge is the glossary's: the accepted step end at which a guard's landing resets the breath's phase. The card declares which phase is a rhythm's, and the record reads the reset from the contract's own firing (`guard.resets` in `ProblemState::fired`), so a discarded trial, a retry or a stage gives no edge. The certificate reads edges and never learns what a breath is, and the same statement serves the heartbeat. One owner states the edge, and the one sealed history holds it.
 
@@ -110,7 +112,7 @@ fn a_steady_vasopressin_rate_at_the_edge_allowance_passes_at_both_lengths() {
 
 ## The two PRs
 
-- **The first, after native-contract 94.** The card's rhythm statement, the sealed edge, the policy's windows between edges with their allowance and settling time, coverage, the compile-fail rows, and the fixture's tests: the exact leaks at two rates, each with its margin both ways, the two openings that mature on one edge, and the control. No body pin moves.
+- **The first, after native-contract 94's first PR, the evaluator.** The card's rhythm statement, the sealed edge, the policy's windows between edges with their allowance and settling time, coverage, the compile-fail rows, and the fixture's tests: the exact leaks at two rates, each with its margin both ways, the two openings that mature on one edge, and the control. No body pin moves.
 - **The second, after 11b.** Its first run is the control with no leak at each breathing rate (open item 6). Then the body's policy takes the windows, the bounds are restated from the steady rates measured on 11b's hour run, which keeps each breathing book's inventory at every breath edge, Fick runs over whole breaths in the form its run settles, hydrogen is bounded at each bed, and the whole-body leak tests run. The body's pins move once.
 
 ## Open, each settled by a run

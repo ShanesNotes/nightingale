@@ -60,4 +60,13 @@ fn the_forward_oracle_accepts_the_same_row_rounding_as_certify() {
 
 At main `certify` passes the policy that admits seven last places a row update, at 2,268,021 last places, and the forward walk refuses the same run.
 
+## The two PRs
+
+Ruled at design.
+
+- **The first, the evaluator.** One evaluator that reads accepted steps in time order, on a checked forward walk of a complete history that `ng-record` lends. `certify` runs on it, the independent oracle gains its row-rounding allowance first, and the backward walk goes once the evaluator matches it. It closes the oracle box, the bit-for-bit box and the parity box, and the `certify` half of the first box, each with its mutant row.
+- **The second, the fold on a session.** The remaining boxes, the view with `resume`, `rewind` and `recover`, the 24 h lag, and memory and cost, each with its mutant row, and the fold half of the first box.
+
+The reason: native-contract 85's first PR needs only the evaluator, and the two halves fail in different ways. The evaluator fails in arithmetic and order. The fold fails in reading history while a run goes and in a session's life.
+
 **Non-goals:** trimming the history, windows between edges ([native-contract 85](85-the-certificates-windows-end-on-breath-edges.md)), and any change to `RecordFormat` or a seal.
