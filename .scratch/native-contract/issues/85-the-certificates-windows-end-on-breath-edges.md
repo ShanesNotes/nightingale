@@ -6,9 +6,9 @@ Type: task
 
 Status: open
 
-Blocked by: 94
+Blocked by: none
 
-The first PR needs only [native-contract 94](94-the-certificate-folds-as-the-run-goes.md)'s first PR, the evaluator. When that PR merges, the line above becomes `none`.
+The first PR builds on [native-contract 94](94-the-certificate-folds-as-the-run-goes.md)'s first PR, the evaluator, which nightingale#210 lands.
 
 Blocks: [body ticket 11](../../body/issues/11-breathing-is-controlled.md)
 
