@@ -85,7 +85,15 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
             k.finish(residual, ns.every_mode(), class)
         });
         ns.residual(&vagal, residual);
-        ng_nervous::breathing(&mut ns, &ports, &vagal)?;
+        let scale = ns.algebraic::<Dimensionless>("drive scale", Admissible::positive());
+        let stated = ns.parameter::<Dimensionless>(ParameterKey::new("fixture.drive-scale"), Admissible::positive());
+        let residual = ns.kernel(|mut k| {
+            let (held, value) = (k.algebraic(&scale), k.parameter(&stated));
+            let residual = k.subtract(held, value);
+            k.finish(residual, ns.every_mode(), class)
+        });
+        ns.residual(&scale, residual);
+        ng_nervous::breathing(&mut ns, &ports, (&vagal, &scale))?;
         body.add(ns.finish());
         let fragment = ng_receptor::declare(body.receptor()?)?;
         body.add(fragment);
@@ -109,6 +117,7 @@ fn packet(body: &CompiledBody, case: Case) -> Result<ParameterPacket<SyntheticFi
     let p = &mut packet;
     let (all, junctions) = (Binding::Body, Binding::Class(Class::Junction));
     set::<Dimensionless>(p, "fixture.vagal", all, VAGAL)?;
+    set::<Dimensionless>(p, "fixture.drive-scale", all, 1.0)?;
     for (key, value) in [
         ("ns.breath-rate", 0.2),
         ("ns.drive-rise", case.rise),
@@ -153,6 +162,7 @@ fn packet(body: &CompiledBody, case: Case) -> Result<ParameterPacket<SyntheticFi
         RowKind::Algebraic(slot) if slot.law.local == "pump_force" => PIMAX * effect(REST_DRIVE),
         RowKind::Algebraic(slot) if slot.law.local == "mixing_share" => 1.0,
         RowKind::Algebraic(slot) if slot.law.owner == Receptor::CARD => effect(REST_DRIVE),
+        RowKind::Algebraic(slot) if slot.law.local == "drive scale" => 1.0,
         RowKind::Memory(_) | RowKind::Algebraic(_) => 0.0,
     };
     let breath = LawName {

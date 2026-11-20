@@ -195,6 +195,7 @@ pub fn body_anatomy() -> Result<Anatomy, AdmissionError> {
         coronary.id(),
         liver.id(),
     ]);
+    map.sample(&arteries);
     for (landmark, site) in [
         (Landmark::CarotidSinus, carotid.id()),
         (Landmark::AorticArch, arch.id()),

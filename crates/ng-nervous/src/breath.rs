@@ -5,15 +5,18 @@ type Bound<'b, U> = Parameter<'b, Nervous, U>;
 type Memory<'b> = StateSlot<'b, Nervous, Dimensionless>;
 
 /// One breath is a pass of the phase through inspiration's length, while the pump drive rises toward its
-/// peak, and then expiration's, while it falls. Two positive lengths leave every breath room to end.
+/// peak, and then expiration's, while it falls. The phase runs at the breath's rate times the drive scale. Two positive lengths leave every breath room to end.
 /// Admission solves one heartbeat, and a phase that ran free could not return to itself inside one, so the
 /// body admits in `rest`, where the phase rests at zero, the drive at the breath's mean and the mixing share
 /// at the rest share, and a hazard starts the first breath.
 /// The mixing share rides line 86: the respiratory card's mixing exchange carries the breath's mean ventilation while
 /// the breath rests, and only the breath's modes say when it starts.
-pub(crate) fn breathe<'b>(laws: &mut FragmentBuilder<'b, Nervous>) -> Result<Memory<'b>, AdmissionError> {
+pub(crate) fn breathe<'b>(
+    laws: &mut FragmentBuilder<'b, Nervous>,
+    scale: &AlgebraicSlot<'b, Nervous, Dimensionless>,
+) -> Result<Memory<'b>, AdmissionError> {
     let class = RateClass::new(RateBand::Beat, 1_000_000_000)?;
-    let Breath { drive, share } = Breath::declare(laws, class)?;
+    let Breath { drive, share } = Breath::declare(laws, scale, class)?;
     let line: RespiratoryDrive<Defines<'b, Nervous>> = laws.emit();
     let mixing = laws.kernel(|mut k| {
         let value = k.state(&share);
@@ -29,7 +32,11 @@ struct Breath<'b> {
 }
 
 impl<'b> Breath<'b> {
-    fn declare(laws: &mut FragmentBuilder<'b, Nervous>, class: RateClass) -> Result<Self, AdmissionError> {
+    fn declare(
+        laws: &mut FragmentBuilder<'b, Nervous>,
+        scale: &AlgebraicSlot<'b, Nervous, Dimensionless>,
+        class: RateClass,
+    ) -> Result<Self, AdmissionError> {
         let key = ParameterKey::new;
         let [rest, inspiration, expiration] = laws.modes("breath", ["rest", "inspiration", "expiration"]);
         let phase = laws.state::<Dimensionless>("breath phase", Admissible::nonnegative());
@@ -92,7 +99,8 @@ impl<'b> Breath<'b> {
         laws.memory_rate(&drive, falling);
         for mode in [&inspiration, &expiration] {
             let advance = laws.kernel(|mut k| {
-                let value = k.parameter(&rate);
+                let (rate, scale) = (k.parameter(&rate), k.algebraic(scale));
+                let value = k.scale(rate, scale);
                 k.finish(value, mode.only(), class)
             });
             laws.memory_rate(&phase, advance);

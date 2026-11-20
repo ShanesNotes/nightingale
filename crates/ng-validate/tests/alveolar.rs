@@ -259,7 +259,15 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
             k.finish(held, laws.every_mode(), class)
         });
         laws.residual(&vagal, residual);
-        ng_nervous::breathing(&mut laws, &ports, &vagal)?;
+        let scale = laws.algebraic::<Dimensionless>("drive scale", Admissible::positive());
+        let stated = laws.parameter::<Dimensionless>(ParameterKey::new("fixture.drive-scale"), Admissible::positive());
+        let residual = laws.kernel(|mut k| {
+            let (held, value) = (k.algebraic(&scale), k.parameter(&stated));
+            let residual = k.subtract(held, value);
+            k.finish(residual, laws.every_mode(), class)
+        });
+        laws.residual(&scale, residual);
+        ng_nervous::breathing(&mut laws, &ports, (&vagal, &scale))?;
         body.add(laws.finish());
         let fragment = ng_receptor::declare(body.receptor()?)?;
         body.add(fragment);
@@ -422,6 +430,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Pressure>(p, "rs.room-vapour-pressure", unit.room_vapour)?;
     set::<Water>(p, "fixture.water-set", INTERSTITIUM_WATER_SET)?;
     set::<Rate<Dimensionless>>(p, "fixture.water-speed", INTERSTITIUM_WATER_SPEED)?;
+    set::<Dimensionless>(p, "fixture.drive-scale", 1.0)?;
     for (gas, key) in [(0, "rs.oxygen-inspired"), (1, "rs.carbon-dioxide-inspired")] {
         set::<Dimensionless>(p, key, INSPIRED[gas])?;
     }
@@ -459,6 +468,7 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
         RowKind::Algebraic(slot) if slot.law.owner == Receptor::CARD => effect(unit.rest_drive),
         RowKind::Algebraic(slot) if slot.law.local == "mixing_share" => unit.initial_mixing_share,
         RowKind::Algebraic(slot) if slot.law.local == "work_of_breathing" => stated_work(unit),
+        RowKind::Algebraic(slot) if slot.law.local == "drive scale" => 1.0,
         RowKind::Memory(_) | RowKind::Algebraic(_) => 0.0,
     };
     let breath = LawName {
