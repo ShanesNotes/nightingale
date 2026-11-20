@@ -5,7 +5,7 @@ type Bound<'b, U> = Parameter<'b, Nervous, U>;
 type Memory<'b> = StateSlot<'b, Nervous, Dimensionless>;
 
 /// One breath is a pass of the phase through inspiration's length, while the pump drive rises toward its
-/// peak, and then expiration's, while it falls. The phase runs at the breath's rate times the drive scale. Two positive lengths leave every breath room to end.
+/// peak, and then expiration's, while it falls. Two positive lengths leave every breath room to end.
 /// Admission solves one heartbeat, and a phase that ran free could not return to itself inside one, so the
 /// body admits in `rest`, where the phase rests at zero, the drive at the breath's mean and the mixing share
 /// at the rest share, and a hazard starts the first breath.

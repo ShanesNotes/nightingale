@@ -113,8 +113,8 @@ impl Start {
     fn admitted() -> Self {
         Self::admitted_with(|body| body_packet(body).expect("a packet"))
     }
-    /// The held run's own admission, on the body's packet with both chemoreflex gains zero: admission seals the packet
-    /// it admits and a run resumes only under its own, so the held run cannot branch from the controlled run's state.
+    /// The held run's own admission: admission seals the packet it admits and a run resumes only under its own, so
+    /// the held run cannot branch from the controlled run's state.
     fn held() -> Self {
         Self::admitted_with(|body| body_packet_with_the_drive_scale_held(body).expect("a packet"))
     }
@@ -305,6 +305,10 @@ fn the_body_admits_at_06_55(start: &Start) {
     );
 }
 
+fn smooth_max(a: f64, b: f64, width: f64) -> f64 {
+    0.5 * (a + b + ((a - b) * (a - b) + width * width).sqrt())
+}
+
 fn parameter(start: &Start, name: &'static str) -> Compensated {
     (start.provenance.values().iter())
         .find_map(|record| match record.name {
@@ -317,16 +321,15 @@ fn parameter(start: &Start, name: &'static str) -> Compensated {
 fn named(start: &Start, owner: &str, local: &str) -> RowId {
     (start.body.rows().iter())
         .find(|row| match row.kind() {
-            RowKind::Memory(slot) | RowKind::Algebraic(slot) => slot.law.owner == owner && slot.law.local == local,
+            RowKind::Memory(slot) | RowKind::Algebraic(slot) => {
+                slot.law.owner == owner && slot.law.local == local
+            }
             _ => false,
         })
         .unwrap_or_else(|| panic!("no row {local}"))
         .id()
 }
 
-/// The chemoreflex's rows and its packet's values: the drive scale `C = c_0 + G_p (x_p - r_p) / w_p - G_c (pH - r_c) /
-/// w_c`, the central sensor `pH` at the brain bed, and the peripheral sensor `x_p = (1 - S_a) smooth_max(PaCO2 - B_p,
-/// 0, w)` at the sampled arteries, with `PaCO2` blood chemistry's from the arteries' bicarbonate and acidity.
 struct Chemoreflex {
     scale: RowId,
     brain: RowId,
@@ -362,9 +365,18 @@ impl Chemoreflex {
         let value = |name| lead(parameter(start, name));
         Self {
             scale: named(start, "NS", "drive scale"),
-            brain: find(field("BC", "acidity", Context::Site(site::<CapillaryBed>("brain bed")))),
-            arteries: ["oxygen saturation", "bicarbonate", "acidity", "oxygen partial pressure"]
-                .map(|local| find(field("BC", local, arteries))),
+            brain: find(field(
+                "BC",
+                "acidity",
+                Context::Site(site::<CapillaryBed>("brain bed")),
+            )),
+            arteries: [
+                "oxygen saturation",
+                "bicarbonate",
+                "acidity",
+                "oxygen partial pressure",
+            ]
+            .map(|local| find(field("BC", local, arteries))),
             set_points: [
                 named(start, "NS", "central set point"),
                 named(start, "NS", "peripheral set point"),
@@ -379,9 +391,9 @@ impl Chemoreflex {
     fn read(&self, view: &AcceptedStateView<'_>) -> Sensed {
         let at = |row: RowId| lead(view.value(row));
         let [saturation, bicarbonate, acidity, oxygen] = self.arteries.map(at);
-        let pressure = bicarbonate / exp((acidity - PK) * core::f64::consts::LN_10) / CARBON_DIOXIDE_SOLUBILITY;
-        let above = pressure - self.offset;
-        let smooth = 0.5 * (above + (above * above + self.smoothing * self.smoothing).sqrt());
+        let pressure =
+            bicarbonate / exp((acidity - PK) * core::f64::consts::LN_10) / CARBON_DIOXIDE_SOLUBILITY;
+        let smooth = smooth_max(pressure - self.offset, 0.0, self.smoothing);
         Sensed {
             scale: view.value(self.scale),
             acidity: at(self.brain),
@@ -392,7 +404,6 @@ impl Chemoreflex {
             set_points: self.set_points.map(at),
         }
     }
-    /// The two arms, each the scale's move from its rest: the peripheral arm's rise and the central arm's.
     fn arms(&self, sensed: &Sensed) -> [f64; 2] {
         let [central, peripheral] = sensed.set_points;
         [
@@ -402,13 +413,12 @@ impl Chemoreflex {
     }
 }
 
-/// At the admitted instant the drive scale meets its form at that state's rows to 1e-12. Admission makes the scale one
-/// in the admitted beat's mean, through each set point's mean over the beat, and not at an instant: the brain bed's
-/// acidity swings with the beat, so a fit at the instant would miss one by that ripple, 7e-3. The run's first beat, to
-/// the heart's first phase reset, is not the admitted orbit's, since the breath starts inside it, so its mean, by the
-/// trapezoid over accepted states, is held to 1e-4 of the rest. The set points' change gives the mean on the solver's
-/// own quadrature, since each set point follows its sensor at the stated speed and the scale is linear in each
-/// sensor's distance from its set point, and the two methods differ by 1.6e-5.
+/// Admission makes the drive scale one in the admitted beat's mean, through each set point's mean over the beat, and
+/// not at an instant: the brain bed's acidity swings with the beat, so a fit at the instant would miss one by that
+/// ripple, 7e-3. The run's first beat, to the heart's first phase reset, is not the admitted orbit's, since the breath
+/// starts inside it, so its mean, by the trapezoid over accepted states, is held to 1e-4 of the rest. The set points'
+/// change gives the mean on the solver's own quadrature, since each set point follows its sensor at the stated speed
+/// and the scale is linear in each sensor's distance from its set point, and the two methods differ by 1.6e-5.
 fn the_drive_scale_at_admission_and_over_the_first_beat(start: &Start) -> String {
     let reflex = Chemoreflex::of(start);
     let beat = named(start, "CV", "phase");
@@ -438,7 +448,8 @@ fn the_drive_scale_at_admission_and_over_the_first_beat(start: &Start) -> String
     let speed = lead(parameter(start, "ns.chemo-set-point-speed"));
     let [central, peripheral] =
         [0, 1].map(|at| lead(held(&session, reflex.set_points[at]).minus(from[at])) / (speed * seconds));
-    let followed = rest + reflex.gains[1] * peripheral / reflex.widths[1] - reflex.gains[0] * central / reflex.widths[0];
+    let followed =
+        rest + reflex.gains[1] * peripheral / reflex.widths[1] - reflex.gains[0] * central / reflex.widths[0];
     let mean = area / last.0 as f64;
     assert!(
         (mean - rest).abs() <= 1e-4,
@@ -985,7 +996,6 @@ fn certified(start: &Start, minute: &Session<'_, Running>) -> Certificate {
     })
 }
 
-/// A book's worst ten-second change on the certificate, at the works' payers or away from them.
 fn worst_change(start: &Start, certificate: &Certificate, book: Book, at_payer: bool) -> f64 {
     (certificate.results().iter())
         .filter(|result| {
@@ -1007,24 +1017,21 @@ fn line(worst: f64, figures: &Figures) -> String {
     )
 }
 
-/// Admission's own tolerance, the packet's error scales: 1e-9 of a row's stated size and 1e-10 of its value, read here
-/// at a unit size, which is stricter for the rows the packet sizes larger.
-const ADMISSION: [f64; 2] = [1e-9, 1e-10];
 const MAIN_CLOSINGS: &str = "aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s\n";
 
-/// The held run admits on its own packet. No rest law reads the drive scale, so both admissions shut each valve at
-/// main's instants, and every row but the scale admits within admission's tolerance of the controlled run's.
+/// No rest law reads the drive scale, so both admissions shut each valve at main's instants, and every row but the
+/// scale admits within admission's tolerance of the controlled run's.
 fn the_held_body_admits_where_the_controlled_body_does(start: &Start, held: &Start) -> String {
     let [controlled, holding] = [start, held].map(|each| closings(&each.provenance));
     assert_eq!([controlled.as_str(), holding.as_str()], [MAIN_CLOSINGS; 2]);
-    let unit = |value| Measure::<Dimensionless>::new(value).expect("finite");
-    let tolerance = ErrorScales::uniform(unit(ADMISSION[0]), unit(ADMISSION[1])).expect("scales");
+    let tolerance = *start.provenance.tolerance();
     let scale = Chemoreflex::of(start).scale;
     let (ours, theirs) = (start.session(), held.session());
     let (ours, theirs) = (ours.record().accepted(), theirs.record().accepted());
     let mut most = (0.0, 0.0, None);
     for row in (start.body.rows().iter()).filter(|row| row.id() != scale) {
         let (x, y) = (lead(ours.value(row.id())), lead(theirs.value(row.id())));
+        // Read at a unit size, which is stricter than admission's for the rows the packet sizes larger.
         let share = (x - y).abs() / tolerance.at(x, 1.0);
         if share > most.0 {
             most = (share, (x - y).abs(), Some(row.kind()));
@@ -1048,24 +1055,26 @@ fn the_held_minute(held: &Start) -> (Session<'_, Running>, Watch) {
     (session, watch)
 }
 
-/// Gains of zero hold the drive scale at its rest's bits at every accepted step of the held run.
 fn the_held_runs_drive_scale_is_its_rest_at_every_step(held: &Start, watch: &Watch) -> String {
     let rest = parameter(held, "ns.drive-scale-rest").bits();
     let off: Vec<f64> = (watch.moments.iter())
         .filter(|moment| moment.sensed.scale.bits() != rest)
         .map(|moment| moment.at as f64 / SECOND as f64)
         .collect();
-    assert!(off.is_empty(), "the held run's drive scale leaves its rest at {off:?} s");
+    assert!(
+        off.is_empty(),
+        "the held run's drive scale leaves its rest at {off:?} s"
+    );
     format!(
         "held run: the drive scale is its rest's bits at all {} accepted steps\n",
         watch.moments.len()
     )
 }
 
-/// The sign walk's whole breaths: those from 30 s to the end of the minute.
+/// By 30 s the drive scale has stood over one for ten seconds, so the controlled run has ventilated more than the held
+/// run long enough to bring its carbon dioxide under the held run's.
 const WALK: [u64; 2] = [30, 60];
 
-/// One run's means over its whole breaths inside the walk.
 struct Walked {
     breaths: usize,
     length: f64,
@@ -1109,16 +1118,15 @@ fn walked(watch: &Watch) -> Walked {
     }
 }
 
-/// Every link of the loop moves its reader the way the loop needs, on the controlled run against the held run, each
-/// from its own admission, where the breath's own under-ventilation is the perturbation. Each link is judged by means
-/// over whole breaths, since the scale's ripple with the beat, 0.74%, is more than the central arm moves it in a
-/// minute, 0.2%. The walk takes the whole breaths from 30 s to the end of the minute: by 30 s the scale has stood over
-/// one for ten seconds, so the controlled run has ventilated more than the held run long enough to bring its carbon
-/// dioxide under the held run's. Each sensor is judged against its set point, the scale against one with the sign its
-/// arms give, the breath's length against the packet's period, and the plant, its ventilation and its alveolar and
-/// arterial carbon dioxide, against the held run. The oxygen readings stand beside them.
-fn every_link_moves_its_reader_the_way_the_loop_needs(start: &Start, controlled: &Watch, held: &Watch) -> String {
-    let period = (lead(parameter(start, "ns.inspiration-length")) + lead(parameter(start, "ns.expiration-length")))
+/// The breath's own under-ventilation is the perturbation. Each link is judged by means over whole breaths, since the
+/// scale's ripple with the beat, 0.74%, is more than the central arm moves it in a minute, 0.2%.
+fn every_link_moves_its_reader_the_way_the_loop_needs(
+    start: &Start,
+    controlled: &Watch,
+    held: &Watch,
+) -> String {
+    let period = (lead(parameter(start, "ns.inspiration-length"))
+        + lead(parameter(start, "ns.expiration-length")))
         / lead(parameter(start, "ns.breath-rate"));
     let (ours, theirs) = (walked(controlled), walked(held));
     let [central, peripheral] = ours.deviations;
@@ -1151,7 +1159,10 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(start: &Start, controlled:
         ),
         (
             "the breath to ventilation",
-            format!("{:.2} a second against held {:.2}", ours.ventilation, theirs.ventilation),
+            format!(
+                "{:.2} a second against held {:.2}",
+                ours.ventilation, theirs.ventilation
+            ),
             ours.ventilation > theirs.ventilation,
         ),
         (
@@ -1166,7 +1177,12 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(start: &Start, controlled:
             "alveolar to arterial carbon dioxide",
             format!(
                 "{:.4} against held {:.4}; arterial oxygen pressure {:.4} against held {:.4}, saturation {:.6} against held {:.6}",
-                ours.arterial, theirs.arterial, ours.oxygen[0], theirs.oxygen[0], ours.oxygen[1], theirs.oxygen[1]
+                ours.arterial,
+                theirs.arterial,
+                ours.oxygen[0],
+                theirs.oxygen[0],
+                ours.oxygen[1],
+                theirs.oxygen[1]
             ),
             ours.arterial < theirs.arterial,
         ),
@@ -1178,12 +1194,14 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(start: &Start, controlled:
     for (link, reading, _) in &links {
         writeln!(report, "{link}: {reading}").expect("a string takes it");
     }
-    let wrong: Vec<&str> = (links.iter()).filter(|(_, _, right)| !right).map(|(link, _, _)| *link).collect();
+    let wrong: Vec<&str> = (links.iter())
+        .filter(|(_, _, right)| !right)
+        .map(|(link, _, _)| *link)
+        .collect();
     assert!(wrong.is_empty(), "{report}wrong way: {wrong:?}");
     report
 }
 
-/// The held run's breathing books on its own certificate, beside the controlled run's.
 fn the_held_runs_breathing_books(held: &Start, minute: &Session<'_, Running>, watch: &Watch) -> String {
     let certificate = certified(held, minute);
     let figures = watch.figures();

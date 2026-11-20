@@ -3,10 +3,9 @@ use ng_contract::*;
 
 type Value<'b, 'k, U> = Expr<'b, 'k, Nervous, U>;
 
-/// The drive scale `C = c_0 + G_p (x_p - r_p) / w_p - G_c (pH - r_c) / w_c`: the central sensor reads the brain bed's
-/// plasma acidity, and the peripheral sensor research 11's `x_p = (1 - S_a) smooth_max(PaCO2 - B_p, 0, w)` at the
-/// sampled arteries. Each set point follows its sensor slowly, as the baroreflex's does, so admission solves it to the
-/// sensor's mean over the beat and the scale's mean there is its rest `c_0`. Gains of zero hold the scale at its rest.
+/// The peripheral sensor is research 11's `x_p = (1 - S_a) smooth_max(PaCO2 - B_p, 0, w)` at the sampled arteries.
+/// Each set point follows its sensor slowly, as the baroreflex's does, so admission solves it to the sensor's mean
+/// over the beat and the drive scale's mean there is its rest.
 pub(crate) fn declare<'b>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     reflex: RateClass,

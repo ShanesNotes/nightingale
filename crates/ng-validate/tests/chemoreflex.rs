@@ -21,7 +21,6 @@ const JUNCTION: &str = "respiratory pump junction";
 const ROOM: f64 = 700.0;
 const VAPOUR: f64 = 50.0;
 const DRY: f64 = ROOM - VAPOUR;
-/// Oxygen, carbon dioxide and nitrogen gas, in that order throughout.
 const INSPIRED: [f64; 3] = [0.21, 0.0, 0.79];
 const CONDUCTANCE: f64 = 1e5;
 const ELASTANCES: [f64; 2] = [1e-3, 3e-3];
@@ -64,9 +63,6 @@ const SMOOTHING: f64 = 0.5;
 const SET_POINT_SPEED: f64 = 1e-6;
 const REST: f64 = 1.0;
 
-/// What the switch moves while the void gate is open: saturation and acidity down by their steps, oxygen use and
-/// carbon dioxide production up by one share, so the membrane still trades equal volumes, and the pump's pressure down
-/// by its share.
 #[derive(Clone, Copy)]
 struct Steps {
     saturation: f64,
@@ -128,8 +124,6 @@ fn rest_shares() -> ([f64; 3], [f64; 3]) {
     (dead, alveolar)
 }
 
-/// The plasma's oxygen and carbon dioxide pressures at rest, each the alveolar pressure less its uptake over its
-/// diffusing conductance.
 fn rest_plasma() -> [f64; 2] {
     let (_, alveolar) = rest_shares();
     [
@@ -198,10 +192,8 @@ impl<'b> Plasma<'b> for Dissolved<'b> {
     }
 }
 
-/// Blood chemistry at the lung bed and the brain bed: each gas's pressure is its plasma amount times the same factor the
-/// respiratory card's membrane reads, so the peripheral sensor and the membrane see one carbon dioxide pressure, and
-/// saturation, bicarbonate and acidity are site parameters, saturation and acidity each less its step while the switch
-/// is open.
+/// Each gas's pressure is its plasma amount times the same factor the respiratory card's membrane reads, so the
+/// peripheral sensor and the membrane see one carbon dioxide pressure.
 fn stage<'b>(
     laws: &mut FragmentBuilder<'b, BloodChemistry>,
     ports: &BloodChemistryPorts<'b>,
@@ -773,12 +765,10 @@ fn trace(unit: Case, core: &dyn CoupledSolver) -> Result<Vec<Sample>, Initializa
     Ok(samples)
 }
 
-/// The peripheral sensor, `x_p = (1 - S) smooth_max(P - B_p, 0, w)`.
 fn peripheral(unit: Case, sample: &Sample) -> f64 {
     (1.0 - sample.saturation) * smooth_max(sample.pressure - unit.offset, 0.0, SMOOTHING)
 }
 
-/// The drive scale's form at a state's rows, `C = c_0 + G_p (x_p - r_p) / w_p - G_c (pH - r_c) / w_c`.
 fn scale_form(unit: Case, sample: &Sample) -> f64 {
     let [central, peripheral_gain] = unit.gains;
     let [central_set, peripheral_set] = sample.set_points;
@@ -793,7 +783,6 @@ fn edges(samples: &[Sample]) -> Vec<usize> {
         .collect()
 }
 
-/// The last `MEANS` whole breaths that end at or before `by`: the accepted states from one breath edge to another.
 fn last_breaths(samples: &[Sample], by: f64) -> &[Sample] {
     let ends: Vec<usize> = (edges(samples).into_iter())
         .filter(|&at| samples[at].at <= by)
@@ -801,7 +790,6 @@ fn last_breaths(samples: &[Sample], by: f64) -> &[Sample] {
     &samples[ends[ends.len() - 1 - MEANS]..=ends[ends.len() - 1]]
 }
 
-/// The time mean of `of` over whole breaths, by the trapezoid over accepted states.
 fn mean(breaths: &[Sample], of: impl Fn(&Sample) -> f64) -> f64 {
     let area: f64 = (breaths.windows(2))
         .map(|pair| 0.5 * (of(&pair[0]) + of(&pair[1])) * (pair[1].at - pair[0].at))
@@ -834,12 +822,9 @@ fn either_side(samples: &[Sample], at: u64) -> (Sample, Sample) {
     )
 }
 
-/// Each sensor's response is its form at every accepted state, with the peripheral sensor read above its offset, near
-/// it and below it. At admission each set point is its sensor and the scale its rest. Acidity stepped down at the
-/// brain bed raises the scale, and so does saturation stepped down at the lung bed; a held breath carries the
-/// carbon dioxide pressure from three widths under the offset to well over it. The runs use the reference integrator,
-/// whose Newton stops at rounding: the core's stops at a tenth of its step's estimate, which left the solved scale
-/// 2.4e-12 off its form.
+/// A held breath carries the carbon dioxide pressure from three widths under the offset to well over it. The runs use
+/// the reference integrator, whose Newton stops at rounding: the core's stops at a tenth of its step's estimate, which
+/// left the solved scale 2.4e-12 off its form.
 #[test]
 fn each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_peripheral_offset()
 -> Result<(), InitializationFailure> {
@@ -1049,8 +1034,7 @@ fn after_a_held_breath_the_breaths_carbon_dioxide_returns_to_where_it_was()
     Ok(())
 }
 
-/// Gains of zero leave the scale its rest exactly, whatever the sensors read, and the breath its packet's period: each
-/// breath edge lands past its crossing inside the core's 0.1 ms floor.
+/// Each breath edge lands past its crossing inside the core's 0.1 ms floor.
 #[test]
 fn gains_of_zero_hold_the_drive_scale_at_exactly_one_and_the_breath_at_the_packets_period()
 -> Result<(), InitializationFailure> {

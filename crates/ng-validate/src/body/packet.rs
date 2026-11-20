@@ -1254,12 +1254,14 @@ fn chemoreflex(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Dimensionless>(packet, "ns.drive-scale-rest", body, 1.0)
 }
 
-/// The peripheral sensor's `(1 - S_a) smooth_max(PaCO2 - B_p, 0, w)` at the packet's arterial guess.
 fn peripheral_guess() -> f64 {
     let arterial = blood("systemic arteries");
     let above = arterial.carbon_dioxide_pressure - PERIPHERAL_OFFSET;
-    let smooth = 0.5 * (above + (above * above + PERIPHERAL_SMOOTHING * PERIPHERAL_SMOOTHING).sqrt());
-    (1.0 - arterial.saturation) * smooth
+    (1.0 - arterial.saturation) * smooth_max(above, 0.0, PERIPHERAL_SMOOTHING)
+}
+
+fn smooth_max(a: f64, b: f64, width: f64) -> f64 {
+    0.5 * (a + b + ((a - b) * (a - b) + width * width).sqrt())
 }
 
 const LUNG_ELASTANCE: f64 = 1.6e-4;
