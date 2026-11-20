@@ -489,6 +489,15 @@ _Avoid_: activation (the heart's)
 **Release share**:
 At a junction that holds acetylcholine, the share of each traffic that releases it: the vagal traffic's and the pump drive's, each a site parameter. The sinoatrial junction takes the vagal traffic alone and the respiratory pump's junction the pump drive alone.
 
+**Drive scale**:
+The nervous card's factor on the breath's rate: its rest, plus the peripheral sensor's deviation and less the central sensor's, each over its width and times its gain. It is one in the admitted beat's mean, since admission solves each set point to its sensor's mean over the beat. Gains of zero hold it at its rest exactly. Only the breath's phase reads it.
+
+**Central sensor**:
+The acidity blood chemistry states in the brain bed's plasma, read at the central chemoreceptor. Acidity under its set point raises the drive scale.
+
+**Peripheral sensor**:
+What the sampled systemic arteries carry to the peripheral chemoreceptor: arterial carbon dioxide over the peripheral offset, smoothed at zero, times the oxygen saturation's shortfall from one. A value over its set point raises the drive scale.
+
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.
 
