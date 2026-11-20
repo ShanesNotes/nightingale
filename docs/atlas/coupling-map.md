@@ -126,8 +126,8 @@ Blood chemistry speciates the blood at every capillary bed and at each vessel se
 |---|---|---|---|
 | MT | `CapillaryBed` | oxygen partial pressure (08), carbon dioxide partial pressure (08) | none |
 | RS | `Beds<Lung>` | oxygen partial pressure (10), carbon dioxide partial pressure (10) | none |
-| NS | `Beds<Brain>` | acidity (11) | none |
-| NS | `Speciated` | oxygen saturation (11), carbon dioxide partial pressure (11) | none |
+| NS | `Beds<Brain>` | none | acidity |
+| NS | `Speciated` | none | oxygen partial pressure, carbon dioxide partial pressure |
 | RN | `Beds<Tubule>` | none | acidity |
 
 ## Tests the map implies
