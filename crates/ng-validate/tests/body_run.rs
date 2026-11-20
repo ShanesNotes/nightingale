@@ -1020,7 +1020,8 @@ fn line(worst: f64, figures: &Figures) -> String {
 const MAIN_CLOSINGS: &str = "aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s\n";
 
 /// No rest law reads the drive scale, so both admissions shut each valve at main's instants, and every row but the
-/// scale admits within admission's tolerance of the controlled run's.
+/// scale and every parameter admission calibrates, matched by key and binding, admits within admission's tolerance of
+/// the controlled run's.
 fn the_held_body_admits_where_the_controlled_body_does(start: &Start, held: &Start) -> String {
     let [controlled, holding] = [start, held].map(|each| closings(&each.provenance));
     assert_eq!([controlled.as_str(), holding.as_str()], [MAIN_CLOSINGS; 2]);
@@ -1042,8 +1043,38 @@ fn the_held_body_admits_where_the_controlled_body_does(start: &Start, held: &Sta
         share <= 1.0,
         "the held admission's {at:?} is {difference} from the controlled one's, {share} of admission's tolerance"
     );
+    let calibrated = |each: &Start| -> Vec<ValueRecord> {
+        (each.provenance.values().iter())
+            .filter(|record| matches!(record.provenance, ValueProvenance::Calibrated { .. }))
+            .copied()
+            .collect()
+    };
+    let (fitted, refitted) = (calibrated(start), calibrated(held));
+    assert_eq!(
+        fitted.len(),
+        refitted.len(),
+        "the two admissions calibrate different parameters"
+    );
+    let mut most = (0.0, 0.0, 0.0, None);
+    for record in &fitted {
+        let again = (refitted.iter())
+            .find(|again| again.name == record.name)
+            .unwrap_or_else(|| panic!("the held admission does not calibrate {:?}", record.name));
+        let (x, y) = (lead(record.value), lead(again.value));
+        let share = (x - y).abs() / tolerance.at(x, 1.0);
+        if share > most.0 {
+            most = (share, (x - y).abs(), (x - y).abs() / x.abs(), Some(record.name));
+        }
+    }
+    let (fitted_share, fitted_difference, relative, fitted_at) = most;
+    assert!(
+        fitted_share <= 1.0,
+        "the held admission calibrates {fitted_at:?} {fitted_difference} from the controlled one, {fitted_share} of \
+         admission's tolerance"
+    );
     format!(
-        "controlled admission: {controlled}held admission: {holding}largest difference over every row but the drive scale {difference:.3e}, {share:.3e} of admission's tolerance, at {at:?}\n"
+        "controlled admission: {controlled}held admission: {holding}largest difference over every row but the drive scale {difference:.3e}, {share:.3e} of admission's tolerance, at {at:?}; over the {} calibrated parameters {fitted_difference:.3e}, {relative:.3e} of its value and {fitted_share:.3e} of admission's tolerance, at {fitted_at:?}\n",
+        fitted.len()
     )
 }
 
@@ -1080,8 +1111,6 @@ struct Walked {
     length: f64,
     ventilation: f64,
     alveolar: [f64; 2],
-    arterial: f64,
-    oxygen: [f64; 2],
     scale: f64,
     deviations: [f64; 2],
     arms: [f64; 2],
@@ -1107,8 +1136,6 @@ fn walked(watch: &Watch) -> Walked {
         length: span / (edges.len() - 1) as f64,
         ventilation: tidal / span,
         alveolar: [0, 1].map(|gas| watch.mean(from, to, |moment| moment.alveolar[gas])),
-        arterial: mean(&|sensed| sensed.pressure),
-        oxygen: [mean(&|sensed| sensed.oxygen), mean(&|sensed| sensed.saturation)],
         scale: mean(&|sensed| lead(sensed.scale)),
         deviations: [
             mean(&|sensed| sensed.acidity - sensed.set_points[0]),
@@ -1118,8 +1145,62 @@ fn walked(watch: &Watch) -> Walked {
     }
 }
 
+/// One quantity's means in two runs over the same stretch of the clock, so both end together whatever each run's
+/// breath. The stretch cuts a breath at each end. Putting the mean of the whole breath beside a cut piece in place of
+/// the piece's samples moves that run's mean by at most the piece's share of the stretch times the farthest any of its
+/// samples sits from that mean: `reach` sums this over both ends of both runs, so a margin past it holds however the
+/// cut breaths are counted.
+struct Compared {
+    means: [f64; 2],
+    spans: [f64; 2],
+    reach: f64,
+}
+impl Compared {
+    fn margin(&self) -> f64 {
+        self.means[0] - self.means[1]
+    }
+}
+
+fn compared(ours: &Watch, theirs: &Watch, [from, to]: [u64; 2], of: impl Fn(&Moment) -> f64) -> Compared {
+    let one = |watch: &Watch| {
+        let moments = &watch.moments;
+        let first = (moments.iter())
+            .position(|moment| moment.at >= from * SECOND)
+            .expect("the stretch's start");
+        let last = (moments.iter())
+            .rposition(|moment| moment.at <= to * SECOND)
+            .expect("the stretch's end");
+        let edges: Vec<usize> = (watch.edges().into_iter())
+            .filter(|edge| (first..=last).contains(edge))
+            .collect();
+        assert!(edges.len() >= 2, "no whole breath from {from} s to {to} s");
+        let span = |a: usize, b: usize| (moments[b].at - moments[a].at) as f64;
+        let cut = |[a, b]: [usize; 2], [whole, next]: [usize; 2]| {
+            let beside = watch.mean(whole, next, &of);
+            let farthest = (a..=b)
+                .map(|at| (of(&moments[at]) - beside).abs())
+                .fold(0.0, larger);
+            span(a, b) * farthest
+        };
+        let n = edges.len();
+        let reach = cut([first, edges[0]], [edges[0], edges[1]])
+            + cut([edges[n - 1], last], [edges[n - 2], edges[n - 1]]);
+        let whole = span(first, last);
+        (watch.mean(first, last, &of), whole / SECOND as f64, reach / whole)
+    };
+    let [(ours, our_span, our_reach), (theirs, their_span, their_reach)] = [ours, theirs].map(one);
+    Compared {
+        means: [ours, theirs],
+        spans: [our_span, their_span],
+        reach: our_reach + their_reach,
+    }
+}
+
 /// The breath's own under-ventilation is the perturbation. Each link is judged by means over whole breaths, since the
-/// scale's ripple with the beat, 0.74%, is more than the central arm moves it in a minute, 0.2%.
+/// scale's ripple with the beat, 0.74%, is more than the central arm moves it in a minute, 0.2%. The arterial link is
+/// the exception: the held run's whole breaths end 4.4 s before the controlled run's while its arterial carbon dioxide
+/// climbs about 0.01 a breath, so the link is judged over the clock, and from 25 s and 35 s, the two starts that flipped
+/// it over whole breaths.
 fn every_link_moves_its_reader_the_way_the_loop_needs(
     start: &Start,
     controlled: &Watch,
@@ -1129,6 +1210,10 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(
         + lead(parameter(start, "ns.expiration-length")))
         / lead(parameter(start, "ns.breath-rate"));
     let (ours, theirs) = (walked(controlled), walked(held));
+    let arterial = |from: u64| compared(controlled, held, [from, WALK[1]], |moment| moment.sensed.pressure);
+    let (judged, [earlier, later]) = (arterial(WALK[0]), [WALK[0] - 5, WALK[0] + 5].map(arterial));
+    let oxygen = compared(controlled, held, WALK, |moment| moment.sensed.oxygen).means;
+    let saturation = compared(controlled, held, WALK, |moment| moment.sensed.saturation).means;
     let [central, peripheral] = ours.deviations;
     let links = [
         (
@@ -1176,15 +1261,25 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(
         (
             "alveolar to arterial carbon dioxide",
             format!(
-                "{:.4} against held {:.4}; arterial oxygen pressure {:.4} against held {:.4}, saturation {:.6} against held {:.6}",
-                ours.arterial,
-                theirs.arterial,
-                ours.oxygen[0],
-                theirs.oxygen[0],
-                ours.oxygen[1],
-                theirs.oxygen[1]
+                "over the clock from {} s to {} s, {:.4} s and {:.4} s, {:.4} against held {:.4}, by {:+.3e} where the cut breaths reach {:.3e}; from {} s by {:+.3e}, from {} s by {:+.3e}; arterial oxygen pressure {:.4} against held {:.4}, saturation {:.6} against held {:.6}",
+                WALK[0],
+                WALK[1],
+                judged.spans[0],
+                judged.spans[1],
+                judged.means[0],
+                judged.means[1],
+                judged.margin(),
+                judged.reach,
+                WALK[0] - 5,
+                earlier.margin(),
+                WALK[0] + 5,
+                later.margin(),
+                oxygen[0],
+                oxygen[1],
+                saturation[0],
+                saturation[1]
             ),
-            ours.arterial < theirs.arterial,
+            judged.margin() < -judged.reach && earlier.margin() < 0.0 && later.margin() < 0.0,
         ),
     ];
     let mut report = format!(
@@ -2508,7 +2603,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         Of(Vasopressin): worst 3.4251e-3, from admission 5.4883e-4, steady 3.2924e-3, inside a breath 2.0938e-2
         controlled admission: aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
         held admission: aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
-        largest difference over every row but the drive scale 8.052e-10, 8.260e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "systemic arteries", class: VesselSegment }, space: Lumen, species: Vasopressin })
+        largest difference over every row but the drive scale 8.052e-10, 8.260e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "systemic arteries", class: VesselSegment }, space: Lumen, species: Vasopressin }); over the 3 calibrated parameters 6.651e-12, 2.431e-14 of its value and 2.345e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
         held run: the drive scale is its rest's bits at all 11680 accepted steps
         held Energy: worst 1.4583e3, from admission 8.4422e0, steady 1.4594e3, inside a breath 7.3025e2
         held Element(Carbon): worst 4.6100e1, from admission 3.8271e1, steady 4.3161e1, inside a breath 2.0145e2
@@ -2524,7 +2619,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         the drive scale to the breath: 4.9012 s a breath against the period 5.0000 s, held 5.0001 s
         the breath to ventilation: 2234.14 a second against held 2201.44
         ventilation to alveolar carbon dioxide: 28.9237 against held 28.9602; alveolar oxygen 99.4185 against held 99.3669
-        alveolar to arterial carbon dioxide: 30.0003 against held 30.0020; arterial oxygen pressure 90.1278 against held 90.1683, saturation 0.958949 against held 0.958989
+        alveolar to arterial carbon dioxide: over the clock from 30 s to 60 s, 29.9997 s and 29.9986 s, 30.0006 against held 30.0094, by -8.739e-3 where the cut breaths reach 2.618e-3; from 25 s by -6.643e-3, from 35 s by -1.141e-2; arterial oxygen pressure 90.1228 against held 90.1065, saturation 0.958942 against held 0.958907
         two breaths from 64.316 s to 74.045 s
         Oxygen: in 4560.2375, out 3637.1692, across 899.2353, along 922.1879, gained 2.3833e1
         CarbonDioxide: in 8.6862, out 679.7044, across -667.3050, along -671.3639, gained -3.7132e0

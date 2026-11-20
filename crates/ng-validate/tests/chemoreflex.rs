@@ -591,7 +591,12 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     }
     let (dead, alveolar) = rest_shares();
     let [oxygen, carbon_dioxide] = rest_plasma();
-    let measure = (1.0 - SATURATION) * smooth_max(carbon_dioxide - unit.offset, 0.0, SMOOTHING);
+    let above = smooth_max(
+        PER_AMOUNT * (carbon_dioxide / PER_AMOUNT) - unit.offset,
+        0.0,
+        SMOOTHING,
+    );
+    let measure = above - above * SATURATION;
     let lung = ELASTANCES[0] * RESTS[0] + ELASTANCES[1] * RESTS[1];
     let lung = lung / (ELASTANCES[0] + ELASTANCES[1]);
     let guess = |row: RowKind| match row {
@@ -899,16 +904,15 @@ fn each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_periph
 
 /// The drive scale is one in the admitted beat's mean, and with its sensors steady the fixture's beat is its instant.
 /// An instant packet solves no memory, so each set point admits where the packet states it: the central one at the
-/// staged acidity's bits, and the peripheral one at the sensor's closed form on the staged plasma, 2 ulps over the
-/// form at the admitted rows. That rounding leaves the scale 2 ulps under its rest.
+/// staged acidity's bits, and the peripheral one by the sensor's own operations on the pressure the staged plasma
+/// amount gives, so the scale admits at its rest's bits.
 #[test]
 fn with_its_sensors_steady_the_drive_scale_admits_at_its_rest() -> Result<(), InitializationFailure> {
     let samples = trace(Case { seconds: 0, ..SENSED }, &ng_solver::Core::new(SECOND / 100))?;
     let admitted = samples[0];
     let [central, peripheral_set] = admitted.set_points;
-    let from = |x: f64| (x.to_bits() as i64 - REST.to_bits() as i64).abs();
     assert!(
-        central.to_bits() == admitted.acidity.to_bits() && from(admitted.scale) <= 2,
+        central.to_bits() == admitted.acidity.to_bits() && admitted.scale.to_bits() == REST.to_bits(),
         "the drive scale admits at {}, its set points at {central} and {peripheral_set} against the sensors {} and \
          {}",
         admitted.scale,
