@@ -1200,8 +1200,8 @@ test = "-p ng-validate --test transaction a_history_one_window_long_is_certified
 [[mutant]]
 name = "one-window-slides-past-admission"
 path = "crates/ng-validate/src/certificate.rs"
-old = '''let mut to = if policy.windows.coverage_ns == length {'''
-new = '''let mut to = if policy.windows.coverage_ns == 0 {'''
+old = '''let last = if policy.windows.coverage_ns == length {'''
+new = '''let last = if policy.windows.coverage_ns == 0 {'''
 test = "-p ng-validate --test transaction a_coverage_of_one_window_is_the_window_from_admission_however_far_the_history_runs"
 
 [[mutant]]
@@ -3551,7 +3551,126 @@ path = "crates/ng-validate/src/certificate.rs"
 old = '''            result.closure_last_places = last_places;
             result.closure_place = place;'''
 new = '''            let _ = (last_places, place);'''
-test = "-p ng-validate --test closure_rounding"
+test = "-p ng-validate --test certificate_shapes the_worst_closure_reports_the_place_of_its_own_windows_closing_total"
+
+[[mutant]]
+name = "certificate-refuses-a-policy-of-another-basis"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if policy.basis != view.basis().digest() {'''
+new = '''if false && policy.basis != view.basis().digest() {'''
+test = "-p ng-validate --test transaction coverage_under_48_hours_and_a_policy_of_another_basis_fail"
+
+[[mutant]]
+name = "certificate-refuses-a-history-shorter-than-its-coverage"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if span.length_ns() < policy.windows.coverage_ns {'''
+new = '''if false && span.length_ns() < policy.windows.coverage_ns {'''
+test = "-p ng-validate --test transaction coverage_under_48_hours_and_a_policy_of_another_basis_fail"
+
+[[mutant]]
+name = "certificate-counts-each-piece-once"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''self.pieces += 1;'''
+new = '''self.pieces += 2;'''
+test = "-p ng-validate --test transaction closure_holds_over_every_window_and_drift_tells_a_closed_body_from_an_open_one"
+
+[[mutant]]
+name = "certificate-earliest-closure-failure-wins"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''Err(failure) => (self.failed, self.done) = (Some(failure), true),'''
+new = '''Err(failure) => self.failed = Some(failure),'''
+test = "-p ng-validate --test certificate_shapes a_closure_failure_outranks_an_earlier_drift_failure"
+
+[[mutant]]
+name = "certificate-earliest-drift-failure-wins"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''self.drifted = self.drifted.or(pair.drifted);'''
+new = '''self.drifted = pair.drifted.or(self.drifted);'''
+test = "-p ng-validate --test certificate_shapes a_closure_failure_outranks_an_earlier_drift_failure"
+
+[[mutant]]
+name = "certificate-closure-outranks-drift"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if let Some(failure) = self.failed.or(self.drifted) {'''
+new = '''if let Some(failure) = self.drifted.or(self.failed) {'''
+test = "-p ng-validate --test certificate_shapes a_closure_failure_outranks_an_earlier_drift_failure"
+
+[[mutant]]
+name = "certificate-tie-keeps-the-earliest-closure-window"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if !closure.at_most(result.worst_closure) {'''
+new = '''if result.worst_closure.at_most(closure) {'''
+test = "-p ng-validate --test certificate_shapes of_equal_worst_windows_the_earliest_is_kept"
+
+[[mutant]]
+name = "certificate-tie-keeps-the-earliest-drift-window"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if !drift.at_most(result.worst_drift) {'''
+new = '''if result.worst_drift.at_most(drift) {'''
+test = "-p ng-validate --test certificate_shapes of_equal_worst_windows_the_earliest_is_kept"
+
+[[mutant]]
+name = "certificate-shared-start-judged-by-both-pieces"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''Stretch::Between { from, to } => (from, to, 2),'''
+new = '''Stretch::Between { from, to } => (from, to, 1),'''
+test = "-p ng-validate --test certificate_shapes a_shared_start_is_judged_by_both_of_its_pieces_and_the_earlier_ones_steps_are_reported"
+
+[[mutant]]
+name = "certificate-pieces-cut-at-shifted-starts"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let to = (end(trailing).min(end(leading) - length)).min(self.last);'''
+new = '''let to = end(trailing).min(self.last);'''
+test = "-p ng-validate --test transaction the_worst_window_can_start_inside_a_segment"
+
+[[mutant]]
+name = "certificate-one-window-leads-to-its-boundary"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''self.first + length <= end(leading)'''
+new = '''self.first + length < end(leading)'''
+test = "-p ng-validate --test transaction a_coverage_of_one_window_is_the_window_from_admission_however_far_the_history_runs"
+
+[[mutant]]
+name = "held-support-passes-over-a-flow-not-finite"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if finite(flow) && !flow.at_most(self.kept.0) {'''
+new = '''if !flow.at_most(self.kept.0) {'''
+test = "-p ng-validate --lib certificate::tests::held_support_keeps_the_earliest_largest_finite_flow_unless_the_last_is_not_finite"
+
+[[mutant]]
+name = "held-support-keeps-a-last-flow-not-finite"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if finite(self.last.0) { self.kept } else { self.last }'''
+new = '''self.kept'''
+test = "-p ng-validate --lib certificate::tests::held_support_keeps_the_earliest_largest_finite_flow_unless_the_last_is_not_finite"
+
+[[mutant]]
+name = "held-support-tie-keeps-the-earliest-window"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if finite(flow) && !flow.at_most(self.kept.0) {'''
+new = '''if finite(flow) && self.kept.0.at_most(flow) {'''
+test = "-p ng-validate --lib certificate::tests::held_support_keeps_the_earliest_largest_finite_flow_unless_the_last_is_not_finite"
+
+[[mutant]]
+name = "time-order-refuses-a-bad-link"
+path = "crates/ng-record/src/history.rs"
+old = '''let walked = walked?;'''
+new = '''let Ok(walked) = walked else { break };'''
+test = "-p ng-validate --test history a_walk_in_time_order_refuses_the_link_a_walk_newest_first_refuses"
+
+[[mutant]]
+name = "certificate-history-error-outranks-closure"
+path = "crates/ng-record/src/history.rs"
+old = '''let walked = walked?;'''
+new = '''let Ok(walked) = walked else { break };'''
+test = "-p ng-validate --test certificate_shapes a_history_error_outranks_a_closure_failure_and_the_newer_of_two_bad_links_is_reported"
+
+[[mutant]]
+name = "time-order-starts-before-its-instant"
+path = "crates/ng-record/src/history.rs"
+old = '''let before = |start: SimTime| start < instant;'''
+new = '''let before = |start: SimTime| start <= instant;'''
+test = "-p ng-validate --test history a_cursor_starts_before_its_instant_and_reaches_the_step_that_holds_it_within_a_page"
 
 [[mutant]]
 name = "oxygen-wall-diffusion-held"

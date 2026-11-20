@@ -193,3 +193,41 @@ fn a_shared_start_is_judged_by_both_of_its_pieces_and_the_earlier_ones_steps_are
         "seven last places for each of water's three row updates in each step of the earlier piece"
     );
 }
+
+#[test]
+fn the_worst_closure_reports_the_place_of_its_own_windows_closing_total() {
+    // The rows round their transfer from the start. The first window closes before the inflow starts, on a total
+    // of 1,024, and later ones on totals up to 2^20 and 1,024.
+    let (span, length, from) = (6 * HOUR, 2 * HOUR, 10_200 * SECOND);
+    let inflow = Delivery {
+        id: b"inflow",
+        from: SimTime::from_ns(from),
+        to: SimTime::from_ns(span),
+        amount: measure(f64::from(1 << 20)),
+    };
+    let case = TwoReservoirs::delivering([measure(600.0), measure(424.0)], vec![inflow])
+        .expect("a body")
+        .until(SimTime::from_ns(span));
+    let (store, core) = (MemoryStore::default(), ng_solver::Core::new(100 * MILLISECOND));
+    let session = to(case.admit(&core, &store).expect("admitted"), case.end());
+    let view = session.conservation();
+    let mut ledger = Ledger::sliding(view.basis(), length, span, 0.0, 1e-12, 1e9);
+    ledger.policy = (ledger.policy)
+        .admitting_row_rounding(case.body(), 7)
+        .expect("a policy");
+    ledger.admit_row_rounding(case.body(), 7);
+    let certificate = certified(&view, &ledger).expect("within seven last places per row update");
+    let water = certificate.results()[0];
+    let end = water.closure_window().end().nanoseconds();
+    let total = 1_024.0 + f64::from(1 << 20) * (end.saturating_sub(from) as f64 / (span - from) as f64);
+    let place = ((total.to_bits() >> 52) - 105) << 52;
+    assert!(
+        total >= 2_048.0,
+        "the worst window closes on {total}, past the first window's binade"
+    );
+    assert_eq!(
+        water.closure_place().bits()[0],
+        place,
+        "the place of {total} at {end} ns"
+    );
+}

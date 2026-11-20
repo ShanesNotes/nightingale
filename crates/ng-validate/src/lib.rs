@@ -282,7 +282,7 @@ pub use body::{
 pub use burning::BurningBeds;
 pub use certificate::{
     Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, HeldSupport,
-    QuantityPolicy, QuantityResult, SlidingWindows, certify, certify_newest_first,
+    QuantityPolicy, QuantityResult, SlidingWindows, certify,
 };
 pub use day::{
     DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict, day_checks,

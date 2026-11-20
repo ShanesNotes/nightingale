@@ -439,7 +439,7 @@ struct Pair {
     carried: Vec<Carried>,
 }
 
-enum Verdict {
+enum Outcome {
     Holds,
     Drifts,
     Open,
@@ -448,7 +448,7 @@ struct Balance {
     closure: Compensated,
     place: Compensated,
     drift: Compensated,
-    verdict: Verdict,
+    outcome: Outcome,
 }
 
 /// One window of one combination, from its inventory at the window's late and early ends, the gross inflow and
@@ -469,18 +469,18 @@ fn balance(
         last_places,
     );
     let drift = change.abs();
-    let verdict = if !closure.at_most(allowed) {
-        Verdict::Open
+    let outcome = if !closure.at_most(allowed) {
+        Outcome::Open
     } else if !drift.at_most(limits.drift.unwrap_or(allowed)) {
-        Verdict::Drifts
+        Outcome::Drifts
     } else {
-        Verdict::Holds
+        Outcome::Holds
     };
     Balance {
         closure,
         place,
         drift,
-        verdict,
+        outcome,
     }
 }
 
@@ -527,12 +527,12 @@ fn pair(
                 window: Some(interval),
                 residual,
             };
-            match balance.verdict {
-                Verdict::Open => return Err(failure(CertificateCheck::Closure, balance.closure)),
-                Verdict::Drifts if drifted.is_none() => {
+            match balance.outcome {
+                Outcome::Open => return Err(failure(CertificateCheck::Closure, balance.closure)),
+                Outcome::Drifts if drifted.is_none() => {
                     drifted = Some(failure(CertificateCheck::Drift, balance.drift));
                 }
-                Verdict::Drifts | Verdict::Holds => {}
+                Outcome::Drifts | Outcome::Holds => {}
             }
             windows.push(Window {
                 quantity: at,
@@ -577,8 +577,8 @@ fn finite(value: Compensated) -> bool {
 }
 
 /// The most a held route carried one way, over windows seen in time order: the earliest of the largest finite
-/// flows, unless the last window's flow is not finite. Held support has no bound, so the walk newest first kept
-/// that last flow, met first, and nothing replaced it.
+/// flows, unless the last window's flow is not finite. Held support has no bound, so nothing refuses such a flow,
+/// and the certificate has always reported it when the last window carried it.
 #[derive(Clone, Copy)]
 struct Most {
     kept: (Compensated, Interval),
@@ -700,9 +700,9 @@ impl<'p> Windows<'p> {
             done: false,
         }
     }
-    /// Judges every piece the trailing segment, which holds the next start, and the leading one, which holds that
-    /// window's end, reach, and says which of them it needs next; `None` once the last start is judged or a window
-    /// failed closure.
+    /// Judges each piece that the trailing segment, which holds the next start, and the leading segment, which holds
+    /// that start's window end, reach, then names the segment it needs next: `None` once the last start is judged or
+    /// a window failed closure.
     fn offer(
         &mut self,
         (behind, trailing): (u64, &HistorySegment),
@@ -783,20 +783,6 @@ pub fn certify(
     view: &ConservationView<'_>,
     policy: &CertificatePolicy,
 ) -> Result<Certificate, CertificateFailure> {
-    let walked = in_time_order(view, policy);
-    parity::compare(
-        view,
-        policy,
-        &walked,
-        &newest_first::certify_newest_first(view, policy),
-    );
-    walked
-}
-
-fn in_time_order(
-    view: &ConservationView<'_>,
-    policy: &CertificatePolicy,
-) -> Result<Certificate, CertificateFailure> {
     let coverage = of_history(CertificateCheck::Coverage);
     if policy.basis != view.basis().digest() {
         return Err(coverage);
@@ -828,354 +814,6 @@ fn in_time_order(
     }
     windows.finish(view, span)
 }
-
-mod parity {
-    use super::{Certificate, CertificateFailure, CertificatePolicy, ConservationView};
-
-    fn bits(result: &Result<Certificate, CertificateFailure>) -> Vec<[u64; 2]> {
-        let Ok(certificate) = result else {
-            return result
-                .as_ref()
-                .err()
-                .map(|failure| failure.residual.bits())
-                .into_iter()
-                .collect();
-        };
-        let mut bits = Vec::new();
-        for result in &certificate.results {
-            let values = [
-                result.closure_floor,
-                result.closure_relative,
-                result.worst_closure,
-                result.closure_place,
-                result.worst_drift,
-            ];
-            bits.extend(values.map(|value| value.bits()));
-        }
-        for support in &certificate.support {
-            bits.extend([support.most_inflow, support.most_outflow].map(|value| value.bits()));
-        }
-        bits
-    }
-
-    /// Transient: both walks on every call, one line each, and a panic when they differ.
-    pub(super) fn compare(
-        view: &ConservationView<'_>,
-        policy: &CertificatePolicy,
-        forward: &Result<Certificate, CertificateFailure>,
-        backward: &Result<Certificate, CertificateFailure>,
-    ) {
-        let same = format!("{forward:?}") == format!("{backward:?}") && bits(forward) == bits(backward);
-        let thread = std::thread::current();
-        let name = thread.name().unwrap_or("-");
-        let span = view
-            .span()
-            .map_or("-".to_string(), |span| span.length_ns().to_string());
-        let outcome = match forward {
-            Ok(certificate) => format!("Ok pieces {}", certificate.pieces),
-            Err(failure) => format!("Err {:?}", failure.check),
-        };
-        let windows = policy.windows;
-        let verdict = if same { "same" } else { "DIFFER" };
-        let line = format!(
-            "parity: {name} | {} {} {span} | {outcome} | {verdict}\n",
-            windows.window_ns, windows.coverage_ns
-        );
-        let written = std::io::Write::write_all(&mut std::io::stderr().lock(), line.as_bytes());
-        written.expect("stderr takes the parity line");
-        assert!(
-            same,
-            "the walks differ\nin time order: {forward:#?}\nnewest first: {backward:#?}"
-        );
-    }
-}
-
-mod newest_first {
-    use super::{
-        Carried, Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, Compensated,
-        ExpectedDrift, HeldSupport, Pair, QuantityResult, Stretch, Window, admitted, last_place, of_history,
-    };
-    use ng_contract::{BoundaryDirection, HeldRoute, Interval, SimTime};
-    use ng_record::{ConservationView, Curve, HistorySegment, NewestFirst};
-
-    struct Holding<'r> {
-        walk: NewestFirst<'r>,
-        at: Option<HistorySegment>,
-        admission: u64,
-        taken: u64,
-    }
-    impl<'r> Holding<'r> {
-        fn new(view: &ConservationView<'r>, admission: u64) -> Self {
-            Self {
-                walk: view.newest_first(),
-                at: None,
-                admission,
-                taken: 0,
-            }
-        }
-        fn holding(&mut self, instant: u64) -> Result<(&HistorySegment, u64), CertificateFailure> {
-            let admission = self.admission;
-            let before = |segment: &HistorySegment| {
-                let start = segment.interval().start().nanoseconds();
-                let opens_the_history = start == admission;
-                start < instant || opens_the_history
-            };
-            while !self.at.as_ref().is_some_and(before) {
-                let next = self.walk.next().ok_or(of_history(CertificateCheck::Coverage))?;
-                let read = |error| of_history(CertificateCheck::History(error));
-                self.at = Some(next.map_err(read)?);
-                self.taken += 1;
-            }
-            let taken = self.taken;
-            (self.at.as_ref().map(|at| (at, taken))).ok_or(of_history(CertificateCheck::Coverage))
-        }
-    }
-
-    fn pair(
-        policy: &CertificatePolicy,
-        routes: &[HeldRoute],
-        trailing: &HistorySegment,
-        leading: &HistorySegment,
-        (stretch, steps): (Stretch, u64),
-    ) -> Result<Pair, CertificateFailure> {
-        let coverage = of_history(CertificateCheck::Coverage);
-        let length = policy.windows.window_ns.get();
-        let (early, late) = (trailing.interval(), leading.interval());
-        let ends =
-            |later: &Curve<'_>, earlier: &Curve<'_>| stretch.ends((later, late), (earlier, early), length);
-        let differences = |later: &Curve<'_>, earlier: &Curve<'_>| {
-            let ends = ends(later, earlier)?;
-            Some(
-                ends.into_iter()
-                    .map(|(later, earlier)| later.minus(earlier))
-                    .collect::<Vec<_>>(),
-            )
-        };
-        let window = |start: u64| {
-            Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length)).ok_or(coverage)
-        };
-        let mut drifted = None;
-        let mut windows = Vec::with_capacity(2 * policy.quantities.len());
-        for (at, limits) in policy.quantities.iter().enumerate() {
-            let quantity = limits.quantity;
-            let inventory =
-                ends(&leading.inventory(quantity), &trailing.inventory(quantity)).ok_or(coverage)?;
-            let inflow =
-                differences(&leading.inflow(quantity), &trailing.inflow(quantity)).ok_or(coverage)?;
-            let outflow =
-                differences(&leading.outflow(quantity), &trailing.outflow(quantity)).ok_or(coverage)?;
-            let rounding = &policy.rounding;
-            let last_places = (rounding
-                .last_places_an_update
-                .saturating_mul(rounding.updates_a_step[at]))
-            .saturating_mul(steps);
-            for (index, start) in stretch.starts().enumerate() {
-                let interval = window(start)?;
-                let (closing, opening) = inventory[index];
-                let change = closing.minus(opening);
-                let closure = change.minus(inflow[index].minus(outflow[index])).abs();
-                let gross = inflow[index].plus(outflow[index]);
-                let place = last_place(closing);
-                let allowed = admitted(
-                    limits.absolute.plus(gross.times(&limits.relative)),
-                    place,
-                    last_places,
-                );
-                if !closure.at_most(allowed) {
-                    return Err(CertificateFailure {
-                        check: CertificateCheck::Closure,
-                        quantity: Some(quantity),
-                        window: Some(interval),
-                        residual: closure,
-                    });
-                }
-                let drift = change.abs();
-                if !drift.at_most(limits.drift.unwrap_or(allowed)) && drifted.is_none() {
-                    drifted = Some(CertificateFailure {
-                        check: CertificateCheck::Drift,
-                        quantity: Some(quantity),
-                        window: Some(interval),
-                        residual: drift,
-                    });
-                }
-                windows.push(Window {
-                    quantity: at,
-                    interval,
-                    closure,
-                    last_places,
-                    place,
-                    drift,
-                });
-            }
-        }
-        let mut carried = Vec::with_capacity(2 * routes.len());
-        for (at, route) in routes.iter().enumerate() {
-            let ((forward, reverse), (forward_before, reverse_before)) = (
-                leading.exchange(route.column()),
-                trailing.exchange(route.column()),
-            );
-            let forward = differences(&forward, &forward_before).ok_or(coverage)?;
-            let reverse = differences(&reverse, &reverse_before).ok_or(coverage)?;
-            let (inflow, outflow) = match route.forward() {
-                BoundaryDirection::IntoBody => (forward, reverse),
-                BoundaryDirection::OutOfBody => (reverse, forward),
-            };
-            for (index, start) in stretch.starts().enumerate() {
-                carried.push(Carried {
-                    route: at,
-                    interval: window(start)?,
-                    inflow: inflow[index],
-                    outflow: outflow[index],
-                });
-            }
-        }
-        Ok(Pair {
-            drifted,
-            windows,
-            carried,
-        })
-    }
-
-    fn keep_the_earliest_most(most: &mut [Option<HeldSupport>], routes: &[HeldRoute], carried: Vec<Carried>) {
-        for window in carried.into_iter().rev() {
-            let Carried {
-                route,
-                interval,
-                inflow,
-                outflow,
-            } = window;
-            let support = most[route].get_or_insert(HeldSupport {
-                route: routes[route],
-                most_inflow: inflow,
-                inflow_window: interval,
-                most_outflow: outflow,
-                outflow_window: interval,
-            });
-            if support.most_inflow.at_most(inflow) {
-                support.most_inflow = inflow;
-                support.inflow_window = interval;
-            }
-            if support.most_outflow.at_most(outflow) {
-                support.most_outflow = outflow;
-                support.outflow_window = interval;
-            }
-        }
-    }
-
-    /// `windows` came earlier in time than every window `worst` has seen, so a tie replaces.
-    fn keep_the_earliest_worst(
-        worst: &mut [Option<QuantityResult>],
-        policy: &CertificatePolicy,
-        windows: Vec<Window>,
-    ) {
-        for window in windows.into_iter().rev() {
-            let Window {
-                quantity,
-                interval,
-                closure,
-                last_places,
-                place,
-                drift,
-            } = window;
-            let limits = &policy.quantities[quantity];
-            let result = worst[quantity].get_or_insert(QuantityResult {
-                quantity: limits.quantity,
-                closure_floor: limits.absolute,
-                closure_relative: Compensated::of(&limits.relative),
-                row_rounding: policy.rounding.last_places_an_update,
-                worst_closure: closure,
-                closure_window: interval,
-                closure_last_places: last_places,
-                closure_place: place,
-                worst_drift: drift,
-                drift_window: interval,
-            });
-            if result.worst_closure.at_most(closure) {
-                result.worst_closure = closure;
-                result.closure_window = interval;
-                result.closure_last_places = last_places;
-                result.closure_place = place;
-            }
-            if result.worst_drift.at_most(drift) {
-                result.worst_drift = drift;
-                result.drift_window = interval;
-            }
-        }
-    }
-
-    /// Closure failures win over drift, so a `Drift` failure says the ledger closed everywhere and the body
-    /// still moved. It walks the store newest first and reports what a walk in time order would: the earliest
-    /// failing window, and the earliest of equal worst windows.
-    pub fn certify_newest_first(
-        view: &ConservationView<'_>,
-        policy: &CertificatePolicy,
-    ) -> Result<Certificate, CertificateFailure> {
-        let coverage = of_history(CertificateCheck::Coverage);
-        if policy.basis != view.basis().digest() {
-            return Err(coverage);
-        }
-        let span = view.span().ok_or(coverage)?;
-        if span.length_ns() < policy.windows.coverage_ns {
-            return Err(coverage);
-        }
-        let ExpectedDrift::Zero = policy.expected;
-        let routes = view.basis().coverage().held_routes();
-        let length = policy.windows.window_ns.get();
-        let first = span.start().nanoseconds();
-        let (mut early, mut late) = (Holding::new(view, first), Holding::new(view, first));
-        let mut worst: Vec<Option<QuantityResult>> = vec![None; policy.quantities.len()];
-        let mut most: Vec<Option<HeldSupport>> = vec![None; routes.len()];
-        let (mut failed, mut drifted) = (None, None);
-        let mut pieces = 0;
-        let mut to = if policy.windows.coverage_ns == length {
-            first
-        } else {
-            span.end().nanoseconds() - length
-        };
-        loop {
-            let (trailing, behind) = early.holding(to)?;
-            let (leading, ahead) = late.holding(to + length)?;
-            let steps = behind.abs_diff(ahead) + 1;
-            let start = |segment: &HistorySegment| segment.interval().start().nanoseconds();
-            let from = start(trailing).max(start(leading).saturating_sub(length));
-            pieces += 1;
-            let stretch = if to == first {
-                Stretch::FromAdmission { at: first }
-            } else {
-                Stretch::Between { from, to }
-            };
-            match pair(policy, routes, trailing, leading, (stretch, steps)) {
-                Err(failure) => failed = Some(failure),
-                Ok(pair) => {
-                    drifted = pair.drifted.or(drifted);
-                    keep_the_earliest_worst(&mut worst, policy, pair.windows);
-                    keep_the_earliest_most(&mut most, routes, pair.carried);
-                }
-            }
-            if from == first {
-                break;
-            }
-            to = from;
-        }
-        if let Some(failure) = failed.or(drifted) {
-            return Err(failure);
-        }
-        let results = worst.into_iter().collect::<Option<Vec<_>>>().ok_or(coverage)?;
-        let support = most.into_iter().collect::<Option<Vec<_>>>().ok_or(coverage)?;
-        Ok(Certificate {
-            seal: view.seal(),
-            basis: policy.basis,
-            policy: policy.digest(),
-            windows: policy.windows,
-            span,
-            results,
-            coverage: view.basis().coverage().clone(),
-            support,
-            pieces,
-        })
-    }
-}
-pub use newest_first::certify_newest_first;
 
 #[cfg(test)]
 mod tests {
