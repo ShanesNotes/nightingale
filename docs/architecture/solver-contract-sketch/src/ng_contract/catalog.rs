@@ -372,19 +372,20 @@ coupling_map! {
         relation "the pleural space's pressure, felt by every bed it encloses",
         relation "the pleural space's pressure, felt by every bed it encloses, defined by the breath from ticket 10";
     83 Respiratory => Nervous, "lung afferents", input,
-        wired (LungAfferents { pulmonary_stretch: Dimensionless => 11 });
+        held [pulmonary_stretch: Dimensionless => Respiratory
+            "a resting day's breaths stay under the volume at which stretch slows the breath (ticket 11)"];
     84 Respiratory => Metabolism, "work of breathing", outside "neither end in the arena slice",
         wired (WorkOfBreathing { work_of_breathing: Rate<Energy> => 10 });
     85 Respiratory => Musculoskeletal, "pump load", outside "neither end in the arena slice",
         held [pump_load: Pressure => Respiratory "no law reads the pump's load at rung 0: the pump's fatigue is held"];
     86 Nervous => Respiratory, "respiratory drive", sink,
-        wired (RespiratoryDrive { respiratory_drive: Dimensionless => 11 });
+        wired (RespiratoryDrive { mixing_share: Dimensionless => 11 });
     87 Nervous => Metabolism, "thermostat, shiver and sweat", sink,
         wired (ShiverDrive { shiver_drive: Dimensionless => 12 })
         held [thermostat_set_point: Temperature => Nervous "the set point is NS memory and no MT law reads it",
             sweat_drive: Dimensionless => Nervous "sweat answers release at the skin junction (S10)"];
     88 Nervous => Musculoskeletal, "motor drive", sink,
-        wired (MotorDrive { motor_drive: Dimensionless => 11 });
+        relation "release at the respiratory pump's junction";
     89 Nervous => Endocrine, "CRH, vasopressin, circadian phase", sink,
         wired (HypothalamicDrive { vasopressin_drive: Dimensionless => 17 })
         held [crh_drive: Dimensionless => Nervous "cortisol's profile follows the clock input directly (ticket 20)",
@@ -401,7 +402,7 @@ coupling_map! {
     94 Metabolism => BloodChemistry, "temperature", outside "neither end in the arena slice",
         held [temperature: Temperature => BloodChemistry "BC's speciation runs at a reference temperature (ticket 12)"];
     95 Musculoskeletal => Respiratory, "pump force and fatigue", outside "neither end in the arena slice",
-        wired (PumpForce { pump_force: Pressure => 10, mixing_share: Dimensionless => 10 })
+        wired (PumpForce { pump_force: Pressure => 10 })
         held [fatigue: Dimensionless => Musculoskeletal "a resting day has no fatigue law"];
     96 Musculoskeletal => Cardiovascular, "position and gravity",
         relation "site positions under the boundary's posture",
@@ -461,9 +462,9 @@ pub const WHOLE_BODY: Count = Census::WholeBody.count();
 const _: () = assert!(SLICE.mapped() + SLICE.unmapped() == MAP_EDGES);
 const _: () = assert!(SLICE.mapped() == 27 && SLICE.unmapped() == 11);
 const _: () = assert!(SLICE.incident_mapped == 27 && SLICE.incident_unmapped == 1);
-const _: () = assert!(WHOLE_BODY.live == 16 && WHOLE_BODY.relation == 5 && WHOLE_BODY.held == 17);
+const _: () = assert!(WHOLE_BODY.live == 14 && WHOLE_BODY.relation == 6 && WHOLE_BODY.held == 18);
 const FIELDS: FieldCount = field_count();
-const _: () = assert!(FIELDS.wired == 19 && FIELDS.held == 32 && FIELDS.wire_and_hold == 7);
+const _: () = assert!(FIELDS.wired == 16 && FIELDS.held == 33 && FIELDS.wire_and_hold == 7);
 const _: () = {
     let mut i = 0;
     while i < MAP_EDGES {
@@ -512,21 +513,22 @@ const _: () = {
     census_lines!(
         Census::WholeBody,
         Disposition::Live,
-        [77, 78, 79, 80, 83, 84, 86, 87, 88, 89, 90, 91, 95, 97, 98, 114]
+        [77, 78, 79, 80, 84, 86, 87, 89, 90, 91, 95, 97, 98, 114]
     );
-    census_lines!(Census::WholeBody, Disposition::AnatomyRelation { .. }, [82, 96, 99, 101, 104]);
+    census_lines!(Census::WholeBody, Disposition::AnatomyRelation { .. }, [82, 88, 96, 99, 101, 104]);
     census_lines!(
         Census::WholeBody,
         Disposition::Held,
-        [81, 85, 92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
+        [81, 83, 85, 92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
     );
 };
 
 const _: () = {
-    let plan: [(usize, &str, &str); 32] = [
+    let plan: [(usize, &str, &str); 33] = [
         (78, "flow_per_bed", "CV"),
         (79, "ventricular_wall_stress", "CV"),
         (81, "pulmonary_capillary_flow", "CV"),
+        (83, "pulmonary_stretch", "RS"),
         (85, "pump_load", "RS"),
         (87, "thermostat_set_point", "NS"),
         (87, "sweat_drive", "NS"),
@@ -575,23 +577,20 @@ const _: () = {
     assert!(n == plan.len());
 };
 const _: () = {
-    let plan: [(usize, &str, u8); 19] = [
+    let plan: [(usize, &str, u8); 16] = [
         (77, "carotid_sinus_stretch", 6),
         (77, "aortic_arch_stretch", 6),
         (78, "myocardial_work", 9),
         (79, "atrial_wall_stress", 17),
         (80, "capillary_pressure", 6),
         (80, "venous_pressure", 6),
-        (83, "pulmonary_stretch", 11),
         (84, "work_of_breathing", 10),
-        (86, "respiratory_drive", 11),
+        (86, "mixing_share", 11),
         (87, "shiver_drive", 12),
-        (88, "motor_drive", 11),
         (89, "vasopressin_drive", 17),
         (90, "oxygen_debt_per_bed", 9),
         (91, "core_temperature", 12),
         (95, "pump_force", 10),
-        (95, "mixing_share", 10),
         (97, "afferent_tone", 6),
         (98, "renin_secretion", 17),
         (114, "viscosity", 8),

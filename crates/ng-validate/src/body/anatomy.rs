@@ -213,6 +213,7 @@ pub fn body_anatomy() -> Result<Anatomy, AdmissionError> {
         (Landmark::Islets, arteries.id()),
         (Landmark::Parathyroid, arteries.id()),
         (Landmark::IronStore, liver.id()),
+        (Landmark::RespiratoryPump, pump.id()),
     ] {
         map.landmark(landmark, site, site);
     }

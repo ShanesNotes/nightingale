@@ -25,6 +25,41 @@ pub(crate) fn release<'b, Q: Substance>(
     ns.transfer_at(&release, out);
 }
 
+/// Release at every junction that holds `Q` by two traffics in that junction's shares, `q_i (s_v f_v + s_m a)`: the
+/// vagal traffic `f_v` and the pump drive `a`. Model adaptation of research 02's `q_i f`.
+pub(crate) fn release_by_shares<'b, Q: Substance>(
+    ns: &mut FragmentBuilder<'b, Nervous>,
+    ports: &NervousPorts<'b>,
+    (traffic, drive): (
+        &AlgebraicSlot<'b, Nervous, Dimensionless>,
+        &StateSlot<'b, Nervous, Dimensionless>,
+    ),
+    release_key: &'static str,
+    class: RateClass,
+) {
+    let release = ports.release::<Q>(ns);
+    let key = ParameterKey::new;
+    let released =
+        ns.site_parameter::<Junction, Rate<Dimensionless>>(key(release_key), Admissible::positive());
+    let vagal =
+        ns.site_parameter::<Junction, Dimensionless>(key("ns.vagal-share"), Admissible::unit_interval());
+    let motor =
+        ns.site_parameter::<Junction, Dimensionless>(key("ns.motor-share"), Admissible::unit_interval());
+    let out = ns.site_kernel(|mut k| {
+        let store = k.at_site(&release.from_amount::<Q>());
+        let (zero, speed) = (k.zero(), k.site_parameter(&released));
+        let emptying = k.relax(store, zero, speed);
+        let (firing, pumping) = (k.algebraic(traffic), k.state(drive));
+        let (vagal, motor) = (k.site_parameter(&vagal), k.site_parameter(&motor));
+        let firing = k.scale(firing, vagal);
+        let pumping = k.scale(pumping, motor);
+        let both = k.add(firing, pumping);
+        let rate = k.scale(emptying, both);
+        k.finish(rate, ns.every_mode(), class)
+    });
+    ns.transfer_at(&release, out);
+}
+
 /// Reuptake is first order.
 pub(crate) fn reuptake<'b, Q: Substance>(
     ns: &mut FragmentBuilder<'b, Nervous>,

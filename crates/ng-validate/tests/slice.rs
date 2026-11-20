@@ -1,6 +1,6 @@
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::catalog::{
-    BaroreceptorAfferents, CapillaryAndVenousPressure, Defines, LungAfferents, Reads, RespiratoryDrive,
+    BaroreceptorAfferents, CapillaryAndVenousPressure, CoreTemperature, Defines, Reads, ShiverDrive,
 };
 use ng_contract::*;
 use ng_validate::*;
@@ -426,23 +426,28 @@ fn coupled_loop() -> Result<CompiledBody, AdmissionError> {
     assemble(Schema::new(map.finish()?)?, |mut body| {
         let fast = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let (mut laws, _ports) = body.nervous()?.parts();
-        let out: RespiratoryDrive<Defines<'_, Nervous>> = laws.emit();
-        let back: LungAfferents<Reads<'_, Nervous>> = laws.receive();
-        let b = laws.parameter::<Dimensionless>(ParameterKey::new("bench.b"), Admissible::finite());
+        let out: ShiverDrive<Defines<'_, Nervous>> = laws.emit();
+        let back: CoreTemperature<Reads<'_, Nervous>> = laws.receive();
+        let b = laws.parameter::<Quotient<Dimensionless, Temperature>>(
+            ParameterKey::new("bench.b"),
+            Admissible::finite(),
+        );
         let drive = laws.kernel(|mut k| {
-            let stretch = k.read(&back.pulmonary_stretch);
+            let warmth = k.read(&back.core_temperature);
             let gain = k.parameter(&b);
-            let value = k.scale(stretch, gain);
+            let product = k.multiply(gain, warmth);
+            let value = k.as_dimension(product);
             k.finish(value, laws.every_mode(), fast)
         });
-        laws.define(&out.respiratory_drive, drive);
+        laws.define(&out.shiver_drive, drive);
         body.add(laws.finish());
 
-        let declaration = HeldDeclaration::<Respiratory>::new(vec![], vec![], "a synthetic bench");
+        let declaration = HeldDeclaration::<Metabolism>::new(vec![], vec![], "a synthetic bench");
         let (mut laws, _ports) = body.hold(declaration)?.parts();
-        let out: LungAfferents<Defines<'_, Respiratory>> = laws.emit();
-        let back: RespiratoryDrive<Reads<'_, Respiratory>> = laws.receive();
-        let a = laws.parameter::<Dimensionless>(ParameterKey::new("bench.a"), Admissible::finite());
+        let out: CoreTemperature<Defines<'_, Metabolism>> = laws.emit();
+        let back: ShiverDrive<Reads<'_, Metabolism>> = laws.receive();
+        let a = laws.parameter::<Temperature>(ParameterKey::new("bench.a"), Admissible::finite());
+        let degree = laws.parameter::<Temperature>(ParameterKey::new("bench.degree"), Admissible::finite());
         let slope =
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("bench.slope"), Admissible::finite());
         let climbing = laws.state::<Dimensionless>("climbing", Admissible::finite());
@@ -451,15 +456,16 @@ fn coupled_loop() -> Result<CompiledBody, AdmissionError> {
             k.finish(rate, laws.every_mode(), fast)
         });
         laws.memory_rate(&climbing, climb);
-        let stretch = laws.kernel(|mut k| {
-            let drive = k.read(&back.respiratory_drive);
+        let warmth = laws.kernel(|mut k| {
+            let drive = k.read(&back.shiver_drive);
             let gain = k.parameter(&a);
-            let scaled = k.scale(drive, gain);
-            let base = k.state(&climbing);
+            let scaled = k.scale(gain, drive);
+            let (degree, climbed) = (k.parameter(&degree), k.state(&climbing));
+            let base = k.scale(degree, climbed);
             let value = k.add(scaled, base);
             k.finish(value, laws.every_mode(), fast)
         });
-        laws.define(&out.pulmonary_stretch, stretch);
+        laws.define(&out.core_temperature, warmth);
         body.add(laws.finish());
         body.compile()
     })
@@ -470,14 +476,21 @@ fn a_loop_of_two_couplings_is_solved_as_one_coupled_step() -> Result<(), Initial
     let store = MemoryStore::default();
     let body = coupled_loop()?;
     let named = |owner, local| LawName { owner, local };
-    let climbing = RowKind::Memory(named("RS", "climbing").into());
-    let stretch = RowKind::Algebraic(named("RS", "pulmonary_stretch").into());
-    let drive = RowKind::Algebraic(named("NS", "respiratory_drive").into());
+    let climbing = RowKind::Memory(named("MT", "climbing").into());
+    let stretch = RowKind::Algebraic(named("MT", "core_temperature").into());
+    let drive = RowKind::Algebraic(named("NS", "shiver_drive").into());
     let mut packet = ParameterPacket::new();
-    for key in ["bench.a", "bench.b"] {
-        let value = Measure::<Dimensionless>::new(0.5)?;
-        packet.synthetic(ParameterKey::new(key), Binding::Body, value, "synthetic")?;
-    }
+    let a = Measure::<Temperature>::new(0.5)?;
+    packet.synthetic(ParameterKey::new("bench.a"), Binding::Body, a, "synthetic")?;
+    let b = Measure::<Quotient<Dimensionless, Temperature>>::new(0.5)?;
+    packet.synthetic(ParameterKey::new("bench.b"), Binding::Body, b, "synthetic")?;
+    let degree = Measure::<Temperature>::new(1.0)?;
+    packet.synthetic(
+        ParameterKey::new("bench.degree"),
+        Binding::Body,
+        degree,
+        "synthetic",
+    )?;
     let slope = Measure::<Rate<Dimensionless>>::new(3.0)?;
     packet.synthetic(
         ParameterKey::new("bench.slope"),
@@ -485,9 +498,10 @@ fn a_loop_of_two_couplings_is_solved_as_one_coupled_step() -> Result<(), Initial
         slope,
         "synthetic",
     )?;
-    for (row, start) in [(climbing, 3.0), (stretch, 4.0), (drive, 2.0)] {
+    for (row, start) in [(climbing, 3.0), (drive, 2.0)] {
         packet.start(row, Measure::<Dimensionless>::new(start)?, "synthetic")?;
     }
+    packet.start(stretch, Measure::<Temperature>::new(4.0)?, "synthetic")?;
     let core = ReferenceIntegrator::new(SECOND);
     let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core, &store)?;
     let Ok(session) = run_until(session, SimTime::from_ns(SECOND)) else {

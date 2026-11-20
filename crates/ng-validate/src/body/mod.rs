@@ -75,7 +75,7 @@ pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
         body.add(fragment);
         let fragment = ng_renal::declare(body.renal()?)?;
         body.add(fragment);
-        let fragment = ng_nervous::declare(body.nervous()?)?;
+        let fragment = ng_nervous::declare_in_the_whole_body(body.nervous()?)?;
         body.add(fragment);
         let fragment = ng_receptor::declare(body.receptor()?)?;
         body.add(fragment);

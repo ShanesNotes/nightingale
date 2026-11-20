@@ -591,6 +591,7 @@ The gut bed and the portal vein are the slice's splanchnic bed and veins, which 
 |---|---|---|
 | central chemoreceptor | brain bed | 11 |
 | peripheral chemoreceptor | systemic arteries | 11 |
+| respiratory pump | respiratory pump junction, the pump drive's effect | 11 |
 | skin thermoreceptor | skin heat site | 12 |
 | osmoreceptor | brain bed | 17 |
 | volume receptor | central veins | 17 |
@@ -662,19 +663,19 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | 80 | CV to FL, capillary and venous pressure | `capillary_pressure`: wired by 06, live in the slice; `venous_pressure`: wired by 06, live in the slice |
 | 81 | CV to RS, pulmonary capillary flow | `pulmonary_capillary_flow`: held at rung 0, the exchange reads the plasma's own partial pressures, which the blood's own transport into its plasma sets |
 | 82 | RS to CV, pleural pressure | `pleural pressure`: anatomy relation, the pleural space's pressure felt by every bed it encloses, defined by the breath from ticket 10 |
-| 83 | RS to NS, lung afferents | `pulmonary_stretch`: wired by 11 |
+| 83 | RS to NS, lung afferents | `pulmonary_stretch`: held at rung 0 by RS, a resting day's breaths stay under the volume at which stretch slows the breath (ticket 11) |
 | 84 | RS to MT, work of breathing | `work of breathing`: wired by 10 |
 | 85 | RS to MS, pump load | `pump load`: held at rung 0, no law reads the pump's load while the pump's fatigue is held |
-| 86 | NS to RS, respiratory drive | `respiratory_drive`: wired by 11 |
+| 86 | NS to RS, respiratory drive | `mixing_share`: wired by 11, the breath's mixing share, which NS holds under the breath's modes |
 | 87 | NS to MT, thermostat, shiver and sweat | `thermostat_set_point`: held at rung 0, the set point is NS memory and no MT law reads it; `shiver_drive`: wired by 12, read by the muscle bed's heat, since shivering is a somatic motor command; `sweat_drive`: held at rung 0, sweat answers release at the skin junction (S10) |
-| 88 | NS to MS, motor drive | `motor_drive`: wired by 11, release at the respiratory pump's junction |
+| 88 | NS to MS, motor drive | `motor drive`: anatomy relation, release at the respiratory pump's junction (11) |
 | 89 | NS to EN, CRH, vasopressin, circadian phase | `crh_drive`: held at rung 0, cortisol's profile follows the clock input directly (ticket 20); `vasopressin_drive`: wired by 17; `circadian_phase`: held at rung 0, the clock is a boundary input every law reads (ticket 05) |
 | 90 | MT to CV, O2 debt per bed, temperature | `oxygen_debt_per_bed`: wired by 09; `temperature`: held at rung 0, CV's laws run at a reference temperature |
 | 91 | MT to NS, temperature | `core_temperature`: wired by 12 |
 | 92 | MT to HC, temperature | `temperature`: held at rung 0, HC's laws run at a reference temperature (ticket 12) |
 | 93 | MT to HP, temperature | `temperature`: held at rung 0, HP's laws run at a reference temperature (ticket 12) |
 | 94 | MT to BC, temperature | `temperature`: held at rung 0, BC's speciation runs at a reference temperature (ticket 12) |
-| 95 | MS to RS, pump force and fatigue | `pump force`: wired by 10; `mixing_share`: wired by 10 until ticket 11 moves it; `fatigue`: held at rung 0, a resting day has no fatigue law |
+| 95 | MS to RS, pump force and fatigue | `pump force`: wired by 10; `fatigue`: held at rung 0, a resting day has no fatigue law |
 | 96 | MS to CV, position and gravity | `position`: anatomy relation, site positions under the boundary's posture; `gravity`: anatomy relation, the hydrostatic head those positions give |
 | 97 | RN to CV, tubuloglomerular feedback | `afferent_tone`: wired by 06, live in the slice |
 | 98 | RN to EN, renin | `renin_secretion`: wired by 17 |
@@ -695,7 +696,7 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | 113 | FL to MS, skin and compartment water | `skin_water`: held at rung 0, pressure injury is absent; `compartment_water`: held at rung 0, limb compartments are absent |
 | 114 | HC to CV, bleeding competence, viscosity, thrombosis | `bleeding_competence`: held at rung 0, no bleeding edge (ticket 21); `viscosity`: wired by 08; `thrombosis`: held at rung 0, zero flux (ticket 21) |
 
-Totals at rung 0: 16 arrows wire at least one field, 5 are anatomy relations, and 17 hold every field. Arrows 78, 79, 87, 89, 90, 95 and 114 wire some fields and hold others.
+Totals at rung 0: 14 arrows wire at least one field, 6 are anatomy relations, and 18 hold every field. Arrows 78, 79, 87, 89, 90, 95 and 114 wire some fields and hold others.
 
 ### Fork owners
 

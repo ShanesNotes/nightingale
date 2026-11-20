@@ -233,6 +233,15 @@ fn body_01() -> Vec<Row> {
             ]],
         ),
         row(
+            "ticket 11's pump drive, released as acetylcholine at the respiratory pump's junction",
+            &[Acetylcholine],
+            &[&[
+                (&["respiratory pump junction"], Space::Vesicle),
+                (&["respiratory pump junction"], Space::Cleft),
+                (&["respiratory pump junction"], Space::Bound),
+            ]],
+        ),
+        row(
             "the slice's body stores, 01:568 skin heat store, 06:31 the airway's heat store, 01:165 each bed's heat",
             &[Energy],
             &[&[
@@ -338,7 +347,7 @@ fn the_whole_body_holds_its_sites_and_pools() -> Result<(), AdmissionError> {
         pooled.len(),
         pools.len()
     );
-    expect!["sites 43, sites with a pool 38, pools 1248, by space {Plasma: 352, Interstitium: 300, Cells: 160, Lumen: 386, Fluid: 2, Vesicle: 8, Cleft: 8, Bound: 9, Elastic: 1, Thermal: 14, Gas: 8}"]
+    expect!["sites 43, sites with a pool 38, pools 1251, by space {Plasma: 352, Interstitium: 300, Cells: 160, Lumen: 386, Fluid: 2, Vesicle: 9, Cleft: 9, Bound: 10, Elastic: 1, Thermal: 14, Gas: 8}"]
     .assert_eq(&pin);
     Ok(())
 }
@@ -902,11 +911,15 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
     let basis = body.conserved_basis();
     let stated = body.bind(body_packet(&body)?)?.packet_hash().digest();
     let pin = format!(
-        "rows {} {kinds:?}, columns {}, jacobian nonzeros {}, blocks {}, parameter slots {}, conserved combinations {}, held pools {}, held route columns {}\nmodel hash {}\nconserved basis {}\nstated packet {}\n",
+        "rows {} {kinds:?}, columns {}, jacobian nonzeros {}, blocks {}, largest block {}, parameter slots {}, conserved combinations {}, held pools {}, held route columns {}\nmodel hash {}\nconserved basis {}\nstated packet {}\n",
         body.rows().len(),
         body.columns().len(),
         body.sparsity().unknowns().len(),
         body.blocks().len(),
+        (body.blocks().iter())
+            .map(|block| block.rows().len())
+            .max()
+            .unwrap_or(0),
         body.parameters().len(),
         basis.combinations().len(),
         basis.coverage().pools().len(),
@@ -916,10 +929,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1453 {"algebraic": 189, "amount": 1248, "memory": 16}, columns 1460, jacobian nonzeros 10092, blocks 430, parameter slots 727, conserved combinations 397, held pools 318, held route columns 88
-        model hash da29b233a160110e7037250aa14b24c1d700bf94a3aaabb5a241446e2ea38db8
-        conserved basis c92e95858d2c64fbdf19a00399c9e12409c151548f8d4dc1e392f153ad01e397
-        stated packet 3e4843c53ad79a90cda913669670db13104c6c02b164b3102e1d382d47c008e4
+        rows 1457 {"algebraic": 190, "amount": 1251, "memory": 16}, columns 1463, jacobian nonzeros 10107, blocks 427, largest block 651, parameter slots 737, conserved combinations 398, held pools 318, held route columns 88
+        model hash 7b6c75ce8f42fe14d3b1ea842d42a92c86aa614b304709a05fe038ec504a545f
+        conserved basis de45607d7612d7f3cad530d632e838b8a6dc0395dbc0d6d85da7f1222b42267d
+        stated packet 28a81ece02c47561e9353f184bc88e7808429a28e1acb17ec3ec3bf4372ed05e
     "#]].assert_eq(&pin);
     Ok(())
 }

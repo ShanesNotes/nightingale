@@ -244,6 +244,18 @@ fn start_guess(row: RowKind) -> f64 {
             (_, Species::CarbonDioxide) => 78.5,
             _ => 2_703.5,
         },
+        RowKind::Amount {
+            site,
+            species: Species::Acetylcholine,
+            space,
+        } if site.key() == PUMP_JUNCTION => {
+            let [vesicle, cleft, bound] = PUMP.steady(BODY_RHYTHM.mean_drive());
+            match space {
+                Space::Vesicle => vesicle,
+                Space::Cleft => cleft,
+                _ => bound,
+            }
+        }
         RowKind::Amount { site, species, space } => {
             if let Some(rest) = burn_rest(site.key(), species, space) {
                 return rest;
@@ -298,7 +310,7 @@ fn start_guess(row: RowKind) -> f64 {
                 "acidity" => blood.acidity,
                 "oxygen_debt_per_bed" => 0.0,
                 "chest wall rest volume" => BODY_RHYTHM.wall_rest(),
-                "pump_force" => BODY_RHYTHM.pump() * BODY_RHYTHM.mean_drive(),
+                "pump_force" => BODY_RHYTHM.rest_force(),
                 "work_of_breathing" => BODY_RHYTHM.work(),
                 _ => 1.0,
             }
@@ -617,7 +629,7 @@ pub fn body_packet_at_viscosity_exponent(
     };
     packet.start_mode(stirring, "still", NOTE)?;
     let breath = LawName {
-        owner: Musculoskeletal::CARD,
+        owner: Nervous::CARD,
         local: "breath",
     };
     packet.start_mode(breath, "rest", NOTE)?;
@@ -897,6 +909,17 @@ fn table(
     set::<Affinity<Acetylcholine>>(packet, "rc.ach-on", junctions, 10.0)?;
     set::<Rate<Dimensionless>>(packet, "rc.ach-off", junctions, 10.0)?;
     set::<Dimensionless>(packet, "rc.ach-efficacy", junctions, 2.0)?;
+    set::<Dimensionless>(packet, "ns.vagal-share", junctions, 1.0)?;
+    set::<Dimensionless>(packet, "ns.motor-share", junctions, 0.0)?;
+    let pump = Binding::Site(site::<Junction>(PUMP_JUNCTION)?);
+    set::<Dimensionless>(packet, "ns.vagal-share", pump, 0.0)?;
+    set::<Dimensionless>(packet, "ns.motor-share", pump, 1.0)?;
+    set::<Rate<Dimensionless>>(packet, "ns.release-ach", pump, PUMP.release)?;
+    set::<Rate<Dimensionless>>(packet, "ns.reuptake-ach", pump, PUMP.reuptake)?;
+    set::<Acetylcholine>(packet, "rc.ach-sites", pump, PUMP.sites)?;
+    set::<Affinity<Acetylcholine>>(packet, "rc.ach-on", pump, PUMP.on)?;
+    set::<Rate<Dimensionless>>(packet, "rc.ach-off", pump, PUMP.off)?;
+    set::<Dimensionless>(packet, "rc.ach-efficacy", pump, PUMP.efficacy)?;
     set::<Vasopressin>(packet, "rc.avp-sites", blood, 1.0)?;
     set::<Affinity<Concentration<Vasopressin>>>(packet, "rc.avp-on", blood, 0.6)?;
     set::<Rate<Dimensionless>>(packet, "rc.avp-off", blood, 0.1)?;
@@ -1165,21 +1188,21 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Dimensionless>(packet, "rs.room-humidity", body, 0.5)?;
     set::<Pressure>(packet, "rs.room-vapour-pressure", body, 20.0)?;
     for (key, value) in [
-        ("ms.breath-rate", BODY_RHYTHM.rate),
-        ("ms.drive-rise", BODY_RHYTHM.rise),
-        ("ms.drive-fall", BODY_RHYTHM.fall),
-        ("ms.rest-speed", 1.0),
-        ("ms.share-fall", 1.0),
-        ("ms.breath-start", 1_000.0),
+        ("ns.breath-rate", BODY_RHYTHM.rate),
+        ("ns.drive-rise", BODY_RHYTHM.rise),
+        ("ns.drive-fall", BODY_RHYTHM.fall),
+        ("ns.rest-speed", 1.0),
+        ("ns.share-fall", 1.0),
+        ("ns.breath-start", 1_000.0),
     ] {
         set::<Rate<Dimensionless>>(packet, key, body, value)?;
     }
     for (key, value) in [
-        ("ms.inspiration-length", BODY_RHYTHM.inspiration),
-        ("ms.expiration-length", BODY_RHYTHM.expiration),
-        ("ms.drive-peak", BODY_RHYTHM.peak),
-        ("ms.rest-drive", BODY_RHYTHM.mean_drive()),
-        ("ms.rest-share", 1.0),
+        ("ns.inspiration-length", BODY_RHYTHM.inspiration),
+        ("ns.expiration-length", BODY_RHYTHM.expiration),
+        ("ns.drive-peak", BODY_RHYTHM.peak),
+        ("ns.rest-drive", BODY_RHYTHM.mean_drive()),
+        ("ns.rest-share", 1.0),
     ] {
         set::<Dimensionless>(packet, key, body, value)?;
     }
@@ -1223,6 +1246,10 @@ pub struct BodyBreath {
     pub rest_drive: Measure<Dimensionless>,
     pub mixing: Measure<Rate<Volume>>,
     pub alveolar_ventilation: Measure<Rate<Volume>>,
+    /// `PImax`, fitted through the pump junction's kinetics.
+    pub pump_pressure: Measure<Pressure>,
+    /// The pump's force at rest: `PImax` times the junction's steady effect at the rest drive.
+    pub rest_force: Measure<Pressure>,
 }
 
 pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
@@ -1237,6 +1264,8 @@ pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
         rest_drive: Measure::new(rhythm.mean_drive())?,
         mixing: Measure::new(MIXING)?,
         alveolar_ventilation: Measure::new(alveolar_ventilation())?,
+        pump_pressure: Measure::new(rhythm.pump())?,
+        rest_force: Measure::new(rhythm.rest_force())?,
     })
 }
 
@@ -1271,13 +1300,11 @@ impl BreathRhythm {
         let falling = end * (1.0 - exp(-self.fall * expiring)) / self.fall;
         (rising + falling) * self.rate
     }
-    /// The pump's pressure whose breath ventilates the alveolar unit as the mixing exchange does. Two mixed exchanges
-    /// in series put the alveolar unit at `2 P / M`, and a breath of volume `V_T` through a mixed dead space `V_D` at
-    /// `P T / (V_T - V_D tanh(V_T / 2 V_D))` while the alveolar gas holds through the breath, so `V_T` solves
-    /// `V_T - V_D tanh(V_T / 2 V_D) = M T / 2` by Newton's method. `V_T` is the drive's swing at the mechanics'
-    /// static solution.
-    fn pump(&self) -> f64 {
-        let (start, end, ..) = self.ends();
+    /// The breath's swing at the mechanics' static solution that ventilates the alveolar unit as the mixing exchange
+    /// does. Two mixed exchanges in series put the alveolar unit at `2 P / M`, and a breath of volume `V_T` through a
+    /// mixed dead space `V_D` at `P T / (V_T - V_D tanh(V_T / 2 V_D))` while the alveolar gas holds through the breath,
+    /// so `V_T` solves `V_T - V_D tanh(V_T / 2 V_D) = M T / 2` by Newton's method.
+    fn tidal(&self) -> f64 {
         let goal = MIXING / (2.0 * self.rate);
         let mut tidal = goal + DEAD_SPACE;
         for _ in 0..50 {
@@ -1286,18 +1313,33 @@ impl BreathRhythm {
             let slope = 1.0 - (1.0 - tanh * tanh) / 2.0;
             tidal -= (tidal - DEAD_SPACE * tanh - goal) / slope;
         }
-        tidal * (LUNG_ELASTANCE + WALL_ELASTANCE) / (end - start)
+        tidal
+    }
+    /// `PImax`, so that the pump junction's effect swings the static solution by the tidal volume: `P_mus = PImax E`
+    /// swings by `PImax (E_1 - E_0)` for the effect's least and most over a breath once breaths repeat.
+    fn pump(&self) -> f64 {
+        let Stepped { least, most, .. } = self.stepped();
+        self.tidal() * (LUNG_ELASTANCE + WALL_ELASTANCE) / (most - least)
+    }
+    fn rest_force(&self) -> f64 {
+        self.pump() * PUMP.effect(self.mean_drive())
     }
     /// The pump's mean work, its pressure times the breath's inflow at the room's side, on the mechanics the airway
     /// builds: the alveolar unit fills at `G (P_mus - (E_L + E_W) x)` for its volume `x` above the static rest, and
-    /// the room refills the dead space at `G E_D y` for the shortfall `y` that filling leaves there. The airway's
-    /// resistance adds its work to the elastic `(P_1^2 - P_0^2) / 2 (E_L + E_W)` a breath, about a third more here.
-    /// Each volume settles within a breath's tenth, so twenty breaths stepped implicitly at 0.1 ms leave the last
-    /// breath periodic.
+    /// the room refills the dead space at `G E_D y` for the shortfall `y` that filling leaves there. The mechanics are
+    /// linear in the pump's pressure, so the work at `PImax` is its square times the work at a pressure of one.
     fn work(&self) -> f64 {
+        let pump = self.pump();
+        pump * pump * self.stepped().work
+    }
+    /// Twenty breaths of the drive, the pump junction and the mechanics at a pressure of one a unit of effect, stepped
+    /// implicitly at 0.1 ms, so the last breath is periodic. Each volume settles within a breath's tenth and the
+    /// junction within a tenth of a second. The airway's resistance adds its work to the elastic
+    /// `(P_1^2 - P_0^2) / 2 (E_L + E_W)` a breath, about a third more here.
+    fn stepped(&self) -> Stepped {
         const STEP: f64 = 1e-4;
         const BREATHS: usize = 20;
-        let (pump, elastance) = (self.pump(), LUNG_ELASTANCE + WALL_ELASTANCE);
+        let elastance = LUNG_ELASTANCE + WALL_ELASTANCE;
         let (_, _, inspiring, expiring) = self.ends();
         let steps = [inspiring, expiring].map(|length| {
             let mut count = 0_u32;
@@ -1307,9 +1349,15 @@ impl BreathRhythm {
             count
         });
         let (rise, fall) = (exp(-self.rise * STEP), exp(-self.fall * STEP));
-        let (mut drive, mut x, mut y, mut work) = (self.mean_drive(), 0.0, 0.0, 0.0);
+        let mut drive = self.mean_drive();
+        let mut junction = PUMP.steady(drive);
+        let (mut x, mut y) = (0.0, 0.0);
+        let mut last = Stepped {
+            least: f64::INFINITY,
+            most: f64::NEG_INFINITY,
+            work: 0.0,
+        };
         for breath in 1..=BREATHS {
-            work = 0.0;
             for (phase, count) in steps.into_iter().enumerate() {
                 for _ in 0..count {
                     drive = if phase == 0 {
@@ -1317,23 +1365,104 @@ impl BreathRhythm {
                     } else {
                         drive * fall
                     };
-                    let pressure = pump * drive;
+                    junction = PUMP.step(junction, drive, STEP);
+                    let pressure = PUMP.of_bound(junction[2]);
                     x = (x + STEP * AIRWAY_CONDUCTANCE * pressure)
                         / (1.0 + STEP * AIRWAY_CONDUCTANCE * elastance);
                     let filling = AIRWAY_CONDUCTANCE * (pressure - elastance * x);
                     y = (y + STEP * filling) / (1.0 + STEP * AIRWAY_CONDUCTANCE * DEAD_SPACE_ELASTANCE);
                     let inflow = AIRWAY_CONDUCTANCE * DEAD_SPACE_ELASTANCE * y;
-                    if breath == BREATHS && inflow > 0.0 {
-                        work += pressure * inflow * STEP;
+                    if breath == BREATHS {
+                        if pressure < last.least {
+                            last.least = pressure;
+                        }
+                        if pressure > last.most {
+                            last.most = pressure;
+                        }
+                        if inflow > 0.0 {
+                            last.work += pressure * inflow * STEP;
+                        }
                     }
                 }
             }
         }
-        work / (inspiring + expiring)
+        last.work /= inspiring + expiring;
+        last
     }
-    /// The chest wall's relaxed volume less the pump's mean pull over the wall's elastance, so at the mean drive the
-    /// lung's static volume and the pleural pressure are the ones the body admits at with no drive.
+    /// The chest wall's relaxed volume less the pump's pull at rest over the wall's elastance, so at rest the lung's
+    /// static volume and the pleural pressure are the ones the body admits at with no drive.
     fn wall_rest(&self) -> f64 {
-        WALL_REST - self.pump() * self.mean_drive() / WALL_ELASTANCE
+        WALL_REST - self.rest_force() / WALL_ELASTANCE
+    }
+}
+
+struct Stepped {
+    least: f64,
+    most: f64,
+    work: f64,
+}
+
+const PUMP_JUNCTION: &str = "respiratory pump junction";
+
+/// The respiratory pump junction's acetylcholine: release `q a V` from the vesicle by the pump drive `a`, reuptake
+/// `r C` from the cleft, and binding `k_on C (R - B) - k_off B` at the receptor's `R` sites, each fast beside the
+/// breath, so the effect follows the drive within about 40 ms. Its store `T = V + C + B` is the vesicle's guess.
+struct PumpJunction {
+    release: f64,
+    reuptake: f64,
+    on: f64,
+    off: f64,
+    sites: f64,
+    efficacy: f64,
+    store: f64,
+}
+
+const PUMP: PumpJunction = PumpJunction {
+    release: 0.05,
+    reuptake: 50.0,
+    on: 10.0,
+    off: 50.0,
+    sites: 1.0,
+    efficacy: 1.0,
+    store: 100.0,
+};
+
+impl PumpJunction {
+    /// Vesicle, cleft and bound at a held drive. With `C = rho V`, `rho = q a / r`, `B = R k_on C / (k_off + k_on C)`
+    /// and `V + C + B = T`, the cleft solves `alpha k_on C^2 + (alpha k_off + (R - T) k_on) C - T k_off = 0` with
+    /// `alpha = (1 + rho) / rho`, taken in the form that subtracts nothing.
+    fn steady(&self, drive: f64) -> [f64; 3] {
+        if drive <= 0.0 {
+            return [self.store, 0.0, 0.0];
+        }
+        let rho = self.release * drive / self.reuptake;
+        let alpha = (1.0 + rho) / rho;
+        let (a, b, c) = (
+            alpha * self.on,
+            alpha * self.off + (self.sites - self.store) * self.on,
+            self.store * self.off,
+        );
+        let cleft = 2.0 * c / (b + (b * b + 4.0 * a * c).sqrt());
+        let bound = self.sites * self.on * cleft / (self.off + self.on * cleft);
+        [cleft / rho, cleft, bound]
+    }
+    /// The receptor's effect `E = eps theta / (1 + (eps - 1) theta)` with `theta = B / R` (research 02).
+    fn of_bound(&self, bound: f64) -> f64 {
+        let theta = bound / self.sites;
+        self.efficacy * theta / (1.0 + (self.efficacy - 1.0) * theta)
+    }
+    fn effect(&self, drive: f64) -> f64 {
+        self.of_bound(self.steady(drive)[2])
+    }
+    /// One implicit step: the vesicle and the bound amount at the step's end, by a few passes that converge at this
+    /// step's size, and the cleft as what the store leaves.
+    fn step(&self, [vesicle, cleft, bound]: [f64; 3], drive: f64, step: f64) -> [f64; 3] {
+        let (mut v, mut c, mut b) = (vesicle, cleft, bound);
+        for _ in 0..6 {
+            v = (vesicle + step * self.reuptake * c) / (1.0 + step * self.release * drive);
+            b = (bound + step * self.on * c * self.sites) / (1.0 + step * (self.on * c + self.off));
+            c = self.store - v - b;
+        }
+        [v, c, b]
     }
 }

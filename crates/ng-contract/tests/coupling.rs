@@ -1,5 +1,5 @@
 use ng_contract::catalog::{
-    BaroreceptorAfferents, CapillaryAndVenousPressure, Defines, LungAfferents, Reads, RespiratoryDrive,
+    BaroreceptorAfferents, CapillaryAndVenousPressure, CoreTemperature, Defines, Reads, ShiverDrive,
 };
 use ng_contract::*;
 
@@ -264,25 +264,33 @@ fn a_loop_of_two_couplings_is_one_block_of_coupled_residuals() -> Result<(), Adm
     map.site::<TissueSite>("body", at()?);
     let body = assemble(Schema::new(map.finish()?)?, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
-        let out: RespiratoryDrive<Defines<'_, Nervous>> = laws.emit();
-        let back: LungAfferents<Reads<'_, Nervous>> = laws.receive();
+        let out: ShiverDrive<Defines<'_, Nervous>> = laws.emit();
+        let back: CoreTemperature<Reads<'_, Nervous>> = laws.receive();
+        let per = laws.parameter::<Quotient<Dimensionless, Temperature>>(
+            ParameterKey::new("bench.per-degree"),
+            Admissible::finite(),
+        );
         let class = wave()?;
         let drive = laws.kernel(|mut k| {
-            let value = k.read(&back.pulmonary_stretch);
+            let (per, warmth) = (k.parameter(&per), k.read(&back.core_temperature));
+            let product = k.multiply(per, warmth);
+            let value = k.as_dimension(product);
             k.finish(value, laws.every_mode(), class)
         });
-        laws.define(&out.respiratory_drive, drive);
+        laws.define(&out.shiver_drive, drive);
         body.add(laws.finish());
-        let declaration = HeldDeclaration::<Respiratory>::new(vec![], vec![], "a synthetic bench");
+        let declaration = HeldDeclaration::<Metabolism>::new(vec![], vec![], "a synthetic bench");
         let (mut laws, _ports) = body.hold(declaration)?.parts();
-        let out: LungAfferents<Defines<'_, Respiratory>> = laws.emit();
-        let back: RespiratoryDrive<Reads<'_, Respiratory>> = laws.receive();
+        let out: CoreTemperature<Defines<'_, Metabolism>> = laws.emit();
+        let back: ShiverDrive<Reads<'_, Metabolism>> = laws.receive();
+        let degree = laws.parameter::<Temperature>(ParameterKey::new("bench.degree"), Admissible::finite());
         let class = wave()?;
-        let stretch = laws.kernel(|mut k| {
-            let value = k.read(&back.respiratory_drive);
+        let warmth = laws.kernel(|mut k| {
+            let (degree, drive) = (k.parameter(&degree), k.read(&back.shiver_drive));
+            let value = k.scale(degree, drive);
             k.finish(value, laws.every_mode(), class)
         });
-        laws.define(&out.pulmonary_stretch, stretch);
+        laws.define(&out.core_temperature, warmth);
         body.add(laws.finish());
         body.compile()
     })?;

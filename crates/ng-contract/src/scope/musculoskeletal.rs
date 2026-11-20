@@ -1,5 +1,8 @@
 use crate::law::{Brand, Family};
-use crate::{Beds, Bone, FragmentBuilder, Mineral, Musculoskeletal, SiteRoute, SiteSet, Wall};
+use crate::{
+    Beds, Bone, Dimensionless, FragmentBuilder, Junction, Mineral, Musculoskeletal, PerSite, ReadPort,
+    SiteRoute, SiteSet, Substance, Wall,
+};
 use core::marker::PhantomData;
 
 pub struct MusculoskeletalPorts<'b> {
@@ -31,5 +34,21 @@ impl<'b> MusculoskeletalPorts<'b> {
         let family = Family::Across(Wall::Cell, <Beds<Bone> as SiteSet>::SET, Q::SPECIES);
         laws.request(family);
         SiteRoute::requested(family)
+    }
+    /// A receptor's effect at its junction, the only way a transmitter changes a musculoskeletal law.
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn read<'b>(ports: &MusculoskeletalPorts<'b>) -> ReadPort<'b, Musculoskeletal, PerSite<Blood, Dimensionless>> {
+    ///     ports.effect::<Acetylcholine>()
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn read<'b>(ports: &MusculoskeletalPorts<'b>) -> ReadPort<'b, Musculoskeletal, PerSite<Junction, Dimensionless>> {
+    ///     ports.effect::<Acetylcholine>()
+    /// }
+    /// ```
+    pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Musculoskeletal, PerSite<Junction, Dimensionless>> {
+        super::effect::<_, _, Q>()
     }
 }

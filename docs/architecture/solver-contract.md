@@ -240,11 +240,11 @@ For every accepted amount, `x_next = x_base + B·J + S·ξ`; exterior columns al
 
 | Disposition | Slice | Count | Whole body | Count |
 |---|---|---:|---|---:|
-| Live: both ends run and a field is wired | 77 CV→NS, 80 CV→FL, 97 RN→CV | 3 | 77 to 80, 83, 84, 86 to 91, 95, 97, 98, 114 | 16 |
+| Live: both ends run and a field is wired | 77 CV→NS, 80 CV→FL, 97 RN→CV | 3 | 77 to 80, 84, 86, 87, 89 to 91, 95, 97, 98, 114 | 14 |
 | Input: a held card sends and the slice receives | 83, 90, 91, 99, 100, 102, 105, 106, 108, 114 | 10 | none | 0 |
-| Anatomy relation: an enclosing space's pressure, site positions under posture, or the portal circuit, not a wire | 82, 96, 101 | 3 | 82, 96, 99, 101, 104 | 5 |
+| Anatomy relation: an enclosing space's pressure, site positions under posture, the portal circuit, or release at the respiratory pump's junction, not a wire | 82, 96, 101 | 3 | 82, 88, 96, 99, 101, 104 | 6 |
 | Sink: the slice sends and a held card receives, consuming no physiology | 78, 79, 81, 86, 87, 88, 89, 98, 110, 112, 113 | 11 | none | 0 |
-| Held: both ends run and every field is held, each by one end with its reason | none | 0 | 81, 85, 92, 93, 94, 100, 102, 103, 105 to 113 | 17 |
+| Held: both ends run and every field is held, each by one end with its reason | none | 0 | 81, 83, 85, 92, 93, 94, 100, 102, 103, 105 to 113 | 18 |
 | Outside: neither end in the slice | 84, 85, 92, 93, 94, 95, 103, 104, 107, 109 | 10 | none | 0 |
 | Unresolved: FL→NS "brain water and ICP" | 111 | 1 | none | 0 |
 

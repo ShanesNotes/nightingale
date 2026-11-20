@@ -4603,8 +4603,8 @@ test = "-p ng-validate --test alveolar the_pleural_pressure_is_the_walls_recoil_
 [[mutant]]
 name = "breath-never-starts"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''        ("ms.breath-start", 1_000.0),'''
-new = '''        ("ms.breath-start", 0.0),'''
+old = '''        ("ns.breath-start", 1_000.0),'''
+new = '''        ("ns.breath-start", 0.0),'''
 test = "-p ng-validate --test body_run the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_the_core_receives"
 
 [[mutant]]
@@ -4630,7 +4630,7 @@ test = "-p ng-validate --test alveolar the_pleural_pressure_is_the_walls_recoil_
 
 [[mutant]]
 name = "expiration-drive-relaxes-to-the-rest-drive"
-path = "crates/ng-musculoskeletal/src/breath.rs"
+path = "crates/ng-nervous/src/breath.rs"
 old = '''            let (target, now, speed) = (k.zero(), k.state(&drive), k.parameter(&fall));'''
 new = '''            let (target, now, speed) = (k.parameter(&rest_drive), k.state(&drive), k.parameter(&fall));'''
 test = "-p ng-validate --test alveolar the_drive_at_the_bodys_rhythm_means_its_rest_value_over_a_breath_and_falls_below_it"
@@ -4644,7 +4644,7 @@ test = "-p ng-validate --test alveolar the_drive_at_the_bodys_rhythm_means_its_r
 
 [[mutant]]
 name = "mixing-share-falls-past-zero"
-path = "crates/ng-musculoskeletal/src/breath.rs"
+path = "crates/ng-nervous/src/breath.rs"
 old = '''                let (target, now, speed) = (k.zero(), k.state(&share), k.parameter(&mixing_fall));'''
 new = '''                let (target, now, speed) = (k.zero(), k.parameter(&rest_share), k.parameter(&mixing_fall));'''
 test = "-p ng-validate --test alveolar a_mixing_share_falling_fast_to_zero_raises_no_refusal_at_its_row"
@@ -4714,9 +4714,23 @@ new = '''    MIXING
 test = "-p ng-validate --test body the_packet_states_the_breaths_alveolar_ventilation_at_half_the_mixing_exchange"
 
 [[mutant]]
-name = "pump-force-ignores-the-drive"
-path = "crates/ng-musculoskeletal/src/breath.rs"
-old = '''        let value = k.scale(pump, drive);'''
-new = '''        let _ = drive;
-        let value = pump;'''
-test = "-p ng-validate --test alveolar a_breaths_lung_volume_follows_the_mechanics_static_solution"
+name = "pump-force-ignores-the-effect"
+path = "crates/ng-musculoskeletal/src/pump.rs"
+old = '''        let value = k.scale(most, effect);'''
+new = '''        let _ = effect;
+        let value = most;'''
+test = "-p ng-validate --test pump_junction at_a_held_drive_the_pumps_effect_and_force_meet_the_junctions_closed_form"
+
+[[mutant]]
+name = "pump-junction-takes-the-vagal-traffic"
+path = "crates/ng-nervous/src/shared.rs"
+old = '''        let (firing, pumping) = (k.algebraic(traffic), k.state(drive));'''
+new = '''        let (firing, pumping) = (k.algebraic(traffic), k.algebraic(traffic));'''
+test = "-p ng-validate --test pump_junction at_a_held_drive_the_pumps_effect_and_force_meet_the_junctions_closed_form"
+
+[[mutant]]
+name = "vagal-release-reaches-the-pump"
+path = "crates/ng-nervous/src/shared.rs"
+old = '''        let firing = k.scale(firing, vagal);'''
+new = '''        let _ = vagal;'''
+test = "-p ng-validate --test pump_junction at_a_held_drive_the_pumps_effect_and_force_meet_the_junctions_closed_form"

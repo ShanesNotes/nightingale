@@ -266,6 +266,8 @@ pub enum Landmark {
     Parathyroid,
     /// At the liver bed, where GI's iron absorption reads the liver cells' iron store.
     IronStore,
+    /// At the respiratory pump's junction, where the musculoskeletal card reads the pump drive's effect.
+    RespiratoryPump,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
