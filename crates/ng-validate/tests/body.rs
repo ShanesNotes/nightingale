@@ -1027,7 +1027,7 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     };
     let stated = Stated {
         species: [
-            (Species::Energy, 3e3),
+            (Species::Energy, 4e3),
             (Species::Water, 5e-2),
             (Species::Sodium, 3e-4),
             (Species::Chloride, 3e-4),

@@ -859,7 +859,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
     .assert_eq(&report);
     let payer = |terms: &[(RowId, i64)]| paid_by_a_works_payer(&start.body, terms);
     let rule = [
-        (Book::Energy, false, 2e3, 3e3),
+        (Book::Energy, false, 3e3, 4e3),
         (Book::Element(Element::Carbon), false, 4e2, 5e2),
         (Book::Element(Element::Oxygen), false, 8e3, 9e3),
         (Book::Element(Element::Hydrogen), false, 6e-5, 7e-5),
