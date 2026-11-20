@@ -65,27 +65,26 @@ const REST: f64 = 1.0;
 const WAKE: f64 = 0.15;
 const FALL: f64 = 0.4;
 
-/// The wake drive and the gain's fall the packet states, and the second the unit falls asleep, if it does.
 #[derive(Clone, Copy)]
 struct Sleeping {
     wake: f64,
     fall: f64,
-    from: Option<u64>,
+    asleep_from: Option<u64>,
 }
 
 const AWAKE: Sleeping = Sleeping {
     wake: WAKE,
     fall: FALL,
-    from: None,
+    asleep_from: None,
 };
 const ASLEEP: Sleeping = Sleeping {
-    from: Some(0),
+    asleep_from: Some(0),
     ..AWAKE
 };
 
 impl Sleeping {
     fn at(self, sample: &Sample) -> f64 {
-        match self.from {
+        match self.asleep_from {
             Some(from) if sample.at >= from as f64 => 1.0,
             _ => 0.0,
         }
@@ -695,7 +694,7 @@ fn switched(unit: Case) -> Vec<BoundaryEvent> {
     if let Some(shuts) = unit.shuts {
         events.push(gate(b"shut again", shuts, Gate::Shut));
     }
-    match unit.sleep.from {
+    match unit.sleep.asleep_from {
         Some(0) => events.push(sleep(b"asleep", 0, Sleep::Nrem)),
         Some(from) => events.extend([
             sleep(b"awake", 0, Sleep::Awake),
@@ -884,7 +883,6 @@ fn each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_periph
     on_its_form(AWAKE)
 }
 
-/// Asleep from the anchor, the wake drive leaves the rest and each arm moves the scale by `1 - L` of its awake share.
 #[test]
 fn asleep_each_sensor_moves_the_drive_scale_by_its_form_less_the_wake_drive_and_the_gains_fall()
 -> Result<(), InitializationFailure> {
@@ -1002,7 +1000,7 @@ fn asleep_with_its_sensors_steady_the_drive_scale_admits_at_its_rest_less_the_wa
     Ok(())
 }
 
-/// Awake the sleep input reads zero, so each of its terms is an exact zero and the law does 11b's arithmetic.
+/// Awake the sleep input reads zero, so each of its terms is an exact zero.
 #[test]
 fn awake_the_wake_drive_and_the_gains_fall_leave_every_bit_of_the_drive_scale()
 -> Result<(), InitializationFailure> {
@@ -1018,7 +1016,7 @@ fn awake_the_wake_drive_and_the_gains_fall_leave_every_bit_of_the_drive_scale()
         sleep: Sleeping {
             wake: 0.0,
             fall: 0.0,
-            from: None,
+            asleep_from: None,
         },
         ..stated
     };
@@ -1126,7 +1124,7 @@ fn a_tenth_more_carbon_dioxide_made_raises_its_pressure_by_a_tenth_over_one_and_
 const SLEEPS: Case = Case {
     seconds: 2 * SETTLED,
     sleep: Sleeping {
-        from: Some(SETTLED),
+        asleep_from: Some(SETTLED),
         ..AWAKE
     },
     ..SENSED

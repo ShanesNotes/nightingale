@@ -512,8 +512,6 @@ const BREATHING_BOOKS: [Book; 7] = [
 ];
 const DRY: f64 = 650.0;
 
-/// The most an inventory moved over the ten seconds from admission, over any ten seconds from a stated start on, and
-/// inside one whole breath from that start on.
 struct Figures {
     from_admission: f64,
     steady: f64,
@@ -859,8 +857,7 @@ fn the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(watc
     )
 }
 
-/// The minute also saves its last accepted head before sleep's stamp, where the sleeping branch starts.
-fn no_held_pool_moves_at_admission_or_over_the_first_minute(
+fn the_first_minute_moves_no_held_pool_and_saves_a_branch(
     start: &Start,
 ) -> (Session<'_, Running>, Minute, Watch, Checkpoint) {
     let pools = start.held_pools();
@@ -1453,8 +1450,8 @@ fn sleep_lowers_ventilation_and_raises_arterial_carbon_dioxide(
 }
 
 /// The branch's certificate covers its whole history, the awake stretch and the transition with the sleeping stretch,
-/// since its windows have no start, and prints with no margin rule, as the held run's does. Each worst change names its
-/// window, and the watch's figures from sleep's stamp on set the sleeping stretch apart.
+/// since its windows have no start. Each worst change names its window, and the watch's figures from sleep's stamp on
+/// set the sleeping stretch apart.
 fn the_sleeping_branchs_breathing_books(
     start: &Start,
     branch: &Session<'_, Running>,
@@ -2737,7 +2734,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(&start);
     each_beds_speciation_meets_its_forms_at_the_admitted_state(&start);
     let before = start.core.solves.get();
-    let (minute, counted, watch, branch) = no_held_pool_moves_at_admission_or_over_the_first_minute(&start);
+    let (minute, counted, watch, branch) = the_first_minute_moves_no_held_pool_and_saves_a_branch(&start);
     let counts = Counts {
         rows: start.body.rows().len(),
         jacobian_nonzeros: start.body.sparsity().unknowns().len(),
