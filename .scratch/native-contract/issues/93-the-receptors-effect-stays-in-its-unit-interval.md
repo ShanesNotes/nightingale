@@ -10,7 +10,7 @@ Blocked by: none
 
 Blocks: none
 
-**Why.** The first milestone (SRS invariant I19) admits the whole body from its packet, and a start the laws cannot hold should be refused at admission, not run. The receptor's effect is `E = eps B / (R - B + eps B)` for the bound amount `B` at `R` sites, written in amounts. Research 02's row says `E` runs from 0 to 1, and the respiratory pump's pressure is `PImax E`, so `PImax` is the pressure at full effect. Instant admission holds the packet's amounts, and the bound pool is checked only for nonnegativity. Once `B` passes `R`, `E` passes 1. The law is main's, and it serves the sinoatrial junction as well as the pump's.
+**Why.** The first milestone (SRS invariant I19) admits the whole body from its packet, and a start the laws cannot hold should be refused at admission, not run. The receptor's effect is `E = eps B / (R - B + eps B)` for the bound amount `B` at `R` sites, written in amounts. Research 02's row says `E` runs from 0 to 1, and the respiratory pump's pressure is `PImax E`, so `PImax` is the pressure at full effect. Instant admission holds the packet's amounts, and the bound pool is checked only for nonnegativity. Once `B` passes `R`, `E` leaves its unit interval: it passes 1, and where `eps` is under 1 it has a pole at `B = R / (1 - eps)` and is negative past it. The law is main's, and it serves the sinoatrial junction as well as the pump's.
 
 A run at main `446e29f9` shows it. A start with two bound on one receptor site at the pump's junction admits with effect 2 and pump force 14.4 at `PImax` 7.2. The test below fails there with `admitted 2 bound at respiratory pump junction with 1 receptor site: effect 2, pump force 14.4, PImax 7.2`.
 
