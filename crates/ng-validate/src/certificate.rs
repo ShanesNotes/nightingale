@@ -215,15 +215,16 @@ impl CertificatePolicy {
         })
     }
     /// Adds windows between the edges of the rhythm `windows` names, each allowing each rated quantity its rate times
-    /// the window's own length. Refuses rates that are not a subset of the basis in basis order, and a rate before
-    /// the settling time stated for some quantities and not for others.
+    /// the window's own length. Refuses rates that are not a subset of the basis in basis order, a rate before the
+    /// settling time stated for some quantities and not for others, and a second call, since a policy judges one
+    /// clock.
     pub fn between_edges(self, windows: EdgeWindows, rates: Vec<EdgeRate>) -> Result<Self, AdmissionError> {
         let mut held = self.quantities.iter().map(|limits| limits.quantity);
         let ordered = rates
             .iter()
             .all(|rate| held.any(|quantity| quantity == rate.quantity));
         let settling = rates.iter().filter(|rate| rate.settling.is_some()).count();
-        if !ordered || (settling != 0 && settling != rates.len()) {
+        if self.edges.is_some() || !ordered || (settling != 0 && settling != rates.len()) {
             return Err(AdmissionError::PolicyCoverage);
         }
         let edges = Some(EdgePolicy { windows, rates });
@@ -824,7 +825,7 @@ impl<'p> Rhythm<'p> {
             limits,
             rhythm,
             admission,
-            early: limits.rates.iter().all(|rate| rate.settling.is_some()),
+            early: limits.rates.iter().any(|rate| rate.settling.is_some()),
             since: admission,
             open: Vec::new(),
             judged: 0,

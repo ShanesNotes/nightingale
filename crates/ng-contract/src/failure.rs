@@ -309,9 +309,7 @@ impl From<CompileDefect> for AdmissionError {
 pub enum CompileDefect {
     /// A declared slot, a requested route family, a declared boundary or a held enclosure's pressure that
     /// no law defines. An omitted law is not zero.
-    OmittedLaw {
-        law: LawName,
-    },
+    OmittedLaw { law: LawName },
     /// Two laws on one row that hold in one mode.
     SecondOwner {
         law: LawName,
@@ -319,37 +317,21 @@ pub enum CompileDefect {
         second: Predicate,
     },
     /// A value of the row's mode variable that no law on the row holds in.
-    UncoveredMode {
-        law: LawName,
-        mode: ModeValue,
-    },
+    UncoveredMode { law: LawName, mode: ModeValue },
     /// A guard whose zero kernel does not hold in the value its transition leaves.
-    GuardOutsideMode {
-        variable: LawName,
-        leaves: &'static str,
-    },
+    GuardOutsideMode { variable: LawName, leaves: &'static str },
     /// A scope this assembly issued whose fragment was never added.
-    MissingFragment {
-        owner: &'static str,
-    },
+    MissingFragment { owner: &'static str },
     /// Two slots, mode variables, streams, forcings, route families or schema boundaries under one name in
     /// one owner.
-    NamedTwice {
-        law: LawName,
-    },
+    NamedTwice { law: LawName },
     /// One parameter key declared with two dimensions, contexts or admissible sets.
-    ParameterConflict {
-        key: ParameterKey,
-    },
+    ParameterConflict { key: ParameterKey },
     /// A mode variable with no values, or with one value twice.
-    BadModeVariable {
-        variable: LawName,
-    },
+    BadModeVariable { variable: LawName },
     /// An algebraic row that no structural matching pairs with an algebraic unknown it reads, or a closed row with no
     /// store of its own to hold it.
-    StructuralSingularity {
-        law: LawName,
-    },
+    StructuralSingularity { law: LawName },
     /// A pool in a space its species may not hold, the first in key order.
     OutOfPlace {
         site: SiteId,
@@ -358,10 +340,7 @@ pub enum CompileDefect {
     },
     /// A pool this body models that no transfer moves and no held card answers for. A read never moves a
     /// pool, and a transfer whose two ends are one pool moves nothing.
-    OrphanPool {
-        site: SiteId,
-        space: Space,
-    },
+    OrphanPool { site: SiteId, space: Space },
     /// A law that moves or reads a pool in a space the schema leaves out.
     LeftOutTouched {
         law: LawName,
@@ -370,123 +349,67 @@ pub enum CompileDefect {
     },
     /// A law or a guard that reads a volume when the schema declares no partial-volume coefficient. A
     /// guard is named by its mode variable.
-    MissingPartialVolume {
-        law: LawName,
-    },
+    MissingPartialVolume { law: LawName },
     /// A boundary at a pool this body does not hold: a space its site does not have, a species that space
     /// does not carry, or a site the anatomy does not declare.
-    BoundaryEndpoint {
-        law: LawName,
-    },
+    BoundaryEndpoint { law: LawName },
     /// A stream no guard draws on, so its ordinal would never move.
-    UndrawnStream {
-        stream: LawName,
-    },
+    UndrawnStream { stream: LawName },
     /// A forcing no law reads.
-    UnreadForcing {
-        forcing: LawName,
-    },
+    UnreadForcing { forcing: LawName },
     /// A second guard on one stream: one draw cannot be two events' threshold.
-    SecondGuardOnStream {
-        stream: LawName,
-    },
+    SecondGuardOnStream { stream: LawName },
     /// A second guard on one integral: one reset cannot serve two thresholds, because a firing would erase what
     /// the other guard crossed.
-    SecondGuardOnIntegral {
-        integral: LawName,
-    },
+    SecondGuardOnIntegral { integral: LawName },
     /// A hazard integral not declared nonnegative, the set that holds the reset and every threshold.
-    HazardSet {
-        integral: LawName,
-    },
+    HazardSet { integral: LawName },
     /// A law on a route that is not its owner's, or on an enclosure the map does not say it holds.
-    UnclaimedLaw {
-        law: LawName,
-    },
+    UnclaimedLaw { law: LawName },
     /// A read of a coupling field no owner emits. An omitted law is not zero.
-    UnemittedField {
-        law: LawName,
-        field: LawName,
-    },
+    UnemittedField { law: LawName, field: LawName },
     /// An edge's read of a narrower set at an end that no edge the law holds on has in that set, so it would read zero
     /// everywhere.
-    EndOffSet {
-        law: LawName,
-    },
+    EndOffSet { law: LawName },
     /// A segment the map samples where no law of another card reads blood chemistry's speciation, so the mark would
     /// keep rows nothing uses.
-    UnreadSample {
-        site: SiteId,
-    },
+    UnreadSample { site: SiteId },
     /// A law that reads a field blood chemistry states where no row of the readers' table wires that quantity to its
     /// card on a set that holds the site.
-    UnwiredRead {
-        law: LawName,
-        field: LawName,
-    },
+    UnwiredRead { law: LawName, field: LawName },
     /// A read of a field in another dimension than the field's own.
-    FieldDimension {
-        law: LawName,
-        field: LawName,
-    },
+    FieldDimension { law: LawName, field: LawName },
     /// A kernel that holds by a route's mode at a place that route does not stand, or a hazard on a mode with no one
     /// place: a hazard's draw stands for the whole body.
-    ModeOfAnotherPlace {
-        law: LawName,
-    },
+    ModeOfAnotherPlace { law: LawName },
     /// A read of a pool this body does not hold there, or of a place the map does not say: a landmark it does not
     /// place, a bed without exactly one drain, a segment without exactly one urinary edge in, a junction read of a
     /// route's amount, or a site's or an edge's entry in a kernel attached where neither stands.
-    NoSuchRead {
-        law: LawName,
-    },
+    NoSuchRead { law: LawName },
     /// A kernel that adds a site term, attached where it stands at no site: a body memory's rate, or a guard's zero,
     /// named by its mode variable. A term is written in only at a site of its set, so there it would vanish.
-    TermOffSite {
-        law: LawName,
-    },
+    TermOffSite { law: LawName },
     /// A row `FragmentBuilder::only_at` reads at the only site of a set the map gives no site or more than one.
-    NotOneSite {
-        law: LawName,
-        set: Sites,
-    },
+    NotOneSite { law: LawName, set: Sites },
     /// A guard that resets a row whose set does not hold zero, so a firing would publish a state no run can resume.
-    ResetOutsideSet {
-        law: LawName,
-    },
+    ResetOutsideSet { law: LawName },
     /// A rhythm's phase that no guard resets at one of its places, so no step would end on an edge there.
-    UnresetRhythm {
-        phase: LawName,
-    },
-    RhythmTwice {
-        phase: LawName,
-    },
+    UnresetRhythm { phase: LawName },
+    /// A rhythm's phase declared twice in one fragment.
+    RhythmTwice { phase: LawName },
+    /// A rhythm's phase that a hazard integrates. A hazard's firing resets its integral by chance and seals no edge.
+    HazardRhythm { phase: LawName },
     /// A law reads a junction at a site the map neither supplies nor states that no nerve reaches.
-    NoSupply {
-        law: LawName,
-        site: SiteId,
-    },
+    NoSupply { law: LawName, site: SiteId },
     /// An `at_junction` read at a site the map says no nerve reaches.
-    UnsuppliedRead {
-        law: LawName,
-        site: SiteId,
-    },
+    UnsuppliedRead { law: LawName, site: SiteId },
     /// A law reads an effect at a junction that holds no such receptor.
-    NoReceptor {
-        law: LawName,
-        junction: SiteId,
-    },
+    NoReceptor { law: LawName, junction: SiteId },
     /// A fluid route between a space that holds a species and one that does not, with no statement that it keeps that
     /// species back. A pool left out of a schema would otherwise stop the species at a wall nobody declared.
-    CargoStranded {
-        law: LawName,
-        species: Species,
-    },
+    CargoStranded { law: LawName, species: Species },
     /// A read of a bed's extravascular pressure when its enclosure's compliance has no law yet.
-    NoEnclosurePressure {
-        law: LawName,
-        space: SiteId,
-    },
+    NoEnclosurePressure { law: LawName, space: SiteId },
     HeldPoolMoved {
         card: &'static str,
         site: SiteId,
@@ -494,15 +417,10 @@ pub enum CompileDefect {
     },
     /// A read of the drive of a route the law's card does not own, or a route's law that reads another
     /// route's drive and would carry its delivery down the wrong route.
-    DriveOfAnotherRoute {
-        law: LawName,
-        route: &'static str,
-    },
+    DriveOfAnotherRoute { law: LawName, route: &'static str },
     /// A law that reads a lasting input of the day and no parameter or memory slot. An input scales a gain or a set
     /// point and never sets a produced quantity.
-    UnscaledInput {
-        law: LawName,
-    },
+    UnscaledInput { law: LawName },
     /// A hold of a card that names no pool in this body: a whole space, with no species, or one species by site set.
     HeldNothing {
         card: &'static str,
@@ -516,55 +434,29 @@ pub enum CompileDefect {
         species: Species,
     },
     /// One species across one wall at one site by two cards.
-    CrossedTwice {
-        laws: [LawName; 2],
-        site: SiteId,
-    },
+    CrossedTwice { laws: [LawName; 2], site: SiteId },
     /// A reaction that names one species twice.
-    SpeciesTwice {
-        law: LawName,
-        species: Species,
-    },
+    SpeciesTwice { law: LawName, species: Species },
     /// A reaction whose terms sit in two spaces of its site, named in space order. A reaction's terms sit in one space,
     /// apart from the space `energy_into` names.
-    ReactionInTwoSpaces {
-        law: LawName,
-        spaces: [Space; 2],
-    },
+    ReactionInTwoSpaces { law: LawName, spaces: [Space; 2] },
     /// One chemistry where two cards' reactions both stand: terms that match up to an overall sign once each reaction's
     /// counts are divided by their greatest common divisor, so a reaction and its reverse are one reaction.
-    ReactionOwnedTwice {
-        laws: [LawName; 2],
-        site: SiteId,
-    },
+    ReactionOwnedTwice { laws: [LawName; 2], site: SiteId },
     /// A reaction that names a fuel whose energy content the schema does not state, so its energy has no value.
-    UnstatedEnergy {
-        law: LawName,
-        species: Species,
-    },
+    UnstatedEnergy { law: LawName, species: Species },
     /// A reaction whose counts leave a conserved quantity open: an element its uses and makes do not hold alike, or
     /// energy with no pool to take it. Names the first in `Book` order.
-    UnbalancedReaction {
-        law: LawName,
-        book: Book,
-    },
+    UnbalancedReaction { law: LawName, book: Book },
     /// A count times a weight, or their sum, past 2^53, where an integer weight stops being exact, or exact arithmetic on
     /// the conserved combinations past i128. Names the reaction when one is to blame, and none for admission's totals.
-    ConservationOverflow {
-        law: Option<LawName>,
-    },
+    ConservationOverflow { law: Option<LawName> },
     /// A reaction whose pools exist together at no site of its set.
-    ReactionNowhere {
-        law: LawName,
-    },
+    ReactionNowhere { law: LawName },
     /// A bed named to pay work whose heat the schema holds no pool for.
-    PayerHoldsNoHeat {
-        site: SiteId,
-    },
+    PayerHoldsNoHeat { site: SiteId },
     /// A work a law requests and a bed is named to pay, with no elastic store at the root for it to end at.
-    PaidWorkHasNoStore {
-        work: crate::Work,
-    },
+    PaidWorkHasNoStore { work: crate::Work },
     /// A site where a reaction stands without the energy pool its energy goes to.
     ReactionEndpoint {
         law: LawName,
@@ -573,9 +465,7 @@ pub enum CompileDefect {
     },
     /// A part the reaction joins whose conserved quantities miss a combination its columns leave unchanged, which the
     /// certificate could then not name.
-    UnnamedConservedQuantity {
-        law: LawName,
-    },
+    UnnamedConservedQuantity { law: LawName },
 }
 
 /// Why one attempt cannot stand. A smaller retry of the same base can still succeed. A row or source id

@@ -347,7 +347,7 @@ fn between_edges(
             (interval.end().nanoseconds(), values)
         })
         .collect();
-    let early = edges.rates.iter().all(|(_, _, settling)| settling.is_some());
+    let early = edges.rates.iter().any(|(_, _, settling)| settling.is_some());
     let mut windows = Vec::new();
     for (open, &(opened, _)) in marks.iter().enumerate() {
         if opened - start < edges.settling_ns && !early {

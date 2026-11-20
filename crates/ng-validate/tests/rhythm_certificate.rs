@@ -624,6 +624,16 @@ fn two_openings_that_mature_on_one_edge_are_each_judged_and_only_the_older_refus
             "the third edge misses the length by one nanosecond, so both openings mature on the fourth"
         );
         assert!(judged(second, missed).is_ok(), "the younger pair, judged alone");
+        let loose = with(&rated, Leak::Nitrogen.book(), (LOOSE, None));
+        let ledger = fixed(view, LOOSE).between_edges(clock(), (first, missed, WIDEST), &loose);
+        let certificate = certified(view, &ledger).expect("a loose nitrogen rate");
+        let closes = |opened: u64| edges.iter().any(|&closed| closed >= opened + missed);
+        let windows = (edges.iter()).filter(|&&opened| opened >= first && closes(opened));
+        assert_eq!(
+            certificate.rhythm().expect("windows between edges").judged(),
+            windows.count() as u64,
+            "the fourth edge closes both the first's window and the second's"
+        );
         let exact = judged(first, third - first).expect_err("at the length, the third edge closes it");
         assert_eq!(exact.window(), Some(interval(first, third)));
     });
@@ -739,6 +749,59 @@ fn a_windows_allowance_is_its_rate_times_its_whole_seconds_and_its_part_second()
 }
 
 #[test]
+fn an_empty_rate_list_opens_no_window_before_the_settling_time() {
+    let body = breathing(true).expect("compiled");
+    running(&body, &Course::standard(4 * SECOND, None), |view| {
+        let edges = edges(view);
+        let first = *edges.first().expect("an opening");
+        let last = *edges.last().expect("a close");
+        let span = view.span().expect("a span").length_ns();
+        let judged = |settling| {
+            let ledger = fixed(view, LOOSE).between_edges(clock(), (settling, last - first, span), &[]);
+            let certificate = certified(view, &ledger).expect("the fixed windows and coverage hold");
+            let rhythm = certificate.rhythm().expect("windows between edges");
+            (rhythm.judged(), rhythm.last_close())
+        };
+        assert_eq!(judged(first), (1, Some(at(last))));
+        assert_eq!(judged(first + 1), (0, None));
+    });
+}
+
+#[test]
+fn the_worst_result_kept_is_the_window_furthest_past_its_allowance_not_the_largest_change() {
+    let body = breathing(true).expect("compiled");
+    let course = Course {
+        period: 2 * SECOND,
+        leak: Some((Leak::Nitrogen, 5.0)),
+        leaking: vec![(0, 9 * SECOND)],
+        held: Vec::new(),
+        end: 30 * SECOND,
+    };
+    running(&body, &course, |view| {
+        let (settling, nitrogen) = (10 * SECOND, Leak::Nitrogen.book());
+        let rated = rates(view.basis(), Some(1.0));
+        let (_, settled, _) = *(rated.iter())
+            .find(|(quantity, _, _)| quantity.book() == nitrogen)
+            .expect("rated");
+        let rated = with(&rated, nitrogen, (settled, Some(1e3)));
+        let ledger = fixed(view, LOOSE).between_edges(clock(), (settling, LENGTH, WIDEST), &rated);
+        let certificate = certified(view, &ledger).expect("a loose rate while the leak runs");
+        let rhythm = certificate.rhythm().expect("windows between edges");
+        let kept = (rhythm.results().iter())
+            .find(|result| result.quantity().book() == nitrogen)
+            .expect("rated");
+        assert!(
+            kept.window().start() >= at(settling),
+            "kept {:?}, which moved {} against {}, where a window open on the leak moved more under a far larger \
+             allowance",
+            kept.window(),
+            hi(kept.change()),
+            hi(kept.allowance())
+        );
+    });
+}
+
+#[test]
 fn a_leak_before_the_settling_time_is_judged_only_where_the_policy_states_a_rate_for_that_stretch() {
     let body = breathing(true).expect("compiled");
     let course = Course {
@@ -830,6 +893,42 @@ fn the_tail_runs_from_the_last_close_judged_and_not_from_the_last_edge() {
         (rhythm.last_close(), Some(rhythm.widest())),
         (Some(at(61 * SECOND)), tail)
     );
+}
+
+#[test]
+fn a_run_in_which_no_window_closed_is_one_stretch_from_admission_to_the_head() {
+    let body = breathing(true).expect("compiled");
+    let mut course = Course::standard(4 * SECOND, None);
+    course.end = running(&body, &course, |view| {
+        edges(view)
+            .into_iter()
+            .find(|&edge| edge >= LENGTH)
+            .expect("an edge after a full fixed window")
+    });
+    running(&body, &course, |view| {
+        let span = view.span().expect("a span");
+        let mut instants = vec![span.start().nanoseconds()];
+        instants.extend(edges(view));
+        assert_eq!(instants.last().copied(), Some(span.end().nanoseconds()));
+        let widest = (instants.windows(2))
+            .map(|ends| ends[1] - ends[0])
+            .max()
+            .expect("an edge");
+        assert!(widest < span.length_ns(), "the run holds several edges");
+        let rated = rates(view.basis(), None);
+        let judged = |bound| {
+            let ledger = fixed(view, LOOSE).between_edges(clock(), (span.length_ns(), LENGTH, bound), &rated);
+            certified(view, &ledger)
+        };
+        let stopped = judged(widest).expect_err("no window closed, so no stretch ends before the head");
+        assert_eq!(
+            (stopped.check(), stopped.window()),
+            (CertificateCheck::RhythmStopped, Some(span))
+        );
+        let certificate = judged(span.length_ns()).expect("a bound that reaches the run's length");
+        let rhythm = certificate.rhythm().expect("windows between edges");
+        assert_eq!((rhythm.judged(), rhythm.last_close()), (0, None));
+    });
 }
 
 #[test]
@@ -1085,6 +1184,12 @@ fn a_fixed_policy_keeps_its_old_digest_and_each_field_of_the_windows_between_edg
     };
     let windows = (0, LENGTH, WIDEST);
     let (first, settled) = (rated[0].0, rated[0].1);
+    let equal = |other: usize| [(first, 1.0, None), (rated[other].0, 1.0, None)];
+    let bed = AnatomyBuilder::new().site::<CapillaryBed>("bed", origin()).id();
+    let elsewhere = Slot {
+        at: Context::Site(bed),
+        ..clock()
+    };
     let digests = [
         ledger().digest(),
         edged(clock(), windows, &rated),
@@ -1100,6 +1205,9 @@ fn a_fixed_policy_keeps_its_old_digest_and_each_field_of_the_windows_between_edg
         edged(clock(), windows, &rates(basis, Some(1.0))),
         edged(clock(), windows, &rated[1..]),
         edged(clock(), windows, &[]),
+        edged(clock(), windows, &equal(1)),
+        edged(clock(), windows, &equal(2)),
+        edged(elsewhere, windows, &rated),
     ];
     for (index, digest) in digests.iter().enumerate() {
         assert!(
@@ -1154,6 +1262,18 @@ fn rates_are_refused_in_another_dimension_out_of_basis_order_twice_or_settling_f
         coverage,
         "settling for one only"
     );
+}
+
+#[test]
+fn a_policy_refuses_a_second_clock() {
+    let body = breathing(true).expect("compiled");
+    let basis = body.conserved_basis();
+    let length = core::num::NonZeroU64::new(LENGTH).expect("positive");
+    let windows = EdgeWindows::new(clock(), 0, length, WIDEST);
+    let policy = Ledger::sliding(basis, LENGTH, 20 * SECOND, 1e-6, 1e-9, LOOSE).policy;
+    let once = policy.between_edges(windows, Vec::new()).expect("one clock");
+    let twice = once.between_edges(windows, Vec::new()).err();
+    assert_eq!(twice, Some(AdmissionError::PolicyCoverage));
 }
 
 fn derived(fields: &[(&str, &dyn core::fmt::Debug)], pretty: bool) -> String {

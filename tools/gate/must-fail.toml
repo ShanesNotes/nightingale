@@ -237,6 +237,10 @@ core = "A rhythm declared on a phase no guard resets at one of its places, or de
 mutants = ["unreset-rhythm-compiles", "rhythm-declared-twice-compiles"]
 
 [[row]]
+core = "A rhythm declared on a phase a hazard integrates, so a firing by chance resets it and seals no edge"
+mutants = ["hazard-rhythm-compiles"]
+
+[[row]]
 core = "A body that leaks a conserved quantity steadily inside the bound its sliding windows set, at a rhythm whose edges cut those windows"
 mutants = [
   "edge-windows-take-every-segment-as-an-edge",
@@ -248,7 +252,12 @@ mutants = [
 
 [[row]]
 core = "A rhythm that stops, so a stretch with no edge outlasts the policy's bound, from admission, between edges or after the last window closed"
-mutants = ["edge-tail-from-the-last-edge", "edge-stretch-at-its-bound-fails", "edge-drift-before-a-stopped-rhythm"]
+mutants = [
+  "edge-tail-from-the-last-edge",
+  "edge-tail-from-the-last-edge-when-none-closed",
+  "edge-stretch-at-its-bound-fails",
+  "edge-drift-before-a-stopped-rhythm",
+]
 
 [[row]]
 core = "A body that resets a phase it does not declare a rhythm, under a policy that names that phase as a rhythm's clock"

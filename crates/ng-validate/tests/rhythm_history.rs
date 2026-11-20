@@ -25,6 +25,8 @@ enum Declares {
     Phase,
     /// The phase, and a second beat whose guards reset it at the same landings as the first's.
     PhaseResetTwice,
+    /// The phase, which a hazard integrates on the beat's first leg and a plain guard resets on its second.
+    HazardThenPlain,
     PhaseTwice,
     Unreset,
 }
@@ -77,7 +79,12 @@ fn metronome(declares: Declares) -> Result<CompiledBody, AdmissionError> {
         };
         for &beat in beats {
             let [tick, tock] = laws.modes(beat, ["tick", "tock"]);
-            for (from, to) in [(&tick, &tock), (&tock, &tick)] {
+            for (leg, (from, to)) in [(&tick, &tock), (&tock, &tick)].into_iter().enumerate() {
+                if leg == 0 && matches!(declares, Declares::HazardThenPlain) {
+                    let draw = laws.stream("beat draw");
+                    laws.hazard(HazardGuard::new(&phase, &draw, from.to(to)?));
+                    continue;
+                }
                 let past = laws.kernel(|mut k| {
                     let (now, threshold) = (k.state(&phase), k.parameter(&threshold));
                     let gap = k.subtract(now, threshold);
@@ -88,7 +95,7 @@ fn metronome(declares: Declares) -> Result<CompiledBody, AdmissionError> {
         }
         match declares {
             Declares::Nothing => {}
-            Declares::Phase | Declares::PhaseResetTwice => laws.rhythm(&phase),
+            Declares::Phase | Declares::PhaseResetTwice | Declares::HazardThenPlain => laws.rhythm(&phase),
             Declares::PhaseTwice => {
                 laws.rhythm(&phase);
                 laws.rhythm(&phase);
@@ -247,7 +254,7 @@ fn edges(view: &ConservationView<'_>) -> Result<Steps, CheckpointError> {
 }
 
 #[test]
-fn compile_refuses_a_rhythm_whose_phase_no_guard_resets_and_one_declared_twice() {
+fn compile_refuses_a_rhythm_whose_phase_no_guard_resets_one_declared_twice_and_one_a_hazard_integrates() {
     let defect = |declares| match metronome(declares) {
         Err(AdmissionError::Compile(defect)) => Some(defect),
         _ => None,
@@ -261,6 +268,12 @@ fn compile_refuses_a_rhythm_whose_phase_no_guard_resets_and_one_declared_twice()
     assert_eq!(
         defect(Declares::PhaseTwice),
         Some(CompileDefect::RhythmTwice {
+            phase: named("phase")
+        })
+    );
+    assert_eq!(
+        defect(Declares::HazardThenPlain),
+        Some(CompileDefect::HazardRhythm {
             phase: named("phase")
         })
     );

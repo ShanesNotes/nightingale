@@ -4933,14 +4933,14 @@ name = "unreset-rhythm-compiles"
 path = "crates/ng-contract/src/compile.rs"
 old = '''if at.is_empty() || !at.iter().all(reset) {'''
 new = '''if at.is_empty() {'''
-test = "-p ng-validate --test rhythm_history compile_refuses_a_rhythm_whose_phase_no_guard_resets_and_one_declared_twice"
+test = "-p ng-validate --test rhythm_history compile_refuses_a_rhythm_whose_phase_no_guard_resets_one_declared_twice_and_one_a_hazard_integrates"
 
 [[mutant]]
 name = "rhythm-declared-twice-compiles"
 path = "crates/ng-contract/src/compile.rs"
 old = '''if fragment.rhythms[..declared].contains(&local) {'''
 new = '''if false {'''
-test = "-p ng-validate --test rhythm_history compile_refuses_a_rhythm_whose_phase_no_guard_resets_and_one_declared_twice"
+test = "-p ng-validate --test rhythm_history compile_refuses_a_rhythm_whose_phase_no_guard_resets_one_declared_twice_and_one_a_hazard_integrates"
 
 [[mutant]]
 name = "a-reset-gives-no-edge"
@@ -5036,7 +5036,7 @@ name = "edge-worst-by-change-alone"
 path = "crates/ng-validate/src/certificate.rs"
 old = '''if !change.minus(allowance).at_most(held.change.minus(held.allowance)) {'''
 new = '''if !change.at_most(held.change) {'''
-test = "-p ng-validate --test rhythm_certificate the_honest_swing_fails_tight_fixed_windows_at_a_pace_that_cuts_them_and_passes_between_edges"
+test = "-p ng-validate --test rhythm_certificate the_worst_result_kept_is_the_window_furthest_past_its_allowance_not_the_largest_change"
 
 [[mutant]]
 name = "edge-tail-from-the-last-edge"
@@ -5113,3 +5113,54 @@ path = "crates/ng-validate/src/certificate.rs"
 old = '''bytes.extend_from_slice(clock.digest().as_bytes());'''
 new = '''bytes.extend_from_slice(&[0; 32]);'''
 test = "-p ng-validate --test rhythm_certificate a_fixed_policy_keeps_its_old_digest_and_each_field_of_the_windows_between_edges_moves_it"
+
+[[mutant]]
+name = "hazard-rhythm-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if fragment.hazards.iter().any(|hazard| hazard.integral == local) {'''
+new = '''if false {'''
+test = "-p ng-validate --test rhythm_history compile_refuses_a_rhythm_whose_phase_no_guard_resets_one_declared_twice_and_one_a_hazard_integrates"
+
+[[mutant]]
+name = "edge-early-by-all"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''early: limits.rates.iter().any(|rate| rate.settling.is_some()),'''
+new = '''early: limits.rates.iter().all(|rate| rate.settling.is_some()),'''
+test = "-p ng-validate --test rhythm_certificate an_empty_rate_list_opens_no_window_before_the_settling_time"
+
+[[mutant]]
+name = "edge-tail-from-the-last-edge-when-none-closed"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''self.stretch(self.last_close.unwrap_or(self.admission), head);'''
+new = '''self.stretch(self.last_close.unwrap_or(self.since), head);'''
+test = "-p ng-validate --test rhythm_certificate a_run_in_which_no_window_closed_is_one_stretch_from_admission_to_the_head"
+
+[[mutant]]
+name = "edge-close-judges-only-the-oldest-opening"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let closed: Vec<_> = self.open.drain(..closing).collect();'''
+new = '''let closed: Vec<_> = self.open.drain(..closing).take(1).collect();'''
+test = "-p ng-validate --test rhythm_certificate two_openings_that_mature_on_one_edge_are_each_judged_and_only_the_older_refuses_a_leak_it_alone_holds"
+
+[[mutant]]
+name = "edge-rate-quantity-left-out-of-the-policy-digest"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''bytes.extend_from_slice(&(quantity.index() as u64).to_be_bytes());'''
+new = '''let _ = quantity;'''
+test = "-p ng-validate --test rhythm_certificate a_fixed_policy_keeps_its_old_digest_and_each_field_of_the_windows_between_edges_moves_it"
+
+[[mutant]]
+name = "edge-clock-place-left-out-of-the-policy-digest"
+path = "crates/ng-contract/src/body.rs"
+old = '''        let mut out = Canonical::new("slot");
+        self.seal(&mut out);'''
+new = '''        let mut out = Canonical::new("slot");
+        self.law.seal(&mut out);'''
+test = "-p ng-validate --test rhythm_certificate a_fixed_policy_keeps_its_old_digest_and_each_field_of_the_windows_between_edges_moves_it"
+
+[[mutant]]
+name = "a-second-clock-replaces-the-first"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if self.edges.is_some() || !ordered ||'''
+new = '''if !ordered ||'''
+test = "-p ng-validate --test rhythm_certificate a_policy_refuses_a_second_clock"

@@ -51,8 +51,9 @@ impl CertificatePolicy {
         todo!()
     }
     /// Adds windows between the edges of the rhythm `windows` names, each allowing each rated combination its rate
-    /// times the window's own length. Refuses rates that are not a subset of the basis in basis order. A policy
-    /// with none keeps the digest it had before they existed; one with them seals every field of them.
+    /// times the window's own length. Refuses rates that are not a subset of the basis in basis order, and a second
+    /// call, since a policy judges one clock. A policy with none keeps the digest it had before they existed; one
+    /// with them seals every field of them.
     pub fn between_edges(self, _windows: EdgeWindows, _rates: Vec<EdgeRate>) -> Result<Self, AdmissionError> {
         todo!()
     }
@@ -103,7 +104,7 @@ impl EdgeRate {
 /// Windows between the edges of the rhythm whose phase is `clock`, named by its row as a paced cycle names its
 /// clock. Every edge from `settling_ns` after admission on opens one window, which closes at the first edge at
 /// least `length_ns` later. No stretch with no edge, from admission to the first edge and from the last window's
-/// close to the head included, may pass `widest_ns`.
+/// close, or from admission when none closed, to the head included, may pass `widest_ns`.
 pub struct EdgeWindows {
     _clock: RowKind,
     _settling_ns: u64,

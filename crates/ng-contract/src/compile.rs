@@ -2541,6 +2541,9 @@ fn rhythms(
             if fragment.rhythms[..declared].contains(&local) {
                 return Err(CompileDefect::RhythmTwice { phase });
             }
+            if fragment.hazards.iter().any(|hazard| hazard.integral == local) {
+                return Err(CompileDefect::HazardRhythm { phase });
+            }
             let at: Vec<RowId> = (rows.iter().enumerate())
                 .filter(|(_, row)| matches!(row.kind, RowKind::Memory(slot) if slot.law == phase))
                 .map(|(row, _)| RowId::at(row))
