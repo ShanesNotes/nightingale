@@ -912,6 +912,27 @@ fn each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_periph
     Ok(())
 }
 
+/// The drive scale is one in the admitted beat's mean, and with its sensors steady the fixture's beat is its instant.
+/// An instant packet solves no memory, so each set point admits where the packet states it: the central one at the
+/// staged acidity's bits, and the peripheral one at the sensor's closed form on the staged plasma, 2 ulps over the
+/// form at the admitted rows. That rounding leaves the scale 2 ulps under its rest.
+#[test]
+fn with_its_sensors_steady_the_drive_scale_admits_at_its_rest() -> Result<(), InitializationFailure> {
+    let samples = trace(Case { seconds: 0, ..SENSED }, &ng_solver::Core::new(SECOND / 100))?;
+    let admitted = samples[0];
+    let [central, peripheral_set] = admitted.set_points;
+    let from = |x: f64| (x.to_bits() as i64 - REST.to_bits() as i64).abs();
+    assert!(
+        central.to_bits() == admitted.acidity.to_bits() && from(admitted.scale) <= 2,
+        "the drive scale admits at {}, its set points at {central} and {peripheral_set} against the sensors {} and \
+         {}",
+        admitted.scale,
+        admitted.acidity,
+        peripheral(SENSED, &admitted)
+    );
+    Ok(())
+}
+
 /// The step's time and half the run: the closed loop's slowest mode is near fifty seconds (inferred from the drift of
 /// the breath means), so 900 s leaves under 1e-7 of a start or a step.
 const SETTLED: u64 = 900;
