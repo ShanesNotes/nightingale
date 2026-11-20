@@ -28,8 +28,17 @@ impl CaseAssembly for WholeBody {
     fn lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError> {
         body_lens(body)
     }
+    fn anchored(at: SimTime) -> Vec<BoundaryEvent> {
+        vec![body_awake(at)]
+    }
 }
 pub type BodyCase = AssemblyCase<WholeBody>;
+
+/// The body reads sleep, so every admission of it states sleep at the anchor, or admission refuses it as unstated.
+pub fn body_awake(at: SimTime) -> BoundaryEvent {
+    let id = InputId::new(Digest::of_canonical(b"awake at the anchor"));
+    BoundaryEvent::new(id, at, BoundaryInput::Sleep(Sleep::Awake))
+}
 
 fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let (mut laws, ports) = body.boundary()?.parts();

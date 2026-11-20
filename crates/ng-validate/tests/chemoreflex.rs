@@ -1,7 +1,7 @@
 //! One alveolar unit breathes under the chemoreflex. Blood chemistry is staged at the lung bed and a brain bed, a held
-//! production feeds the plasma and the void gate stands for the fixture's switch, so each sensor's response, the
-//! loop's gain on a step in production, a held breath's return and the exact hold of the drive scale at one are
-//! checked against closed forms with no body admission.
+//! production feeds the plasma and the void gate stands for the fixture's switch, so each sensor's response awake and
+//! asleep, the loop's gain on a step in production, sleep's steady shift, a held breath's return and the exact hold of
+//! the drive scale at one are checked against closed forms with no body admission.
 
 use core::f64::consts::LOG10_E;
 use core::num::NonZeroU64;
@@ -62,6 +62,35 @@ const OFFSET: f64 = 40.0;
 const SMOOTHING: f64 = 0.5;
 const SET_POINT_SPEED: f64 = 1e-6;
 const REST: f64 = 1.0;
+const WAKE: f64 = 0.15;
+const FALL: f64 = 0.4;
+
+/// The wake drive and the gain's fall the packet states, and the second the unit falls asleep, if it does.
+#[derive(Clone, Copy)]
+struct Sleeping {
+    wake: f64,
+    fall: f64,
+    from: Option<u64>,
+}
+
+const AWAKE: Sleeping = Sleeping {
+    wake: WAKE,
+    fall: FALL,
+    from: None,
+};
+const ASLEEP: Sleeping = Sleeping {
+    from: Some(0),
+    ..AWAKE
+};
+
+impl Sleeping {
+    fn at(self, sample: &Sample) -> f64 {
+        match self.from {
+            Some(from) if sample.at >= from as f64 => 1.0,
+            _ => 0.0,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct Steps {
@@ -86,6 +115,7 @@ struct Case {
     opens: u64,
     shuts: Option<u64>,
     seconds: u64,
+    sleep: Sleeping,
 }
 
 const SWITCH: u64 = 3;
@@ -97,6 +127,7 @@ const SENSED: Case = Case {
     opens: SWITCH,
     shuts: None,
     seconds: 6,
+    sleep: AWAKE,
 };
 
 /// The breath's alveolar ventilation at a drive scale of one: a breath of `V_T` through a mixed dead space `V_D`
@@ -505,6 +536,8 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Pressure>(p, "ns.peripheral-smoothing", SMOOTHING)?;
     set::<Rate<Dimensionless>>(p, "ns.chemo-set-point-speed", SET_POINT_SPEED)?;
     set::<Dimensionless>(p, "ns.drive-scale-rest", REST)?;
+    set::<Dimensionless>(p, "ns.wake-drive", unit.sleep.wake)?;
+    set::<Dimensionless>(p, "ns.sleep-gain-fall", unit.sleep.fall)?;
     set::<Pressure>(p, "rs.room-pressure", ROOM)?;
     set::<Pressure>(p, "rs.water-vapour-pressure", VAPOUR)?;
     set::<Pressure>(p, "rs.head-width", HEAD_WIDTH)?;
@@ -646,19 +679,29 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
 }
 
 fn switched(unit: Case) -> Vec<BoundaryEvent> {
-    let gate = |id: &[u8], seconds: u64, gate: Gate| {
+    let event = |id: &[u8], seconds: u64, input: BoundaryInput| {
         BoundaryEvent::new(
             InputId::new(Digest::of_canonical(id)),
             SimTime::from_ns(seconds * SECOND),
-            BoundaryInput::Void(gate),
+            input,
         )
     };
+    let gate = |id: &[u8], seconds: u64, gate: Gate| event(id, seconds, BoundaryInput::Void(gate));
+    let sleep = |id: &[u8], seconds: u64, sleep: Sleep| event(id, seconds, BoundaryInput::Sleep(sleep));
     let mut events = vec![
         gate(b"shut", 0, Gate::Shut),
         gate(b"open", unit.opens, Gate::Open),
     ];
     if let Some(shuts) = unit.shuts {
         events.push(gate(b"shut again", shuts, Gate::Shut));
+    }
+    match unit.sleep.from {
+        Some(0) => events.push(sleep(b"asleep", 0, Sleep::Nrem)),
+        Some(from) => events.extend([
+            sleep(b"awake", 0, Sleep::Awake),
+            sleep(b"asleep", from, Sleep::Nrem),
+        ]),
+        None => events.push(sleep(b"awake", 0, Sleep::Awake)),
     }
     events
 }
@@ -775,11 +818,16 @@ fn peripheral(unit: Case, sample: &Sample) -> f64 {
 }
 
 fn scale_form(unit: Case, sample: &Sample) -> f64 {
+    form(unit, sample, unit.sleep.at(sample))
+}
+
+fn form(unit: Case, sample: &Sample, asleep: f64) -> f64 {
     let [central, peripheral_gain] = unit.gains;
     let [central_set, peripheral_set] = sample.set_points;
     let rising = peripheral_gain * (peripheral(unit, sample) - peripheral_set) / peripheral_width();
     let falling = central * (sample.acidity - central_set) / CENTRAL_WIDTH;
-    REST + rising - falling
+    let Sleeping { wake, fall, .. } = unit.sleep;
+    REST - wake * asleep + (1.0 - fall * asleep) * (rising - falling)
 }
 
 fn edges(samples: &[Sample]) -> Vec<usize> {
@@ -833,11 +881,23 @@ fn either_side(samples: &[Sample], at: u64) -> (Sample, Sample) {
 #[test]
 fn each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_peripheral_offset()
 -> Result<(), InitializationFailure> {
+    on_its_form(AWAKE)
+}
+
+/// Asleep from the anchor, the wake drive leaves the rest and each arm moves the scale by `1 - L` of its awake share.
+#[test]
+fn asleep_each_sensor_moves_the_drive_scale_by_its_form_less_the_wake_drive_and_the_gains_fall()
+-> Result<(), InitializationFailure> {
+    on_its_form(ASLEEP)
+}
+
+fn on_its_form(sleep: Sleeping) -> Result<(), InitializationFailure> {
     let central = Case {
         steps: Steps {
             acidity: 0.01,
             ..STILL
         },
+        sleep,
         ..SENSED
     };
     let saturation = Case {
@@ -845,7 +905,7 @@ fn each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_periph
             saturation: 0.01,
             ..STILL
         },
-        ..SENSED
+        ..central
     };
     let swept = Case {
         offset: rest_plasma()[1] + 3.0 * SMOOTHING,
@@ -857,7 +917,7 @@ fn each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_periph
         },
         shuts: Some(SWITCH + 12),
         seconds: 20,
-        ..SENSED
+        ..central
     };
     let floor = NonZeroU64::MIN.saturating_add(SECOND / 100_000 - 1);
     let reference = ReferenceIntegrator::new(SECOND / 1_000).with_floor(floor);
@@ -867,10 +927,11 @@ fn each_sensor_moves_the_drive_scale_by_its_form_above_near_and_below_the_periph
         let admitted = samples[0];
         let measured = peripheral(unit, &admitted);
         let [central_set, peripheral_set] = admitted.set_points;
+        let rest = REST - sleep.wake * sleep.at(&admitted);
         assert!(
             (central_set - admitted.acidity).abs() <= 1e-12 * admitted.acidity.abs()
                 && (peripheral_set - measured).abs() <= 1e-12 * measured
-                && (admitted.scale - REST).abs() <= 1e-12,
+                && (admitted.scale - rest).abs() <= 1e-12,
             "at admission the set points are {central_set} and {peripheral_set} against the sensors {} and \
              {measured}, and the scale {}",
             admitted.acidity,
@@ -918,6 +979,65 @@ fn with_its_sensors_steady_the_drive_scale_admits_at_its_rest() -> Result<(), In
         admitted.scale,
         admitted.acidity,
         peripheral(SENSED, &admitted)
+    );
+    Ok(())
+}
+
+/// Both arms are zero, so asleep the scale admits at its rest less the wake drive, whatever the gain's fall.
+#[test]
+fn asleep_with_its_sensors_steady_the_drive_scale_admits_at_its_rest_less_the_wake_drive()
+-> Result<(), InitializationFailure> {
+    let unit = Case {
+        seconds: 0,
+        sleep: ASLEEP,
+        ..SENSED
+    };
+    let admitted = trace(unit, &ng_solver::Core::new(SECOND / 100))?[0];
+    assert!(
+        admitted.scale.to_bits() == (REST - WAKE).to_bits(),
+        "asleep the drive scale admits at {}, against its rest less the wake drive {}",
+        admitted.scale,
+        REST - WAKE
+    );
+    Ok(())
+}
+
+/// Awake the sleep input reads zero, so each of its terms is an exact zero and the law does 11b's arithmetic.
+#[test]
+fn awake_the_wake_drive_and_the_gains_fall_leave_every_bit_of_the_drive_scale()
+-> Result<(), InitializationFailure> {
+    let stated = Case {
+        steps: Steps {
+            saturation: 0.01,
+            acidity: 0.01,
+            ..STILL
+        },
+        ..SENSED
+    };
+    let unstated = Case {
+        sleep: Sleeping {
+            wake: 0.0,
+            fall: 0.0,
+            from: None,
+        },
+        ..stated
+    };
+    let core = ng_solver::Core::new(SECOND / 100);
+    let bits = |unit: Case| -> Result<Vec<[u64; 2]>, InitializationFailure> {
+        let samples = trace(unit, &core)?;
+        Ok((samples.iter())
+            .map(|sample| [sample.at.to_bits(), sample.scale.to_bits()])
+            .collect())
+    };
+    let (stated, unstated) = (bits(stated)?, bits(unstated)?);
+    let moved = (stated.iter())
+        .filter(|[_, scale]| *scale != REST.to_bits())
+        .count();
+    assert!(
+        stated == unstated && moved >= 10,
+        "{} and {} accepted states, {moved} with the scale off its rest",
+        stated.len(),
+        unstated.len()
     );
     Ok(())
 }
@@ -1000,6 +1120,67 @@ fn a_tenth_more_carbon_dioxide_made_raises_its_pressure_by_a_tenth_over_one_and_
         scale(first, before),
         scale(last, after)
     );
+    Ok(())
+}
+
+const SLEEPS: Case = Case {
+    seconds: 2 * SETTLED,
+    sleep: Sleeping {
+        from: Some(SETTLED),
+        ..AWAKE
+    },
+    ..SENSED
+};
+
+/// With `Q = P - U / D`, the alveolar ventilation equation above holds `Q C` at `a U` on both sides of sleep, so
+/// `Q_1 C_s(P_1) = Q_0 C(P_0)`, with `C_s = rest - W + g (arms)`, `g = 1 - L`, the set points held and the central arm
+/// at its set point. At `C(P_0) = rest = 1` and linear in `dP = P_1 - P_0`, `dP = Q_0 W / (1 - W + g K)`, with
+/// `K = Q_0 C' / C` the step test's loop gain. The ticket's `W / (g C')` is the sensor's shift that restores the awake
+/// drive, the threshold's: the pressure meets it only as `g K` grows. The second-order term, `g C' dP^2 / (1 - W + g K)`,
+/// is 4% of the shift at this `K`, so the linear form is held to 1.25 times it, and the relation solved whole, with each
+/// window's set points, to 2e-3, as the step test holds its own for the plant's speeds.
+#[test]
+fn sleep_raises_the_steady_carbon_dioxide_pressure_by_the_wake_drive_over_one_less_it_and_the_lowered_loops_gain()
+-> Result<(), InitializationFailure> {
+    let unit = SLEEPS;
+    let samples = trace(unit, &ng_solver::Core::new(SECOND / 100))?;
+    let [first, last] = [SETTLED, unit.seconds].map(|by| last_breaths(&samples, by as f64));
+    let [before, after] = [first, last].map(|breaths| mean(breaths, |sample| sample.pressure));
+    let scale = |breaths: &[Sample], pressure: f64, asleep: f64| {
+        let at = Sample {
+            pressure,
+            saturation: SATURATION,
+            acidity: ACIDITY,
+            ..breaths[breaths.len() - 1]
+        };
+        form(unit, &at, asleep)
+    };
+    let (head, awake, fall) = (MADE / DIFFUSING[1], scale(first, before, 0.0), 1.0 - FALL);
+    let above = before - unit.offset;
+    let slope = 0.5 * (1.0 + above / (above * above + SMOOTHING * SMOOTHING).sqrt());
+    let rising = unit.gains[1] * (1.0 - SATURATION) * slope / peripheral_width();
+    let gain = (before - head) * rising / awake;
+    let lowered = REST - WAKE + fall * gain;
+    let linear = (before - head) * WAKE / lowered;
+    let second = fall * rising * linear * linear / lowered;
+    let steady = |pressure: f64| head + (before - head) * awake / scale(last, pressure, 1.0);
+    let (mut low, mut high) = (before, steady(before));
+    for _ in 0..200 {
+        let middle = 0.5 * (low + high);
+        if middle < steady(middle) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    let (whole, measured) = (0.5 * (low + high) - before, after - before);
+    let report = format!(
+        "sleep moved the pressure from {before} by {measured}: the relation solved whole {whole}, linear {linear} at \
+         K = {gain} with a second-order term of {second}, the threshold's shift {}",
+        WAKE / (fall * rising)
+    );
+    assert!((measured - whole).abs() <= 2e-3 * whole, "{report}");
+    assert!((measured - linear).abs() <= 1.25 * second, "{report}");
     Ok(())
 }
 

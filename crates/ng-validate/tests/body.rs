@@ -929,11 +929,29 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1464 {"algebraic": 195, "amount": 1251, "memory": 18}, columns 1463, jacobian nonzeros 10150, blocks 431, largest block 651, parameter slots 745, conserved combinations 398, held pools 318, held route columns 88
-        model hash 00d2cbe7eb50e2dcf169174106cdcb02eb95d3aa433477abd00f9bc4b4171df5
+        rows 1464 {"algebraic": 195, "amount": 1251, "memory": 18}, columns 1463, jacobian nonzeros 10150, blocks 431, largest block 651, parameter slots 747, conserved combinations 398, held pools 318, held route columns 88
+        model hash 177b07e4ae6f8549c6d3042993de40cbed221c3d0c29a18a8808817dfc96921e
         conserved basis de45607d7612d7f3cad530d632e838b8a6dc0395dbc0d6d85da7f1222b42267d
-        stated packet c2549a8c42c7193d715fe31dd5827d4aaecc62a2979d025303d096131a6de3bd
+        stated packet 8ba515aff686d041ba9ad243452e0b5f6b2f5c6caf60d0f8bf9cb9c7dd0cbb74
     "#]].assert_eq(&pin);
+    Ok(())
+}
+
+#[test]
+fn admission_refuses_the_body_before_any_solve_unless_its_port_states_sleep_at_the_anchor()
+-> Result<(), AdmissionError> {
+    let body = whole_body()?;
+    let lens = body_lens(&body)?;
+    let refused = |events: Vec<BoundaryEvent>| -> Result<Option<AdmissionError>, AdmissionError> {
+        let (parameters, port) = (body.bind(body_packet(&body)?)?, BoundaryPort::new(events)?);
+        let request = InitializationRequest::at(anchor_moment()).reading(&lens);
+        Ok(body.initialization(parameters, port, request).err())
+    };
+    let unstated = AdmissionError::InputUnstated {
+        input: Lasting::Sleep,
+    };
+    assert_eq!(refused(Vec::new())?, Some(unstated));
+    assert_eq!(refused(vec![body_awake(anchor_moment())])?, None);
     Ok(())
 }
 

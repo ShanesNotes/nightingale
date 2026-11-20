@@ -1241,6 +1241,9 @@ const CENTRAL_GAIN: f64 = 2.0 / 0.778;
 const PERIPHERAL_GAIN: f64 = 1.0 / 0.778;
 const PERIPHERAL_OFFSET: f64 = 20.0;
 const PERIPHERAL_SMOOTHING: f64 = 0.5;
+/// Sleep takes the wake drive from the scale's rest and lowers each gain by the gain's fall. Research 22.
+const WAKE_DRIVE: f64 = 0.15;
+const SLEEP_GAIN_FALL: f64 = 0.4;
 
 fn chemoreflex(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
     let body = Binding::Body;
@@ -1251,6 +1254,8 @@ fn chemoreflex(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Pressure>(packet, "ns.peripheral-offset", body, PERIPHERAL_OFFSET)?;
     set::<Pressure>(packet, "ns.peripheral-smoothing", body, PERIPHERAL_SMOOTHING)?;
     set::<Rate<Dimensionless>>(packet, "ns.chemo-set-point-speed", body, 1e-6)?;
+    set::<Dimensionless>(packet, "ns.wake-drive", body, WAKE_DRIVE)?;
+    set::<Dimensionless>(packet, "ns.sleep-gain-fall", body, SLEEP_GAIN_FALL)?;
     set::<Dimensionless>(packet, "ns.drive-scale-rest", body, 1.0)
 }
 

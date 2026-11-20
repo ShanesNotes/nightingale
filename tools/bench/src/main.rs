@@ -117,16 +117,16 @@ fn arena(arguments: &[String]) {
     println!("work core {named}");
     let origin = anchor_moment();
     let end = SimTime::from_ns(origin.nanoseconds() + simulated_s * 1_000 * MS);
-    let (packet, lens) = if whole {
-        (body_packet(&body), body_lens(&body))
+    let (packet, lens, anchored) = if whole {
+        (body_packet(&body), body_lens(&body), vec![body_awake(origin)])
     } else {
-        (arena_packet(&body), arena_lens(&body))
+        (arena_packet(&body), arena_lens(&body), Vec::new())
     };
     let spec = ArenaSpec {
         window: Interval::new(origin, end).expect("a window"),
         packet: packet.expect("packet"),
         lens: lens.expect("lens"),
-        boundary: BoundaryPort::new(Vec::new()).expect("port"),
+        boundary: BoundaryPort::new(anchored).expect("port"),
         seed: arena_seed(),
         repeats: repeats.expect("at least one repeat"),
     };
@@ -361,10 +361,10 @@ fn cost(arguments: &[String]) {
         core: ng_solver::Core::new(10 * MS),
         solves: core::cell::Cell::new(0),
     };
-    let (packet, lens) = if whole {
-        (body_packet(&body), body_lens(&body))
+    let (packet, lens, anchored) = if whole {
+        (body_packet(&body), body_lens(&body), vec![body_awake(anchor_moment())])
     } else {
-        (arena_packet(&body), arena_lens(&body))
+        (arena_packet(&body), arena_lens(&body), Vec::new())
     };
     let (disk, memory) = (LinkLog::create(), MemoryStore::default());
     let log: &dyn HistoryStore = match arguments.get(3).map(String::as_str) {
@@ -372,7 +372,7 @@ fn cost(arguments: &[String]) {
         Some("disk") => &disk,
         Some(other) => panic!("no store named {other}"),
     };
-    let port = BoundaryPort::new(Vec::new()).expect("port");
+    let port = BoundaryPort::new(anchored).expect("port");
     let started = Instant::now();
     let admitted = admit_at(
         &body,

@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "944d90e8b323ba4856346826c5b85a43fc9c0715e6cd114e107050f9bd98aee6";
-const ADMITTED_SEAL: &str = "a8b0d0d25e18abc99d0b03daa707178bb3150245be922ca21bd67db8d43b6d6c";
+const PACKET: &str = "c7ec85aee0622edf508da2a0ada7da12c2d77fe49c97c9e790583cbcdc006ef4";
+const ADMITTED_SEAL: &str = "f03722e1e96bc928e1876f55ffe0aa0d77a10515b92aaa4b0f95cb614294c364";
 
 struct Counted {
     core: ng_solver::Core,
@@ -127,7 +127,7 @@ impl Start {
         let links = MemoryStore::default();
         let (saved, identity, provenance) = {
             let (packet, lens) = (packet(&body), body_lens(&body).expect("a lens"));
-            let port = BoundaryPort::new(Vec::new()).expect("no event");
+            let port = BoundaryPort::new(vec![body_awake(anchor_moment())]).expect("awake");
             let admitted = admit_at(&body, packet, port, &core, &lens, anchor_moment(), &links);
             let Admitted { session, provenance } =
                 admitted.unwrap_or_else(|refused| panic!("admission refused: {refused:?}"));
@@ -1496,23 +1496,23 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 944d90e8b323ba4856346826c5b85a43fc9c0715e6cd114e107050f9bd98aee6
-        seal 14753e3e586ee283e9e6fbde3f18f24cf65a9b41f669e31d77c34c37bc16c992
+        packet c7ec85aee0622edf508da2a0ada7da12c2d77fe49c97c9e790583cbcdc006ef4
+        seal f04394fc43ff567fc9b9138ce869add3af1cb82d4920d909ecf33db8af734f1f
         steps 198
         viscosity over its reference at the start 1.000092324
     "#]]
     .assert_eq(&pin);
     expect![[r#"
-         100.404686 ms  arterial pressure 134.595436  right atrial pressure 2.899838  portal vein pressure 6.243627  leg vein pressure 3.563185  heart rate 1.063911  sympathetic traffic 0.786252  filtration 1.670550  urine 0.015786  wall power 24546.873069  aortic flow 0.000000
-         201.522037 ms  arterial pressure 126.975732  right atrial pressure 3.333237  portal vein pressure 6.374803  leg vein pressure 3.722203  heart rate 1.081155  sympathetic traffic 0.085799  filtration 2.108909  urine 0.015786  wall power 15542.100702  aortic flow 39.654805
-         302.706352 ms  arterial pressure 118.697020  right atrial pressure 3.744205  portal vein pressure 6.158129  leg vein pressure 3.904980  heart rate 1.047384  sympathetic traffic 0.016483  filtration 2.342035  urine 0.015786  wall power 38216.953764  aortic flow 0.000000
-         403.022757 ms  arterial pressure 109.417396  right atrial pressure 3.252423  portal vein pressure 5.910982  leg vein pressure 4.252114  heart rate 1.004767  sympathetic traffic 0.012387  filtration 2.405432  urine 0.015786  wall power 14003.499403  aortic flow 0.000000
-         504.258003 ms  arterial pressure 100.951074  right atrial pressure 1.517484  portal vein pressure 5.658394  leg vein pressure 3.951843  heart rate 0.970402  sympathetic traffic 0.023270  filtration 2.343725  urine 0.015786  wall power 11997.268312  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.050732  right atrial pressure 0.922101  portal vein pressure 5.367241  leg vein pressure 3.258118  heart rate 0.947688  sympathetic traffic 0.075204  filtration 2.189160  urine 0.015786  wall power 8625.224991  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.067502  right atrial pressure 0.844003  portal vein pressure 5.145296  leg vein pressure 2.684889  heart rate 0.940766  sympathetic traffic 0.262970  filtration 1.993594  urine 0.015786  wall power 6296.317051  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.633379  right atrial pressure 1.012081  portal vein pressure 5.135669  leg vein pressure 2.440226  heart rate 0.952637  sympathetic traffic 0.642936  filtration 1.781198  urine 0.015786  wall power 4912.445666  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.719445  right atrial pressure 1.262543  portal vein pressure 5.411434  leg vein pressure 2.534952  heart rate 0.982910  sympathetic traffic 0.904771  filtration 1.567550  urine 0.015786  wall power 3946.273757  aortic flow 0.000000
-        1000.440947 ms  arterial pressure 68.693980  right atrial pressure 1.495867  portal vein pressure 5.777187  leg vein pressure 2.727024  heart rate 1.021751  sympathetic traffic 0.977546  filtration 1.378176  urine 0.015786  wall power 3075.457519  aortic flow 0.000000
+         100.404686 ms  arterial pressure 134.595436  right atrial pressure 2.899838  portal vein pressure 6.243627  leg vein pressure 3.563185  heart rate 1.063911  sympathetic traffic 0.786252  filtration 1.670550  urine 0.015786  wall power 24546.873073  aortic flow 0.000000
+         201.522035 ms  arterial pressure 126.975733  right atrial pressure 3.333237  portal vein pressure 6.374803  leg vein pressure 3.722203  heart rate 1.081155  sympathetic traffic 0.085799  filtration 2.108908  urine 0.015786  wall power 15542.100771  aortic flow 39.654803
+         302.706352 ms  arterial pressure 118.697020  right atrial pressure 3.744205  portal vein pressure 6.158129  leg vein pressure 3.904980  heart rate 1.047384  sympathetic traffic 0.016483  filtration 2.342035  urine 0.015786  wall power 38216.953770  aortic flow 0.000000
+         403.022757 ms  arterial pressure 109.417396  right atrial pressure 3.252423  portal vein pressure 5.910982  leg vein pressure 4.252114  heart rate 1.004767  sympathetic traffic 0.012387  filtration 2.405432  urine 0.015786  wall power 14003.499405  aortic flow 0.000000
+         504.258003 ms  arterial pressure 100.951074  right atrial pressure 1.517484  portal vein pressure 5.658394  leg vein pressure 3.951843  heart rate 0.970402  sympathetic traffic 0.023270  filtration 2.343725  urine 0.015786  wall power 11997.268313  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.050732  right atrial pressure 0.922101  portal vein pressure 5.367241  leg vein pressure 3.258118  heart rate 0.947688  sympathetic traffic 0.075204  filtration 2.189160  urine 0.015786  wall power 8625.224992  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.067502  right atrial pressure 0.844003  portal vein pressure 5.145296  leg vein pressure 2.684889  heart rate 0.940766  sympathetic traffic 0.262970  filtration 1.993594  urine 0.015786  wall power 6296.317052  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.633379  right atrial pressure 1.012081  portal vein pressure 5.135669  leg vein pressure 2.440226  heart rate 0.952637  sympathetic traffic 0.642936  filtration 1.781198  urine 0.015786  wall power 4912.445667  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.719445  right atrial pressure 1.262543  portal vein pressure 5.411434  leg vein pressure 2.534952  heart rate 0.982910  sympathetic traffic 0.904771  filtration 1.567550  urine 0.015786  wall power 3946.273758  aortic flow 0.000000
+        1000.440947 ms  arterial pressure 68.693980  right atrial pressure 1.495867  portal vein pressure 5.777187  leg vein pressure 2.727024  heart rate 1.021751  sympathetic traffic 0.977546  filtration 1.378176  urine 0.015786  wall power 3075.457520  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -2593,7 +2593,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         highest alveolar oxygen 102.524 (4.101 times P50) at 2.024 s: plasma oxygen pressure 100.886 (4.035 times P50), bound 0.971026 of capacity
         work of breathing: stated 5331.3, over two whole breaths from 49.687 s 5367.6
         alveolar water over whole breaths from 20.091 s: 1.02166 of the saturated vapour share
-        drive scale at admission 1.007406222041; over the first beat, to 0.998962223 s, 0.999997735918 by the trapezoid and 1.000013756971 from the set points
+        drive scale at admission 1.007406222041; over the first beat, to 0.998962223 s, 0.999997735913 by the trapezoid and 1.000013756971 from the set points
         Energy: worst 1.5287e3, from admission 7.0243e0, steady 1.5296e3, inside a breath 7.6119e2
         Element(Carbon): worst 6.6534e1, from admission 3.8811e1, steady 5.0087e1, inside a breath 2.0096e2
         Element(Oxygen): worst 1.8721e3, from admission 1.8458e3, steady 1.0175e3, inside a breath 4.4957e3
