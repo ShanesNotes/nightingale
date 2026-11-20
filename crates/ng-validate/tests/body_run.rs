@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "b98249ca0dca9b05cbb58c1d0f49c6dc5a66b60a006ab5529bd5ef4cecfb27c7";
-const ADMITTED_SEAL: &str = "24dd320b4893928ddbbcfadaa1a22fc145e62f08e1229ff6a5374ed864288a16";
+const PACKET: &str = "944d90e8b323ba4856346826c5b85a43fc9c0715e6cd114e107050f9bd98aee6";
+const ADMITTED_SEAL: &str = "a8b0d0d25e18abc99d0b03daa707178bb3150245be922ca21bd67db8d43b6d6c";
 
 struct Counted {
     core: ng_solver::Core,
@@ -107,7 +107,7 @@ struct Start {
     saved: Checkpoint,
     identity: RunIdentity,
     links: MemoryStore,
-    closings: String,
+    provenance: InitializationProvenance,
 }
 impl Start {
     fn admitted() -> Self {
@@ -117,7 +117,7 @@ impl Start {
             solves: Cell::new(0),
         };
         let links = MemoryStore::default();
-        let (saved, identity, closings) = {
+        let (saved, identity, provenance) = {
             let (packet, lens) = (
                 body_packet(&body).expect("a packet"),
                 body_lens(&body).expect("a lens"),
@@ -129,7 +129,7 @@ impl Start {
             (
                 session.checkpoint().expect("a checkpoint"),
                 session.record().identity().clone(),
-                closings(&provenance),
+                provenance,
             )
         };
         Self {
@@ -138,7 +138,7 @@ impl Start {
             saved,
             identity,
             links,
-            closings,
+            provenance,
         }
     }
     fn session(&self) -> Session<'_, Running> {
@@ -291,13 +291,77 @@ fn the_body_admits_at_06_55(start: &Start) {
     expect![[r#"
         aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
     "#]]
-    .assert_eq(&start.closings);
+    .assert_eq(&closings(&start.provenance));
     let force = value(start, &start.session(), field("MS", "pump_force", Context::Body));
     let fitted = lead(Compensated::of(&body_breath().expect("the breath").rest_force));
     assert!(
         (force - fitted).abs() <= 1e-9 * fitted,
         "the pump's force at admission is {force}, the fitted rest {fitted}"
     );
+}
+
+/// The drive scale at the admitted instant, where the brain bed's acidity swings with the beat, and its mean over the
+/// first beat, to the heart's first phase reset. The trapezoid over accepted states carries its own quadrature's error.
+/// Each set point follows its sensor at the stated speed and the scale is linear in each sensor's distance from its set
+/// point, so the set points' change gives the mean on the solver's own quadrature.
+fn the_drive_scale_at_admission_and_over_the_first_beat(start: &Start) -> String {
+    let parameter = |name: &'static str| {
+        (start.provenance.values().iter())
+            .find_map(|record| match record.name {
+                ValueName::Parameter { key, .. } if key == ParameterKey::new(name) => {
+                    Some(lead(record.value))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no parameter {name}"))
+    };
+    let named = |owner: &str, local: &str| {
+        (start.body.rows().iter())
+            .find(|row| match row.kind() {
+                RowKind::Memory(slot) | RowKind::Algebraic(slot) => {
+                    slot.law.owner == owner && slot.law.local == local
+                }
+                _ => false,
+            })
+            .unwrap_or_else(|| panic!("no row {local}"))
+            .id()
+    };
+    let (beat, scale, set_points) = (
+        named("CV", "phase"),
+        named("NS", "drive scale"),
+        [
+            named("NS", "central set point"),
+            named("NS", "peripheral set point"),
+        ],
+    );
+    let held = |session: &Session<'_, Running>, row: RowId| session.record().accepted().value(row);
+    let mut session = start.session();
+    let admitted = lead(held(&session, scale));
+    let from = set_points.map(|row| held(&session, row));
+    let (mut area, mut last) = (0.0, (0, admitted));
+    loop {
+        let phase = lead(held(&session, beat));
+        session = until(session, last.0 + 1);
+        let now = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+        let value = lead(held(&session, scale));
+        area += 0.5 * (last.1 + value) * (now - last.0) as f64;
+        last = (now, value);
+        if lead(held(&session, beat)) < phase {
+            break;
+        }
+    }
+    let seconds = last.0 as f64 / SECOND as f64;
+    let [central, peripheral] = [0, 1].map(|at| {
+        lead(held(&session, set_points[at]).minus(from[at]))
+            / (parameter("ns.chemo-set-point-speed") * seconds)
+    });
+    let mean = parameter("ns.drive-scale-rest")
+        + parameter("ns.peripheral-gain") * peripheral / parameter("ns.peripheral-width")
+        - parameter("ns.central-gain") * central / parameter("ns.central-width");
+    format!(
+        "drive scale at admission {admitted:.12}; over the first beat, to {seconds:.9} s, {:.12} by the trapezoid and {mean:.12} from the set points\n",
+        area / last.0 as f64
+    )
 }
 
 #[derive(Default)]
@@ -750,7 +814,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11679, quantities 398, held routes 88
+        steps 11666, quantities 398, held routes 88
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -1032,8 +1096,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet b98249ca0dca9b05cbb58c1d0f49c6dc5a66b60a006ab5529bd5ef4cecfb27c7
-        seal 35d566823b059e4af67f4bf62ff950b2a9eddcdd0ec19b947ecae7e321a3fb5a
+        packet 944d90e8b323ba4856346826c5b85a43fc9c0715e6cd114e107050f9bd98aee6
+        seal 14753e3e586ee283e9e6fbde3f18f24cf65a9b41f669e31d77c34c37bc16c992
         steps 198
         viscosity over its reference at the start 1.000092324
     "#]]
@@ -2100,6 +2164,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     report += &the_work_of_breathing_follows_the_pump_from_the_stated_mean(&watch);
     report += &the_alveolar_water_share_over_whole_breaths(&watch);
     the_body_admits_at_06_55(&start);
+    report += &the_drive_scale_at_admission_and_over_the_first_beat(&start);
     the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
     report += &the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
         &start, &minute, &watch,
@@ -2107,32 +2172,34 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     the_lining_moves_research_11s_form_over_the_first_minute(&start, &minute);
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
-        before the first breath edge: alveolar oxygen 101.296, carbon dioxide 28.354, venous return 77.32
-        breath from 5.000 s: alveolar oxygen 100.761 swinging 3.060, carbon dioxide 28.699 swinging 1.988, venous return's beat means 74.21 to 84.51 around 78.01, tidal volume 11006.4
-        breath from 10.000 s: alveolar oxygen 100.435 swinging 3.044, carbon dioxide 28.831 swinging 1.933, venous return's beat means 74.06 to 84.47 around 77.98, tidal volume 11008.2
-        breath from 15.000 s: alveolar oxygen 100.170 swinging 3.042, carbon dioxide 28.893 swinging 1.909, venous return's beat means 74.06 to 84.44 around 77.96, tidal volume 11008.4
-        breath from 20.001 s: alveolar oxygen 99.951 swinging 3.079, carbon dioxide 28.923 swinging 1.916, venous return's beat means 74.07 to 84.44 around 77.97, tidal volume 11008.2
-        breath from 25.001 s: alveolar oxygen 99.766 swinging 3.109, carbon dioxide 28.937 swinging 1.922, venous return's beat means 73.98 to 84.44 around 77.97, tidal volume 11008.0
-        breath from 30.001 s: alveolar oxygen 99.608 swinging 3.136, carbon dioxide 28.947 swinging 1.925, venous return's beat means 73.99 to 84.44 around 77.97, tidal volume 11007.8
-        breath from 35.001 s: alveolar oxygen 99.472 swinging 3.159, carbon dioxide 28.954 swinging 1.927, venous return's beat means 73.99 to 84.44 around 77.96, tidal volume 11007.5
-        breath from 40.001 s: alveolar oxygen 99.353 swinging 3.178, carbon dioxide 28.961 swinging 1.929, venous return's beat means 73.99 to 84.44 around 77.96, tidal volume 11007.3
-        breath from 45.001 s: alveolar oxygen 99.247 swinging 3.196, carbon dioxide 28.967 swinging 1.931, venous return's beat means 73.99 to 84.44 around 77.97, tidal volume 11007.1
-        breath from 50.001 s: alveolar oxygen 99.154 swinging 3.211, carbon dioxide 28.972 swinging 1.933, venous return's beat means 73.99 to 84.44 around 77.97, tidal volume 11006.8
+        before the first breath edge: alveolar oxygen 101.294, carbon dioxide 28.356, venous return 77.29
+        breath from 5.006 s: alveolar oxygen 100.752 swinging 3.062, carbon dioxide 28.705 swinging 1.990, venous return's beat means 74.07 to 84.51 around 77.81, tidal volume 11021.5
+        breath from 10.037 s: alveolar oxygen 100.410 swinging 3.057, carbon dioxide 28.844 swinging 1.931, venous return's beat means 73.96 to 84.47 around 77.61, tidal volume 11026.1
+        breath from 15.074 s: alveolar oxygen 100.133 swinging 3.150, carbon dioxide 28.907 swinging 1.945, venous return's beat means 73.98 to 84.41 around 77.77, tidal volume 11016.8
+        breath from 20.091 s: alveolar oxygen 99.916 swinging 3.201, carbon dioxide 28.930 swinging 1.965, venous return's beat means 74.00 to 84.39 around 78.08, tidal volume 11002.1
+        breath from 25.079 s: alveolar oxygen 99.749 swinging 3.214, carbon dioxide 28.935 swinging 1.961, venous return's beat means 74.01 to 84.38 around 78.36, tidal volume 10988.0
+        breath from 30.039 s: alveolar oxygen 99.621 swinging 3.186, carbon dioxide 28.932 swinging 1.938, venous return's beat means 74.12 to 84.39 around 78.39, tidal volume 10975.2
+        breath from 34.975 s: alveolar oxygen 99.519 swinging 3.089, carbon dioxide 28.928 swinging 1.909, venous return's beat means 74.10 to 84.41 around 78.27, tidal volume 10958.6
+        breath from 39.892 s: alveolar oxygen 99.435 swinging 3.017, carbon dioxide 28.924 swinging 1.920, venous return's beat means 74.07 to 84.33 around 78.13, tidal volume 10949.3
+        breath from 44.795 s: alveolar oxygen 99.366 swinging 3.019, carbon dioxide 28.922 swinging 1.969, venous return's beat means 74.07 to 83.91 around 77.64, tidal volume 10942.6
+        breath from 49.687 s: alveolar oxygen 99.308 swinging 3.131, carbon dioxide 28.919 swinging 2.015, venous return's beat means 74.08 to 83.26 around 76.74, tidal volume 10938.5
+        breath from 54.570 s: alveolar oxygen 99.259 swinging 3.238, carbon dioxide 28.918 swinging 2.047, venous return's beat means 74.10 to 83.61 around 75.80, tidal volume 10935.4
         highest alveolar oxygen 102.524 (4.101 times P50) at 2.024 s: plasma oxygen pressure 100.886 (4.035 times P50), bound 0.971026 of capacity
-        work of breathing: stated 5331.3, over two whole breaths from 45.001 s 5323.0
-        alveolar water over whole breaths from 20.001 s: 1.02188 of the saturated vapour share
-        Energy: worst 1.4583e3, from admission 8.4422e0, steady 1.4594e3, inside a breath 7.3025e2
-        Element(Carbon): worst 4.6100e1, from admission 3.8271e1, steady 4.3161e1, inside a breath 2.0145e2
-        Element(Oxygen): worst 1.8508e3, from admission 1.8470e3, steady 5.2877e1, inside a breath 4.4965e3
-        Element(Hydrogen): worst 3.3523e-5, from admission 7.7904e-6, steady 3.3547e-5, inside a breath 1.6847e-5
-        Of(NitrogenGas): worst 3.4629e3, from admission 3.4604e3, steady 7.7951e1, inside a breath 8.6213e3
-        Of(Water): worst 1.9155e-2, from admission 1.9154e-2, steady 1.1407e-2, inside a breath 2.0097e-2
-        Of(Vasopressin): worst 3.0454e-3, from admission 3.9430e-4, steady 2.0234e-3, inside a breath 2.0981e-2
-        two breaths from 60.001 s to 70.001 s
-        Oxygen: in 4598.7228, out 3659.8661, across 950.6467, along 939.5306, gained -1.1790e1
-        CarbonDioxide: in 8.7595, out 687.3534, across -679.2904, along -678.6404, gained 6.9647e-1
-        NitrogenGas: in 17291.1979, out 17280.0809, across 0.0000, along 10.4688, gained 1.1117e1
-        Water: in 0.0000, out 0.0414, across -0.0421, along -0.0414, gained 7.8197e-4
+        work of breathing: stated 5331.3, over two whole breaths from 49.687 s 5367.6
+        alveolar water over whole breaths from 20.091 s: 1.02166 of the saturated vapour share
+        drive scale at admission 1.007406222041; over the first beat, to 0.998962223 s, 0.999997735918 by the trapezoid and 1.000013756971 from the set points
+        Energy: worst 1.5287e3, from admission 7.0243e0, steady 1.5296e3, inside a breath 7.6119e2
+        Element(Carbon): worst 6.6534e1, from admission 3.8811e1, steady 5.0087e1, inside a breath 2.0096e2
+        Element(Oxygen): worst 1.8721e3, from admission 1.8458e3, steady 1.0175e3, inside a breath 4.4957e3
+        Element(Hydrogen): worst 3.1838e-5, from admission 7.8286e-6, steady 3.1872e-5, inside a breath 1.5646e-5
+        Of(NitrogenGas): worst 3.4950e3, from admission 3.4590e3, steady 2.0239e3, inside a breath 8.6200e3
+        Of(Water): worst 1.9184e-2, from admission 1.9184e-2, steady 1.5519e-2, inside a breath 2.0007e-2
+        Of(Vasopressin): worst 3.4251e-3, from admission 5.4883e-4, steady 3.2924e-3, inside a breath 2.0938e-2
+        two breaths from 64.316 s to 74.045 s
+        Oxygen: in 4560.2375, out 3637.1692, across 899.2353, along 922.1879, gained 2.3833e1
+        CarbonDioxide: in 8.6862, out 679.7044, across -667.3050, along -671.3639, gained -3.7132e0
+        NitrogenGas: in 17146.4932, out 17140.9561, across 0.0000, along -0.9528, gained 5.5371e0
+        Water: in 0.0000, out 0.0407, across -0.0410, along -0.0407, gained 3.1313e-4
     "#]].assert_eq(&report);
     let mut minute = format!(
         "steps {}, solves {}: ordinary {}, landing {}\n",
@@ -2145,12 +2212,11 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
     expect![[r#"
-        steps 11679, solves 14387: ordinary 12350, landing 2037
-        refused 74 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
-        refused 1 Accuracy Amount { site: SiteId { key: "body", class: TissueSite }, space: Elastic, species: Energy }
-        refused 242 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
-        refused 295 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
-        refused 59 IterationLimit
+        steps 11666, solves 14397: ordinary 12343, landing 2054
+        refused 76 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
+        refused 243 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
+        refused 297 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
+        refused 61 IterationLimit
     "#]]
     .assert_eq(&minute);
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");

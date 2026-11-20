@@ -2057,7 +2057,7 @@ fn speciation_readers(body: &CompiledBody) -> BTreeSet<(String, &'static str)> {
 
 #[test]
 fn blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops() -> Result<(), AdmissionError> {
-    for (body, beds) in [(compiled(Cells::HeldUse)?, 1), (whole_body()?, 11)] {
+    for (body, sites) in [(compiled(Cells::HeldUse)?, 1), (whole_body()?, 12)] {
         for quantity in SPECIATION {
             let owners: Vec<&str> = (body.rows().iter())
                 .filter_map(|row| match row.kind() {
@@ -2068,7 +2068,7 @@ fn blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops() -
             let rows = if quantity == CarbonDioxidePartialPressure::NAME {
                 0
             } else {
-                beds
+                sites
             };
             assert_eq!(owners, vec![BloodChemistry::CARD; rows], "{quantity}");
         }
