@@ -726,7 +726,6 @@ mod tests {
         );
     }
 
-    /// A bench of cell water, held, and with `rhythm` a still phase whose guard resets it, declared a rhythm.
     fn held_bench(rhythm: bool) -> Result<CompiledBody, AdmissionError> {
         let mut map = AnatomyBuilder::new();
         let root = map.site::<TissueSite>("body", at_origin()?);

@@ -41,8 +41,7 @@ index!(
     ColumnId,
     ProgramId,
     ParameterId,
-    /// One rhythm of a compiled body, numbered in its phase's row order. Only the body makes one, so a policy names a
-    /// rhythm through the body it was made on.
+    /// One rhythm of a compiled body, numbered in its phase's row order.
     RhythmId
 );
 
@@ -73,7 +72,6 @@ pub(crate) struct Layout {
     pub(crate) streams: Vec<StreamLayout>,
     pub(crate) forcings: Vec<ForcingLayout>,
     pub(crate) hazards: Vec<HazardLayout>,
-    /// Each rhythm's phase row, in row order.
     pub(crate) rhythms: Vec<RowId>,
     pub(crate) basis: ConservedBasis,
 }
@@ -151,7 +149,6 @@ impl CompiledBody {
             (RhythmId::at(at), phase)
         })
     }
-    /// The rhythm whose phase is `phase`, if its card declared one.
     pub fn rhythm(&self, phase: Slot) -> Option<RhythmId> {
         self.rhythms()
             .find_map(|(rhythm, slot)| (slot == phase).then_some(rhythm))
@@ -327,7 +324,6 @@ impl From<LawName> for Slot {
     }
 }
 impl Slot {
-    /// The slot sealed whole, its law and its place, so a policy that names a clock by its slot seals that name.
     pub fn digest(&self) -> Digest {
         let mut out = Canonical::new("slot");
         self.seal(&mut out);

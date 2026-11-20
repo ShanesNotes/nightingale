@@ -13,7 +13,6 @@ const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
 const EXTERIOR: &str = "exterior";
 const NOTE: &str = "synthetic";
-/// The phase runs 0.8 a second to a threshold of one, so an edge every 1.25 s, and fifteen before the end.
 const PACE: f64 = 0.8;
 const EDGES: usize = 15;
 const END: u64 = 19_500 * MILLISECOND;
@@ -24,6 +23,8 @@ const CUT: u64 = 1_240 * MILLISECOND;
 enum Declares {
     Nothing,
     Phase,
+    /// The phase, and a second beat whose guards reset it at the same landings as the first's.
+    PhaseResetTwice,
     PhaseTwice,
     Unreset,
 }
@@ -40,7 +41,6 @@ fn named(local: &'static str) -> LawName {
     LawName { owner: "NS", local }
 }
 
-/// One vessel filled from outside, and a phase whose two guards each reset it at the threshold and swap the beat.
 fn metronome(declares: Declares) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin());
@@ -71,18 +71,24 @@ fn metronome(declares: Declares) -> Result<CompiledBody, AdmissionError> {
         laws.memory_rate(&phase, running);
         let threshold =
             laws.parameter::<Dimensionless>(ParameterKey::new("ns.threshold"), Admissible::positive());
-        let [tick, tock] = laws.modes("beat", ["tick", "tock"]);
-        for (from, to) in [(&tick, &tock), (&tock, &tick)] {
-            let past = laws.kernel(|mut k| {
-                let (now, threshold) = (k.state(&phase), k.parameter(&threshold));
-                let gap = k.subtract(now, threshold);
-                k.finish(gap, from.only(), wave)
-            });
-            laws.event(Guard::new(past, Crossing::Rising, from.to(to)?).resetting(&phase));
+        let beats: &[&'static str] = match declares {
+            Declares::PhaseResetTwice => &["beat", "echo"],
+            _ => &["beat"],
+        };
+        for &beat in beats {
+            let [tick, tock] = laws.modes(beat, ["tick", "tock"]);
+            for (from, to) in [(&tick, &tock), (&tock, &tick)] {
+                let past = laws.kernel(|mut k| {
+                    let (now, threshold) = (k.state(&phase), k.parameter(&threshold));
+                    let gap = k.subtract(now, threshold);
+                    k.finish(gap, from.only(), wave)
+                });
+                laws.event(Guard::new(past, Crossing::Rising, from.to(to)?).resetting(&phase));
+            }
         }
         match declares {
             Declares::Nothing => {}
-            Declares::Phase => laws.rhythm(&phase),
+            Declares::Phase | Declares::PhaseResetTwice => laws.rhythm(&phase),
             Declares::PhaseTwice => {
                 laws.rhythm(&phase);
                 laws.rhythm(&phase);
@@ -133,7 +139,6 @@ fn boundary() -> BoundaryPort {
     BoundaryPort::new(vec![event]).expect("one event")
 }
 
-/// Every link a run hands over, and each kept in the compact form that follows the one before.
 #[derive(Default)]
 struct Compacting {
     held: RefCell<Vec<(Digest, Vec<u8>)>>,
@@ -170,8 +175,7 @@ impl HistoryStore for Compacting {
     }
 }
 
-/// Refuses every fourth solve of a first attempt, so some steps land only on a retry and some landings are refused part
-/// way, and never a retry.
+/// So some steps land only on a retry and some landings are refused part way.
 struct Refusing {
     core: ReferenceIntegrator,
     calls: Cell<u64>,
@@ -192,7 +196,6 @@ impl CoupledSolver for Refusing {
     }
 }
 
-/// Each accepted step and whether it swapped the beat, which only a guard's landing does.
 type Steps = Vec<(Interval, bool)>;
 
 fn run<'m>(
@@ -230,7 +233,6 @@ fn admitted<'m>(
     admit_fixture(body, packet(body), boundary(), core, store).expect("admitted")
 }
 
-/// Each segment and whether it ends on an edge, oldest first, read through a cursor in time order.
 fn edges(view: &ConservationView<'_>) -> Result<Steps, CheckpointError> {
     let [(rhythm, phase)] = view.rhythms().collect::<Vec<_>>()[..] else {
         panic!("one rhythm");
@@ -339,6 +341,19 @@ fn each_edge_is_sealed_where_the_selected_landing_reset_the_phase_and_reads_back
 }
 
 #[test]
+fn two_guards_that_reset_the_phase_in_one_firing_seal_one_edge() {
+    let body = metronome(Declares::PhaseResetTwice).expect("compiled");
+    let (core, store) = (ReferenceIntegrator::new(SECOND), Compacting::default());
+    let mut packet = packet(&body);
+    packet.start_mode(named("echo"), "tick", NOTE).expect("once");
+    let session = admit_fixture(&body, packet, boundary(), &core, &store).expect("admitted");
+    let (mut steps, mut retries) = (Steps::new(), 0);
+    let session = run(session, END, &mut steps, &mut retries);
+    assert_eq!(steps.iter().filter(|(_, edge)| *edge).count(), EDGES);
+    assert_eq!(edges(&session.conservation()), Ok(steps));
+}
+
+#[test]
 fn a_retry_gives_no_edge_and_each_edge_stays_where_the_beat_swapped() {
     let body = metronome(Declares::Phase).expect("compiled");
     let core = Refusing {
@@ -351,11 +366,6 @@ fn a_retry_gives_no_edge_and_each_edge_stays_where_the_beat_swapped() {
     assert!(retries > 0);
     assert_eq!(steps.iter().filter(|(_, edge)| *edge).count(), EDGES);
     assert_eq!(edges(&session.conservation()), Ok(steps));
-}
-
-/// The bytes one rhythm adds to a link, raw and as kept after the link before, by whether the link ends on its edge.
-fn added(_edge: bool) -> (usize, usize) {
-    (32, 16)
 }
 
 #[test]
@@ -385,12 +395,11 @@ fn a_body_that_declares_no_rhythm_writes_its_old_links_and_one_that_does_adds_it
         "main's layout: {plain_raw:?}"
     );
     for (at, (_, edge)) in steps.iter().enumerate() {
-        let (raw_added, kept_added) = added(*edge);
-        let kept_added = if at == 0 { raw_added } else { kept_added };
+        let kept_added = if at == 0 { 32 } else { 16 };
         assert_eq!(
             (raw[at] - plain_raw[at], kept[at] - plain_kept[at]),
-            (raw_added, kept_added),
-            "step {at}, edge {edge}"
+            (32, kept_added),
+            "step {at}, edge {edge}: two counts, and the start one past the first link is the end before it"
         );
     }
 }

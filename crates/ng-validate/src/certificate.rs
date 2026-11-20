@@ -5,9 +5,9 @@ use ng_contract::{
     CoverageManifest, Digest, Dimensionless, HeldRoute, Interval, Measure, QuantityId, Rate, RhythmId,
     SimTime, Slot, Substance,
 };
+use ng_record::{CheckpointError, ConservationView, Curve, HistorySeal, HistorySegment, OldestFirst};
 
 const SECOND: u64 = 1_000_000_000;
-use ng_record::{CheckpointError, ConservationView, Curve, HistorySeal, HistorySegment, OldestFirst};
 
 /// One combination's limits. `absolute + relative * gross exchange in the window` bounds closure, so a tiny
 /// exchange needs a tiny residual. `drift` stands in for 1.96 times the within-subject variation until the
@@ -445,7 +445,6 @@ pub struct RhythmResult {
     last_close: Option<SimTime>,
 }
 impl RhythmResult {
-    /// The policy's windows between edges, which name the clock.
     pub fn windows(&self) -> EdgeWindows {
         self.windows
     }
@@ -805,8 +804,6 @@ enum Need {
     Finish,
 }
 
-/// The windows between one rhythm's edges, judged as each accepted segment arrives in time order: each edge closes
-/// the windows that have reached their length, oldest opening first, then opens one.
 struct Rhythm<'p> {
     limits: &'p EdgePolicy,
     rhythm: RhythmId,
@@ -865,7 +862,6 @@ impl<'p> Rhythm<'p> {
             self.open.push((at, values));
         }
     }
-    /// A window takes the rate of the stretch its opening edge is in.
     fn judge(&mut self, (opened, before): (u64, &[Compensated]), (at, after): (u64, &[Compensated])) {
         let Some(window) = Interval::new(SimTime::from_ns(opened), SimTime::from_ns(at)) else {
             return;
@@ -923,7 +919,6 @@ impl<'p> Rhythm<'p> {
             self.widest = Some(stretch);
         }
     }
-    /// The tail runs from the last close judged, or from admission when none was, to the head.
     fn finish(mut self, head: u64) -> Result<RhythmResult, CertificateFailure> {
         self.stretch(self.last_close.unwrap_or(self.admission), head);
         if let Some(failure) = self.stopped.or(self.drifted) {
@@ -976,7 +971,6 @@ impl<'p> Windows<'p> {
             rhythm: edges.map(|(limits, rhythm)| Rhythm::new(limits, rhythm, first)),
         }
     }
-    /// The windows between edges read every segment, to the head, whatever the fixed windows still need.
     fn arrive(&mut self, segment: &HistorySegment) {
         if let Some(rhythm) = &mut self.rhythm {
             rhythm.arrive(segment);

@@ -2526,7 +2526,6 @@ fn guards(
     Ok(guards)
 }
 
-/// Each declared phase's rows, in row order, so a rhythm's number follows the body and not the order of fragments.
 fn rhythms(
     fragments: &[FragmentData],
     rows: &[Row],

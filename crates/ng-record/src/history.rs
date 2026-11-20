@@ -207,8 +207,7 @@ pub(crate) struct LedgerChunk {
     interval: Interval,
     quantities: Vec<QuantityStep>,
     columns: Vec<ColumnStep>,
-    /// Each rhythm's edges since admission at the step's start and end, in `RhythmId` order.
-    rhythms: Vec<[u64; 2]>,
+    edges: Vec<[u64; 2]>,
 }
 #[derive(Clone)]
 struct QuantityStep {
@@ -257,20 +256,19 @@ impl LedgerChunk {
                 }
             })
             .collect();
-        let rhythms = (0..body.rhythms().len())
-            .map(|rhythm| [previous.map_or(0, |chunk| chunk.rhythms[rhythm][1]); 2])
+        let edges = (0..body.rhythms().len())
+            .map(|rhythm| [previous.map_or(0, |chunk| chunk.edges[rhythm][1]); 2])
             .collect();
         Self {
             interval: step.ticket().interval(),
             quantities,
             columns,
-            rhythms,
+            edges,
         }
     }
-    /// The step the contract settled ends on an edge of each rhythm its firing reset.
     pub(crate) fn edged(mut self, reset: &[RhythmId]) -> Self {
         for rhythm in reset {
-            self.rhythms[rhythm.index()][1] += 1;
+            self.edges[rhythm.index()][1] += 1;
         }
         self
     }
@@ -279,7 +277,7 @@ impl LedgerChunk {
             interval: _,
             quantities,
             columns,
-            rhythms: _,
+            edges: _,
         } = self;
         let totals = quantities.iter().flat_map(|quantity| {
             let QuantityStep {
@@ -298,14 +296,14 @@ impl LedgerChunk {
             .all(|&value| AdmissibleSet::Finite.holds(value))
     }
     fn shape(&self) -> Shape {
-        (self.quantities.len(), self.columns.len(), self.rhythms.len())
+        (self.quantities.len(), self.columns.len(), self.edges.len())
     }
     fn write(&self, bytes: &mut Vec<u8>) {
         let Self {
             interval,
             quantities,
             columns,
-            rhythms,
+            edges,
         } = self;
         for instant in [interval.start(), interval.end()] {
             bytes.extend_from_slice(&instant.nanoseconds().to_be_bytes());
@@ -326,7 +324,7 @@ impl LedgerChunk {
                 push_bits(bytes, *value);
             }
         }
-        for &count in rhythms.iter().flatten() {
+        for &count in edges.iter().flatten() {
             push_count(bytes, count);
         }
     }
@@ -349,18 +347,18 @@ impl LedgerChunk {
                 })
             })
             .collect::<Result<_, Malformed>>()?;
-        let rhythms = (0..rhythms)
+        let edges = (0..rhythms)
             .map(|_| {
                 let [start, end] = [read_count(read)?, read_count(read)?];
-                let edges = end.checked_sub(start).ok_or(Malformed)?;
-                (edges <= 1).then_some([start, end]).ok_or(Malformed)
+                let added = end.checked_sub(start).ok_or(Malformed)?;
+                (added <= 1).then_some([start, end]).ok_or(Malformed)
             })
             .collect::<Result<_, Malformed>>()?;
         let chunk = Self {
             interval,
             quantities,
             columns,
-            rhythms,
+            edges,
         };
         if chunk.is_finite() {
             Ok(chunk)
@@ -370,7 +368,6 @@ impl LedgerChunk {
     }
 }
 
-/// Quantities, columns and rhythms.
 type Shape = (usize, usize, usize);
 
 fn linked(hash: RecordHash, previous: Digest, revision: u64, image: Digest, ledger: &[u8]) -> Digest {
@@ -863,8 +860,7 @@ impl<'r> ConservationView<'r> {
     pub fn basis(&self) -> &'r ConservedBasis {
         self.body.conserved_basis()
     }
-    /// The rhythms the record's body declares, each with its phase. No part of the basis, so one basis serves
-    /// models that declare different rhythms.
+    /// Not part of the basis, so one basis serves models that declare different rhythms.
     pub fn rhythms(&self) -> impl ExactSizeIterator<Item = (RhythmId, Slot)> + 'r {
         self.body.rhythms()
     }
@@ -1049,9 +1045,8 @@ impl HistorySegment {
         let step = &self.chunk.columns[column.index()];
         (self.curve(&step.forward), self.curve(&step.reverse))
     }
-    /// Whether this segment ends on an edge of `rhythm`.
     pub fn ends_on_edge(&self, rhythm: RhythmId) -> bool {
-        (self.chunk.rhythms.get(rhythm.index())).is_some_and(|&[start, end]| end > start)
+        (self.chunk.edges.get(rhythm.index())).is_some_and(|&[start, end]| end > start)
     }
     fn curve<'s>(&self, coefficients: &'s [Compensated; 2]) -> Curve<'s> {
         Curve {

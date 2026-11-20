@@ -109,8 +109,6 @@ impl Ledger {
             edges: None,
         }
     }
-    /// Windows between the edges of `clock`'s rhythm, with `(settling, length, widest)` in nanoseconds and each
-    /// rated quantity's rate a second, settled and before settling.
     pub fn between_edges(
         self,
         clock: Slot,

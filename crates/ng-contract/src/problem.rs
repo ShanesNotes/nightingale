@@ -239,8 +239,7 @@ impl<'r> CoupledProblem<'r> {
     }
     /// A firing's whole effect: hazards as `Chance::fired` has them, then every plain guard armed before any fired and
     /// crossed here sets its mode and resets its row. Plain firings are no chance event, so they make no `Fired`, and
-    /// `fired` on the state is what the next ticket reads as a breakpoint. Last, each rhythm whose phase a guard
-    /// reset, once, in `RhythmId` order.
+    /// `fired` on the state is what the next ticket reads as a breakpoint.
     pub(crate) fn fired(
         &self,
         ticket: &StepTicket,

@@ -76,7 +76,6 @@ fn burned(laws: &mut FragmentBuilder<'_, Metabolism>, class: RateClass) {
     laws.react_at(&burn, rate);
 }
 
-/// A steady drift and a leak the room's humidity gates, on one route.
 fn leaking<'b, Q: Substance>(
     laws: &mut FragmentBuilder<'b, Boundary>,
     ports: &BoundaryPorts<'b>,
@@ -202,7 +201,6 @@ impl Leak {
             Leak::Vasopressin => Book::Of(Species::Vasopressin),
         }
     }
-    /// The old size a second, the fixture's own bound below it, and a leak under the bound less the honest drift.
     fn sizes(self) -> [f64; 3] {
         match self {
             Leak::Oxygen => [20.0, 12.0, 5.0],
@@ -227,7 +225,6 @@ fn room(leaking: bool, breathing: bool) -> BoundaryInput {
     })
 }
 
-/// A breath every `period`, a leak through each of `leaking`, the breath held through each of `held`, to `end`.
 struct Course {
     period: u64,
     leak: Option<(Leak, f64)>,
@@ -236,8 +233,7 @@ struct Course {
     end: u64,
 }
 impl Course {
-    /// Edges every period to 20 s, the breath held from the next half breath for 10.5 s, then edges again half a
-    /// second off the whole, to 55 s; a leak throughout.
+    /// The hold is 10.5 s, not whole periods, so the edges after it fall half a second off the grid before it.
     fn standard(period: u64, leak: Option<(Leak, f64)>) -> Self {
         let held = 20 * SECOND + period / 2;
         Self {
@@ -384,18 +380,16 @@ fn running<T>(body: &CompiledBody, course: &Course, look: impl FnOnce(&Conservat
     look(&session.conservation())
 }
 
-/// Closure to rounding and each quantity's drift over every ten seconds of the history.
 fn fixed(view: &ConservationView<'_>, drift: f64) -> Ledger {
     let span = view.span().expect("a span").length_ns();
     Ledger::sliding(view.basis(), LENGTH, span, 1e-6, 1e-9, drift)
 }
 
-/// Each leak's quantity at the fixture's bound, in basis order, and at `early` times it before the settling time.
 fn rates(basis: &ConservedBasis, early: Option<f64>) -> Vec<(QuantityId, f64, Option<f64>)> {
     (basis.ids())
         .filter_map(|quantity| {
             let leak = (Leak::ALL.into_iter()).find(|leak| leak.book() == quantity.book())?;
-            let bound = leak.sizes()[1];
+            let [_, bound, _] = leak.sizes();
             Some((quantity, bound, early.map(|factor| factor * bound)))
         })
         .collect()
@@ -421,7 +415,6 @@ fn quantity(view: &ConservationView<'_>, book: Book) -> QuantityId {
         .expect("in the basis")
 }
 
-/// Each edge with the quantity's inventory there, oldest first, read from the record.
 fn marks(view: &ConservationView<'_>, quantity: QuantityId) -> Vec<(u64, f64)> {
     let (rhythm, _) = view.rhythms().next().expect("one rhythm");
     let mut segments = (view.newest_first().collect::<Result<Vec<_>, _>>()).expect("a whole history");
@@ -443,7 +436,6 @@ fn edges(view: &ConservationView<'_>) -> Vec<u64> {
     marks(view, any).into_iter().map(|(edge, _)| edge).collect()
 }
 
-/// The steepest drift a second over any two edges at least a window's length apart.
 fn steepest(view: &ConservationView<'_>, book: Book) -> f64 {
     let marks = marks(view, quantity(view, book));
     let mut steepest = 0.0;
@@ -458,7 +450,6 @@ fn steepest(view: &ConservationView<'_>, book: Book) -> f64 {
     steepest
 }
 
-/// The window the first edge from `settling` on opens: to the first edge at least `length` later.
 fn pair(edges: &[u64], settling: u64, length: u64) -> Interval {
     let opened = *edges.iter().find(|&&edge| edge >= settling).expect("an opening");
     let closed = *edges
@@ -468,7 +459,6 @@ fn pair(edges: &[u64], settling: u64, length: u64) -> Interval {
     interval(opened, closed)
 }
 
-/// Settling times at which the first window judged is at admission, across the held breath and at the tail.
 fn placements(edges: &[u64]) -> [u64; 3] {
     let held = (edges.windows(2))
         .max_by_key(|pair| pair[1] - pair[0])
@@ -1166,7 +1156,6 @@ fn rates_are_refused_in_another_dimension_out_of_basis_order_twice_or_settling_f
     );
 }
 
-/// A struct named `Certificate` with these fields in this order, as a derived `Debug` prints it.
 fn derived(fields: &[(&str, &dyn core::fmt::Debug)], pretty: bool) -> String {
     if pretty {
         let mut out = String::from("Certificate {\n");
@@ -1183,8 +1172,7 @@ fn derived(fields: &[(&str, &dyn core::fmt::Debug)], pretty: bool) -> String {
     }
 }
 
-/// Every field the certificate had before it could hold a rhythm, in that order.
-fn today(certificate: &Certificate) -> [(&'static str, Box<dyn core::fmt::Debug + '_>); 9] {
+fn base_fields(certificate: &Certificate) -> [(&'static str, Box<dyn core::fmt::Debug + '_>); 9] {
     let seal: HistorySeal = certificate.seal();
     [
         ("seal", Box::new(seal)),
@@ -1205,7 +1193,7 @@ fn a_certificate_prints_as_its_derive_did_and_adds_its_rhythm_only_where_one_was
     running(&body, &Course::standard(2 * SECOND, None), |view| {
         let plain = certified(view, &fixed(view, LOOSE)).expect("honest");
         assert!(plain.rhythm().is_none());
-        let fields = today(&plain);
+        let fields = base_fields(&plain);
         let fields: Vec<(&str, &dyn core::fmt::Debug)> = (fields.iter())
             .map(|(name, value)| (*name, value.as_ref()))
             .collect();
@@ -1215,7 +1203,7 @@ fn a_certificate_prints_as_its_derive_did_and_adds_its_rhythm_only_where_one_was
         let ledger = fixed(view, LOOSE).between_edges(clock(), (0, LENGTH, WIDEST), &rated);
         let paced = certified(view, &ledger).expect("honest");
         let rhythm = paced.rhythm().expect("windows between edges");
-        let fields = today(&paced);
+        let fields = base_fields(&paced);
         let fields: Vec<(&str, &dyn core::fmt::Debug)> = (fields.iter())
             .map(|(name, value)| (*name, value.as_ref()))
             .chain([("rhythm", rhythm as &dyn core::fmt::Debug)])
