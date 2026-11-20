@@ -920,6 +920,16 @@ fn a_fixed_drift_outranks_a_stopped_rhythm_which_outranks_an_earlier_drift_betwe
             );
             let opening = Some(interval(4 * SECOND, 16 * SECOND));
             assert_eq!(failed(LOOSE, WIDEST), (CertificateCheck::EdgeDrift, opening));
+            let span = view.span().expect("a span").length_ns();
+            let long = Ledger::sliding(view.basis(), 40 * SECOND, span, 1e-6, 1e-9, LOOSE);
+            let long = long.between_edges(clock(), (0, LENGTH, WIDEST), &rated);
+            let failure = certified(view, &long).expect_err("a leak");
+            assert_eq!(
+                (failure.check(), failure.window()),
+                (CertificateCheck::EdgeDrift, opening),
+                "fixed windows of 40 s begin reading a page past the first edges, and the windows between edges \
+                 still read from admission"
+            );
         },
     );
 }
