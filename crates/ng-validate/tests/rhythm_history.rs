@@ -25,7 +25,6 @@ enum Declares {
     Phase,
     /// The phase, and a second beat whose guards reset it at the same landings as the first's.
     PhaseResetTwice,
-    /// The phase, which a hazard integrates on the beat's first leg and a plain guard resets on its second.
     HazardThenPlain,
     PhaseTwice,
     Unreset,

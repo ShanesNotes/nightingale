@@ -534,7 +534,8 @@ impl<'b, O> FragmentBuilder<'b, O> {
     }
     /// Declares `phase` a rhythm's phase: each accepted step end at which the selected step's own firing resets it
     /// is one of the rhythm's edges, and the record seals each. A fragment that never calls this declares no rhythm
-    /// and adds nothing to its body's model hash. Compile refuses a phase no guard resets and one declared twice.
+    /// and adds nothing to its body's model hash. Compile refuses a phase no guard resets, one declared twice and
+    /// one a hazard integrates.
     pub fn rhythm(&mut self, _phase: &StateSlot<'b, O, Dimensionless>) {
         todo!()
     }

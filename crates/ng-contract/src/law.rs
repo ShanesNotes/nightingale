@@ -2678,7 +2678,8 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     }
     /// Declares `phase` a rhythm's phase: each accepted step end at which a guard's landing resets it is one of the
     /// rhythm's edges, and the record seals each edge. A fragment that never calls this declares no rhythm and adds
-    /// nothing to its body's model hash. Compile refuses a phase no guard resets and a phase declared twice.
+    /// nothing to its body's model hash. Compile refuses a phase no guard resets, a phase declared twice and a phase
+    /// a hazard integrates.
     pub fn rhythm(&mut self, phase: &StateSlot<'b, O, Dimensionless>) {
         self.data.rhythms.push(phase.name);
     }

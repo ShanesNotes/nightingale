@@ -51,8 +51,8 @@ impl CertificatePolicy {
         todo!()
     }
     /// Adds windows between the edges of the rhythm `windows` names, each allowing each rated combination its rate
-    /// times the window's own length. Refuses rates that are not a subset of the basis in basis order, and a second
-    /// call, since a policy judges one clock. A policy with none keeps the digest it had before they existed; one
+    /// times the window's own length. Refuses rates that are not a subset of the basis in basis order, a settling
+    /// rate stated for some and not all, and a second call, since a policy judges one clock. A policy with none keeps the digest it had before they existed; one
     /// with them seals every field of them.
     pub fn between_edges(self, _windows: EdgeWindows, _rates: Vec<EdgeRate>) -> Result<Self, AdmissionError> {
         todo!()
