@@ -3631,25 +3631,11 @@ new = '''self.first + length < end(leading)'''
 test = "-p ng-validate --test transaction a_coverage_of_one_window_is_the_window_from_admission_however_far_the_history_runs"
 
 [[mutant]]
-name = "held-support-passes-over-a-flow-not-finite"
-path = "crates/ng-validate/src/certificate.rs"
-old = '''if finite(flow) && !flow.at_most(self.kept.0) {'''
-new = '''if !flow.at_most(self.kept.0) {'''
-test = "-p ng-validate --lib certificate::tests::held_support_keeps_the_earliest_largest_finite_flow_unless_the_last_is_not_finite"
-
-[[mutant]]
-name = "held-support-keeps-a-last-flow-not-finite"
-path = "crates/ng-validate/src/certificate.rs"
-old = '''if finite(self.last.0) { self.kept } else { self.last }'''
-new = '''self.kept'''
-test = "-p ng-validate --lib certificate::tests::held_support_keeps_the_earliest_largest_finite_flow_unless_the_last_is_not_finite"
-
-[[mutant]]
 name = "held-support-tie-keeps-the-earliest-window"
 path = "crates/ng-validate/src/certificate.rs"
-old = '''if finite(flow) && !flow.at_most(self.kept.0) {'''
-new = '''if finite(flow) && self.kept.0.at_most(flow) {'''
-test = "-p ng-validate --lib certificate::tests::held_support_keeps_the_earliest_largest_finite_flow_unless_the_last_is_not_finite"
+old = '''if !flow.at_most(held.0) {'''
+new = '''if held.0.at_most(flow) {'''
+test = "-p ng-validate --test slice_certificate a_short_slice_window_passes_closure_and_drift_and_states_its_coverage_and_held_support"
 
 [[mutant]]
 name = "certificate-coverage-outranks-a-bad-link"

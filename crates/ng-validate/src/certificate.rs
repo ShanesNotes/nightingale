@@ -570,33 +570,6 @@ fn pair(
     })
 }
 
-fn finite(value: Compensated) -> bool {
-    value.at_most(value)
-}
-
-#[derive(Clone, Copy)]
-struct Most {
-    kept: (Compensated, Interval),
-    last: (Compensated, Interval),
-}
-impl Most {
-    fn new(flow: Compensated, window: Interval) -> Self {
-        Self {
-            kept: (flow, window),
-            last: (flow, window),
-        }
-    }
-    fn see(&mut self, flow: Compensated, window: Interval) {
-        if finite(flow) && !flow.at_most(self.kept.0) {
-            self.kept = (flow, window);
-        }
-        self.last = (flow, window);
-    }
-    fn most(self) -> (Compensated, Interval) {
-        if finite(self.last.0) { self.kept } else { self.last }
-    }
-}
-
 enum Need {
     Trailing,
     Leading,
@@ -610,7 +583,7 @@ struct Windows<'p> {
     last: u64,
     from: u64,
     worst: Vec<Option<QuantityResult>>,
-    most: Vec<Option<[Most; 2]>>,
+    most: Vec<Option<[(Compensated, Interval); 2]>>,
     drifted: Option<CertificateFailure>,
     failed: Option<CertificateFailure>,
     pieces: u64,
@@ -721,10 +694,12 @@ impl<'p> Windows<'p> {
             match &mut self.most[route] {
                 Some(held) => {
                     for (held, flow) in held.iter_mut().zip(flows) {
-                        held.see(flow, interval);
+                        if !flow.at_most(held.0) {
+                            *held = (flow, interval);
+                        }
                     }
                 }
-                unseen => *unseen = Some(flows.map(|flow| Most::new(flow, interval))),
+                unseen => *unseen = Some(flows.map(|flow| (flow, interval))),
             }
         }
     }
@@ -735,7 +710,7 @@ impl<'p> Windows<'p> {
         let coverage = of_history(CertificateCheck::Coverage);
         let results = self.worst.into_iter().collect::<Option<Vec<_>>>();
         let support = (self.routes.iter().zip(self.most)).map(|(&route, most)| {
-            let [(most_inflow, inflow_window), (most_outflow, outflow_window)] = most?.map(Most::most);
+            let [(most_inflow, inflow_window), (most_outflow, outflow_window)] = most?;
             Some(HeldSupport {
                 route,
                 most_inflow,
@@ -801,8 +776,8 @@ pub fn certify(
 
 #[cfg(test)]
 mod tests {
-    use super::{Most, admitted, last_place};
-    use ng_contract::{Compensated, Dimensionless, Interval, Measure, SimTime};
+    use super::{admitted, last_place};
+    use ng_contract::{Compensated, Dimensionless, Measure};
 
     fn exact(value: f64) -> Compensated {
         Compensated::of(&Measure::<Dimensionless>::new(value).expect("finite"))
@@ -895,38 +870,6 @@ mod tests {
             last_place(unbounded).bits(),
             Compensated::ZERO.bits(),
             "zero for a total that is not finite"
-        );
-    }
-
-    #[test]
-    fn held_support_keeps_the_earliest_largest_finite_flow_unless_the_last_is_not_finite() {
-        let unbounded = exact(f64::MAX).scaled(2);
-        let window = |start: u64| {
-            Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + 10)).expect("a window")
-        };
-        let most = |flows: &[Compensated]| {
-            let mut most = Most::new(flows[0], window(0));
-            for (start, &flow) in (1..).zip(&flows[1..]) {
-                most.see(flow, window(start));
-            }
-            let (flow, interval) = most.most();
-            (flow.bits(), interval.start().nanoseconds())
-        };
-        let (one, two) = (exact(1.0), exact(2.0));
-        assert_eq!(
-            most(&[one, two, unbounded, two, one]),
-            (two.bits(), 1),
-            "the earliest of the largest, past a flow that is not finite"
-        );
-        assert_eq!(
-            most(&[unbounded, one, two]),
-            (two.bits(), 2),
-            "a first flow that is not finite gives way to a finite one"
-        );
-        assert_eq!(
-            most(&[one, two, unbounded]),
-            (unbounded.bits(), 2),
-            "the last window's flow when it is not finite"
         );
     }
 }
