@@ -816,7 +816,7 @@ What a held stand-in moves across the boundary on one route. The certificate rep
 The automatic check that every conserved quantity balances, that charge never drifts, and that every other quantity drifts over every sliding 24 h window no further than its within-subject variation allows (record 0004). It shows stability, not accuracy.
 
 **Window between edges**:
-A window of the certificate from one rhythm edge to the first edge at least the policy's length later. Every edge from the settling time on opens one, one edge can close several, and each is judged on the values after the steps that end at its two edges. It allows each rated conserved quantity its edge rate times the window's own length. It adds a check and takes none away: every conserved quantity keeps its sliding windows of one fixed length.
+A window of the certificate from one rhythm edge to the first edge at least the policy's length later. Every edge from the settling time on opens one, and every earlier edge too where the policy states a rate for the stretch before it. One edge can close several, and each is judged on the values after the steps that end at its two edges. It allows each rated conserved quantity its edge rate times the window's own length. It adds a check and takes none away: every conserved quantity keeps its sliding windows of one fixed length.
 
 **Edge rate**:
 A conserved quantity's allowance between a rhythm's edges, a rate in its own units a second. A window between edges allows the rate times its whole seconds plus the rate's exact share of the rest, so a steady leak is refused at one size at any period of the rhythm.
