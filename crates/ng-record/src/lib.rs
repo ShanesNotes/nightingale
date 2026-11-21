@@ -12,6 +12,15 @@
 //! use ng_record::PatientRecord;
 //! fn read(record: &PatientRecord) -> SimTime { record.accepted().time() }
 //! ```
+//! An edge comes only from the step the contract settled, so a segment says whether it ends on one and takes none.
+//! ```compile_fail,E0599
+//! use ng_record::*;
+//! fn mark(segment: &mut HistorySegment, rhythm: ng_contract::RhythmId) { segment.mark_edge(rhythm) }
+//! ```
+//! ```
+//! use ng_record::*;
+//! fn read(segment: &HistorySegment, rhythm: ng_contract::RhythmId) -> bool { segment.ends_on_edge(rhythm) }
+//! ```
 //! A faulted session is latched: it can be read, never stepped.
 //! ```compile_fail,E0599
 //! use ng_record::*;

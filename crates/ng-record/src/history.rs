@@ -2,14 +2,28 @@ use crate::checkpoint::{CheckpointError, HistoryStore, RecordFormat};
 use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, AdmissibleSet, ByteReader, ColumnId, Compensated, CompiledBody, ConservedBasis,
-    DenseBasis, Digest, Dimensionless, Interval, Malformed, Measure, QuantityId, RecordHash, SimTime,
-    VerifiedStep,
+    DenseBasis, Digest, Dimensionless, Interval, Malformed, Measure, QuantityId, RecordHash, RhythmId,
+    SimTime, Slot, VerifiedStep,
 };
 
 pub(crate) fn push_bits(bytes: &mut Vec<u8>, value: Compensated) {
     for limb in value.bits() {
         bytes.extend_from_slice(&limb.to_be_bytes());
     }
+}
+
+/// A count of edges in a value's cell, as the compensated whole number.
+fn push_count(bytes: &mut Vec<u8>, count: u64) {
+    bytes.extend_from_slice(&(count as f64).to_bits().to_be_bytes());
+    bytes.extend_from_slice(&0_u64.to_be_bytes());
+}
+
+fn read_count(read: &mut ByteReader<'_>) -> Result<u64, Malformed> {
+    let [whole, below] = [read.number()?, read.number()?];
+    let count = f64::from_bits(whole) as u64;
+    (below == 0 && (count as f64).to_bits() == whole)
+        .then_some(count)
+        .ok_or(Malformed)
 }
 
 const LIMBS: usize = 36;
@@ -193,6 +207,7 @@ pub(crate) struct LedgerChunk {
     interval: Interval,
     quantities: Vec<QuantityStep>,
     columns: Vec<ColumnStep>,
+    edges: Vec<[u64; 2]>,
 }
 #[derive(Clone)]
 struct QuantityStep {
@@ -241,17 +256,28 @@ impl LedgerChunk {
                 }
             })
             .collect();
+        let edges = (0..body.rhythms().len())
+            .map(|rhythm| [previous.map_or(0, |chunk| chunk.edges[rhythm][1]); 2])
+            .collect();
         Self {
             interval: step.ticket().interval(),
             quantities,
             columns,
+            edges,
         }
+    }
+    pub(crate) fn edged(mut self, reset: &[RhythmId]) -> Self {
+        for rhythm in reset {
+            self.edges[rhythm.index()][1] += 1;
+        }
+        self
     }
     pub(crate) fn is_finite(&self) -> bool {
         let Self {
             interval: _,
             quantities,
             columns,
+            edges: _,
         } = self;
         let totals = quantities.iter().flat_map(|quantity| {
             let QuantityStep {
@@ -269,14 +295,15 @@ impl LedgerChunk {
             .chain(exchanges)
             .all(|&value| AdmissibleSet::Finite.holds(value))
     }
-    fn shape(&self) -> (usize, usize) {
-        (self.quantities.len(), self.columns.len())
+    fn shape(&self) -> Shape {
+        (self.quantities.len(), self.columns.len(), self.edges.len())
     }
     fn write(&self, bytes: &mut Vec<u8>) {
         let Self {
             interval,
             quantities,
             columns,
+            edges,
         } = self;
         for instant in [interval.start(), interval.end()] {
             bytes.extend_from_slice(&instant.nanoseconds().to_be_bytes());
@@ -297,8 +324,11 @@ impl LedgerChunk {
                 push_bits(bytes, *value);
             }
         }
+        for &count in edges.iter().flatten() {
+            push_count(bytes, count);
+        }
     }
-    fn read(read: &mut ByteReader<'_>, quantities: usize, columns: usize) -> Result<Self, Malformed> {
+    fn read(read: &mut ByteReader<'_>, (quantities, columns, rhythms): Shape) -> Result<Self, Malformed> {
         let interval = Interval::new(read.time()?, read.time()?).ok_or(Malformed)?;
         let quantities = (0..quantities)
             .map(|_| {
@@ -317,10 +347,18 @@ impl LedgerChunk {
                 })
             })
             .collect::<Result<_, Malformed>>()?;
+        let edges = (0..rhythms)
+            .map(|_| {
+                let [start, end] = [read_count(read)?, read_count(read)?];
+                let added = end.checked_sub(start).ok_or(Malformed)?;
+                (added <= 1).then_some([start, end]).ok_or(Malformed)
+            })
+            .collect::<Result<_, Malformed>>()?;
         let chunk = Self {
             interval,
             quantities,
             columns,
+            edges,
         };
         if chunk.is_finite() {
             Ok(chunk)
@@ -329,6 +367,8 @@ impl LedgerChunk {
         }
     }
 }
+
+type Shape = (usize, usize, usize);
 
 fn linked(hash: RecordHash, previous: Digest, revision: u64, image: Digest, ledger: &[u8]) -> Digest {
     let mut bytes = Vec::with_capacity(104);
@@ -670,7 +710,11 @@ impl History {
         let mut walk = Walk {
             store,
             format,
-            shape: (body.conserved_basis().combinations().len(), body.columns().len()),
+            shape: (
+                body.conserved_basis().combinations().len(),
+                body.columns().len(),
+                body.rhythms().len(),
+            ),
             origin: history.origin.seal,
             at: seal,
             revision,
@@ -727,7 +771,7 @@ impl History {
 pub(crate) struct Walk<'s> {
     store: &'s dyn HistoryStore,
     format: RecordFormat,
-    shape: (usize, usize),
+    shape: Shape,
     origin: Digest,
     at: Digest,
     revision: u64,
@@ -752,8 +796,7 @@ impl Walk<'_> {
             return Err(altered);
         }
         let mut read = ByteReader::new(bytes);
-        let (quantities, columns) = self.shape;
-        let chunk = LedgerChunk::read(&mut read, quantities, columns).map_err(|_| altered)?;
+        let chunk = LedgerChunk::read(&mut read, self.shape).map_err(|_| altered)?;
         read.finish().map_err(|_| altered)?;
         Ok(Walked {
             chunk,
@@ -807,7 +850,7 @@ pub struct HistorySeal {
 pub struct ConservationView<'r> {
     pub(crate) history: &'r History,
     pub(crate) store: &'r dyn HistoryStore,
-    pub(crate) basis: &'r ConservedBasis,
+    pub(crate) body: &'r CompiledBody,
     pub(crate) seal: HistorySeal,
 }
 impl<'r> ConservationView<'r> {
@@ -815,7 +858,11 @@ impl<'r> ConservationView<'r> {
         self.seal
     }
     pub fn basis(&self) -> &'r ConservedBasis {
-        self.basis
+        self.body.conserved_basis()
+    }
+    /// Not part of the basis, so one basis serves models that declare different rhythms.
+    pub fn rhythms(&self) -> impl ExactSizeIterator<Item = (RhythmId, Slot)> + 'r {
+        self.body.rhythms()
     }
     /// Admission to the accepted head; `None` before the first accepted step.
     pub fn span(&self) -> Option<Interval> {
@@ -843,7 +890,7 @@ impl<'r> ConservationView<'r> {
         let mut order = TimeOrder {
             store: self.store,
             format: history.format,
-            shape: (0, 0),
+            shape: (0, 0, 0),
             origin: history.origin.seal,
             marks: Vec::new(),
             head: None,
@@ -893,7 +940,7 @@ struct Mark {
 pub struct TimeOrder<'r> {
     store: &'r dyn HistoryStore,
     format: RecordFormat,
-    shape: (usize, usize),
+    shape: Shape,
     origin: Digest,
     marks: Vec<Mark>,
     head: Option<(u64, HistorySegment)>,
@@ -997,6 +1044,9 @@ impl HistorySegment {
     pub fn exchange(&self, column: ColumnId) -> (Curve<'_>, Curve<'_>) {
         let step = &self.chunk.columns[column.index()];
         (self.curve(&step.forward), self.curve(&step.reverse))
+    }
+    pub fn ends_on_edge(&self, rhythm: RhythmId) -> bool {
+        (self.chunk.edges.get(rhythm.index())).is_some_and(|&[start, end]| end > start)
     }
     fn curve<'s>(&self, coefficients: &'s [Compensated; 2]) -> Curve<'s> {
         Curve {

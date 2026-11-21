@@ -1171,6 +1171,35 @@
 //!     HazardGuard::new(integral, dice, change)
 //! }
 //! ```
+//! A rhythm's phase is a dimensionless memory of the card that declares it.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn on_reference<'b>(laws: &mut FragmentBuilder<'b, Nervous>,
+//!     held: &StateSlot<'b, Nervous, Reference<Pressure>>) {
+//!     laws.rhythm(held)
+//! }
+//! ```
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn foreign<'b>(laws: &mut FragmentBuilder<'b, Nervous>, beat: &StateSlot<'b, Cardiovascular, Dimensionless>) {
+//!     laws.rhythm(beat)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn own<'b>(laws: &mut FragmentBuilder<'b, Nervous>, phase: &StateSlot<'b, Nervous, Dimensionless>) {
+//!     laws.rhythm(phase)
+//! }
+//! ```
+//! Only a compiled body numbers its rhythms, so a policy names one by its phase.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forged() -> RhythmId { RhythmId { index: 0 } }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn named(body: &CompiledBody, phase: Slot) -> Option<RhythmId> { body.rhythm(phase) }
+//! ```
 //! A forcing is a factor with no unit of amount, so it varies a rate and never adds to one (I10).
 //! ```compile_fail,E0308
 //! use ng_contract::*;
@@ -1552,9 +1581,10 @@
 //! use ng_contract::*;
 //! fn settled(time: SimTime, state: Candidate, continuation: MethodHistory, dense: DenseSegment,
 //!     applied: AppliedInputs, excursions: Vec<ValidityExcursion>, extents: StepExtents) -> NextHead {
-//!     let after_breakpoint = false;
+//!     let (after_breakpoint, rhythm_edges) = (false, Vec::new());
 //!     let (known, digest) = (0, todo!());
-//!     NextHead { time, state, continuation, dense, applied, known, digest, after_breakpoint, excursions, extents }
+//!     NextHead { time, state, continuation, dense, applied, known, digest, after_breakpoint, excursions,
+//!         rhythm_edges, extents }
 //! }
 //! ```
 //! ```

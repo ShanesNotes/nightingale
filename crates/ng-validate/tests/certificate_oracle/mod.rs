@@ -34,6 +34,40 @@ fn limits(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> Qua
     build(quantity, absolute, relative, drift)
 }
 
+fn edge_rate(quantity: QuantityId, settled: f64, settling: Option<f64>) -> EdgeRate {
+    fn of<U: Substance>(quantity: QuantityId, settled: f64, settling: Option<f64>) -> EdgeRate {
+        let rate = |value| Measure::<Rate<U>>::new(value).expect("finite");
+        EdgeRate::new(quantity, rate(settled), settling.map(rate)).expect("its own dimension")
+    }
+    struct Build;
+    impl Visit for Build {
+        type Output = fn(QuantityId, f64, Option<f64>) -> EdgeRate;
+        fn visit<Q: Substance>(self) -> Self::Output {
+            of::<Q>
+        }
+    }
+    let build = match quantity.book() {
+        Book::Of(Species::Energy) | Book::Energy => of::<Energy>,
+        Book::Of(species) => species.visit(Build),
+        Book::Element(_) => {
+            let rate = |value| Measure::<Rate<Atoms>>::new(value).expect("finite");
+            return EdgeRate::element(quantity, rate(settled), settling.map(rate)).expect("atoms");
+        }
+        Book::Charge => panic!("charge holds to its closure bound and has no rate between edges"),
+    };
+    build(quantity, settled, settling)
+}
+
+const SECOND: u64 = 1_000_000_000;
+
+struct EdgeLedger {
+    clock: Slot,
+    settling_ns: u64,
+    length_ns: u64,
+    widest_ns: u64,
+    rates: Vec<(QuantityId, Compensated, Option<Compensated>)>,
+}
+
 pub struct Ledger {
     pub policy: CertificatePolicy,
     basis: Digest,
@@ -44,6 +78,7 @@ pub struct Ledger {
     drift: Compensated,
     per_update: u64,
     updates_a_step: Vec<u64>,
+    edges: Option<EdgeLedger>,
 }
 impl Ledger {
     pub fn sliding(
@@ -71,6 +106,36 @@ impl Ledger {
             drift: plain(drift),
             per_update: 0,
             updates_a_step: vec![0; basis.combinations().len()],
+            edges: None,
+        }
+    }
+    pub fn between_edges(
+        self,
+        clock: Slot,
+        (settling_ns, length_ns, widest_ns): (u64, u64, u64),
+        rates: &[(QuantityId, f64, Option<f64>)],
+    ) -> Self {
+        let length = NonZeroU64::new(length_ns).expect("positive");
+        let windows = EdgeWindows::new(clock, settling_ns, length, widest_ns);
+        let typed = (rates.iter())
+            .map(|&(quantity, settled, settling)| edge_rate(quantity, settled, settling))
+            .collect();
+        let policy = self.policy.between_edges(windows, typed).expect("a policy");
+        let plain = |value| Compensated::of(&Measure::<Rate<Water>>::new(value).expect("finite"));
+        let rates = (rates.iter())
+            .map(|&(quantity, settled, settling)| (quantity, plain(settled), settling.map(plain)))
+            .collect();
+        let edges = Some(EdgeLedger {
+            clock,
+            settling_ns,
+            length_ns,
+            widest_ns,
+            rates,
+        });
+        Self {
+            policy,
+            edges,
+            ..self
         }
     }
     pub fn digest(&self) -> Digest {
@@ -132,6 +197,18 @@ struct Failed {
     residual: [u64; 2],
 }
 
+#[derive(Debug, PartialEq)]
+struct Rhythmic {
+    clock: Slot,
+    settling_ns: u64,
+    length_ns: u64,
+    widest_ns: u64,
+    judged: u64,
+    results: Vec<(QuantityId, [u64; 2], [u64; 2], Interval)>,
+    widest: Interval,
+    last_close: Option<SimTime>,
+}
+
 pub fn certified(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Certificate, CertificateFailure> {
     let walked = certify(view, &ledger.policy);
     let seen = walked.as_ref().map(|certificate| {
@@ -156,7 +233,24 @@ pub fn certified(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Certifi
             outflow: support.most_outflow().bits(),
             outflow_window: support.outflow_window(),
         });
-        (worst.collect(), most.collect(), certificate.pieces())
+        let rhythm = certificate.rhythm().map(|rhythm| {
+            let windows = rhythm.windows();
+            let results = (rhythm.results().iter()).map(|result| {
+                let (change, allowance) = (result.change().bits(), result.allowance().bits());
+                (result.quantity(), change, allowance, result.window())
+            });
+            Rhythmic {
+                clock: windows.clock(),
+                settling_ns: windows.settling_ns(),
+                length_ns: windows.length_ns().get(),
+                widest_ns: windows.widest_ns(),
+                judged: rhythm.judged(),
+                results: results.collect(),
+                widest: rhythm.widest(),
+                last_close: rhythm.last_close(),
+            }
+        });
+        (worst.collect(), most.collect(), certificate.pieces(), rhythm)
     });
     let seen = seen.map_err(|failure| Failed {
         check: failure.check(),
@@ -231,7 +325,114 @@ fn differences(
     )
 }
 
-type Walked = (Vec<Worst>, Vec<Most>, u64);
+type Walked = (Vec<Worst>, Vec<Most>, u64, Option<Rhythmic>);
+
+/// Every window between edges, found by scanning forward from each opening for its close, then judged in order of
+/// close and opening; every stretch with no edge, the tail from the last close.
+fn between_edges(
+    segments: &[HistorySegment],
+    span: Interval,
+    edges: &EdgeLedger,
+    rhythm: RhythmId,
+) -> Result<Rhythmic, Failed> {
+    let at = SimTime::from_ns;
+    let start = span.start().nanoseconds();
+    let marks: Vec<(u64, Vec<Compensated>)> = (segments.iter())
+        .filter(|segment| segment.ends_on_edge(rhythm))
+        .map(|segment| {
+            let interval = segment.interval();
+            let values = (edges.rates.iter())
+                .map(|&(quantity, _, _)| segment.inventory(quantity).on(interval).expect("its own")[1])
+                .collect();
+            (interval.end().nanoseconds(), values)
+        })
+        .collect();
+    let early = edges.rates.iter().any(|(_, _, settling)| settling.is_some());
+    let mut windows = Vec::new();
+    for (open, &(opened, _)) in marks.iter().enumerate() {
+        if opened - start < edges.settling_ns && !early {
+            continue;
+        }
+        let close = (open + 1..marks.len()).find(|&close| marks[close].0 - opened >= edges.length_ns);
+        windows.extend(close.map(|close| (close, open)));
+    }
+    windows.sort_unstable();
+    let allowed = |per_second: Compensated, ns: u64| {
+        let whole = i64::try_from(ns / SECOND).expect("seconds");
+        let part = Compensated::between(Compensated::ZERO, per_second, ns % SECOND, SECOND);
+        per_second.scaled(whole).plus(part)
+    };
+    let mut drifted = None;
+    let mut worst: Vec<Option<(Compensated, Compensated, Interval)>> = vec![None; edges.rates.len()];
+    for &(close, open) in &windows {
+        let ((opened, before), (closed, after)) = (&marks[open], &marks[close]);
+        let window = Interval::new(at(*opened), at(*closed)).expect("a later edge");
+        let settled = opened - start >= edges.settling_ns;
+        for (index, &(quantity, rate, settling)) in edges.rates.iter().enumerate() {
+            let per_second = if settled {
+                rate
+            } else {
+                settling.expect("every rate states one")
+            };
+            let allowance = allowed(per_second, closed - opened);
+            let change = after[index].minus(before[index]).abs();
+            if !change.at_most(allowance) && drifted.is_none() {
+                drifted = Some(Failed {
+                    check: CertificateCheck::EdgeDrift,
+                    quantity: Some(quantity),
+                    window: Some(window),
+                    residual: change.bits(),
+                });
+            }
+            let held = worst[index].get_or_insert((change, allowance, window));
+            if !change.minus(allowance).at_most(held.0.minus(held.1)) {
+                *held = (change, allowance, window);
+            }
+        }
+    }
+    let last_close = windows.last().map(|&(close, _)| marks[close].0);
+    let ends = (marks.iter().map(|&(edge, _)| edge)).chain([span.end().nanoseconds()]);
+    let starts = [start].into_iter().chain(marks.iter().map(|&(edge, _)| edge));
+    let mut stretches: Vec<(u64, u64)> = starts.zip(ends).collect();
+    stretches.pop();
+    stretches.push((last_close.unwrap_or(start), span.end().nanoseconds()));
+    let stretches: Vec<Interval> = (stretches.into_iter())
+        .filter_map(|(from, to)| Interval::new(at(from), at(to)))
+        .collect();
+    if let Some(&stopped) = (stretches.iter()).find(|stretch| stretch.length_ns() > edges.widest_ns) {
+        return Err(Failed {
+            check: CertificateCheck::RhythmStopped,
+            quantity: None,
+            window: Some(stopped),
+            residual: Compensated::ZERO.bits(),
+        });
+    }
+    if let Some(failure) = drifted {
+        return Err(failure);
+    }
+    let widest = stretches
+        .iter()
+        .fold(None, |held: Option<Interval>, &stretch| match held {
+            Some(held) if stretch.length_ns() <= held.length_ns() => Some(held),
+            _ => Some(stretch),
+        });
+    let results = (edges.rates.iter().zip(worst))
+        .filter_map(|(&(quantity, _, _), held)| {
+            let (change, allowance, window) = held?;
+            Some((quantity, change.bits(), allowance.bits(), window))
+        })
+        .collect();
+    Ok(Rhythmic {
+        clock: edges.clock,
+        settling_ns: edges.settling_ns,
+        length_ns: edges.length_ns,
+        widest_ns: edges.widest_ns,
+        judged: windows.len() as u64,
+        results,
+        widest: widest.ok_or_else(|| failed(CertificateCheck::Coverage))?,
+        last_close: last_close.map(at),
+    })
+}
 
 #[derive(Clone)]
 struct Held {
@@ -248,6 +449,14 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
     if ledger.basis != view.basis().digest() {
         return Err(coverage());
     }
+    let rhythm = match &ledger.edges {
+        Some(edges) => {
+            let declared = view.rhythms().find(|&(_, phase)| phase == edges.clock);
+            let undeclared = || failed(CertificateCheck::UndeclaredRhythm);
+            Some((edges, declared.ok_or_else(undeclared)?.0))
+        }
+        None => None,
+    };
     let span = view.span().ok_or_else(coverage)?;
     if span.length_ns() < ledger.coverage_ns {
         return Err(coverage());
@@ -433,7 +642,8 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
         })
         .collect::<Option<Vec<_>>>()
         .ok_or_else(coverage)?;
-    Ok((results, support, pieces))
+    let rhythm = (rhythm.map(|(edges, rhythm)| between_edges(&segments, span, edges, rhythm))).transpose()?;
+    Ok((results, support, pieces, rhythm))
 }
 
 #[test]
@@ -462,4 +672,26 @@ fn the_forward_oracle_accepts_the_same_row_rounding_as_certify() {
         .map(|_| ())
         .map_err(|failure| failure.check);
     assert_eq!(oracle, Ok(()), "the forward oracle must accept the same policy");
+}
+
+#[test]
+fn the_forward_oracle_refuses_a_clock_the_body_declares_no_rhythm_of_before_any_step_as_certify_does() {
+    let start = [600.0, 424.0].map(|amount| Measure::new(amount).expect("a start"));
+    let case = TwoReservoirs::delivering(start, Vec::new()).expect("a body");
+    let (store, core) = (MemoryStore::default(), ng_solver::Core::new(100_000_000));
+    let session = case.admit(&core, &store).expect("admitted");
+    let view = session.conservation();
+    assert_eq!(view.span(), None, "no step, so no span to check");
+    let clock = Slot::from(LawName {
+        owner: "NS",
+        local: "phase",
+    });
+    let water = view.basis().ids().next().expect("a quantity");
+    let ledger = Ledger::sliding(view.basis(), SECOND, SECOND, 0.0, 1e-12, 1e9).between_edges(
+        clock,
+        (0, SECOND, SECOND),
+        &[(water, 1.0, None)],
+    );
+    let refused = certified(&view, &ledger).expect_err("no rhythm of that clock");
+    assert_eq!(refused.check(), CertificateCheck::UndeclaredRhythm);
 }

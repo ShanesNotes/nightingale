@@ -544,6 +544,12 @@ A discrete state of a law, such as a valve open or shut. Only a guard changes it
 **Guard**:
 A crossing of a computed value, such as a valve's pressure head passing zero, that ends a step and fires a declared change: a mode transition, a stream's next draw or a hazard's event.
 
+**Rhythm**:
+A dimensionless memory of a card that its guards reset, which the card declares the phase of a rhythm. Nothing infers a rhythm from a reset, and a card that declares none adds nothing to its body's model hash. A policy names a rhythm by its phase's slot, so one policy serves every model of its basis.
+
+**Rhythm edge**:
+The accepted step end at which the selected step's own firing resets a rhythm's phase. The record seals each in that step's link. A discarded trial, a retry or a blind step's landing that a waiting input throws away gives none. Breath edges and beat edges are a rhythm's edges where the card declares that phase a rhythm.
+
 **Rate class**:
 How fast a process moves: wave, beat, reflex, minutes or hours, with the longest step its law tolerates. A step stops at the body's tightest class. It constrains scheduling and never makes an organ lane.
 
@@ -823,6 +829,18 @@ What a held stand-in moves across the boundary on one route. The certificate rep
 
 **Certificate**:
 The automatic check that every conserved quantity balances, that charge never drifts, and that every other quantity drifts over every sliding 24 h window no further than its within-subject variation allows (record 0004). It shows stability, not accuracy.
+
+**Window between edges**:
+A window of the certificate from one rhythm edge to the first edge at least the policy's length later. Every edge from the settling time on opens one, and every earlier edge too where the policy states a rate for the stretch before it. One edge can close several, and each is judged on the values after the steps that end at its two edges. It allows each rated conserved quantity its edge rate times the window's own length. It adds a check and takes none away: every conserved quantity keeps its sliding windows of one fixed length.
+
+**Edge rate**:
+A conserved quantity's allowance between a rhythm's edges, a rate in its own units a second. A window between edges allows the rate times its whole seconds plus the rate's exact share of the rest, so a steady leak is refused at one size at any period of the rhythm.
+
+**Settling time**:
+The time from admission from which edges open windows between edges. A policy may state an edge rate for the stretch before it, and a window then takes the rate of the stretch its opening edge is in.
+
+**Stopped rhythm**:
+A stretch with no edge longer than the policy allows: from admission to the first edge, between two edges, or from the close of the last window judged to the head. The certificate names it as its own failure.
 
 **Healthy-range check**:
 The check that each reading in the lens stays inside its healthy range for what the patient is doing at that moment. With the certificate and the return check, it decides the first milestone (record 0004).

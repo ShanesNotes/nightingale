@@ -726,30 +726,51 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_held_cards_end_the_model_hashs_stream_and_a_list_length_follows_them_in_the_basis_digest() {
-        use crate::identity::{Canonical, Seal};
+    fn held_bench(rhythm: bool) -> Result<CompiledBody, AdmissionError> {
         let mut map = AnatomyBuilder::new();
-        let root = map.site::<TissueSite>("body", at_origin().expect("finite"));
-        let vessel = map.site::<VesselSegment>("vessel", at_origin().expect("finite"));
-        let bed = map.site::<CapillaryBed>("bed", at_origin().expect("finite"));
+        let root = map.site::<TissueSite>("body", at_origin()?);
+        let vessel = map.site::<VesselSegment>("vessel", at_origin()?);
+        let bed = map.site::<CapillaryBed>("bed", at_origin()?);
         for site in [vessel.id(), bed.id()] {
             map.contain(root.id(), site);
         }
         map.connect(Network::Vascular, vessel.id(), bed.id());
         map.connect(Network::Vascular, bed.id(), vessel.id());
-        let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
+        let mut schema = Schema::new(map.finish()?)?;
         for space in [Space::Lumen, Space::Plasma, Space::Interstitium] {
             schema.leave_out(space, "a bench of cell water");
         }
-        let body = assemble(schema, |mut body| {
+        assemble(schema, |mut body| {
             let held = HeldDeclaration::<BloodChemistry>::new(vec![], vec![], "a synthetic bench")
                 .pool::<Water, CapillaryBed>(Space::Cells);
             let (laws, _) = body.hold(held)?.parts();
             body.add(laws.finish());
+            if rhythm {
+                let (mut laws, _) = body.nervous()?.parts();
+                let wave = RateClass::new(RateBand::Wave, 1_000_000_000)?;
+                let phase = laws.state::<Dimensionless>("phase", Admissible::finite());
+                let still = laws.kernel(|mut k| {
+                    let value = k.zero::<Rate<Dimensionless>>();
+                    k.finish(value, laws.every_mode(), wave)
+                });
+                laws.memory_rate(&phase, still);
+                let [rest, beat] = laws.modes("beat", ["rest", "beat"]);
+                let reached = laws.kernel(|mut k| {
+                    let value = k.state(&phase);
+                    k.finish(value, rest.only(), wave)
+                });
+                laws.event(Guard::new(reached, Crossing::Rising, rest.to(&beat)?).resetting(&phase));
+                laws.rhythm(&phase);
+                body.add(laws.finish());
+            }
             body.compile()
         })
-        .expect("compiled");
+    }
+
+    #[test]
+    fn the_held_cards_end_the_model_hashs_stream_and_a_list_length_follows_them_in_the_basis_digest() {
+        use crate::identity::{Canonical, Seal};
+        let body = held_bench(false).expect("compiled");
         let declarations = &body.conserved_basis().coverage.declarations;
         assert!(declarations.iter().any(|card| !card.pools.is_empty()));
         let mut cards = Canonical::new("");
@@ -770,5 +791,45 @@ mod tests {
         assert_eq!(basis.digest(), body.conserved_basis().digest());
         let next = &basis.into_bytes()[after..after + 8];
         assert_eq!(next, (coverage.routes.len() as u64).to_be_bytes());
+    }
+
+    #[test]
+    fn a_declared_rhythm_enters_the_model_hash_before_the_basis_so_the_held_cards_still_end_its_stream() {
+        use crate::identity::{Canonical, Seal};
+        let tail = |body: &CompiledBody| {
+            let mut basis = Canonical::new("");
+            body.conserved_basis().seal(&mut basis);
+            let mut model = Canonical::new("ng-contract model 2");
+            body.layout.seal(&mut model);
+            assert_eq!(model.digest(), body.model_hash().digest());
+            let (model, basis) = (model.into_bytes(), basis.into_bytes().split_off(8));
+            assert!(
+                model.ends_with(&basis),
+                "the basis, held cards last, ends the stream"
+            );
+            model[..model.len() - basis.len()].to_vec()
+        };
+        let body = held_bench(true).expect("compiled");
+        let [(rhythm, phase)] = body.rhythms().collect::<Vec<_>>()[..] else {
+            panic!("one rhythm");
+        };
+        let phase_law = LawName {
+            owner: Nervous::CARD,
+            local: "phase",
+        };
+        assert_eq!(phase, Slot::from(phase_law));
+        assert_eq!(body.rhythm(phase), Some(rhythm));
+        let row = (body.rows().iter()).position(|row| row.kind() == RowKind::Memory(phase));
+        let mut declared = Canonical::new("");
+        declared.number(u64::MAX);
+        body.layout.rhythms.seal(&mut declared);
+        let declared = declared.into_bytes().split_off(8);
+        assert_eq!(declared[16..], (row.expect("a phase row") as u64).to_be_bytes());
+        assert!(tail(&body).ends_with(&declared));
+        let plain = held_bench(false).expect("compiled");
+        assert!(
+            !tail(&plain).ends_with(&declared[..8]),
+            "no tag where no rhythm is declared"
+        );
     }
 }

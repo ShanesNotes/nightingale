@@ -393,6 +393,12 @@ pub enum CompileDefect {
     NotOneSite { law: LawName, set: Sites },
     /// A guard that resets a row whose set does not hold zero, so a firing would publish a state no run can resume.
     ResetOutsideSet { law: LawName },
+    /// A rhythm's phase that no guard resets at one of its places, so no step would end on an edge there.
+    UnresetRhythm { phase: LawName },
+    /// A rhythm's phase declared twice in one fragment.
+    RhythmTwice { phase: LawName },
+    /// A rhythm's phase that a hazard integrates. A hazard's firing resets its integral by chance and seals no edge.
+    HazardRhythm { phase: LawName },
     /// A law reads a junction at a site the map neither supplies nor states that no nerve reaches.
     NoSupply { law: LawName, site: SiteId },
     /// An `at_junction` read at a site the map says no nerve reaches.

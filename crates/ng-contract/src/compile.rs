@@ -68,6 +68,7 @@ pub(crate) fn compile(
     check_samples(&placement, &guards, &modes, &rows, &schema.anatomy)?;
     let forced = forcing_parameters(&fragments);
     let (parameters, instances, guards) = bind(placement.instances, guards, &forced, &declarations);
+    let rhythms = rhythms(&fragments, &rows.rows, &guards)?;
     let closed = closed_rows(&fragments, &rows);
     let (reads, rates) = reads(
         &rows.rows,
@@ -131,6 +132,7 @@ pub(crate) fn compile(
         streams,
         forcings,
         hazards,
+        rhythms,
         basis,
     };
     Ok(CompiledBody::seal(layout, elimination, totals))
@@ -2522,6 +2524,39 @@ fn guards(
         }
     }
     Ok(guards)
+}
+
+fn rhythms(
+    fragments: &[FragmentData],
+    rows: &[Row],
+    guards: &[GuardLayout],
+) -> Result<Vec<RowId>, CompileDefect> {
+    let mut rhythms = Vec::new();
+    for fragment in fragments {
+        for (declared, &local) in fragment.rhythms.iter().enumerate() {
+            let phase = LawName {
+                owner: fragment.owner,
+                local,
+            };
+            if fragment.rhythms[..declared].contains(&local) {
+                return Err(CompileDefect::RhythmTwice { phase });
+            }
+            if fragment.hazards.iter().any(|hazard| hazard.integral == local) {
+                return Err(CompileDefect::HazardRhythm { phase });
+            }
+            let at: Vec<RowId> = (rows.iter().enumerate())
+                .filter(|(_, row)| matches!(row.kind, RowKind::Memory(slot) if slot.law == phase))
+                .map(|(row, _)| RowId::at(row))
+                .collect();
+            let reset = |row: &RowId| guards.iter().any(|guard| guard.resets == Some(*row));
+            if at.is_empty() || !at.iter().all(reset) {
+                return Err(CompileDefect::UnresetRhythm { phase });
+            }
+            rhythms.extend(at);
+        }
+    }
+    rhythms.sort_unstable();
+    Ok(rhythms)
 }
 
 fn bind(

@@ -40,7 +40,9 @@ index!(
     UnknownId,
     ColumnId,
     ProgramId,
-    ParameterId
+    ParameterId,
+    /// One rhythm of a compiled body, numbered in its phase's row order.
+    RhythmId
 );
 
 /// The checked, immutable result of compiling the anatomy and every fragment. Its arrays are in
@@ -70,6 +72,7 @@ pub(crate) struct Layout {
     pub(crate) streams: Vec<StreamLayout>,
     pub(crate) forcings: Vec<ForcingLayout>,
     pub(crate) hazards: Vec<HazardLayout>,
+    pub(crate) rhythms: Vec<RowId>,
     pub(crate) basis: ConservedBasis,
 }
 impl CompiledBody {
@@ -137,6 +140,19 @@ impl CompiledBody {
     pub fn hazards(&self) -> impl Iterator<Item = LawName> + '_ {
         (self.layout.hazards.iter()).map(|hazard| self.layout.streams[hazard.stream].name)
     }
+    /// Each rhythm with its phase, in `RhythmId` order.
+    pub fn rhythms(&self) -> impl ExactSizeIterator<Item = (RhythmId, Slot)> + '_ {
+        (self.layout.rhythms.iter().enumerate()).map(|(at, row)| {
+            let RowKind::Memory(phase) = self.layout.rows[row.index()].kind else {
+                unreachable!("a rhythm's phase is a memory")
+            };
+            (RhythmId::at(at), phase)
+        })
+    }
+    pub fn rhythm(&self, phase: Slot) -> Option<RhythmId> {
+        self.rhythms()
+            .find_map(|(rhythm, slot)| (slot == phase).then_some(rhythm))
+    }
     /// One Jacobian of this body factored over its elimination, or the row whose pivot it cannot take. A pivot never
     /// moves, so a core that meets one solves `Jacobian::view` its own way.
     pub fn factor(&self, jacobian: &Jacobian) -> Result<Factors<'_>, usize> {
@@ -186,6 +202,9 @@ impl Layout {
         }
         fired
     }
+    pub(crate) fn rhythm_of(&self, row: RowId) -> Option<RhythmId> {
+        self.rhythms.binary_search(&row).ok().map(RhythmId::at)
+    }
 }
 impl Seal for Layout {
     fn seal(&self, out: &mut Canonical) {
@@ -204,6 +223,7 @@ impl Seal for Layout {
             streams,
             forcings,
             hazards,
+            rhythms,
             basis,
         } = self;
         schema.seal(out);
@@ -223,6 +243,12 @@ impl Seal for Layout {
         streams.seal(out);
         forcings.seal(out);
         hazards.seal(out);
+        // Absent, no byte, so a body that declares no rhythm keeps its hash; before the basis, whose held cards end
+        // the stream.
+        if !rhythms.is_empty() {
+            out.number(u64::MAX);
+            rhythms.seal(out);
+        }
         basis.seal(out);
     }
 }
@@ -295,6 +321,13 @@ impl From<LawName> for Slot {
             law,
             at: Context::Body,
         }
+    }
+}
+impl Slot {
+    pub fn digest(&self) -> Digest {
+        let mut out = Canonical::new("slot");
+        self.seal(&mut out);
+        out.digest()
     }
 }
 impl Seal for Slot {
