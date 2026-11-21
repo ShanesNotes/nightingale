@@ -5272,3 +5272,20 @@ path = "crates/ng-validate/src/certificate.rs"
 old = '''if self.edges.is_some() || !ordered ||'''
 new = '''if !ordered ||'''
 test = "-p ng-validate --test rhythm_certificate a_policy_refuses_a_second_clock"
+
+# The lymph reads the absolute tissue pressure: the fixture's swing and the body's tidal breathing each see it.
+[[mutant]]
+name = "lymph-reads-the-absolute-tissue-pressure-at-the-fixture"
+path = "crates/ng-fluids/src/lymph.rs"
+old = '''        let enclosure = k.upstream(&ports.extravascular_pressure);
+        let inside = k.subtract(tissue, enclosure);'''
+new = '''        let inside = tissue;'''
+test = "-p ng-validate --test arena_body a_swing_of_the_enclosure_at_a_held_tissue_volume_leaves_the_beds_lymph_where_it_stood"
+
+[[mutant]]
+name = "lymph-reads-the-absolute-tissue-pressure-in-the-body"
+path = "crates/ng-fluids/src/lymph.rs"
+old = '''        let enclosure = k.upstream(&ports.extravascular_pressure);
+        let inside = k.subtract(tissue, enclosure);'''
+new = '''        let inside = tissue;'''
+test = "-p ng-validate --test body_run the_whole_body_admits_runs_its_first_minute_and_holds_its_pins"

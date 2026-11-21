@@ -730,7 +730,7 @@ fn table(
     set::<Rate<Energy>>(packet, "cv.heat-width", body, 100.0)?;
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05)?;
-    set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0)?;
+    set::<Pressure>(packet, "gi.abdominal-pressure", body, ABDOMINAL_PRESSURE)?;
     respiratory(packet, breath_rate)?;
     set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.035)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.05)?;
@@ -893,7 +893,22 @@ fn table(
             0.04 * NEW_BED,
         )?;
     }
-    set::<Pressure>(packet, "fl.lymph-threshold", lymph, -2.0)?;
+    // The lymph reads the tissue's pressure over its enclosure's, so an enclosed bed's threshold is the opening on
+    // the whole tissue pressure less its enclosure's design pressure, and the body admits where it did.
+    set::<Pressure>(packet, "fl.lymph-threshold", lymph, LYMPH_OPENING)?;
+    for (at, enclosure) in [
+        (lung, PLEURAL_REST),
+        (bed("coronary bed")?, PLEURAL_REST),
+        (gut, ABDOMINAL_PRESSURE),
+        (liver, ABDOMINAL_PRESSURE),
+    ] {
+        set::<Pressure>(
+            packet,
+            "fl.lymph-threshold",
+            edge(at, veins),
+            LYMPH_OPENING - enclosure,
+        )?;
+    }
     set::<Pressure>(packet, "fl.lymph-width", lymph, 0.5)?;
 
     let (tubule, duct, bladder) = (
@@ -1141,9 +1156,9 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// from the settling time on, a settling rate twice the worst of one that opens before it, and the widest stretch twice
 /// the widest gap between edges, each rounded up to one significant figure. The onset is pinned at 30 s because the
 /// figures are taken there, inside the admission's own fall of energy, which puts energy's above a settled onset's, so
-/// moving the onset moves them. On a longer run the salts leave their bounds from about 350 s (body ticket 17).
-/// Energy's figures belong to the held feeds and the held heat exit, and are measured again when body tickets 12 and 13
-/// to 16 land. The payers of the stroke work and of the work of breathing take a hydrogen bound of their own, since
+/// moving the onset moves them. The salts' excess grows to the run's end, so a longer run leaves their bounds (body
+/// ticket 17). Energy's figures belong to the held feeds and the held heat exit, and are measured again when body
+/// tickets 12 and 13 to 16 land. The payers of the stroke work and of the work of breathing take a hydrogen bound of their own, since
 /// their cells settle as their works do, and each is judged on its own. Oxygen and carbon dioxide as species keep only
 /// held pools that never move, so the slice's bound for an unmoved species holds them.
 const ELEMENT_BOUNDS: [(Element, f64, f64, f64); 3] = [
@@ -1156,10 +1171,10 @@ const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
 const SPECIES_BOUNDS: [(Species, f64, f64, f64); 7] = [
     (Species::Energy, 1e4, 1e3, 3e2),
     (Species::Water, 5e-2, 4e-3, 3e-3),
-    (Species::Sodium, 2e-3, 2e-4, 9e-6),
-    (Species::Chloride, 2e-3, 2e-4, 1e-5),
-    (Species::Potassium, 9e-5, 8e-6, 5e-7),
-    (Species::Vasopressin, 6e-2, 2e-3, 4e-4),
+    (Species::Sodium, 5e-3, 5e-4, 9e-6),
+    (Species::Chloride, 6e-3, 6e-4, 1e-5),
+    (Species::Potassium, 3e-4, 3e-5, 5e-7),
+    (Species::Vasopressin, 6e-2, 2e-3, 5e-4),
     (Species::NitrogenGas, 2e4, 2e1, 8.0),
 ];
 const SETTLING_TIME: u64 = 20 * SECOND;
@@ -1319,6 +1334,13 @@ fn smooth_max(a: f64, b: f64, width: f64) -> f64 {
     0.5 * (a + b + ((a - b) * (a - b) + width * width).sqrt())
 }
 
+/// The pleural pressure at rest that `WALL_REST` is stated at, the design pressure of the enclosure around the lung's
+/// and the heart's beds.
+const PLEURAL_REST: f64 = -3.0;
+/// The abdomen's held pressure, the enclosure around the gut's and the liver's beds.
+const ABDOMINAL_PRESSURE: f64 = 4.0;
+/// The tissue pressure, enclosure included, at which lymph opens, as the law read it before it read its enclosure's.
+const LYMPH_OPENING: f64 = -2.0;
 const LUNG_ELASTANCE: f64 = 1.6e-4;
 const WALL_ELASTANCE: f64 = 1.6e-4;
 /// The chest wall's relaxed volume with the drive at zero, at which the lung rests at 57,000 and the pleural space at
