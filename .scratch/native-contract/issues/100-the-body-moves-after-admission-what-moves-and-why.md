@@ -42,7 +42,7 @@ A fix that moves the body's pins lands after [native-contract 85](85-the-certifi
 
 Every value is synthetic. Each rate is a difference of cumulative transfers at the breath edges nearest a span's ends, over the time between them. A law's rate is a time-weighted mean over the solver's steps. Each albumin concentration is the ratio of two span-weighted means of amounts, albumin over water. Each other concentration or pressure is a mean over the breaths that end inside the span. The held pass has no breaths, so its spans end at clock marks at or after the base pass's edge times. Each statement is one of three kinds: established (a closed balance and a run), inferred (a balance and no run), or a projection (a fit beyond the data). A second read checked the investigation, and where the two differ this Answer takes the read's figures.
 
-**The passes.** Three passes from one build of main `b4a40ef6` with the switches added, each from its own admission and each to 1,500 s, since a sealed packet resumes only under its own admission. The base pass has main's laws and tidal breathing. The switched pass is a prototype, not a law: the pulmonary lymph reads the pleural pressure's rest value, -3, in place of its instant, and nothing else changes. The held pass sets the hazard that starts the first breath to zero, so the breath stays at rest, where admission holds it. The held pass admits the base pass's 1,464 rows bit for bit, and on every row above 1e-9 the switched pass's admitted rows differ from them by at most 7.13e-13 relative (row 774). Part 1's balance is over the plan's diagnostic run of main to 2,900 s.
+**The passes.** Three passes from one build of main `b4a40ef6` with the switches added, each from its own admission and each to 1,500 s, since a sealed packet resumes only under its own admission. The base pass has main's laws and tidal breathing. The switched pass is a prototype, not a law: the pulmonary lymph reads the pleural pressure's rest value, -3, in place of its instant, and nothing else changes. The held pass sets the hazard that starts the first breath to zero, so the breath stays at rest, where admission holds it. The held pass admits the base pass's 1,464 rows bit for bit, and on every row above 1e-9 the switched pass's admitted rows differ from them by at most 7.14e-13 relative (7.1328e-13 at row 774). Part 1's balance is over the plan's diagnostic run of main to 2,900 s.
 
 ### Part 1. The plasma (established)
 
@@ -80,7 +80,7 @@ Ruled, a model default: the lymph law reads the tissue pressure over the pressur
 
 - A memory of the outside pressure: a new state and a time constant, with no run behind it. On the switched pass's saved steps over the whole breaths from 601.673 to 620.714 s, the law with the pleural pressure's true time-weighted mean in place of -3 gives a lymph about 1.2% higher, 0.00565025 a second against 0.00558223.
 - A flatter law by packet values: it leaves part of the gain (a width of 2 and a conductance of 0.006497 keep the resting lymph and cut the gain from 1.808 to 1.059 on the base pass's saved steps over 602.079 to 621.137 s), and it bends the law at rest.
-- Admission over whole breaths: a design round that nothing measured needs.
+- Admission over whole breaths: a design round, which the plasma's drift does not need if the fix's PR shows on the whole body what the switch showed on one bed.
 
 ### Part 2. The gases
 
@@ -125,6 +125,6 @@ The screen removes a fitted slope, so it cannot show that an item has settled. I
 | The held skin water loss, with its forcing | A hold | [Body ticket 12](../../body/issues/12-heat-balance.md) moves the loss and its forcing to the evaporation law | With ticket 12 |
 | Admission over whole breaths | What admission solves | Native-contract | Not scheduled |
 
-Admission over whole breaths is not scheduled, since nothing measured needs it once the lymph reads over its enclosure. It reopens on a pool or flow whose mean under breathing stands off its admitted value with no fix by a law's form or a packet value. If it reopens, it is a design round of its own.
+Admission over whole breaths is not scheduled: the plasma's drift has a fix by a law's form, and the gases' shortfall may have one by a law or a packet value, which body ticket 38's box owns. It reopens on a pool or flow whose mean under breathing stands off its admitted value and that no law's form or packet value brings back. If it reopens, it is a design round of its own.
 
 This ticket stays open for the box on the admitted beat and the suite test's box, and it still blocks body ticket 17.
