@@ -14,6 +14,7 @@ Blocked by: 05, 09, `.scratch/research/issues/12-law-forms-heat.md`
 - [ ] The certificate passes on the whole body with the heat book held by this loop, and the body's trace is updated
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 - [ ] From [ticket 05](05-the-days-inputs.md): each law here that reads a lasting input is reviewed against the rule by reading: the input scales a gain or a set point and never stands for a produced quantity. Compile's `UnscaledInput` is only a stand-in: it passes a law that reads any parameter, such as `0 = k (T - room_air())`, and refuses one that reads only inputs
+- [ ] From [ticket 10](10-lungs-breathe.md): the lung gas's water share is held at its vapour limit where the airway's loss is built, or the PR says why its excess does not matter to that loss. Today the airway's wash-out sets the share, and on the body it rises to 1.0574 of the saturated share at five minutes. [Native-contract 89](../../native-contract/issues/89-the-eliminations-order-inside-its-largest-block.md) records it and leaves the change to a later ticket, and no ticket owned it
 
 **Non-goals:** more than two nodes, fever, exercise, and clothing as anything but one insulation value.
 

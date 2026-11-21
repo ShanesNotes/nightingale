@@ -12,7 +12,7 @@ Blocked by: 06, 26, `.scratch/research/issues/14-law-forms-volume-and-acid.md`
 - [ ] Run: a salt load is excreted over the following day and body sodium returns to its start. With the hormones held, a rise in arterial pressure still raises sodium excretion
 - [ ] Run: lying down raises the peptide. Night urine flow falls below the day's, with no law setting urine flow
 - [ ] Every link of each loop moves its reader the way the loop needs, on the admitted start
-- [ ] The certificate passes with the sodium, potassium, chloride and water books held by these loops, and the body's trace is updated
+- [ ] The certificate passes with the sodium, potassium, chloride and water conserved quantities held by these loops, and the body's trace is updated. The PR also shows the three salts and water inside their bounds on a run at least as long as the measurement note's below, by the certificate or by sampled ten-second windows
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 - [ ] From [ticket 05](05-the-days-inputs.md): each law here that reads a lasting input is reviewed against the rule by reading: the input scales a gain or a set point and never stands for a produced quantity. Compile's `UnscaledInput` is only a stand-in: it passes a law that reads any parameter, such as `0 = k (T - room_air())`, and refuses one that reads only inputs
 
@@ -30,3 +30,14 @@ From [ticket 04](04-scopes-ports-and-census.md):
 - The sodium pump's energy is no reaction as research 14 writes it (research 14:39; 01:487). One law that moved the ions and burned fuel would span cells and interstitium, which compile refuses (`ReactionInTwoSpaces`). With [ticket 09](09-tissues-respire.md), this ticket picks FL's pump crossing beside MT's burn in cells, or keeps the heat route from the receipt `chemical energy` that [ticket 03](03-whole-body-lists.md) chose.
 - Body 01 lists renin secretion under RN with arrow 98 (01:388) and has EN secrete every hormone (01:710). The code follows the second. Renin's secretion is EN's boundary process (`Secretion<Renin>`, `crates/ng-contract/src/scope/processes.rs:100`), and RN sets its rate on arrow 98 (`renin_secretion: Rate<Renin>`).
 - FL's water exchange and the Starling route both move water at the capillary wall, and both are FL's, so `CrossedTwice` does not count them. This ticket is the next to edit FL's wall laws.
+
+From a measurement run before [native-contract 85](../../native-contract/issues/85-the-certificates-windows-end-on-breath-edges.md)'s second PR, at main `e2d5c6ba`, to 2,895 s with sleep from 1,800 s. Every value is synthetic.
+
+- With this loop open the body leaves salt balance within minutes. Main's certificate refuses the run at the ten-second window that opens 109.7 s after admission: chloride changes 3.0001e-4 against its 3e-4. No suite run of the body passes 90 s, so no test sees it.
+- Sodium comes in at exactly 1.0000 a second throughout, by the gut's held absorption. Sodium out is 0.99997 a second from 108 to 161 s, crosses 1.0000 near 230 s, and is 1.0011 from 602 to 650 s, 1.0034 from 1,001 to 1,048 s, 1.0069 from 1,599 to 1,650 s, 1.0089 from 2,000 to 2,048 s and 1.0124 from 2,802 to 2,849 s. It gains most between 1,000 and 1,200 s, 0.0013 in 200 s, and gains 0.0008 in the 200 s to 2,800 s. By 2,895 s the body has lost 16.8 of sodium, 17.6 of chloride and 0.84 of potassium.
+- Chloride and potassium rise in step with it: from 2,802 to 2,849 s chloride out is 1.0631 a second against 1.0500 in, and potassium out 0.05062 against 0.05000. Each salt is then 1.24% over what comes in.
+- Sleep's onset at 1,800 s leaves no mark on the rise.
+- Water stays near balance over the run, 0.11 lost of about 90 taken in, while the water leaving swings between 2.86e-2 and 3.41e-2 a second with a period near 2,000 s. Vasopressin's secretion less its clearance swings between -1.2e-3 and +1.5e-3 a second. Neither swing decays in the run.
+- What moves the excretion is not found. _Inferred:_ the three salts rise in step, which points at what they share, the filtered load, and not at any one reclaim law.
+
+The PR that closes the loop says what moved the excretion on main.

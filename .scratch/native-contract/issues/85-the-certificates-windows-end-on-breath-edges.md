@@ -137,14 +137,61 @@ fn a_steady_vasopressin_rate_at_the_edge_allowance_passes_at_both_lengths() {
 - **One rate serves the steady body and every change.** The evaluator picks a window's rate by time since admission alone (`certificate.rs`, `Rhythm`), so one rate a conserved quantity must admit the steady body and every change of activity. Sized for sleep's onset, energy's rate lets a steady leak of that size pass all day. The glossary's Activity entry already gives the healthy-range check a range of its own for a window across a change or in the time the change's shift lasts (record 0004). Whether the certificate's policy takes the same shape is decided from the measurement, and it would change section 5 and the policy's sealed fields, so it is a design decision made before the build and not a builder's choice. No conserved quantity had settled at the hour, awake or asleep (ticket 11's hour runs), so "steady" here means the rate a run shows after the settling time.
 - **Energy is one of the breath's conserved quantities.** 11b moved its bound from 3e3 to 4e3, countersigned at merge, since twice energy's worst ten-second change under the controller is 3,057.4. At main the body's bounds for the breath's conserved quantities are energy 4e3, oxygen 9e3, carbon 5e2, nitrogen gas 2e4, water 5e-2, vasopressin 5e-2, hydrogen 7e-5 and the paying beds' hydrogen 0.2 each. For this PR's builder: the doc comment above `ENERGY_DRIFT` in `crates/ng-validate/src/body/packet.rs` still reads "Energy's worst change is 1,347, in the window from 47 s." The check of nightingale#211 measured 1,529.6, in windows opening 20 to 30 s.
 - **Water and vasopressin pass half their fixed bound, and no cause is known.** In 11b's awake hour (the check of nightingale#211): water passes half its 5e-2 in 137 of 360 ten-second buckets, the buckets from 620 s to 3,420 s, so windows opening from 620 s up to 3,430 s, its worst 3.835e-2 in the bucket from 840 s up to 850 s, 1.53 times half; vasopressin passes half only in the buckets from 3,500 to 3,580 s, so windows opening from 3,500 s up to 3,590 s, at 1.10 times half, 2.75e-2. In 11c's hour with sleep, sampled in the minute before each mark: water's worst is 3.24e-2 at the 5-minute mark, 1.30 times half, and vasopressin's 2.20e-2 at the hour, 0.88 times half. The margin rule asks for a factor of 2, so this PR states each against its bound and finds the cause or files it.
+- **The salts leave their bounds on any run past about 100 s.** A measurement run of the whole body at main before this PR, to 2,895 s with sleep from 1,800 s, was certified under main's policy from its stored history. It is refused first at the ten-second window that opens 109.7 s after admission, where chloride changes 3.0001e-4 against its 3e-4, and the sampled ten-second windows put sodium past its 3e-4 from 120 s. Both gain at first, since a little less leaves the body than the gut's held absorption brings in. From about 250 s more leaves than comes in, and the excess grows: from 2,802 to 2,849 s sodium leaves at 1.0124 a second against 1.0000 in, chloride at 1.0631 against 1.0500 and potassium at 0.05062 against 0.05000. The worst sampled ten-second change is 0.134 for chloride, 0.127 for sodium and 6.4e-3 for potassium: 445, 424 and 318 times their bounds. The growth slows after about 1,100 s and had not stopped when the run ended. Closure holds throughout, so the ledger is whole and the body is out of balance. Nothing on main sets the salts' excretion by the body's sodium, its pressure or a hormone: [body ticket 17](../../body/issues/17-volume-hormones.md) builds that, and its note gives the run. No suite run of the body passes 90 s, so no test sees it. Ruled: this PR sizes sodium, chloride and potassium on the suite's own longest certified run, as `RULE` holds every bound, and the doc above the bounds gives that run's length and says the salts leave their bounds soon after it. It does not size them on a longer run, since the excess has no worst while it grows. The same holds for water and vasopressin, whose held secretion body ticket 17 replaces: in this run the water leaving swings between 2.86e-2 and 3.41e-2 a second about 3.13e-2 coming in, with a period near 2,000 s, and vasopressin's secretion less its clearance swings between -1.2e-3 and +1.5e-3 a second over a similar time. Neither swing had decayed at 2,895 s. That swing is why both pass half their bound, and what starts it is not found.
 - **A fixed window cuts the breath's swing as the breath's length moves.** A fixed ten-second window holds whole breaths only when the breath's length divides ten seconds, as 5.000 s does. Otherwise it cuts a breath and catches part of its swing, and where it cuts moves as the breath's length moves. Ticket 11 infers it at 11b: "Under the controller the breath shortens from 5.000 s to 4.883 s by 54.6 s, which moves where each ten-second window cuts the breath's swing of energy (inferred)." The windows between edges remove it. The hour's runs awake and asleep are done, so what waits on this PR is the suite certifying a sleeping run longer than its branch, and any certified run under depth.
 - **The bound on the widest stretch must reach the first close.** From the check of nightingale#213's windows: with no window closed the tail runs from admission, so for an honest run to pass at every head the bound must reach the first close. That is about the settling time plus the length plus up to two breaths when no rate before the settling time is stated, and about the first edge plus the length plus a breath when rates are stated. For the body at 5 s breaths, a settling time of 20 s and a length of 10 s, that is about 30 s or 15 s, and the same bound then admits a held breath that long for all 48 hours. Under the reading that measures the tail from the last edge, the bound would need only the longest honest stretch with no edge, about 5 s. The bound is a guard on coverage, how long the judgment between edges may lapse, and not a monitor of breathing.
 - **The old sizes, both ways.** The second box stands as the target: each old size refused at any breathing rate. A two-sided bound of twice the steady rate refuses a leak against the drift only above the bound plus that rate ("The bound", item 4). Where the measured steady rate leaves an old size passing one way, this PR says so beside the box, with the size refused both ways and what the weaker size leaves unseen over 48 hours. It does not restate the box in silence.
+- **A failure between edges carries the allowance it passed.** Section 7's must-fail row says the certificate names the quantity and the window's two edges, "with the change beside its edge rate times the window's length". `CertificateFailure` holds the change alone. A break-it pass on main after the first PR merged wrote the test below, and it fails at main: two policies that rate nitrogen gas at 6 and at 7 a second give one report for the window from 4 to 16 s, where their allowances are 72 and 84. This PR's body run is the first whose failure between edges a person reads, so the failure carries its allowance and the test holds it.
+- **A low note on the worst window kept.** The same pass's second test: the worst window is chosen on the margin in compensated arithmetic, so at a rate of 1e34 a change of 10 and a change of 60 compare equal against an allowance of 1e35, and the earliest stays, as the doc on `EdgeResult` says of equal margins. No policy states a rate near that. It held nothing and asks for nothing.
 - **Low notes from the check of nightingale#213's fix round.**
   - No test fixes which refusal fires for a phase only a hazard resets. `compile::rhythms` checks `RhythmTwice`, then `HazardRhythm`, then `UnresetRhythm`, and such a phase is both unreset and a hazard's integral, so `HazardRhythm` fires. Either refusal refuses. A fixture case would fix the order.
   - The contract's section 5 said the policy "refuses a second rhythm's" windows, while `between_edges` refuses any second call, of the same clock too, as `a_policy_refuses_a_second_clock` shows. The code is unambiguous, and the sentence now says so.
   - The first PR's `/no-comments` report says its `failure.rs` diff went from 206 lines to 8. It is 6.
   - `docs/architecture/solver-contract-sketch/src/ng_validate.rs` line 55 is a doc line of 161 characters against `max_width = 110`. Rustfmt does not wrap comments, so no gate sees it.
+
+The test for a failure's allowance, as a patch to `crates/ng-validate/tests/rhythm_certificate.rs`:
+
+```diff
+diff --git a/crates/ng-validate/tests/rhythm_certificate.rs b/crates/ng-validate/tests/rhythm_certificate.rs
+index 53db2cb77061aa49932fe12d7cbfc74e5c186ba6..f1ac591679ef68f5dfb90e9a3b6f8d571c028f22 100644
+--- a/crates/ng-validate/tests/rhythm_certificate.rs
++++ b/crates/ng-validate/tests/rhythm_certificate.rs
+@@ -1088,6 +1088,34 @@
+ }
+ 
+ #[test]
++fn an_edge_drift_reports_the_allowance_that_the_change_exceeded() {
++    // Solver contract section 7 requires "the certificate names the quantity and the window's two edges,
++    // with the change beside its edge rate times the window's length".
++    let body = breathing(true).expect("compiled");
++    running(
++        &body,
++        &Course::standard(4 * SECOND, Some((Leak::Nitrogen, 20.0))),
++        |view| {
++            let nitrogen = quantity(view, Leak::Nitrogen.book());
++            let window = interval(4 * SECOND, 16 * SECOND);
++            let report = |rate| {
++                let rated = with(&rates(view.basis(), None), nitrogen.book(), (rate, None));
++                let ledger = fixed(view, LOOSE).between_edges(clock(), (0, LENGTH, WIDEST), &rated);
++                let failure = certified(view, &ledger).expect_err("the nitrogen leak exceeds the rate");
++                assert_eq!(
++                    (failure.check(), failure.quantity(), failure.window()),
++                    (CertificateCheck::EdgeDrift, Some(nitrogen), Some(window))
++                );
++                (failure.residual().bits(), format!("{failure:?}"))
++            };
++            let [(first_change, first_report), (second_change, second_report)] = [6.0, 7.0].map(report);
++            assert_eq!(first_change, second_change);
++            assert_ne!(first_report, second_report, "the same change exceeded 72 and 84");
++        },
++    );
++}
++
++#[test]
+ fn one_policy_resolves_its_clock_where_a_model_declares_it_and_refuses_it_by_name_where_one_does_not() {
+     let (declared, undeclared) = (
+         breathing(true).expect("compiled"),
+```
 
 ## Open, each settled by a run
 

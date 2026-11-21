@@ -19,7 +19,7 @@ Blocks: none
 - [ ] The test below is red before the change and green after it, in `crates/ng-contract/tests/solved_modes.rs`
 - [ ] A body whose guards read no lasting input keeps its bytes: its model hash, its admitted seals and its pins, or the PR moves them once with the reason
 - [ ] A mutant row that collects the lasting reads from the instances alone, CAUGHT by the test
-- [ ] The fix covers every lasting input a guard reads, posture through a height among them: no rule on main owes an unstated posture, since `InputUnstated` names a `Lasting` and posture is none
+- [ ] The fix covers every lasting input a guard reads as a value. Posture, which a law or a guard reads through a height, is [native-contract 98](98-posture-is-owed-at-the-anchor-moment.md)'s
 
 The test, from the break-it pass on nightingale#214, as a patch to `crates/ng-contract/tests/solved_modes.rs`:
 
