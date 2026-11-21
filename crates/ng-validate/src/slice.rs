@@ -1,5 +1,8 @@
 use crate::initialize::{AdmissionSolve, admit_from, solve_admission};
-use crate::{CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase, SlidingWindows};
+use crate::{
+    CertificatePolicy, EdgeRate, EdgeWindows, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase,
+    SlidingWindows,
+};
 use core::cell::RefCell;
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
@@ -565,11 +568,25 @@ pub fn arena_certificate(
 
 /// A body's own drift bounds, each in its species' unit, for the species it `names` in place of the slice's table,
 /// and in atoms for each element it bounds in place of `SYNTHETIC_DRIFT`. An element's bound may differ by the sites
-/// its quantity's amounts sit at.
+/// its quantity's amounts sit at. A table may also state windows between a rhythm's edges, and for each species or
+/// element it rates, its edge rate and its rate before the settling time, as `[settled, settling]`.
 pub trait DriftTable {
     fn names(&self, species: Species) -> bool;
     fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError>;
     fn element(&self, _: Element, _at: &[SiteId]) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+        Ok(None)
+    }
+    fn edges(&self) -> Option<EdgeWindows> {
+        None
+    }
+    fn rate<Q: Substance>(&self) -> Result<Option<[Measure<Rate<Q>>; 2]>, AdmissionError> {
+        Ok(None)
+    }
+    fn element_rate(
+        &self,
+        _: Element,
+        _at: &[SiteId],
+    ) -> Result<Option<[Measure<Rate<Atoms>>; 2]>, AdmissionError> {
         Ok(None)
     }
 }
@@ -584,7 +601,8 @@ impl DriftTable for SliceDrifts {
     }
 }
 
-/// The arena's policy with `drifts` in place of the slice's bound for each species it names.
+/// The arena's policy with `drifts` in place of the slice's bound for each species it names, and with the windows
+/// between edges and the rates the table states.
 pub fn certificate_with(
     body: &CompiledBody,
     windows: SlidingWindows,
@@ -648,8 +666,34 @@ pub fn certificate_with(
         Book::Charge => QuantityPolicy::charge(quantity, Measure::new(0.0)?, Measure::new(CLOSURE_RELATIVE)?),
     });
     let quantities = quantities.collect::<Result<Vec<_>, _>>()?;
-    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)?
-        .admitting_row_rounding(body, ROW_ROUNDING)
+    let policy = CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)?
+        .admitting_row_rounding(body, ROW_ROUNDING)?;
+    let Some(edges) = drifts.edges() else {
+        return Ok(policy);
+    };
+    struct Rated<'t, T>(QuantityId, &'t T);
+    impl<T: DriftTable> Visit for Rated<'_, T> {
+        type Output = Result<Option<EdgeRate>, AdmissionError>;
+        fn visit<Q: Substance>(self) -> Self::Output {
+            let rates = self.1.rate::<Q>()?;
+            (rates.map(|[settled, settling]| EdgeRate::new(self.0, settled, Some(settling)))).transpose()
+        }
+    }
+    let rates = (basis.combinations().iter()).map(|combination| {
+        let quantity = combination.id();
+        match quantity.book() {
+            Book::Of(Species::Energy) | Book::Energy => Species::Energy.visit(Rated(quantity, drifts)),
+            Book::Of(species) => species.visit(Rated(quantity, drifts)),
+            Book::Element(element) => (drifts.element_rate(element, &sites(combination))?)
+                .map(|[settled, settling]| EdgeRate::element(quantity, settled, Some(settling)))
+                .transpose(),
+            Book::Charge => Ok(None),
+        }
+    });
+    let rates = rates
+        .filter_map(Result::transpose)
+        .collect::<Result<Vec<_>, _>>()?;
+    policy.between_edges(edges, rates)
 }
 
 /// One beat in 100 intervals, paced by the heart's phase: the cycle's period and the heart rate's time mean state one

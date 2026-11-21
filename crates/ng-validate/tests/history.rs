@@ -1,8 +1,9 @@
 use core::cell::{Cell, RefCell};
-use core::num::NonZeroU32;
+use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 use ng_record::{
-    CheckpointError, CompactLink, HistorySegment, HistoryStore, Running, Session, compact, expand,
+    AuthorizedInput, Checkpoint, CheckpointError, CompactLink, HistorySegment, HistoryStore, Running,
+    Session, compact, expand,
 };
 use ng_solver::Core;
 use ng_validate::*;
@@ -310,4 +311,186 @@ fn a_walk_in_time_order_refuses_the_link_a_walk_newest_first_refuses() {
         "the newer of two bad links"
     );
     assert_eq!(refusal(&[], &[]), None);
+}
+
+#[derive(Default)]
+struct Given<S> {
+    kept: S,
+    links: RefCell<Vec<(Digest, Vec<u8>)>>,
+}
+impl<S: HistoryStore> HistoryStore for Given<S> {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        self.kept.resolve(seal)
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        self.links.borrow_mut().push((seal, link.to_vec()));
+        self.kept.keep(seal, link)
+    }
+}
+
+#[derive(Default)]
+struct Raw(RefCell<Vec<(Digest, Vec<u8>)>>);
+impl HistoryStore for Raw {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        let links = self.0.borrow();
+        let (_, link) = links.iter().find(|(kept, _)| kept == seal)?;
+        Some(link.clone())
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        let mut links = self.0.borrow_mut();
+        if !links.iter().any(|(kept, _)| *kept == seal) {
+            links.push((seal, link.to_vec()));
+        }
+        Ok(())
+    }
+}
+
+fn follows(link: &[u8]) -> Digest {
+    ng_record::follows(link).expect("a link opens on the seal it follows")
+}
+
+fn to<'s>(session: Session<'s, Running>, seconds: u64) -> Session<'s, Running> {
+    let Ok(session) = run_until(session, SimTime::from_ns(seconds * SECOND)) else {
+        panic!("the run faulted");
+    };
+    session
+}
+
+fn loose(basis: &ConservedBasis) -> CertificatePolicy {
+    let water = |value| Measure::<Water>::new(value).expect("finite");
+    let ratio = || Measure::<Dimensionless>::new(1e-9).expect("finite");
+    let quantities = (basis.ids())
+        .map(|quantity| QuantityPolicy::new(quantity, water(1e9), ratio(), water(1e9)).expect("water"))
+        .collect();
+    let window = NonZeroU64::new(10 * SECOND).expect("positive");
+    let windows = SlidingWindows::new(window, 20 * SECOND).expect("windows");
+    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows).expect("a policy")
+}
+
+struct Branched<S> {
+    store: Given<S>,
+    after_the_head: usize,
+    branch: usize,
+    certificate: Result<String, String>,
+}
+impl<S> Branched<S> {
+    fn named(&self, at: usize) -> &'static str {
+        match at {
+            0 => "the chain's first link, ",
+            at if at == self.after_the_head => "the first link after the resumed head, ",
+            at if at == self.branch => "the branch's first link, ",
+            _ => "",
+        }
+    }
+}
+
+fn branched<S: HistoryStore + Default + 'static>() -> Branched<S> {
+    let (case, core, store) = (twenty_minutes(), Core::new(STEP), Given::<S>::default());
+    let given = || store.links.borrow().len();
+    let session = to(case.admit(&core, &store).expect("admitted"), 20);
+    let (saved, identity) = (
+        session.checkpoint().expect("a checkpoint"),
+        session.record().identity().clone(),
+    );
+    let session = to(session, 40);
+    let head = session.checkpoint().expect("the head");
+    drop(session);
+    let resumed = |saved: &Checkpoint| {
+        Session::resume(saved, &identity, case.body(), &core, &store).expect("every link chains to its seal")
+    };
+    let after_the_head = given();
+    drop(to(resumed(&head), 50));
+    let branch = given();
+    let mut session = resumed(&saved);
+    let from = session.record().earliest_stamp();
+    let delivery = BoundaryInput::Water(WaterDelivery {
+        boundary: "exterior",
+        amount: Measure::new(100.0).expect("finite"),
+        ends: SimTime::from_ns(from.nanoseconds() + 5 * SECOND),
+    });
+    let event = BoundaryEvent::new(
+        InputId::new(Digest::of_canonical(b"the branch's own")),
+        from,
+        delivery,
+    );
+    let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a command"), event);
+    session.enqueue(input).expect("taken");
+    let session = to(session, 30);
+    let view = session.conservation();
+    let certificate = certify(&view, &loose(view.basis()));
+    let certificate =
+        (certificate.map(|certificate| format!("{certificate:?}"))).map_err(|failed| format!("{failed:?}"));
+    drop(session);
+
+    let links = store.links.borrow();
+    let held_before = |at: usize, seal: Digest| links[..at].iter().any(|(given, _)| *given == seal);
+    assert!(
+        !held_before(links.len(), follows(&links[0].1)),
+        "the chain's first link follows its origin, which no store is given"
+    );
+    let (head, after) = (&links[after_the_head - 1], &links[after_the_head]);
+    assert!(!held_before(after_the_head, after.0), "a new link");
+    assert_eq!(
+        follows(&after.1),
+        head.0,
+        "the link after the head follows the last link given"
+    );
+    let (last, first) = (&links[branch - 1], &links[branch]);
+    assert!(!held_before(branch, first.0), "a new link");
+    assert!(
+        held_before(branch, follows(&first.1)) && follows(&first.1) != last.0,
+        "the branch's first link follows a link given before the last"
+    );
+    drop(links);
+    Branched {
+        store,
+        after_the_head,
+        branch,
+        certificate,
+    }
+}
+
+#[test]
+fn the_memory_store_gives_back_every_link_byte_for_byte_the_first_after_a_resumed_head_and_a_branchs_first_among_them()
+ {
+    let run = branched::<MemoryStore>();
+    let links = run.store.links.borrow();
+    for (at, (seal, link)) in links.iter().enumerate() {
+        assert_eq!(
+            run.store.kept.resolve(seal).as_ref(),
+            Some(link),
+            "{}link {at} of {}",
+            run.named(at),
+            links.len()
+        );
+    }
+}
+
+#[test]
+fn the_memory_store_keeps_each_link_that_follows_one_it_holds_in_fewer_bytes_than_it_was_given() {
+    let run = branched::<MemoryStore>();
+    let links = run.store.links.borrow();
+    let mut checked = Vec::new();
+    for (at, (seal, link)) in links.iter().enumerate() {
+        let held_before = |seal: Digest| links[..at].iter().any(|(given, _)| *given == seal);
+        if held_before(*seal) || !held_before(follows(link)) {
+            continue;
+        }
+        let kept = run.store.kept.kept_len(seal).expect("kept");
+        assert!(
+            kept < link.len(),
+            "{}link {at}: {kept} bytes kept of {} given",
+            run.named(at),
+            link.len()
+        );
+        checked.push(at);
+    }
+    assert!(checked.contains(&run.after_the_head) && checked.contains(&run.branch));
+}
+
+#[test]
+fn a_certificate_from_the_memory_store_is_the_one_from_a_store_of_raw_links_on_the_same_branched_run() {
+    let raw = branched::<Raw>();
+    assert!(raw.certificate.is_ok(), "{:?}", raw.certificate);
+    assert_eq!(branched::<MemoryStore>().certificate, raw.certificate);
 }

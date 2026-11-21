@@ -195,6 +195,7 @@ struct Failed {
     quantity: Option<QuantityId>,
     window: Option<Interval>,
     residual: [u64; 2],
+    allowance: Option<[u64; 2]>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -257,6 +258,7 @@ pub fn certified(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Certifi
         quantity: failure.quantity(),
         window: failure.window(),
         residual: failure.residual().bits(),
+        allowance: failure.allowance().map(|allowance| allowance.bits()),
     });
     assert_eq!(
         seen,
@@ -272,6 +274,7 @@ fn failed(check: CertificateCheck) -> Failed {
         quantity: None,
         window: None,
         residual: Compensated::ZERO.bits(),
+        allowance: None,
     }
 }
 
@@ -382,6 +385,7 @@ fn between_edges(
                     quantity: Some(quantity),
                     window: Some(window),
                     residual: change.bits(),
+                    allowance: Some(allowance.bits()),
                 });
             }
             let held = worst[index].get_or_insert((change, allowance, window));
@@ -405,6 +409,7 @@ fn between_edges(
             quantity: None,
             window: Some(stopped),
             residual: Compensated::ZERO.bits(),
+            allowance: None,
         });
     }
     if let Some(failure) = drifted {
@@ -553,6 +558,7 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
                         quantity: Some(quantity),
                         window: Some(window),
                         residual: closure.bits(),
+                        allowance: None,
                     });
                 }
                 let drift = change[index].abs();
@@ -566,6 +572,7 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
                         quantity: Some(quantity),
                         window: Some(window),
                         residual: drift.bits(),
+                        allowance: None,
                     });
                 }
                 let held = held.get_or_insert(Held {

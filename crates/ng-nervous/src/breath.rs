@@ -138,6 +138,7 @@ impl<'b> Breath<'b> {
             k.finish(gap, expiration.only(), class)
         });
         laws.event(Guard::new(past_breath, Crossing::Rising, expiration.to(&inspiration)?).resetting(&phase));
+        laws.rhythm(&phase);
         laws.hazard(HazardGuard::new(&hazard, &dice, rest.to(&inspiration)?));
         Ok(Self { drive, share })
     }

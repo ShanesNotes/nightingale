@@ -415,6 +415,11 @@ pub struct CompactLink<'b> {
     pub bytes: &'b [u8],
 }
 
+/// The seal of the link `link` follows, which opens it.
+pub fn follows(link: &[u8]) -> Option<Digest> {
+    link.first_chunk().map(|&seal| Digest::from_bytes(seal))
+}
+
 /// A link as a history store may keep it. When `link` follows `previous`, only its image, its end time and each
 /// curve's end value are kept; any other link is kept whole.
 pub fn compact(previous: Option<CompactLink<'_>>, link: &[u8]) -> Vec<u8> {
