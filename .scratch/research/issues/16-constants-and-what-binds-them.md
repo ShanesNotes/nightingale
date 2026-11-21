@@ -11,7 +11,7 @@ This is the first part of [Parameters](05-parameters.md). Ticket 05 binds the va
 
 ## Answer
 
-Every constant of every rung 0 law has a row below, 556 in all. The laws are the slice's (research 02, the crates' parameter keys and the native-contract tickets that state a slice law), the forms of research 11 to 15, and the receptor binding each of those forms reads. [Body ticket 01](../../body/issues/01-rung-0-specification.md)'s Answer decides which laws rung 0 keeps. A constant of a law it does not keep has no row.
+Every constant of every rung 0 law has a row below, 558 in all. The laws are the slice's (research 02, the crates' parameter keys and the native-contract tickets that state a slice law), the forms of research 11 to 15, and the receptor binding each of those forms reads. [Body ticket 01](../../body/issues/01-rung-0-specification.md)'s Answer decides which laws rung 0 keeps. A constant of a law it does not keep has no row, but for NS-062 and NS-063, which research 23 adds for body ticket 38's law.
 
 ### How to read the list
 
@@ -42,7 +42,7 @@ A work's tier is the one most rows give it. In store says whether the evidence s
 
 | Work | Citation | Tier | In store | Rows | Which rows |
 |---|---|---|---|---|---|
-| W001 | Guyton and Hall 12e | textbook | yes | 86 | CV-080, CV-081, FL-020, RN-014, RN-015, RN-026, RN-029, RN-030, RN-040, RN-059, RS-001, RS-010, RS-014, RS-015, EN-007, EN-012, EN-013, EN-014, EN-015, EN-016, EN-024, EN-025, EN-040, EN-041, EN-042, EN-043, HP-002, HP-005, HP-006, HP-007, HP-008, HP-010, HP-011, HP-012, HP-013, HP-015, HP-020, HP-021, GI-006, GI-008, GI-009, GI-014, GI-015, GI-017, GI-018, GI-019, GI-021, GI-023, GI-024, GI-026, GI-036, HC-002, HC-003, HC-006, MT-005, MT-006, MT-008, MT-009, MT-010, MT-020, MT-023, MT-027, MT-028, MT-034, MT-035, MT-037, MT-038, MT-039, MT-040, MT-042, MT-044, MT-049, MT-051, MT-053, MT-055, MT-056, MT-058, MT-062, MT-065, MT-066, MS-004, MS-005, MS-008, MS-009, MS-010, MS-011 |
+| W001 | Guyton and Hall 12e | textbook | yes | 87 | CV-080, CV-081, FL-020, RN-014, RN-015, RN-026, RN-029, RN-030, RN-040, RN-059, NS-062, RS-001, RS-010, RS-014, RS-015, EN-007, EN-012, EN-013, EN-014, EN-015, EN-016, EN-024, EN-025, EN-040, EN-041, EN-042, EN-043, HP-002, HP-005, HP-006, HP-007, HP-008, HP-010, HP-011, HP-012, HP-013, HP-015, HP-020, HP-021, GI-006, GI-008, GI-009, GI-014, GI-015, GI-017, GI-018, GI-019, GI-021, GI-023, GI-024, GI-026, GI-036, HC-002, HC-003, HC-006, MT-005, MT-006, MT-008, MT-009, MT-010, MT-020, MT-023, MT-027, MT-028, MT-034, MT-035, MT-037, MT-038, MT-039, MT-040, MT-042, MT-044, MT-049, MT-051, MT-053, MT-055, MT-056, MT-058, MT-062, MT-065, MT-066, MS-004, MS-005, MS-008, MS-009, MS-010, MS-011 |
 | W002 | Modern Nutrition in Health and Disease 11e | textbook | yes | 49 | RN-068, RN-069, RN-070, RN-075, HP-001, HP-006, HP-016, HP-017, HP-020, HP-022, HP-023, HP-024, HP-026, HP-027, HP-028, HP-029, GI-015, GI-016, GI-017, GI-019, GI-021, GI-022, GI-029, GI-030, GI-031, GI-032, GI-033, GI-034, GI-035, MT-056, MT-065, MT-067, MT-068, MT-069, MT-070, MT-071, MT-072, MT-073, MT-074, MT-075, MT-076, MS-006, MS-008, MS-009, MS-010, MS-011, MS-012, MS-013, MS-014 |
 | W003 | Boron and Boulpaep 2e | textbook | yes | 48 | CV-083, CV-086, FL-020, FL-021, RN-026, RN-027, RN-029, RN-030, BC-033, HP-001, HP-007, HP-010, HP-011, HP-013, HP-015, HP-016, HP-017, HP-019, HP-021, HP-022, HP-026, HP-027, HP-028, GI-007, GI-008, GI-009, GI-025, GI-036, MT-013, MT-020, MT-022, MT-028, MT-056, MT-057, MT-065, MT-067, MT-068, MT-069, MT-070, MT-071, MT-072, MT-073, MT-074, MT-075, MS-005, MS-012, MS-013, MS-014 |
 | W004 | Dash, Korman and Bassingthwaighte 2016, Eur J Appl Physiol 116:97, doi:10.1007/s00421-015-3228-3, PMC4699875 | compiled | yes | 27 | BC-001, BC-002, BC-003, BC-004, BC-005, BC-006, BC-007, BC-008, BC-009, BC-010, BC-011, BC-012, BC-013, BC-014, BC-015, BC-017, BC-018, BC-019, BC-020, BC-021, BC-022, BC-023, BC-024, BC-025, BC-026, BC-027, HC-001 |
@@ -81,7 +81,7 @@ A work's tier is the one most rows give it. In store says whether the evidence s
 | W037 | Rose and Post, Clinical Physiology of Acid-Base and Electrolyte Disorders 5e | textbook | yes | 6 | RN-061, RN-062, RN-063, RN-064, MT-059, MT-061 |
 | W038 | Scheer et al. 2010, Proc Natl Acad Sci USA 107:20541, doi:10.1073/pnas.1006749107 | primary | yes | 6 | NS-048, NS-049, NS-050, NS-051, EN-041, EN-042 |
 | W039 | Taylor and colleagues 1996, J Clin Invest 97:126, doi:10.1172/jci118379 | primary | yes | 6 | HP-007, HP-008, HP-011, HP-012, MS-004, MS-006 |
-| W040 | West and Luks, West's Respiratory Physiology, 11th edition | textbook | yes | 6 | RS-008, RS-009, RS-010, RS-011, RS-012, RS-013 |
+| W040 | West and Luks, West's Respiratory Physiology, 11th edition | textbook | yes | 7 | NS-062, RS-008, RS-009, RS-010, RS-011, RS-012, RS-013 |
 | W041 | Antonius 2023, Adv Simul, PMC10268443 | unknown | yes | 5 | BC-028, BC-029, BC-030, BC-031, BC-032 |
 | W042 | Cheng et al. 1995, Anesthesiology 82:1160 | primary | no | 5 | NS-041, NS-042, NS-043, NS-044, NS-045 |
 | W043 | Fordtran and colleagues 1965, J Clin Invest 44:1935 | primary | yes | 5 | GI-006, GI-007, GI-009, GI-010, GI-011 |
@@ -332,7 +332,7 @@ Within a system, open the works in this order. Each count is the system's rows t
 | 1 | CV | 87 | W013 Williams and Leggett 1989, doi:10.1088/0143-0815/10/3/001 (12); W018 Contarino and Toro 2018 (8); W020 Mynard 2012, doi:10.1002/cnm.1466 (8); W045 Kana 2010 (5) |
 | 2 | FL | 28 | W023 Stadt 2022, PLoS Comput Biol, PMC9812337 (7); W009 Tietz Textbook of Laboratory Medicine 7e (5); W077 Aukland and Reed 1993, doi:10.1152/physrev.1993.73.1.1 (3); W003 Boron and Boulpaep 2e (2) |
 | 3 | RN | 85 | W008 Hallow and Gebremichael 2017, CPT Pharmacometrics Syst Pharmacol 6:383, PMC5488122, with its supplement and model code, doi:10.1002/psp4.12178 (14); W001 Guyton and Hall 12e (7); W012 Guyton model report, Physiome Model Repository 2008 (7); W019 Karaaslan 2014, Am J Physiol Regul Integr Comp Physiol 306:R234, PMC4116423 (6) |
-| 4 | NS | 61 | W027 Proudman 2021, doi:10.1002/prp2.799 (7); W007 Stolwijk 1971, NASA CR-1855 (6); W032 Black and Leff 1983, doi:10.1098/rspb.1983.0093 (6); W042 Cheng et al. 1995, Anesthesiology 82:1160 (5) |
+| 4 | NS | 63 | W027 Proudman 2021, doi:10.1002/prp2.799 (7); W007 Stolwijk 1971, NASA CR-1855 (6); W032 Black and Leff 1983, doi:10.1098/rspb.1983.0093 (6); W042 Cheng et al. 1995, Anesthesiology 82:1160 (5) |
 | 5 | RS | 15 | W014 Nunn, Applied Respiratory Physiology (1969, reprinted 1972) (8); W040 West and Luks, West's Respiratory Physiology, 11th edition (6); W001 Guyton and Hall 12e (4); W111 D'Angelo 1989, J Appl Physiol 67:2556, doi:10.1152/jappl.1989.67.6.2556 (anaesthetised, paralysed) (2) |
 | 5 | BC | 38 | W004 Dash, Korman and Bassingthwaighte 2016, Eur J Appl Physiol 116:97, doi:10.1007/s00421-015-3228-3, PMC4699875 (26); W033 Douglas, Jones and Reed 1988, J Appl Physiol 65:473, doi:10.1152/jappl.1988.65.1.473 (6); W041 Antonius 2023, Adv Simul, PMC10268443 (5); W065 Moore 1970, J Clin Invest 49:318 (4) |
 | 5 | EN | 54 | W001 Guyton and Hall 12e (12); W012 Guyton model report, Physiome Model Repository 2008 (7); W029 Schaller and colleagues 2013, CPT Pharmacometrics Syst Pharmacol, PMC3828004 (7); W009 Tietz Textbook of Laboratory Medicine 7e (5) |
@@ -352,7 +352,7 @@ Rows by system and route. A row is one constant at its binding level.
 | CV | 56 | 13 | 3 | 12 | 3 | 0 | 87 |
 | FL | 21 | 3 | 2 | 2 | 0 | 0 | 28 |
 | RN | 47 | 3 | 20 | 11 | 4 | 0 | 85 |
-| NS | 50 | 0 | 4 | 5 | 2 | 0 | 61 |
+| NS | 51 | 0 | 4 | 6 | 2 | 0 | 63 |
 | RS | 9 | 6 | 0 | 0 | 0 | 0 | 15 |
 | BC | 35 | 1 | 0 | 1 | 1 | 0 | 38 |
 | EN | 47 | 1 | 1 | 4 | 1 | 0 | 54 |
@@ -362,9 +362,9 @@ Rows by system and route. A row is one constant at its binding level.
 | MT | 59 | 4 | 2 | 14 | 2 | 0 | 81 |
 | MS | 20 | 0 | 0 | 2 | 1 | 0 | 23 |
 | IM | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| All | 410 | 32 | 38 | 56 | 20 | 0 | 556 |
+| All | 411 | 32 | 38 | 57 | 20 | 0 | 558 |
 
-141 rows carry a key a crate reads today, and 415 have no key yet. 27 rows are flagged as fitted at the instant where their source model used a mean: CV-083, CV-084, RN-040, RN-041, RN-042, RN-053, RN-054, NS-017, NS-018, NS-020, NS-021, NS-022, NS-023, NS-028, NS-029, NS-031, NS-032, NS-034, NS-035, NS-036, EN-028, EN-029, GI-002, GI-003, GI-033, GI-034, GI-035. 115 rows have no work named for them. 230 rows read a quantity no row holds. The works table holds 280 works.
+141 rows carry a key a crate reads today, and 417 have no key yet. 28 rows are flagged as fitted at the instant where their source model used a mean: CV-083, CV-084, RN-040, RN-041, RN-042, RN-053, RN-054, NS-017, NS-018, NS-020, NS-021, NS-022, NS-023, NS-028, NS-029, NS-031, NS-032, NS-034, NS-035, NS-036, NS-062, EN-028, EN-029, GI-002, GI-003, GI-033, GI-034, GI-035. 116 rows have no work named for them. 231 rows read a quantity no row holds. The works table holds 280 works.
 
 ### What cannot be bound
 
@@ -411,7 +411,6 @@ No row has the route "none". Record 0003 lets an inference record fill any param
 - Lactate's oxidation and clearance.
 - Lung stretch to NS (arrow 83), and the work of breathing and the pump's load (arrows 84 and 85).
 - The dry heat of warming inspired gas. Research 12's Kingma supplement may hold it.
-- The breathing rhythm: how drive splits into rate and depth.
 
 Three laws name no constant by design and need none: the liver's glucose output as a check, the kidney's creatinine as filtration times concentration, and ketones into the cells, which reuses the liver's `P_ket`. Immunity and coagulation are declared with zero flux at rung 0 (the body map's default), so IM and coagulation have no row.
 
@@ -984,6 +983,8 @@ Flags for RN:
 | NS-059 | `w` (vasopressin drive). Key: no key yet. Binds at: body | Vasopressin secretion and clearance (NS's drive). Form: research 14, Answer table, row 'Vasopressin secretion and clearance'. Rung 0: body 01 NS (line 372): 'The osmoreceptor and the volume drive to vasopressin', arrow 89, ticket 17 | Plasma AVP at and below the osmotic threshold, healthy recumbent adults (low but usually detectable). Route: **sourced**. The contract's smooth_max gives w / 2 at the threshold, so the residual AVP there sets w | w = 2 c_AVP,thr / s, with s Robertson's slope of plasma AVP on osmolality and c_AVP,thr plasma AVP at the threshold; mOsm/kg. Reads: no other row | no | W022 (p. 2345 and Fig. 7; primary; named by research 14) |
 | NS-060 | `k_V`. Key: no key yet. Binds at: body | Vasopressin secretion and clearance (NS's drive). Form: research 14, Answer table, row 'Vasopressin secretion and clearance'. Rung 0: body 01 NS (line 372): 'The osmoreceptor and the volume drive to vasopressin', arrow 89, ticket 17 | Shift of the osmotic threshold per change in central blood volume: the thresholds of plasma AVP on osmolality recumbent, upright and during hypertonic saline, healthy young adults, beside a measure of central blood volume in each state. Route: **sourced**. The threshold shifts are on hand; the central volume change in each state is not | k_V = Δθ / ΔV_cv; mOsm/kg per L. Reads: the central venous volume change on standing or saline loading (no row holds it) | no | W028 (abstract; primary; named by research 14); W011 (Fig. 38-4 (competing: slope changes with volume); textbook; named by research 14) |
 | NS-061 | `V_ref`. Key: no key yet. Binds at: body | Vasopressin secretion and clearance (NS's drive). Form: research 14, Answer table, row 'Vasopressin secretion and clearance'. Rung 0: body 01 NS (line 372): 'The osmoreceptor and the volume drive to vasopressin', arrow 89, ticket 17 | none on its own: θ0 and V_ref enter only as θ0 - k_V V_ref. Route: **unknown**. V_ref is an origin: the central volume in the state θ0 was measured (recumbent, hydropenic). Setting it to the engine's own resting central volume reads a produced quantity (I14). Needs a ruling, likely a model default | none; a volume, L. Reads: `θ0` (NS-057); `k_V` (NS-060) | no | W028 (abstract; primary; named by research 14) |
+| NS-062 | `k_V` (the breath's split), depth's ceiling as a multiple of resting tidal volume. Key: no key yet. Binds at: body | The split of the drive into depth and rate (the nervous breath's phase and pump drive). Form: research 23, Answer, 'The split as a law can state it', `R(C) = smooth_max(1, C / k_V, w_V)`, the phase's speed `ns.breath-rate` times `R(C)` and the pump drive's peak `ns.drive-peak` times `C / R(C)`. Model default with no sourced form. Rung 0: body ticket 38 | The tidal volume at which the rise in ventilation under progressive hypercapnia from rest passes from depth to rate, healthy adults awake, by pneumotachograph or inductance plethysmography without a mask, over resting tidal volume in the same subjects. Route: **sourced**. No work on hand measures it. The textbooks give the volume at which the inflation reflex acts, above 1 L (West) or about 1.5 L, three times normal (Guyton), and disagree on what it then does to timing: a longer expiration and a slower rate (West), a sooner end to inspiration and a faster rate (Guyton). Taking that volume as depth's ceiling is an inference: two to three times a 500 mL breath. A primary source (Hey 1966, not in the store) would bind it. | `k_V = V_ceiling / V_T0`; volumes in m^3, ratio dimensionless. Reads: resting tidal volume (no row holds it; research 20's box) | yes | W001 (p. 506; textbook; named by research 23); W040 (PDF page 321; textbook; named by research 23) |
+| NS-063 | `w_V`, the width of the breath's rate factor's smooth maximum. Key: no key yet. Binds at: body | The split of the drive into depth and rate (the nervous breath's phase). Form: research 23, Answer, 'The split as a law can state it', `R(C) = smooth_max(1, C / k_V, w_V)`. Rung 0: body ticket 38 | none: a numerical choice. Route: **model default**. Any positive width puts `R` above one at the awake rest, so it moves the awake rate by an amount the builder measures. | identity; dimensionless. Reads: `k_V` (NS-062) | no | None named |
 
 Flags for NS:
 
@@ -1083,6 +1084,7 @@ Flags for NS:
 - NS-060: The mapping needs the central venous volume change in each posture, which Robertson and Athar did not measure; fitting it to the engine's own change would bind against a produced quantity
 - NS-060: No identity takes osmolality per volume times a volume to an osmolality (research 14, What the contract lacks)
 - NS-061: θ0 and V_ref are not separately identifiable; only θ0 - k_V V_ref is (research 14, row 'Vasopressin secretion and clearance')
+- NS-062: The binding measurement averages breaths at each level of CO2, and the engine reads the drive scale at the instant for the rate and, under native-contract 87's candidate, at each breath edge for the peak, so `k_V` is fitted against the form as the engine evaluates it. The mapping reads resting tidal volume, which no row holds until research 20 answers. NS-060's `k_V` is the vasopressin law's, a different constant.
 
 #### RS. Respiratory
 
