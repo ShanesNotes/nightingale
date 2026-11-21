@@ -2768,6 +2768,72 @@ fn the_lining_moves_research_11s_form_over_the_first_minute(start: &Start, minut
     );
 }
 
+/// Twice what the awake minute's whole breaths give on the head that reads each lymph over its enclosure, rounded up
+/// to one figure: the lung's interstitial water a second, and the pulmonary lymph's mean off its admitted rate.
+const LUNG_POOL_RATE: f64 = 2e-4;
+const LUNG_LYMPH_SHARE: f64 = 6e-4;
+
+/// Native-contract 100's suite test. Admission holds the breath at rest, so under tidal breathing from admission the
+/// lung's interstitial water and its lymph keep their admitted rates over whole breaths: the pleural swing moves the
+/// tissue's pressure and its enclosure's together. Judged against the run's own admitted state.
+fn the_lungs_interstitial_water_and_lymph_keep_their_admitted_rates_over_the_awake_minutes_breaths(
+    start: &Start,
+    minute: &Session<'_, Running>,
+    watch: &Watch,
+) -> String {
+    let body = &start.body;
+    let columns = every_column(body);
+    let (lung, veins) = (
+        site::<CapillaryBed>("pulmonary bed"),
+        site::<VesselSegment>("central veins"),
+    );
+    let pool =
+        |site, species, space| site == lung && species == Species::Water && space == Space::Interstitium;
+    let drain = Context::Edge {
+        from: lung,
+        to: veins,
+    };
+    let lymph = (columns.iter().copied())
+        .find(|column| {
+            let placed = &body.columns()[column.index()];
+            placed.origin()
+                == LawName {
+                    owner: "FL",
+                    local: "lymph",
+                }
+                && placed.context() == drain
+                && count(body, *column, pool) == -1.0
+        })
+        .expect("the pulmonary lymph's water");
+    let admitted = value(start, &start.session(), field("FL", "lymph", drain));
+    let edges = watch.edges();
+    let (first, last) = (edges[0], edges[edges.len() - 1]);
+    let [from, to] = [first, last].map(|edge| watch.moments[edge].at);
+    let [before, after] = [from, to].map(|at| extents(minute, &columns, anchor_moment().nanoseconds() + at));
+    let seconds = (to - from) as f64 / SECOND as f64;
+    let rate = (columns.iter())
+        .map(|column| count(body, *column, pool) * (after[column.index()] - before[column.index()]))
+        .sum::<f64>()
+        / seconds;
+    let share = (after[lymph.index()] - before[lymph.index()]) / seconds / admitted - 1.0;
+    let span = format!(
+        "over the {} whole breaths from {:.3} s to {:.3} s",
+        edges.len() - 1,
+        from as f64 / SECOND as f64,
+        to as f64 / SECOND as f64
+    );
+    let measured = format!(
+        "{span} the lung's interstitial water changes {rate:+.6e} a second, against {LUNG_POOL_RATE}, and the \
+         pulmonary lymph runs {share:+.6e} off its admitted {admitted:.8e}, against {LUNG_LYMPH_SHARE}"
+    );
+    assert!(rate.abs() <= LUNG_POOL_RATE, "{measured}");
+    assert!(share.abs() <= LUNG_LYMPH_SHARE, "{measured}");
+    format!(
+        "{span}: the lung's interstitial water {rate:+.4e} a second, the pulmonary lymph {share:+.4e} off its \
+         admitted {admitted:.6e}\n"
+    )
+}
+
 fn the_whole_beat_heat_report_counts_what_the_core_receives_from_the_beds(start: &Start) {
     let mut openings = Vec::new();
     let session = beats(start, start.session(), 3 * SECOND, |session, opened| {
@@ -3417,8 +3483,6 @@ fn the_whole_body_passes_every_replay_gate() {
 #[test]
 fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let start = Start::admitted();
-    each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(&start);
-    each_beds_speciation_meets_its_forms_at_the_admitted_state(&start);
     let before = start.core.solves.get();
     let (minute, counted, watch, branch) = the_first_minute_moves_no_held_pool_and_saves_a_branch(&start);
     let counts = Counts {
@@ -3427,7 +3491,13 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         steps: minute.record().revision(),
         solves: start.core.solves.get() - before,
     };
-    let mut report = each_breath_swings_the_alveolar_gases_and_venous_return(&watch);
+    let mut report =
+        the_lungs_interstitial_water_and_lymph_keep_their_admitted_rates_over_the_awake_minutes_breaths(
+            &start, &minute, &watch,
+        );
+    each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(&start);
+    each_beds_speciation_meets_its_forms_at_the_admitted_state(&start);
+    report += &each_breath_swings_the_alveolar_gases_and_venous_return(&watch);
     report += &the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(&watch);
     report += &the_work_of_breathing_follows_the_pump_from_the_stated_mean(&watch);
     report += &the_alveolar_water_share_over_whole_breaths(&watch);
