@@ -3876,15 +3876,15 @@ test = "-p ng-validate --test body each_beds_glycolysis_and_lactate_burn_carry_t
 [[mutant]]
 name = "water-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Species::Water, 5e-2),'''
-new = '''(Species::Water, 0.1),'''
+old = '''(Species::Water, 5e-2, 4e-3, 3e-3),'''
+new = '''(Species::Water, 0.1, 4e-3, 3e-3),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
 name = "oxygen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Oxygen, 9e3),'''
-new = '''(Element::Oxygen, 1.8e4),'''
+old = '''(Element::Oxygen, 1e4, 4e1, 7.0),'''
+new = '''(Element::Oxygen, 2e4, 4e1, 7.0),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -3918,15 +3918,15 @@ test = "-p ng-validate --test body each_beds_burns_carry_their_fuels_atoms_and_e
 [[mutant]]
 name = "carbon-element-drift-bound-tightened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Carbon, 5e2),'''
-new = '''(Element::Carbon, 2.5e2),'''
+old = '''(Element::Carbon, 7e2, 3e1, 1e1),'''
+new = '''(Element::Carbon, 3.5e2, 3e1, 1e1),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
 name = "hydrogen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Element::Hydrogen, 7e-5),'''
-new = '''(Element::Hydrogen, 1.4e-4),'''
+old = '''(Element::Hydrogen, 2e-4, 2e-5, 2e-6),'''
+new = '''(Element::Hydrogen, 4e-4, 2e-5, 2e-6),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -4567,8 +4567,8 @@ test = "-p ng-validate --test body the_coronary_bed_pays_the_stroke_work_and_the
 [[mutant]]
 name = "payer-hydrogen-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''const PAYER_HYDROGEN_DRIFT: f64 = 0.2;'''
-new = '''const PAYER_HYDROGEN_DRIFT: f64 = 0.4;'''
+old = '''const PAYER_HYDROGEN: (f64, f64, f64) = (0.4, 4e-2, 2e-2);'''
+new = '''const PAYER_HYDROGEN: (f64, f64, f64) = (0.8, 4e-2, 2e-2);'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -4868,6 +4868,20 @@ path = "crates/ng-nervous/src/breath.rs"
 old = '''        laws.rhythm(&phase);'''
 new = '''        let _ = &phase;'''
 test = "-p ng-validate --test body the_whole_body_holds_its_rows_columns_and_digests"
+
+[[mutant]]
+name = "body-edge-rate-apart-from-rule"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''    (Species::Energy, 1e4, 1e3, 3e2),'''
+new = '''    (Species::Energy, 1e4, 2e3, 3e2),'''
+test = "-p ng-validate --test body_run each_figure_of_rule_is_the_bodys_policy_bit_for_bit"
+
+[[mutant]]
+name = "edge-rates-read-no-sites"
+path = "crates/ng-validate/src/slice.rs"
+old = '''            Book::Element(element) => (drifts.element_rate(element, &sites(combination))?)'''
+new = '''            Book::Element(element) => (drifts.element_rate(element, &[])?)'''
+test = "-p ng-validate --test body_run each_figure_of_rule_is_the_bodys_policy_bit_for_bit"
 
 [[mutant]]
 name = "sleep-lowers-no-gain"

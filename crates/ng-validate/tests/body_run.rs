@@ -959,38 +959,139 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
     .assert_eq(&report);
     let figures = watch.figures(20);
     let mut report = String::new();
-    let mut refused = Vec::new();
-    for (book, at_payer, below, bound) in RULE {
+    for (book, at_payer, _) in RULE {
         let (worst, _) = worst_change(start, &certificate, book, at_payer);
-        let breathing = figures.iter().find(|(of, _)| *of == book && !at_payer);
-        if let Some((_, figures)) = breathing {
+        if let Some((_, figures)) = figures.iter().find(|(of, _)| *of == book && !at_payer) {
             writeln!(report, "{book:?}: {}", line(worst, figures)).expect("a string takes it");
         }
-        let figure = breathing.map_or(worst, |(_, figures)| larger(worst, figures.inside_a_breath));
-        if !(below < 2.0 * figure && 2.0 * figure <= bound) {
-            refused.push(format!(
-                "{book:?}: twice the worst ten-second change or the most a breath moves it, {}, rounds up to a figure other than {bound}",
-                2.0 * figure
-            ));
-        }
     }
-    assert!(refused.is_empty(), "{}", refused.join("\n"));
     report
 }
 
-const RULE: [(Book, bool, f64, f64); 11] = [
-    (Book::Energy, false, 3e3, 4e3),
-    (Book::Element(Element::Carbon), false, 4e2, 5e2),
-    (Book::Element(Element::Oxygen), false, 8e3, 9e3),
-    (Book::Element(Element::Hydrogen), false, 6e-5, 7e-5),
-    (Book::Element(Element::Hydrogen), true, 0.1, 0.2),
-    (Book::Of(Species::NitrogenGas), false, 1e4, 2e4),
-    (Book::Of(Species::Water), false, 0.04, 0.05),
-    (Book::Of(Species::Sodium), false, 2e-4, 3e-4),
-    (Book::Of(Species::Chloride), false, 2e-4, 3e-4),
-    (Book::Of(Species::Potassium), false, 1e-5, 2e-5),
-    (Book::Of(Species::Vasopressin), false, 4e-2, 5e-2),
+/// A figure of the body's policy beside the one-figure value next under it, `(below, figure)`. It holds while
+/// `below < 2 × measured ≤ figure`.
+type Figure = (f64, f64);
+
+/// Each row of the body's policy, sized on the reference run: the quantities it holds, then its drift over any ten
+/// seconds, its edge rate and its settling rate.
+const RULE: [(Book, bool, [Figure; 3]); 11] = [
+    (Book::Energy, false, [(9e3, 1e4), (9e2, 1e3), (2e2, 3e2)]),
+    (
+        Book::Element(Element::Carbon),
+        false,
+        [(6e2, 7e2), (2e1, 3e1), (9.0, 1e1)],
+    ),
+    (
+        Book::Element(Element::Oxygen),
+        false,
+        [(9e3, 1e4), (3e1, 4e1), (6.0, 7.0)],
+    ),
+    (
+        Book::Element(Element::Hydrogen),
+        false,
+        [(1e-4, 2e-4), (1e-5, 2e-5), (1e-6, 2e-6)],
+    ),
+    (
+        Book::Element(Element::Hydrogen),
+        true,
+        [(0.3, 0.4), (3e-2, 4e-2), (1e-2, 2e-2)],
+    ),
+    (
+        Book::Of(Species::NitrogenGas),
+        false,
+        [(1e4, 2e4), (1e1, 2e1), (7.0, 8.0)],
+    ),
+    (
+        Book::Of(Species::Water),
+        false,
+        [(4e-2, 5e-2), (3e-3, 4e-3), (2e-3, 3e-3)],
+    ),
+    (
+        Book::Of(Species::Sodium),
+        false,
+        [(1e-3, 2e-3), (1e-4, 2e-4), (8e-6, 9e-6)],
+    ),
+    (
+        Book::Of(Species::Chloride),
+        false,
+        [(1e-3, 2e-3), (1e-4, 2e-4), (9e-6, 1e-5)],
+    ),
+    (
+        Book::Of(Species::Potassium),
+        false,
+        [(8e-5, 9e-5), (7e-6, 8e-6), (4e-7, 5e-7)],
+    ),
+    (
+        Book::Of(Species::Vasopressin),
+        false,
+        [(5e-2, 6e-2), (1e-3, 2e-3), (3e-4, 4e-4)],
+    ),
 ];
+/// The widest stretch with no breath edge, in seconds, held as RULE's figures are.
+const WIDEST: Figure = (1e1, 2e1);
+
+/// Whether RULE's row holds a combination: the body states its bounds by species and element, energy's species
+/// among them, and apart for hydrogen at a works payer.
+fn holds(body: &CompiledBody, (book, at_payer): (Book, bool), quantity: QuantityId) -> bool {
+    let combination = &body.conserved_basis().combinations()[quantity.index()];
+    match (book, combination.book()) {
+        (Book::Energy, Book::Of(Species::Energy)) => true,
+        (Book::Element(Element::Hydrogen), Book::Element(Element::Hydrogen)) => {
+            paid_by_a_works_payer(body, combination.terms()) == at_payer
+        }
+        (row, of) => row == of,
+    }
+}
+
+fn exactly(figure: f64) -> [u64; 2] {
+    Compensated::of(&Measure::<Dimensionless>::new(figure).expect("finite")).bits()
+}
+
+/// RULE's figures are the body's policy, bit for bit: each combination a row holds takes the row's drift bound, edge
+/// rate and settling rate, the two payers' hydrogen are two combinations each with its own rate, no other combination
+/// is rated, and the widest stretch is WIDEST's.
+#[test]
+fn each_figure_of_rule_is_the_bodys_policy_bit_for_bit() {
+    let body = whole_body().expect("compiled");
+    let window = NonZeroU64::new(10 * SECOND).expect("a window");
+    let policy = body_certificate(&body, SlidingWindows::new(window, 60 * SECOND).expect("windows"))
+        .expect("a policy");
+    let (windows, rates) = policy.edges().expect("windows between breath edges");
+    assert_eq!(windows.widest_ns() as f64, WIDEST.1 * SECOND as f64);
+    let mut held = [0; RULE.len()];
+    for quantity in body.conserved_basis().ids() {
+        let rate = rates.iter().find(|rate| rate.quantity() == quantity);
+        let row = (RULE.iter().enumerate())
+            .find(|(_, (book, at_payer, _))| holds(&body, (*book, *at_payer), quantity));
+        let Some((index, &(book, _, [(_, drift), (_, settled), (_, settling)]))) = row else {
+            assert!(
+                rate.is_none(),
+                "{quantity:?} is rated and no row of RULE holds it"
+            );
+            continue;
+        };
+        held[index] += 1;
+        let rate = rate.unwrap_or_else(|| panic!("{quantity:?} of {book:?} is not rated"));
+        assert_eq!(
+            (
+                policy.drift(quantity).map(|bound| bound.bits()),
+                rate.settled().bits(),
+                rate.settling().map(|bound| bound.bits())
+            ),
+            (Some(exactly(drift)), exactly(settled), Some(exactly(settling))),
+            "{quantity:?} of {book:?}"
+        );
+    }
+    let payers = RULE
+        .iter()
+        .position(|&(_, at_payer, _)| at_payer)
+        .expect("the payers' row");
+    assert_eq!(
+        held[payers], 2,
+        "the coronary bed's hydrogen and the muscle bed's"
+    );
+    assert!(held.iter().all(|&count| count > 0), "{held:?}");
+}
 
 fn certified(start: &Start, minute: &Session<'_, Running>) -> Certificate {
     let reached = minute.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
@@ -1014,10 +1115,7 @@ fn worst_change(
     at_payer: bool,
 ) -> (f64, Option<Interval>) {
     (certificate.results().iter())
-        .filter(|result| {
-            let combination = &start.body.conserved_basis().combinations()[result.quantity().index()];
-            combination.book() == book && paid_by_a_works_payer(&start.body, combination.terms()) == at_payer
-        })
+        .filter(|result| holds(&start.body, (book, at_payer), result.quantity()))
         .map(|result| (lead(result.worst_drift()).abs(), Some(result.drift_window())))
         .fold((0.0, None), |most, x| if x.0 > most.0 { x } else { most })
 }
@@ -1470,7 +1568,7 @@ fn the_sleeping_branchs_breathing_books(
     let figures = watch.figures(ASLEEP);
     let seconds = |at: SimTime| (at.nanoseconds() - anchor_moment().nanoseconds()) as f64 / SECOND as f64;
     let mut report = String::new();
-    for (book, at_payer, _, _) in RULE {
+    for (book, at_payer, _) in RULE {
         if let Some((_, figures)) = figures.iter().find(|(of, _)| *of == book && !at_payer) {
             let (worst, window) = worst_change(start, &certificate, book, at_payer);
             let window = window.expect("a window");
@@ -1493,13 +1591,13 @@ fn the_sleeping_branchs_breathing_books(
 /// run's stretch from 40 s to 60 s.
 const WOKEN: [u64; 2] = [WAKES + 10, ENDS];
 
-fn the_sleeping_branch_wakes_and_runs_on(
+fn the_sleeping_branch_wakes_and_runs_on<'s>(
     start: &Start,
-    asleep: Session<'_, Running>,
+    asleep: Session<'s, Running>,
     watch: &mut Watch,
     awake: &Watch,
-) -> String {
-    counted_until(start, asleep, ENDS * SECOND, &mut Minute::default(), watch);
+) -> (Session<'s, Running>, String) {
+    let reference = counted_until(start, asleep, ENDS * SECOND, &mut Minute::default(), watch);
     let [woken, slept] = [WOKEN, SLEPT].map(|stretch| walked(watch, stretch));
     let theirs = walked(awake, SLEPT);
     let report = format!(
@@ -1517,6 +1615,126 @@ fn the_sleeping_branch_wakes_and_runs_on(
         woken.scale > theirs.scale && woken.length < theirs.length,
         "{report}waking does not lift the drive back over the awake run's"
     );
+    (reference, report)
+}
+
+fn seconds(ns: u64) -> f64 {
+    (ns - anchor_moment().nanoseconds()) as f64 / SECOND as f64
+}
+
+fn within(refused: &mut Vec<String>, name: String, measured: f64, (below, figure): Figure) {
+    if !(below < 2.0 * measured && 2.0 * measured <= figure) {
+        refused.push(format!(
+            "{name}: twice {measured:.4e} is not over {below:e} and at most {figure:e}"
+        ));
+    }
+}
+
+/// The reference run, from admission through the onset and the waking to 300 s, passes the body's policy, and each of
+/// RULE's figures holds to it: a drift bound to the larger of the worst ten-second change and the most one breath
+/// moves the quantity, an edge rate to the worst rate of a window between edges that opens from the settling time on,
+/// a settling rate to the worst of one that opens before it, and the widest stretch to the widest gap between edges.
+/// The certificate keeps one window a combination, so the rates are read from the record's sealed edges, on the
+/// windows the evaluator opens.
+fn the_reference_run_passes_the_bodys_policy_and_rule_holds_each_figure_to_it(
+    start: &Start,
+    reference: &Session<'_, Running>,
+    watch: &Watch,
+) -> String {
+    let certificate = certified(start, reference);
+    let rhythm = certificate.rhythm().expect("windows between breath edges");
+    let (length, settling) = (rhythm.windows().length_ns().get(), rhythm.windows().settling_ns());
+    let view = reference.conservation();
+    let span = view.span().expect("a span");
+    let (clock, _) = (view.rhythms())
+        .find(|&(_, phase)| phase == rhythm.windows().clock())
+        .expect("the breath's rhythm");
+    let members: Vec<Vec<QuantityId>> = (RULE.iter())
+        .map(|&(book, at_payer, _)| {
+            let held = |&quantity: &QuantityId| holds(&start.body, (book, at_payer), quantity);
+            view.basis().ids().filter(held).collect()
+        })
+        .collect();
+    let order = view.in_time_order().expect("the history in time order");
+    let mut edges: Vec<(u64, Vec<Vec<f64>>)> = Vec::new();
+    for segment in order.from(span.start()) {
+        let (_, segment) = segment.expect("a link");
+        if segment.ends_on_edge(clock) {
+            let interval = segment.interval();
+            let at =
+                |quantity: &QuantityId| lead(segment.inventory(*quantity).on(interval).expect("its own")[1]);
+            let values = members.iter().map(|row| row.iter().map(at).collect()).collect();
+            edges.push((interval.end().nanoseconds(), values));
+        }
+    }
+    let mut worst = vec![[(0.0, 0, 0); 2]; RULE.len()];
+    let mut judged = 0;
+    for (open, (opened, before)) in edges.iter().enumerate() {
+        let Some((closed, after)) = edges[open + 1..]
+            .iter()
+            .find(|(closed, _)| closed - opened >= length)
+        else {
+            continue;
+        };
+        judged += 1;
+        let stretch = usize::from(opened - span.start().nanoseconds() >= settling);
+        let long = (closed - opened) as f64 / SECOND as f64;
+        for (held, (before, after)) in worst.iter_mut().zip(before.iter().zip(after)) {
+            for (before, after) in before.iter().zip(after) {
+                let rate = (after - before).abs() / long;
+                if rate > held[stretch].0 {
+                    held[stretch] = (rate, *opened, *closed);
+                }
+            }
+        }
+    }
+    assert_eq!(judged, rhythm.judged(), "the windows the evaluator opens");
+    let gaps = edges.windows(2).map(|pair| (pair[1].0 - pair[0].0, pair[1].0));
+    let (gap, ending) = gaps.fold((0, 0), |most, gap| if gap.0 > most.0 { gap } else { most });
+    let gap = gap as f64 / SECOND as f64;
+    let widest = rhythm.widest();
+    let mut report = format!(
+        "reference run: {} breath edges from {:.3} s to {:.3} s, {judged} windows between edges, the widest gap {gap:.4} s to {:.3} s, the widest stretch {:.4} s to {:.3} s\n",
+        edges.len(),
+        seconds(edges[0].0),
+        seconds(edges[edges.len() - 1].0),
+        seconds(ending),
+        widest.length_ns() as f64 / SECOND as f64,
+        seconds(widest.end().nanoseconds())
+    );
+    let mut refused = Vec::new();
+    within(&mut refused, "the widest stretch".into(), gap, WIDEST);
+    let figures = watch.figures(20);
+    for (&(book, at_payer, [drift, settled, early]), [before, after]) in RULE.iter().zip(&worst) {
+        let (ten, window) = worst_change(start, &certificate, book, at_payer);
+        let window = window.expect("a window");
+        let breath = (figures.iter())
+            .find(|(of, _)| *of == book && !at_payer)
+            .map(|(_, figures)| figures.inside_a_breath);
+        let name = format!("{book:?}{}", if at_payer { " at a payer" } else { "" });
+        let inside = breath.map_or(String::new(), |breath| format!(", inside a breath {breath:.4e}"));
+        writeln!(
+            report,
+            "{name}: ten seconds {ten:.4e} from {:.3} s{inside}; between edges {:.4e} a second from {:.3} s to {:.3} s, before the settling time {:.4e} from {:.3} s to {:.3} s",
+            seconds(window.start().nanoseconds()),
+            after.0,
+            seconds(after.1),
+            seconds(after.2),
+            before.0,
+            seconds(before.1),
+            seconds(before.2)
+        )
+        .expect("a string takes it");
+        within(
+            &mut refused,
+            format!("{name}'s drift"),
+            breath.map_or(ten, |breath| larger(ten, breath)),
+            drift,
+        );
+        within(&mut refused, format!("{name}'s edge rate"), after.0, settled);
+        within(&mut refused, format!("{name}'s settling rate"), before.0, early);
+    }
+    assert!(refused.is_empty(), "{report}{}", refused.join("\n"));
     report
 }
 
@@ -1524,7 +1742,7 @@ fn the_held_runs_breathing_books(held: &Start, minute: &Session<'_, Running>, wa
     let certificate = certified(held, minute);
     let figures = watch.figures(20);
     let mut report = String::new();
-    for (book, at_payer, _, _) in RULE {
+    for (book, at_payer, _) in RULE {
         if let Some((_, figures)) = figures.iter().find(|(of, _)| *of == book && !at_payer) {
             let (worst, _) = worst_change(held, &certificate, book, at_payer);
             writeln!(report, "held {book:?}: {}", line(worst, figures)).expect("a string takes it");
@@ -2805,7 +3023,14 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let (asleep, mut asleep_watch, head) = the_sleeping_branch(&start, &branch, &core, &watch);
     report += &sleep_lowers_ventilation_and_raises_arterial_carbon_dioxide(&asleep_watch, &watch, head);
     report += &the_sleeping_branchs_breathing_books(&start, &asleep, &asleep_watch);
-    report += &the_sleeping_branch_wakes_and_runs_on(&start, asleep, &mut asleep_watch, &watch);
+    let (reference, woken) = the_sleeping_branch_wakes_and_runs_on(&start, asleep, &mut asleep_watch, &watch);
+    report += &woken;
+    report += &the_reference_run_passes_the_bodys_policy_and_rule_holds_each_figure_to_it(
+        &start,
+        &reference,
+        &asleep_watch,
+    );
+    drop(reference);
     the_lining_moves_research_11s_form_over_the_first_minute(&start, &minute);
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
@@ -2864,6 +3089,18 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         asleep Of(Water): worst 1.9347e-2 from 37.572 s to 47.572 s; from 30 s any ten seconds 1.9305e-2, inside a breath 2.1802e-2
         asleep Of(Vasopressin): worst 1.4045e-2 from 35.356 s to 45.356 s; from 30 s any ten seconds 1.4187e-2, inside a breath 2.5728e-2
         awake again from 150 s to 300 s; over whole breaths from 160 s, 29 breaths, the drive scale 1.056587 and the breath 4.7322 s, against 1.023836 and 4.8836 s awake and 0.873901 and 5.7215 s asleep
+        reference run: 59 breath edges from 5.006 s to 298.949 s, 56 windows between edges, the widest gap 5.8282 s to 35.874 s, the widest stretch 5.8282 s to 35.874 s
+        Energy: ten seconds 4.6473e3 from 80.509 s, inside a breath 2.5697e3; between edges 4.6118e2 a second from 81.305 s to 92.444 s, before the settling time 1.3626e2 from 15.074 s to 25.079 s
+        Element(Carbon): ten seconds 3.3745e2 from 34.193 s, inside a breath 2.1640e2; between edges 1.0729e1 a second from 30.046 s to 41.678 s, before the settling time 4.8577e0 from 5.006 s to 15.074 s
+        Element(Oxygen): ten seconds 4.2660e3 from 31.808 s, inside a breath 4.6606e3; between edges 1.8695e1 a second from 147.671 s to 161.716 s, before the settling time 3.4607e0 from 5.006 s to 15.074 s
+        Element(Hydrogen): ten seconds 6.9592e-5 from 65.552 s, inside a breath 3.8705e-5; between edges 6.8165e-6 a second from 64.491 s to 75.718 s, before the settling time 8.6078e-7 from 5.006 s to 15.074 s
+        Element(Hydrogen) at a payer: ten seconds 1.9341e-1 from 158.590 s; between edges 1.5782e-2 a second from 157.159 s to 170.908 s, before the settling time 9.2136e-3 from 5.006 s to 15.074 s
+        Of(NitrogenGas): ten seconds 8.3456e3 from 34.110 s, inside a breath 8.9322e3; between edges 5.9562e0 a second from 35.874 s to 47.442 s, before the settling time 3.6760e0 from 15.074 s to 25.079 s
+        Of(Water): ten seconds 2.0430e-2 from 289.751 s, inside a breath 2.1843e-2; between edges 1.5622e-3 a second from 284.657 s to 298.949 s, before the settling time 1.1556e-3 from 15.074 s to 25.079 s
+        Of(Sodium): ten seconds 8.2853e-4 from 290.001 s; between edges 7.8217e-5 a second from 284.657 s to 298.949 s, before the settling time 4.3812e-6 from 15.074 s to 25.079 s
+        Of(Chloride): ten seconds 8.6996e-4 from 290.001 s; between edges 8.2127e-5 a second from 284.657 s to 298.949 s, before the settling time 4.6002e-6 from 15.074 s to 25.079 s
+        Of(Potassium): ten seconds 4.1427e-5 from 290.001 s; between edges 3.9108e-6 a second from 284.657 s to 298.949 s, before the settling time 2.1906e-7 from 15.074 s to 25.079 s
+        Of(Vasopressin): ten seconds 1.4045e-2 from 35.356 s, inside a breath 2.5728e-2; between edges 8.3907e-4 a second from 142.172 s to 152.617 s, before the settling time 1.7876e-4 from 15.074 s to 25.079 s
         two breaths from 64.316 s to 74.045 s
         Oxygen: in 4560.2375, out 3637.1692, across 899.2353, along 922.1879, gained 2.3833e1
         CarbonDioxide: in 8.6862, out 679.7044, across -667.3050, along -671.3639, gained -3.7132e0

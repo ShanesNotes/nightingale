@@ -1045,23 +1045,33 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     };
     let stated = Stated {
         species: [
-            (Species::Energy, 4e3),
+            (Species::Energy, 1e4),
             (Species::Water, 5e-2),
-            (Species::Sodium, 3e-4),
-            (Species::Chloride, 3e-4),
-            (Species::Potassium, 2e-5),
-            (Species::Vasopressin, 5e-2),
+            (Species::Sodium, 2e-3),
+            (Species::Chloride, 2e-3),
+            (Species::Potassium, 9e-5),
+            (Species::Vasopressin, 6e-2),
             (Species::NitrogenGas, 2e4),
         ],
         elements: [
-            (Element::Carbon, 5e2),
-            (Element::Hydrogen, 7e-5),
-            (Element::Oxygen, 9e3),
+            (Element::Carbon, 7e2),
+            (Element::Hydrogen, 2e-4),
+            (Element::Oxygen, 1e4),
         ],
-        payer_hydrogen: 0.2,
+        payer_hydrogen: 0.4,
     };
-    let policy = body_certificate(&body, windows)?.digest();
-    assert_eq!(policy, digest(&stated)?);
+    // The body's policy also states windows between breath edges, which `body_run`'s RULE holds, so its drift bounds
+    // are compared one combination at a time.
+    let (body_policy, stated_policy) = (
+        body_certificate(&body, windows)?,
+        certificate_with(&body, windows, &stated)?,
+    );
+    for quantity in body.conserved_basis().ids() {
+        let [ours, theirs] =
+            [&body_policy, &stated_policy].map(|policy| policy.drift(quantity).map(|drift| drift.bits()));
+        assert_eq!(ours, theirs, "{quantity:?}");
+    }
+    let policy = stated_policy.digest();
     for by in [0.5, 2.0] {
         for index in 0..stated.species.len() {
             let mut moved = stated;
