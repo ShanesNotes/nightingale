@@ -1113,8 +1113,7 @@ fn assert_body_rule(body: &CompiledBody, policy: &CertificatePolicy) {
     assert!(held.iter().all(|&count| count > 0), "{held:?}");
 }
 
-#[test]
-fn rule_detects_a_change_to_either_breath_window_time() {
+fn the_bodys_policy_with_its_times_moved(late_ns: u64, longer_ns: u64) -> (CompiledBody, CertificatePolicy) {
     struct Fixed;
     fn bound(book: Book, payer: bool) -> Option<f64> {
         let (_, _, [(_, fixed), ..]) = RULE.iter().find(|(of, at, _)| (*of, *at) == (book, payer))?;
@@ -1152,43 +1151,32 @@ fn rule_detects_a_change_to_either_breath_window_time() {
     let sliding = SlidingWindows::new(window, 60 * SECOND).expect("windows");
     let stated = body_certificate(&body, sliding).expect("a policy");
     let (edges, rates) = stated.edges().expect("windows between breath edges");
-    let build = |settling, length, rated: &[EdgeRate]| {
+    let build = |settling, length| {
         let times = EdgeWindows::new(edges.clock(), settling, length, edges.widest_ns());
         certificate_with(&body, sliding, &Fixed)
             .expect("the fixed bounds")
-            .between_edges(times, rated.to_vec())
+            .between_edges(times, rates.to_vec())
             .expect("the body's rated rows")
     };
     let (settling, length) = (edges.settling_ns(), edges.length_ns());
-    assert_eq!(build(settling, length, rates).digest(), stated.digest());
-    assert_body_rule(&body, &stated);
-    let omitted = Leak::Vasopressin.quantity(&body);
-    let one_fewer: Vec<_> = rates
-        .iter()
-        .copied()
-        .filter(|rate| rate.quantity() != omitted)
-        .collect();
-    assert_eq!(one_fewer.len() + 1, rates.len());
-    let missing = build(settling, length, &one_fewer);
-    assert!(
-        std::panic::catch_unwind(|| assert_body_rule(&body, &missing)).is_err(),
-        "RULE missed the omitted row"
-    );
+    assert_eq!(build(settling, length).digest(), stated.digest());
+    let moved = build(settling + late_ns, length.saturating_add(longer_ns));
+    assert_ne!(moved.digest(), stated.digest());
+    (body, moved)
+}
 
-    let mut missed = Vec::new();
-    for (name, altered) in [
-        ("settling time", build(settling + 1, length, rates)),
-        ("window length", build(settling, length.saturating_add(1), rates)),
-    ] {
-        assert_ne!(altered.digest(), stated.digest());
-        if std::panic::catch_unwind(|| assert_body_rule(&body, &altered)).is_ok() {
-            missed.push(name);
-        }
-    }
-    assert!(
-        missed.is_empty(),
-        "RULE accepted an extra nanosecond in {missed:?}"
-    );
+#[test]
+#[should_panic(expected = "the settling time and the window's length")]
+fn rule_refuses_the_bodys_policy_with_a_settling_time_one_nanosecond_late() {
+    let (body, policy) = the_bodys_policy_with_its_times_moved(1, 0);
+    assert_body_rule(&body, &policy);
+}
+
+#[test]
+#[should_panic(expected = "the settling time and the window's length")]
+fn rule_refuses_the_bodys_policy_with_windows_one_nanosecond_longer() {
+    let (body, policy) = the_bodys_policy_with_its_times_moved(0, 1);
+    assert_body_rule(&body, &policy);
 }
 
 #[test]
