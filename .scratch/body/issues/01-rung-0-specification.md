@@ -58,7 +58,7 @@ Pass 1. Vasopressin on the collecting duct controls it, answering osmolality, vo
 | cell water | moves | interstitium and cells of every bed | water follows tonicity across the cell membrane | FL | 17 |
 | filtration and reclaim | moves | glomerular bed, tubule, collecting duct | filtration, and reclaim under vasopressin | RN | slice |
 | urine | leaves | bladder | voiding: the slice's drain, then a void event | RN | slice, 22 |
-| skin evaporation | leaves | skin bed | evaporation, which takes water and its latent heat in one transfer | MT | 12 |
+| skin evaporation | leaves | skin bed | evaporation, which takes water and its latent heat, one rate posting both through two routes in a fixed proportion as [ticket 12](12-heat-balance.md)'s ruling on evaporation states | MT | 12 |
 | sweat | leaves | skin bed | sweat under the thermostat's sweat drive | MT | 12 |
 | airway evaporation | leaves | pulmonary bed interstitium, out through the airway gas | water drawn from the pulmonary bed's interstitium humidifies inspired gas as vapor, which leaves in expired gas | RS | 10 |
 | feces water | leaves | small intestine lumen | the balanced fecal exit | GI | 13 |

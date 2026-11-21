@@ -351,6 +351,9 @@ A route that moves energy between heat stores: each bed's heat to the core store
 **Core store**:
 The heat store of the containment root, the site that stands for the whole body. Each bed's heat reaches it.
 
+**Thermal zero**:
+The temperature that every heat store's amount is measured from. A heat store's amount is energy above the thermal zero, so its temperature is the thermal zero plus its amount over its capacity. The packet declares it once.
+
 **Left-out space**:
 A space the schema states this body does not model, with its reason, such as cell water in a bench with no cell-water law. Its pools are not amounts, and no law may move or read them. Every other pool is an amount some transfer must move or a held declaration holds; one that neither covers is an orphan pool, which compilation refuses.
 
