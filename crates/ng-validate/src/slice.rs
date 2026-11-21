@@ -1070,8 +1070,6 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         0.005,
         note,
     )?;
-    // The lymph reads the tissue's pressure over its enclosure's, so an enclosed bed's threshold is the opening on
-    // the whole tissue pressure less its enclosure's held pressure.
     let opening = -2.0;
     set::<Pressure>(packet, "fl.lymph-threshold", lymph, opening, note)?;
     for (at, enclosure) in [(lung, PLEURAL_PRESSURE), (splanchnic, ABDOMINAL_PRESSURE)] {

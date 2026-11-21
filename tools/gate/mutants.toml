@@ -5273,7 +5273,6 @@ old = '''if self.edges.is_some() || !ordered ||'''
 new = '''if !ordered ||'''
 test = "-p ng-validate --test rhythm_certificate a_policy_refuses_a_second_clock"
 
-# The lymph reads the absolute tissue pressure: the fixture's swing and the body's tidal breathing each see it.
 [[mutant]]
 name = "lymph-reads-the-absolute-tissue-pressure-at-the-fixture"
 path = "crates/ng-fluids/src/lymph.rs"

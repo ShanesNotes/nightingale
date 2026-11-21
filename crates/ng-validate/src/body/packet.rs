@@ -893,8 +893,7 @@ fn table(
             0.04 * NEW_BED,
         )?;
     }
-    // The lymph reads the tissue's pressure over its enclosure's, so an enclosed bed's threshold is the opening on
-    // the whole tissue pressure less its enclosure's design pressure, and the body admits where it did.
+    // An enclosed bed's threshold is the opening less its enclosure's design pressure, so the body admits where it did.
     set::<Pressure>(packet, "fl.lymph-threshold", lymph, LYMPH_OPENING)?;
     for (at, enclosure) in [
         (lung, PLEURAL_REST),
@@ -1158,9 +1157,9 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// figures are taken there, inside the admission's own fall of energy, which puts energy's above a settled onset's, so
 /// moving the onset moves them. The salts' excess grows to the run's end, so a longer run leaves their bounds (body
 /// ticket 17). Energy's figures belong to the held feeds and the held heat exit, and are measured again when body
-/// tickets 12 and 13 to 16 land. The payers of the stroke work and of the work of breathing take a hydrogen bound of their own, since
-/// their cells settle as their works do, and each is judged on its own. Oxygen and carbon dioxide as species keep only
-/// held pools that never move, so the slice's bound for an unmoved species holds them.
+/// tickets 12 and 13 to 16 land. The payers of the stroke work and of the work of breathing take a hydrogen bound of
+/// their own, since their cells settle as their works do, and each is judged on its own. Oxygen and carbon dioxide as
+/// species keep only held pools that never move, so the slice's bound for an unmoved species holds them.
 const ELEMENT_BOUNDS: [(Element, f64, f64, f64); 3] = [
     (Element::Carbon, 7e2, 3e1, 1e1),
     (Element::Hydrogen, 2e-4, 2e-5, 2e-6),
