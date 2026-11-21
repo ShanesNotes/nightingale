@@ -4884,6 +4884,13 @@ new = '''            Book::Element(element) => (drifts.element_rate(element, &[]
 test = "-p ng-validate --test body_run each_figure_of_rule_is_the_bodys_policy_bit_for_bit"
 
 [[mutant]]
+name = "edge-drift-allowance-is-the-change"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''                    allowance: Some(allowance),'''
+new = '''                    allowance: Some(change),'''
+test = "-p ng-validate --test rhythm_certificate an_edge_drift_carries_the_change_beside_the_allowance_it_passed"
+
+[[mutant]]
 name = "sleep-lowers-no-gain"
 path = "crates/ng-nervous/src/chemoreflex.rs"
 old = '''    let gain = k.subtract(gain, lowered);'''

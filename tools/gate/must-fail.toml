@@ -248,6 +248,7 @@ mutants = [
   "edge-allowance-on-the-policys-length",
   "edge-window-closes-past-its-length",
   "edge-close-judges-only-the-youngest-opening",
+  "edge-drift-allowance-is-the-change",
 ]
 
 [[row]]

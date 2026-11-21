@@ -1100,10 +1100,12 @@ fn certified(start: &Start, minute: &Session<'_, Running>) -> Certificate {
     let policy = body_certificate(&start.body, windows).expect("a policy");
     certify(&minute.conservation(), &policy).unwrap_or_else(|failed| {
         panic!(
-            "{:?} {:?} {:?}",
+            "{:?} {:?} {:?}: changed {:.6e} against {:?}",
             failed.check(),
             failed.quantity(),
-            failed.window()
+            failed.window(),
+            lead(failed.residual()),
+            failed.allowance().map(lead)
         )
     })
 }

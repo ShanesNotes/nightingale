@@ -1088,6 +1088,53 @@ fn the_fixed_windows_judge_as_they_did_and_the_windows_between_edges_run_to_the_
 }
 
 #[test]
+fn an_edge_drift_reports_the_allowance_that_the_change_exceeded() {
+    // Solver contract section 7 requires "the certificate names the quantity and the window's two edges,
+    // with the change beside its edge rate times the window's length".
+    let body = breathing(true).expect("compiled");
+    running(
+        &body,
+        &Course::standard(4 * SECOND, Some((Leak::Nitrogen, 20.0))),
+        |view| {
+            let nitrogen = quantity(view, Leak::Nitrogen.book());
+            let window = interval(4 * SECOND, 16 * SECOND);
+            let report = |rate| {
+                let rated = with(&rates(view.basis(), None), nitrogen.book(), (rate, None));
+                let ledger = fixed(view, LOOSE).between_edges(clock(), (0, LENGTH, WIDEST), &rated);
+                let failure = certified(view, &ledger).expect_err("the nitrogen leak exceeds the rate");
+                assert_eq!(
+                    (failure.check(), failure.quantity(), failure.window()),
+                    (CertificateCheck::EdgeDrift, Some(nitrogen), Some(window))
+                );
+                (failure.residual().bits(), format!("{failure:?}"))
+            };
+            let [(first_change, first_report), (second_change, second_report)] = [6.0, 7.0].map(report);
+            assert_eq!(first_change, second_change);
+            assert_ne!(first_report, second_report, "the same change exceeded 72 and 84");
+        },
+    );
+}
+
+#[test]
+fn an_edge_drift_carries_the_change_beside_the_allowance_it_passed() {
+    let body = breathing(true).expect("compiled");
+    let course = Course::standard(4 * SECOND, Some((Leak::Nitrogen, 20.0)));
+    running(&body, &course, |view| {
+        let nitrogen = quantity(view, Leak::Nitrogen.book());
+        for (rate, allowed) in [(6.0, 72.0), (7.0, 84.0)] {
+            let rated = with(&rates(view.basis(), None), nitrogen.book(), (rate, None));
+            let ledger = fixed(view, LOOSE).between_edges(clock(), (0, LENGTH, WIDEST), &rated);
+            let failure = certified(view, &ledger).expect_err("the nitrogen leak exceeds the rate");
+            let named = (failure.check(), failure.quantity(), failure.window());
+            let window = Some(interval(4 * SECOND, 16 * SECOND));
+            assert_eq!(named, (CertificateCheck::EdgeDrift, Some(nitrogen), window));
+            let (change, allowance) = (hi(failure.residual()), failure.allowance().map(hi));
+            assert_eq!((change, allowance), (252.0, Some(allowed)), "at {rate} a second");
+        }
+    });
+}
+
+#[test]
 fn one_policy_resolves_its_clock_where_a_model_declares_it_and_refuses_it_by_name_where_one_does_not() {
     let (declared, undeclared) = (
         breathing(true).expect("compiled"),

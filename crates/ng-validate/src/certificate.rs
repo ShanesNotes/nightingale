@@ -587,6 +587,7 @@ pub struct CertificateFailure {
     quantity: Option<QuantityId>,
     window: Option<Interval>,
     residual: Compensated,
+    allowance: Option<Compensated>,
 }
 impl CertificateFailure {
     pub fn check(&self) -> CertificateCheck {
@@ -601,6 +602,11 @@ impl CertificateFailure {
     pub fn residual(&self) -> Compensated {
         self.residual
     }
+    /// The allowance a window between edges passed, its edge rate times its length, beside the change `residual`
+    /// gives.
+    pub fn allowance(&self) -> Option<Compensated> {
+        self.allowance
+    }
 }
 
 fn of_history(check: CertificateCheck) -> CertificateFailure {
@@ -609,6 +615,7 @@ fn of_history(check: CertificateCheck) -> CertificateFailure {
         quantity: None,
         window: None,
         residual: Compensated::ZERO,
+        allowance: None,
     }
 }
 
@@ -771,6 +778,7 @@ fn pair(
                 quantity: Some(quantity),
                 window: Some(interval),
                 residual,
+                allowance: None,
             };
             match balance.outcome {
                 Outcome::Open => return Err(failure(CertificateCheck::Closure, balance.closure)),
@@ -903,6 +911,7 @@ impl<'p> Rhythm<'p> {
                     quantity: Some(rate.quantity),
                     window: Some(window),
                     residual: change,
+                    allowance: Some(allowance),
                 });
             }
             let judged = EdgeResult {
@@ -929,6 +938,7 @@ impl<'p> Rhythm<'p> {
                 quantity: None,
                 window: Some(stretch),
                 residual: Compensated::ZERO,
+                allowance: None,
             });
         }
         if self
