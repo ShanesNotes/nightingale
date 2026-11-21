@@ -1,4 +1,4 @@
-# 96: An input only a guard reads is owed at the anchor
+# 96: An input only a guard reads is owed at the anchor moment
 
 Spec: [solver contract](../../../docs/architecture/solver-contract.md), section 6, [body ticket 05](../../body/issues/05-the-days-inputs.md)'s rule for lasting inputs, and `crates/ng-contract/src/body.rs` (`CompiledBody::seal`)
 
@@ -12,13 +12,14 @@ Blocks: none
 
 **Why.** The first milestone (SRS invariant I19) runs a day whose inputs reach the body as lasting inputs, and a body that reads one with no value at the anchor moment must be refused at admission, not run on an unstated value. Body ticket 05 states the rule, and section 6 says admission refuses such a body with `InputUnstated`.
 
-**What the break-it pass on nightingale#214 found.** A lasting input that only a guard reads is not in the list admission checks. The compiler keeps a guard's input reads with the guards, and `CompiledBody::seal` collects the lasting reads from the law instances only (`layout.instances`). Admission checks the anchor against that list, so it returns `Ok` where ticket 05 requires `InputUnstated`. Main behaves so: the test below fails there with `left: None` and `right: Some(Admission(InputUnstated { input: Sleep }))`.
+**What the break-it pass on nightingale#214 found.** A lasting input that only a guard reads is not in the list admission checks. The compiler keeps a guard's input reads with the guards, and `CompiledBody::seal` collects the lasting reads from the law instances only (`layout.instances`). Admission checks the opening frame at the anchor moment, after the boundary port's events, against that list, so it returns `Ok` where ticket 05 requires `InputUnstated`. Main behaves so: the test below fails there with `left: None` and `right: Some(Admission(InputUnstated { input: Sleep }))`.
 
-**Live or waiting.** By reading main: no guard reads a lasting input today. Outside tests the one law that reads one is the chemoreflex's scale in `crates/ng-nervous/src/chemoreflex.rs`, which reads sleep and is no guard. Every other read of a lasting input in the crates is in a test. So the hole is waiting. No body ticket plans a guard on a lasting input: the bladder's void in [body ticket 22](../../body/issues/22-the-bladder.md) is a gate a law multiplies by, not a threshold, so this ticket blocks none.
+**Live or waiting.** By reading main: no guard reads an input through the lasting binding (`Bound::Lasting`) today. Outside tests the one law that reads a lasting input that way is the chemoreflex's scale in `crates/ng-nervous/src/chemoreflex.rs`, which reads sleep and is no guard. But the valves' guards read heights, and a height stands on posture, a lasting input: both guards in `crates/ng-cardiovascular/src/valves.rs` take the head across the valve through `drive` in `crates/ng-cardiovascular/src/shared.rs`, which calls `Kernel::fall`, the upstream height less the downstream under the drive frame's posture, and the compiler binds that read as `Bound::Height`. Admission's check reads only the lasting reads, and posture is not among them. When no posture is stated at the anchor moment, the opening frame's trunk and legs are zero (`DriveFrame::default` in `crates/ng-contract/src/boundary.rs`), so every height reads zero and admission returns `Ok`, for a guard's height read and a law instance's alike. So for sleep and the other lasting inputs read as values the hole is waiting, and for posture it is open today wherever a body states none at the anchor moment. No body ticket plans a guard on any other lasting input: the bladder's void in [body ticket 22](../../body/issues/22-the-bladder.md) is a gate a law multiplies by, not a threshold, so this ticket blocks none.
 
 - [ ] The test below is red before the change and green after it, in `crates/ng-contract/tests/solved_modes.rs`
 - [ ] A body whose guards read no lasting input keeps its bytes: its model hash, its admitted seals and its pins, or the PR moves them once with the reason
 - [ ] A mutant row that collects the lasting reads from the instances alone, CAUGHT by the test
+- [ ] The fix covers every lasting input a guard reads, posture through a height among them: no rule on main owes an unstated posture, since `InputUnstated` names a `Lasting` and posture is none
 
 The test, from the break-it pass on nightingale#214, as a patch to `crates/ng-contract/tests/solved_modes.rs`:
 
