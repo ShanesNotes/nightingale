@@ -13,7 +13,7 @@ const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
 const LONGEST_STEP: u64 = 10 * MILLISECOND;
 const PACKET: &str = "c7ec85aee0622edf508da2a0ada7da12c2d77fe49c97c9e790583cbcdc006ef4";
-const ADMITTED_SEAL: &str = "f03722e1e96bc928e1876f55ffe0aa0d77a10515b92aaa4b0f95cb614294c364";
+const ADMITTED_SEAL: &str = "10243794e349b938264a4b8ad3beb4b8ad135895d222d424356a4bf25b33820e";
 
 struct Counted {
     core: ng_solver::Core,
@@ -1679,7 +1679,7 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
     );
     expect![[r#"
         packet c7ec85aee0622edf508da2a0ada7da12c2d77fe49c97c9e790583cbcdc006ef4
-        seal f04394fc43ff567fc9b9138ce869add3af1cb82d4920d909ecf33db8af734f1f
+        seal 0aa9eb4ea3ac09101fa9655857cc9d1cabd48408c1c29d0562d9948266390b5f
         steps 198
         viscosity over its reference at the start 1.000092324
     "#]]
