@@ -16,6 +16,7 @@ pub use table::{HOLD_TABLE, Held, Hold, Release};
 
 use crate::{AssemblyCase, CaseAssembly};
 use ng_contract::*;
+use schema::{CARBON_LEAK, NITROGEN_EXCHANGE, NITROGEN_LEAK, OXYGEN_LEAK, VASOPRESSIN_LEAK};
 
 pub struct WholeBody;
 impl CaseAssembly for WholeBody {
@@ -40,7 +41,7 @@ pub fn body_awake(at: SimTime) -> BoundaryEvent {
     BoundaryEvent::new(id, at, BoundaryInput::Sleep(Sleep::Awake))
 }
 
-fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
+fn exits(body: &mut Assembly<'_>, leaking: bool) -> Result<(), AdmissionError> {
     let (mut laws, ports) = body.boundary()?.parts();
     let urine = ports.route::<Water>("urine")?.route;
     let rest = laws.parameter::<Water>(ParameterKey::new("bd.bladder-rest"), Admissible::nonnegative());
@@ -69,15 +70,84 @@ fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
         k.finish(rate, laws.every_mode(), class)
     });
     laws.transfer(Transfer::new(&heat, rate));
+    if leaking {
+        leak::<Oxygen>(&mut laws, &ports, (OXYGEN_LEAK, "bd.oxygen-leak"), class)?;
+        leak::<CarbonDioxide>(&mut laws, &ports, (CARBON_LEAK, "bd.carbon-dioxide-leak"), class)?;
+        leak::<NitrogenGas>(&mut laws, &ports, (NITROGEN_LEAK, "bd.nitrogen-gas-leak"), class)?;
+        leak::<Vasopressin>(
+            &mut laws,
+            &ports,
+            (VASOPRESSIN_LEAK, "bd.vasopressin-leak"),
+            class,
+        )?;
+        nitrogen_gas_exchange(&mut laws, &ports, class)?;
+    }
     body.add(laws.finish());
+    Ok(())
+}
+
+fn leak<'b, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, Boundary>,
+    ports: &BoundaryPorts<'b>,
+    (route, key): (&'static str, &'static str),
+    class: RateClass,
+) -> Result<(), AdmissionError> {
+    let route = ports.route::<Q>(route)?.route;
+    let rate = laws.parameter::<Rate<Q>>(ParameterKey::new(key), Admissible::finite());
+    let kernel = laws.kernel(|mut k| {
+        let (rate, open) = (k.parameter(&rate), k.room_humidity());
+        let value = k.scale(rate, open);
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.transfer(Transfer::new(&route, kernel));
+    Ok(())
+}
+
+/// The fat bed's gas holds nitrogen gas for its leak alone. An exchange slow beside the leak holds it at its rest, so
+/// admission solves its level.
+fn nitrogen_gas_exchange<'b>(
+    laws: &mut FragmentBuilder<'b, Boundary>,
+    ports: &BoundaryPorts<'b>,
+    class: RateClass,
+) -> Result<(), AdmissionError> {
+    let route = ports.route::<NitrogenGas>(NITROGEN_EXCHANGE)?.route;
+    let rest =
+        laws.parameter::<NitrogenGas>(ParameterKey::new("bd.nitrogen-gas-rest"), Admissible::positive());
+    let pace = laws
+        .parameter::<Rate<Dimensionless>>(ParameterKey::new("bd.nitrogen-gas-pace"), Admissible::positive());
+    let kernel = laws.kernel(|mut k| {
+        let (rest, held, pace) = (
+            k.parameter(&rest),
+            k.read(&route.amount::<NitrogenGas>()),
+            k.parameter(&pace),
+        );
+        let rate = k.relax(rest, held, pace);
+        k.finish(rate, laws.every_mode(), class)
+    });
+    laws.transfer(Transfer::new(&route, kernel));
     Ok(())
 }
 
 /// The composition root of the whole body: the slice's systems, and every other card held.
 pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
-    assemble(body_schema()?, |mut body| {
+    assembled(body_schema()?, false)
+}
+
+/// The whole body with four steady leaks for its certificate's tests, each into the body at the signed rate its
+/// parameter states times the room's humidity, so a room of humidity zero shuts them and one of humidity one opens
+/// them: `bd.oxygen-leak` and `bd.carbon-dioxide-leak` into the arteries' blood, `bd.nitrogen-gas-leak` into the fat
+/// bed's gas, which holds nitrogen gas for it alone at `bd.nitrogen-gas-rest`, and `bd.vasopressin-leak` into the
+/// central veins. Nothing else reads the room.
+pub fn whole_body_leaking() -> Result<CompiledBody, AdmissionError> {
+    let mut schema = body_schema()?;
+    schema::leaks(&mut schema)?;
+    assembled(schema, true)
+}
+
+fn assembled(schema: Schema, leaking: bool) -> Result<CompiledBody, AdmissionError> {
+    assemble(schema, |mut body| {
         holds::hold_every_card(&mut body)?;
-        exits(&mut body)?;
+        exits(&mut body, leaking)?;
         let fragment = ng_cardiovascular::declare_in_the_whole_body(body.cardiovascular()?)?;
         body.add(fragment);
         let fragment = ng_fluids::declare(body.fluids()?)?;

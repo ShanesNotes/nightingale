@@ -4898,6 +4898,32 @@ new = '''        ("ns.breath-rate", BODY_RHYTHM.rate + 0.0 * breath_rate),'''
 test = "-p ng-validate --test body_run the_held_packet_moves_with_the_breath_rate_it_is_given"
 
 [[mutant]]
+name = "leak-gate-left-open"
+path = "crates/ng-validate/src/body/mod.rs"
+old = '''        let value = k.scale(rate, open);'''
+new = '''        let shut = k.scale(rate, open);
+        let nothing = k.subtract(shut, shut);
+        let value = k.add(rate, nothing);'''
+test = "-p ng-validate --test body_run at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges"
+
+[[mutant]]
+name = "leaks-run-out-of-the-body"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''pub(super) fn leaks(schema: &mut Schema) -> Result<(), AdmissionError> {
+    let into = BoundaryDirection::IntoBody;'''
+new = '''pub(super) fn leaks(schema: &mut Schema) -> Result<(), AdmissionError> {
+    let into = BoundaryDirection::OutOfBody;'''
+test = "-p ng-validate --test body_run at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges"
+
+[[mutant]]
+name = "fat-bed-nitrogen-gas-held-at-no-rest"
+path = "crates/ng-validate/src/body/mod.rs"
+old = '''        let rate = k.relax(rest, held, pace);'''
+new = '''        let kept = k.relax(rest, held, pace);
+        let rate = k.subtract(kept, kept);'''
+test = "-p ng-validate --test body_run at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges"
+
+[[mutant]]
 name = "sleep-lowers-no-gain"
 path = "crates/ng-nervous/src/chemoreflex.rs"
 old = '''    let gain = k.subtract(gain, lowered);'''
