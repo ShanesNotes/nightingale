@@ -2,7 +2,7 @@
 
 Type: task
 Status: open
-Blocked by: 11, 38, 12, 16, 17, 18, 23, 25, 27, 30, 33, ../../native-contract/issues/37-the-return-check-reads-its-runs-own-anchors.md, ../../native-contract/issues/40-the-range-check-names-a-short-stretch.md, ../../native-contract/issues/64-the-landing-reads-a-guard-that-did-not-cross.md
+Blocked by: 11, 38, 12, 16, 17, 18, 23, 25, 27, 30, 33, ../../native-contract/issues/37-the-return-check-reads-its-runs-own-anchors.md, ../../native-contract/issues/40-the-range-check-names-a-short-stretch.md, ../../native-contract/issues/64-the-landing-reads-a-guard-that-did-not-cross.md, ../../native-contract/issues/95-the-record-trims-its-history.md
 
 **What to build:** The whole body, with no hold left that pass 1 names, lives 24 hours of the synthetic day on one named build worker: sleep, two posture changes, three meals, drinks and room air. This is the map's destination for pass 1. It is not the first milestone: every number is synthetic, and only a reviewed packet can pass I19.
 
@@ -22,3 +22,5 @@ From [ticket 08](08-blood-carries-gases.md): the body's gas drift bounds, oxygen
 From [ticket 10](10-lungs-breathe.md): nothing refuses inspired oxygen and carbon dioxide shares that sum above one, which would make nitrogen gas's inspired share negative. When this ticket states the room's gas as inputs, it holds that sum.
 
 From [ticket 10](10-lungs-breathe.md)'s last PR: when the day states the room's humidity and pressure, the lining and the expired water's route read them, and `rs.room-humidity` goes, with `rs.room-pressure` from 10a, so one fact has one source. The day's water intake also covers the lungs' 364.1 units a day; until it does, admission balances that loss with less urine.
+
+From the measurement before [native-contract 85](../../native-contract/issues/85-the-certificates-windows-end-on-breath-edges.md)'s second PR: a day of the whole body's complete links is about 1.1 TB compacted, more than the build worker that measured it has free, and certifying a day from a disk store would take about 6.8 hours at 1.47 ms a link. So this ticket waits on [native-contract 95](../../native-contract/issues/95-the-record-trims-its-history.md), which waits on [native-contract 94](../../native-contract/issues/94-the-certificate-folds-as-the-run-goes.md): the fold judges the day as the run goes, and 95 says where the rolling day of the body's links is kept.

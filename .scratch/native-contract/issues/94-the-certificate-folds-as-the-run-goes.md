@@ -78,3 +78,51 @@ The reason: native-contract 85's first PR needs only the evaluator, and the two 
 - **Parity.** At the commit where both walks ran, every call of `certify` in `ng-validate`'s tests ran both and compared the whole result bit for bit: 111 calls from 50 tests, and none differed. That covers the shapes of the fourth box. The backward walk is gone, and `crates/ng-validate/tests/certificate_shapes.rs` holds the shapes through the oracle.
 - **The oracle** works out the row-rounding allowance from the policy's inputs, with its own count of row updates and steps.
 - **Mutant rows.** Each reachable rule of the old walk's order of judgment has a row: a coverage failure outranks a bad link, the earliest failure wins, closure outranks drift, a tie keeps the earliest window, both pieces judge a shared endpoint, shifted starts are kept, a history error outranks closure, and the walk refuses a bad link. Two rules have none, because no history reaches them: a walk that runs out gives `Coverage`, and a `Coverage` failure inside one piece ranks with closure. The chain is checked whole before either cursor reads it, and the head always reaches past the last window, so neither cursor runs out. Each piece's windows lie inside the two segments it is given, so no piece fails `Coverage`. The second, third and fourth boxes are done with their rows. The last box stays open until the second PR's rows land.
+
+## For the second PR
+
+- **A larger held flow replaces the one held, and no row holds it.** `Windows` keeps each held route's largest flow by `if !flow.at_most(held.0) { *held = (flow, interval); }` in `crates/ng-validate/src/certificate.rs`, so only a strictly larger flow replaces the one held. The row `held-support-tie-keeps-the-earliest-window` holds the tie, and no row holds the replacement; main before nightingale#210 had none either. The check of nightingale#210's last round found a probe that never replaces (`if false && ...`) caught by the slice certificate's comparison with the oracle, so a row is cheap.
+- **`Rhythm::finish` consumes its state.** From the check of nightingale#213: `Rhythm::finish(mut self, head)` measures the tail with `self.stretch(self.last_close.unwrap_or(self.admission), head)`, which writes `widest` and `stopped`, and `Windows::finish(self, ...)` consumes the evaluator and calls it. `certify` rereads the history from admission whenever a rhythm is named. A fold that gives a certificate at every head must carry the open queue, `since`, `last_close`, `widest`, each quantity's worst, the count of windows judged (`judged`) and the first stopped and first drifted failures (`stopped`, `drifted`) forward, with a stop taking precedence over a drift as `finish` gives it (`self.stopped.or(self.drifted)`), and compute the tail and the result without consuming them, by reference or on a copy.
+- **A store that loses a link during a walk.** `HistoryStore`'s docs say a store that loses a link fails the next walk that needs it, by that link's seal. The check of nightingale#210 compared the old evaluator and the new on stores damaged before a walk, and they report the same missing seal. It did not compare them on a store that loses a link while a walk runs. The break-it pass wrote three such tests in `crates/ng-validate/tests/transaction.rs`, each with a store that gives a marked link once and then loses it, and ran them at main. The first lost a link the walk had already passed (revision 65 of 66, under a window of the first second): it expected a missing-history failure, and main gave a certificate. The second lost a link the walk still needed (revision 1 of 2, under one 120 s window): it expected a certificate, and main gave `HistoryMissing` by that link's seal. The third lost two links (revisions 64 and 128 of 129): it expected the newer link's seal, and main reported a single seal, not the newer one. They were ruled outside the first PR, since the docs do not say what a walk reports when a link is lost during it. A fold on a session reads a store that the running session writes and that [native-contract 95](95-the-record-trims-its-history.md) trims, so this PR states what a walk reports in each of the three cases and holds each by a test.
+- **Coverage before a lost link.** `certify` tests the span's coverage before it reads the chain. So one damaged four-hour history fails by the lost link's seal under a coverage of four hours and by `Coverage` under five (`a_history_shorter_than_its_coverage_fails_coverage_before_a_bad_link_is_read` in `crates/ng-validate/tests/certificate_shapes.rs`). The fold reproduces both outcomes.
+- **The body's history does not fit in memory.** Measured on main's whole body before native-contract 85's second PR: each accepted step's link is 131,920 bytes and the body accepts about 194 steps a simulated second, so a store in memory holds 10 GB after about 390 s of the run. A disk store of compacted links took 37 GB for 2,900 s, and certifying its 562,271 links took 828 s, 1.47 ms a link. So until the fold lands, a certified run of the body lasts a few minutes in memory, or as long as a disk has 46 GB for each simulated hour. The box on what the fold holds in memory is stated beside these.
+- **The earliest failure does not always win.** The first PR's rule is that the earliest failure wins and closure outranks drift, and section 5 has a window judged when the step that holds its end is accepted. `pair` in `crates/ng-validate/src/certificate.rs` judges together the windows whose two ends lie in one pair of steps, and it loops over the quantities before the starts. So where a later window of an earlier quantity and an earlier window of a later quantity both drift, it reports the later window. The oracle loops the same way, so the two agree and neither catches it. A break-it pass on main after the first PRs merged wrote the test below, and it fails at main: under sliding windows the certificate reports `Drift` for 0.25 to 10.25 s, where the window from 0 to 10 s, judged alone, drifts. Any failure still fails the run, so it held nothing. Section 5 ranks closure anywhere above a fixed window's drift, and `crates/ng-validate/tests/certificate_shapes.rs` holds a later closure above an earlier drift: that stays. This PR has the earliest window win among fixed windows' drifts, then the basis's order, in the evaluator and in the oracle by its own arithmetic. The test below compares two drifts and holds that much, and the PR adds the mixed case among windows judged together: a later closure over an earlier drift.
+
+The test, as a patch to `crates/ng-validate/tests/rhythm_certificate.rs`:
+
+```diff
+diff --git a/crates/ng-validate/tests/rhythm_certificate.rs b/crates/ng-validate/tests/rhythm_certificate.rs
+index 53db2cb77061aa49932fe12d7cbfc74e5c186ba6..53cf51bacff906bec608d9279b8f3a4467dbcac3 100644
+--- a/crates/ng-validate/tests/rhythm_certificate.rs
++++ b/crates/ng-validate/tests/rhythm_certificate.rs
+@@ -987,6 +987,29 @@
+ }
+ 
+ #[test]
++fn fixed_windows_report_the_admission_drift_when_another_quantity_drifts_one_step_later() {
++    // Native-contract 94 says "the earliest failure wins, closure outranks drift".
++    let body = breathing(true).expect("compiled");
++    let course = Course {
++        period: 4 * SECOND,
++        leak: Some((Leak::Oxygen, 30.0)),
++        leaking: vec![(0, LENGTH)],
++        held: vec![(0, 30 * SECOND)],
++        end: 30 * SECOND,
++    };
++    running(&body, &course, |view| {
++        let judged = |coverage| {
++            let ledger = Ledger::sliding(view.basis(), LENGTH, coverage, 1e-6, 1e-9, 4.0);
++            let failure = certified(view, &ledger).expect_err("the admission window drifts");
++            (failure.check(), failure.window())
++        };
++        let first = (CertificateCheck::Drift, Some(interval(0, LENGTH)));
++        assert_eq!(judged(LENGTH), first, "the admission window judged alone");
++        assert_eq!(judged(view.span().expect("a span").length_ns()), first);
++    });
++}
++
++#[test]
+ fn a_fixed_drift_outranks_a_stopped_rhythm_which_outranks_an_earlier_drift_between_edges() {
+     let body = breathing(true).expect("compiled");
+     running(
+```
