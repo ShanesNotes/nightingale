@@ -22,6 +22,6 @@ Today's forms, on main as body 11 built them:
 - [ ] The steady change in arterial carbon dioxide a healthy adult shows for a stated change in carbon dioxide production or in inspired carbon dioxide, with the population and the method, so that once [body 38](../../body/issues/38-the-drive-moves-the-breaths-depth.md) has built depth, the whole loop, depth and rate together, can be sized against a cited figure and not by its slopes alone
 - [ ] The wake drive the cited values give stays below the drive scale's rest, so the scale stays above zero asleep. A packet whose wake drive reaches the rest is admitted, since admission runs awake, and its run faults at sleep's onset (the check of nightingale#214)
 
-The form of the sleep law that the cited gains land in is in body ticket 11's 11c bullet "The law's form, for the PR that lands sourced gains".
+The form of the sleep law that the cited gains land in is in body ticket 11's 11c bullet "The law's form", and [body 38](../../body/issues/38-the-drive-moves-the-breaths-depth.md) takes it.
 
 **Non-goals:** REM sleep, the transport delays research 11 dropped, and how the drive splits into rate and depth ([research 23](23-how-the-drive-splits-into-rate-and-depth.md)).
