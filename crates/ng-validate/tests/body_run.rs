@@ -1798,9 +1798,6 @@ const QUARTER_ENDS: u64 = 60;
 const LEAK_ENDS: u64 = 40;
 const LOOSE: f64 = 1e30;
 const LEAK_NOTE: &str = "synthetic: a test's leak";
-/// The fat bed's nitrogen gas at rest, and the pace of the exchange that holds it there, slow beside the leak.
-const NITROGEN_GAS_REST: f64 = 1e3;
-const NITROGEN_GAS_PACE: f64 = 1e-4;
 /// A row's net leak meets its size within this share of it.
 const NET_BAND: f64 = 0.05;
 
@@ -1833,53 +1830,52 @@ impl Leak {
             Leak::Vasopressin => -3e-3,
         }
     }
-    /// The rate the packet states for the leak's route, a second, and the pool the route runs into. Carbon leaks as
-    /// carbon dioxide, which brings two oxygen atoms with each carbon, so oxygen's route of oxygen gas takes back what
-    /// its row's size leaves of them.
+    /// The rate the packet states for the leak's route, a second, and the pool the route runs into, each sized so its
+    /// row nets its size over the window it is refused in. The lungs breathe most of the nitrogen gas in their gas out
+    /// within a breath, so its route is near six times its size. That gas lowers oxygen's row by about a third of each
+    /// unit and carbon's by about a fortieth, so carbon dioxide's route takes back carbon's share, and oxygen gas's
+    /// route makes up what oxygen's row lacks of its size after the two oxygen atoms each carbon dioxide brings.
     fn route(self) -> (f64, &'static str) {
         match self {
-            Leak::Oxygen => (
-                (self.size() - 2.0 * Leak::Carbon.size()) / 2.0,
-                "oxygen gas into the arteries' blood",
-            ),
-            Leak::Carbon => (self.size(), "carbon dioxide into the arteries' blood"),
-            Leak::NitrogenGas => (self.size(), "nitrogen gas into the fat bed's gas"),
+            Leak::Oxygen => (5.82, "oxygen gas into the arteries' blood"),
+            Leak::Carbon => (5.39e1, "carbon dioxide into the arteries' blood"),
+            Leak::NitrogenGas => (1.73e2, "nitrogen gas into the pulmonary bed's gas"),
             Leak::Vasopressin => (self.size(), "vasopressin into the central veins' blood"),
         }
     }
-    /// The body's own edge rate for one of this row's combinations.
-    fn settled(self, body: &CompiledBody, quantity: QuantityId, windows: SlidingWindows) -> Compensated {
-        let policy = body_certificate(body, windows).expect("the body's policy");
+    /// The body's own edge rate for this row.
+    fn settled(self, body: &CompiledBody, windows: SlidingWindows) -> Compensated {
+        let (policy, quantity) = (
+            body_certificate(body, windows).expect("the body's policy"),
+            self.quantity(body),
+        );
         let (_, rates) = policy.edges().expect("windows between breath edges");
         (rates.iter().find(|rate| rate.quantity() == quantity))
             .unwrap_or_else(|| panic!("the body rates {self:?}'s {quantity:?}"))
             .settled()
     }
-    /// This row's rate alone, at the figure the body's policy states for each of its combinations, with no settling
-    /// rate, so every window it judges opens from the settling time on; every fixed bound is one no leak reaches.
+    /// This row's rate alone, at the figure the body's policy states for it, with no settling rate, so every window it
+    /// judges opens from the settling time on; every fixed bound is one no leak reaches.
     fn alone(self, body: &CompiledBody, windows: SlidingWindows) -> CertificatePolicy {
-        let rates = (self.quantities(body).into_iter()).map(|quantity| {
-            let rate = lead(self.settled(body, quantity, windows));
-            match self {
-                Leak::Oxygen | Leak::Carbon => EdgeRate::element(quantity, finite(rate), None),
-                Leak::NitrogenGas => EdgeRate::new::<NitrogenGas>(quantity, finite(rate), None),
-                Leak::Vasopressin => EdgeRate::new::<Vasopressin>(quantity, finite(rate), None),
-            }
-            .expect("its own dimension")
-        });
+        let (quantity, rate) = (self.quantity(body), lead(self.settled(body, windows)));
+        let rate = match self {
+            Leak::Oxygen | Leak::Carbon => EdgeRate::element(quantity, finite(rate), None),
+            Leak::NitrogenGas => EdgeRate::new::<NitrogenGas>(quantity, finite(rate), None),
+            Leak::Vasopressin => EdgeRate::new::<Vasopressin>(quantity, finite(rate), None),
+        }
+        .expect("its own dimension");
         let loose = certificate_with(body, windows, &Loose).expect("a loose policy");
         loose
-            .between_edges(edge_windows(body), rates.collect())
+            .between_edges(edge_windows(body), vec![rate])
             .expect("its rates")
     }
-    /// The row's combinations. The fat bed's nitrogen gas is a combination of its own, since nothing in the body
-    /// moves it to or from the airway's.
-    fn quantities(self, body: &CompiledBody) -> Vec<QuantityId> {
-        let held: Vec<QuantityId> = (body.conserved_basis().ids())
-            .filter(|quantity| quantity.book() == self.book())
-            .collect();
-        assert!(!held.is_empty(), "no combination of {self:?}");
-        held
+    /// The body's own combination of this row: the row holds one, and each leak runs into a pool it holds.
+    fn quantity(self, body: &CompiledBody) -> QuantityId {
+        let mut held = (body.conserved_basis().ids()).filter(|quantity| quantity.book() == self.book());
+        match (held.next(), held.next()) {
+            (Some(quantity), None) => quantity,
+            _ => panic!("{self:?}'s row is not one combination"),
+        }
     }
 }
 
@@ -1917,7 +1913,7 @@ fn room(at: u64, humidity: f64) -> BoundaryEvent {
     BoundaryEvent::new(id, SimTime::from_ns(anchor_moment().nanoseconds() + at), input)
 }
 
-/// The held packet at `rate` with each leak's route at its rate, and the fat bed's nitrogen gas at its rest.
+/// The held packet at `rate` with each leak's route at its rate.
 fn leaking_packet(body: &CompiledBody, rate: f64) -> ParameterPacket<SyntheticFixture> {
     let mut packet = body_packet_with_the_drive_scale_held(body, finite(rate)).expect("a packet");
     let (key, at) = (ParameterKey::new, Binding::Body);
@@ -1939,18 +1935,6 @@ fn leaking_packet(body: &CompiledBody, rate: f64) -> ParameterPacket<SyntheticFi
             key("bd.nitrogen-gas-leak"),
             at,
             finite::<Rate<NitrogenGas>>(route(Leak::NitrogenGas)),
-            LEAK_NOTE,
-        ),
-        packet.synthetic(
-            key("bd.nitrogen-gas-rest"),
-            at,
-            finite::<NitrogenGas>(NITROGEN_GAS_REST),
-            LEAK_NOTE,
-        ),
-        packet.synthetic(
-            key("bd.nitrogen-gas-pace"),
-            at,
-            finite::<Rate<Dimensionless>>(NITROGEN_GAS_PACE),
             LEAK_NOTE,
         ),
         packet.synthetic(
@@ -2007,18 +1991,6 @@ fn settled_edge(windows: EdgeWindows, edges: &[(u64, Vec<f64>)]) -> usize {
         .expect("an edge after the settling time")
 }
 
-/// Each leak's row at each edge: the sum, over the row's combinations in `books`, of the inventories `at_the_edges`
-/// read for them in that order.
-fn by_book(edges: &[(u64, Vec<f64>)], books: &[Vec<QuantityId>]) -> Vec<(u64, Vec<f64>)> {
-    (edges.iter())
-        .map(|(at, values)| {
-            let mut values = values.iter();
-            let rows = books.iter().map(|book| values.by_ref().take(book.len()).sum());
-            (*at, rows.collect())
-        })
-        .collect()
-}
-
 /// The first window between edges that opens from the settling time on, at the leaking run's edges, with the indices
 /// of its two edges and each row's net change a second over it: the leaking run's change less the run with no leak's,
 /// each read at its own edges.
@@ -2055,13 +2027,12 @@ fn nets(
 /// run with no leak and the run whose room opens at the settling time. The run with no leak passes each leak's own
 /// policy. Over the first window between edges that opens from the settling time on, each row's net leak opposes the
 /// row's mean change in the run with no leak from the settling time on and meets the leak's size within `NET_BAND`;
-/// then each leak's own policy refuses the leaking run between edges in that window, by the row's combination the
-/// leak moves, its change past the body's own rate for the row.
+/// then each leak's own policy refuses the leaking run between edges in that window, by the body's own combination of
+/// the leak's row, its change past the body's own rate for the row.
 fn at_a_quarter_each_leak_is_refused_between_edges_against_its_drift() -> String {
     let start = Start::leaking(QUARTER);
     assert_eq!(lead(parameter(&start, "ns.breath-rate")), QUARTER);
-    let books: Vec<Vec<QuantityId>> = Leak::ALL.map(|leak| leak.quantities(&start.body)).into();
-    let quantities = books.concat();
+    let quantities = Leak::ALL.map(|leak| leak.quantity(&start.body));
     let windows = edge_windows(&start.body);
     let control = {
         let run = until(start.session(), LEAK_ENDS * SECOND);
@@ -2071,21 +2042,22 @@ fn at_a_quarter_each_leak_is_refused_between_edges_against_its_drift() -> String
                 panic!("the run with no leak is refused by {leak:?}'s own policy: {failed:?}");
             }
         }
-        by_book(&at_the_edges(&run, windows.clock(), &quantities), &books)
+        at_the_edges(&run, windows.clock(), &quantities)
     };
     let (from, to) = (
         &control[settled_edge(windows, &control)],
         &control[control.len() - 1],
     );
     let drifts =
-        (0..books.len()).map(|row| (to.1[row] - from.1[row]) / ((to.0 - from.0) as f64 / SECOND as f64));
+        (0..quantities.len()).map(|row| (to.1[row] - from.1[row]) / ((to.0 - from.0) as f64 / SECOND as f64));
     let mut session = start.session();
     let opens = room(windows.settling_ns(), 1.0);
     let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a test's own command"), opens);
     session.enqueue(input).expect("enqueued");
     let leaking = until(session, LEAK_ENDS * SECOND);
     let edges = at_the_edges(&leaking, windows.clock(), &quantities);
-    let (window, [open, close], nets) = nets(windows, &control, &by_book(&edges, &books));
+    let (window, [open, close], nets) = nets(windows, &control, &edges);
+    assert!(window.start().nanoseconds() - anchor_moment().nanoseconds() >= windows.settling_ns());
     let mut report = format!(
         "leaking body at {QUARTER} a second: with its room shut it passes each leak's own policy over {LEAK_ENDS} s; its rows' mean change from {:.3} s to {:.3} s\n",
         seconds(from.0),
@@ -2117,20 +2089,16 @@ fn at_a_quarter_each_leak_is_refused_between_edges_against_its_drift() -> String
     }
     assert!(off.is_empty(), "{report}{}", off.join("\n"));
     let long = window.length_ns() as f64 / SECOND as f64;
-    for leak in Leak::ALL {
+    for (at, leak) in Leak::ALL.into_iter().enumerate() {
         let alone = leak.alone(&start.body, sliding(&leaking));
         let failure = certify(&leaking.conservation(), &alone).expect_err("the leak is refused");
-        let quantity = failure.quantity().expect("the quantity refused");
         assert_eq!(
-            (failure.check(), quantity.book(), failure.window()),
-            (CertificateCheck::EdgeDrift, leak.book(), Some(window)),
+            (failure.check(), failure.quantity(), failure.window()),
+            (CertificateCheck::EdgeDrift, Some(quantities[at]), Some(window)),
             "{leak:?}"
         );
-        let at = (quantities.iter())
-            .position(|&each| each == quantity)
-            .expect("a combination of the row");
         let moved = edges[close].1[at] - edges[open].1[at];
-        let rate = lead(leak.settled(&start.body, quantity, sliding(&leaking)));
+        let rate = lead(leak.settled(&start.body, sliding(&leaking)));
         let (change, allowance) = (
             lead(failure.residual()),
             lead(failure.allowance().expect("an allowance")),
@@ -2177,13 +2145,13 @@ fn at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak
     report += &at_a_quarter_the_run_with_no_leak_passes_the_bodys_policy();
     expect![[r#"
         leaking body at 0.25 a second: with its room shut it passes each leak's own policy over 40 s; its rows' mean change from 20.001 s to 36.001 s
-        Element(Oxygen) moves -4.3066e0 a second; its leak, -2e1 a second of oxygen gas into the arteries' blood, nets +6.0053e1 from 20.001 s to 32.001 s against its size +6e1
-        Element(Carbon) moves -3.5103e0 a second; its leak, +5e1 a second of carbon dioxide into the arteries' blood, nets +4.9990e1 from 20.001 s to 32.001 s against its size +5e1
-        Of(NitrogenGas) moves -6.8914e-1 a second; its leak, +3e1 a second of nitrogen gas into the fat bed's gas, nets +3.0062e1 from 20.001 s to 32.001 s against its size +3e1
-        Of(Vasopressin) moves +5.1484e-5 a second; its leak, -3e-3 a second of vasopressin into the central veins' blood, nets -2.9826e-3 from 20.001 s to 32.001 s against its size -3e-3
-        Element(Oxygen) refused between edges from 20.001 s to 32.001 s: changed +6.6991e2 against 4.8001e2
-        Element(Carbon) refused between edges from 20.001 s to 32.001 s: changed +5.5772e2 against 3.6000e2
-        Of(NitrogenGas) refused between edges from 20.001 s to 32.001 s: changed +3.5979e2 against 2.4000e2
+        Element(Oxygen) moves -4.3066e0 a second; its leak, +5.82e0 a second of oxygen gas into the arteries' blood, nets +5.9996e1 from 20.001 s to 32.001 s against its size +6e1
+        Element(Carbon) moves -3.5103e0 a second; its leak, +5.39e1 a second of carbon dioxide into the arteries' blood, nets +4.9961e1 from 20.001 s to 32.001 s against its size +5e1
+        Of(NitrogenGas) moves -6.8914e-1 a second; its leak, +1.73e2 a second of nitrogen gas into the pulmonary bed's gas, nets +2.9977e1 from 20.001 s to 32.001 s against its size +3e1
+        Of(Vasopressin) moves +5.1485e-5 a second; its leak, -3e-3 a second of vasopressin into the central veins' blood, nets -2.9826e-3 from 20.001 s to 32.001 s against its size -3e-3
+        Element(Oxygen) refused between edges from 20.001 s to 32.001 s: changed +6.6923e2 against 4.8001e2
+        Element(Carbon) refused between edges from 20.001 s to 32.001 s: changed +5.5736e2 against 3.6000e2
+        Of(NitrogenGas) refused between edges from 20.001 s to 32.001 s: changed +3.5103e2 against 2.4000e2
         Of(Vasopressin) refused between edges from 20.001 s to 32.001 s: changed -3.5207e-2 against 2.4000e-2
         held run at 0.25 a second: passes the body's policy over 60 s, 11 windows between edges
     "#]].assert_eq(&report);

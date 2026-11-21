@@ -170,20 +170,16 @@ pub(super) const OXYGEN_LEAK: &str = "oxygen leak";
 pub(super) const CARBON_LEAK: &str = "carbon dioxide leak";
 pub(super) const NITROGEN_LEAK: &str = "nitrogen gas leak";
 pub(super) const VASOPRESSIN_LEAK: &str = "vasopressin leak";
-pub(super) const NITROGEN_EXCHANGE: &str = "fat bed nitrogen gas exchange";
 
 /// The routes of the body's four test leaks: oxygen and carbon dioxide into the arteries' blood, nitrogen gas into
-/// the fat bed's gas, which holds it for this leak alone and has an exchange of its own, and vasopressin into the
-/// central veins.
+/// the pulmonary bed's gas, and vasopressin into the central veins.
 pub(super) fn leaks(schema: &mut Schema) -> Result<(), AdmissionError> {
     let into = BoundaryDirection::IntoBody;
     let arteries = site::<VesselSegment>("systemic arteries")?;
     schema.boundary::<Oxygen>(OXYGEN_LEAK, into, arteries, Space::Lumen)?;
     schema.boundary::<CarbonDioxide>(CARBON_LEAK, into, arteries, Space::Lumen)?;
-    let fat = site::<CapillaryBed>("fat bed")?;
-    schema.pool::<NitrogenGas>(fat, Space::Gas)?;
-    schema.boundary::<NitrogenGas>(NITROGEN_LEAK, into, fat, Space::Gas)?;
-    schema.boundary::<NitrogenGas>(NITROGEN_EXCHANGE, into, fat, Space::Gas)?;
+    let lung = site::<CapillaryBed>("pulmonary bed")?;
+    schema.boundary::<NitrogenGas>(NITROGEN_LEAK, into, lung, Space::Gas)?;
     let veins = site::<VesselSegment>("central veins")?;
     schema.boundary::<Vasopressin>(VASOPRESSIN_LEAK, into, veins, Space::Lumen)
 }

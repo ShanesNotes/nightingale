@@ -4916,11 +4916,12 @@ new = '''pub(super) fn leaks(schema: &mut Schema) -> Result<(), AdmissionError> 
 test = "-p ng-validate --test body_run at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges"
 
 [[mutant]]
-name = "fat-bed-nitrogen-gas-held-at-no-rest"
-path = "crates/ng-validate/src/body/mod.rs"
-old = '''        let rate = k.relax(rest, held, pace);'''
-new = '''        let kept = k.relax(rest, held, pace);
-        let rate = k.subtract(kept, kept);'''
+name = "nitrogen-gas-leaks-into-the-airway"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''    let lung = site::<CapillaryBed>("pulmonary bed")?;
+    schema.boundary::<NitrogenGas>(NITROGEN_LEAK, into, lung, Space::Gas)?;'''
+new = '''    let lung = site::<TissueSite>("conducting airway")?;
+    schema.boundary::<NitrogenGas>(NITROGEN_LEAK, into, lung, Space::Gas)?;'''
 test = "-p ng-validate --test body_run at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges"
 
 [[mutant]]
