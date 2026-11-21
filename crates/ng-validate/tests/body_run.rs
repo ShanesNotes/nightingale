@@ -1067,13 +1067,22 @@ fn each_figure_of_rule_is_the_bodys_policy_bit_for_bit() {
     let window = NonZeroU64::new(10 * SECOND).expect("a window");
     let policy = body_certificate(&body, SlidingWindows::new(window, 60 * SECOND).expect("windows"))
         .expect("a policy");
+    assert_body_rule(&body, &policy);
+}
+
+fn assert_body_rule(body: &CompiledBody, policy: &CertificatePolicy) {
     let (windows, rates) = policy.edges().expect("windows between breath edges");
     assert_eq!(windows.widest_ns() as f64, WIDEST.1 * SECOND as f64);
+    assert_eq!(
+        (windows.settling_ns(), windows.length_ns().get()),
+        (20 * SECOND, 10 * SECOND),
+        "the settling time and the window's length"
+    );
     let mut held = [0; RULE.len()];
     for quantity in body.conserved_basis().ids() {
         let rate = rates.iter().find(|rate| rate.quantity() == quantity);
         let row = (RULE.iter().enumerate())
-            .find(|(_, (book, at_payer, _))| holds(&body, (*book, *at_payer), quantity));
+            .find(|(_, (book, at_payer, _))| holds(body, (*book, *at_payer), quantity));
         let Some((index, &(book, _, [(_, drift), (_, settled), (_, settling)]))) = row else {
             assert!(
                 rate.is_none(),
@@ -1102,6 +1111,84 @@ fn each_figure_of_rule_is_the_bodys_policy_bit_for_bit() {
         "the coronary bed's hydrogen and the muscle bed's"
     );
     assert!(held.iter().all(|&count| count > 0), "{held:?}");
+}
+
+#[test]
+fn rule_detects_a_change_to_either_breath_window_time() {
+    struct Fixed;
+    fn bound(book: Book, payer: bool) -> Option<f64> {
+        let (_, _, [(_, fixed), ..]) = RULE.iter().find(|(of, at, _)| (*of, *at) == (book, payer))?;
+        Some(*fixed)
+    }
+    fn species_book(species: Species) -> Book {
+        if species == Species::Energy {
+            Book::Energy
+        } else {
+            Book::Of(species)
+        }
+    }
+    impl DriftTable for Fixed {
+        fn names(&self, species: Species) -> bool {
+            bound(species_book(species), false).is_some()
+        }
+        fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
+            Measure::new(bound(species_book(Q::SPECIES), false).expect("a named row"))
+        }
+        fn element(
+            &self,
+            element: Element,
+            sites: &[SiteId],
+        ) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+            let payer = element == Element::Hydrogen
+                && sites
+                    .iter()
+                    .all(|site| matches!(site.key(), "coronary bed" | "muscle bed"));
+            bound(Book::Element(element), payer).map(Measure::new).transpose()
+        }
+    }
+
+    let body = whole_body().expect("compiled");
+    let window = NonZeroU64::new(10 * SECOND).expect("a window");
+    let sliding = SlidingWindows::new(window, 60 * SECOND).expect("windows");
+    let stated = body_certificate(&body, sliding).expect("a policy");
+    let (edges, rates) = stated.edges().expect("windows between breath edges");
+    let build = |settling, length, rated: &[EdgeRate]| {
+        let times = EdgeWindows::new(edges.clock(), settling, length, edges.widest_ns());
+        certificate_with(&body, sliding, &Fixed)
+            .expect("the fixed bounds")
+            .between_edges(times, rated.to_vec())
+            .expect("the body's rated rows")
+    };
+    let (settling, length) = (edges.settling_ns(), edges.length_ns());
+    assert_eq!(build(settling, length, rates).digest(), stated.digest());
+    assert_body_rule(&body, &stated);
+    let omitted = Leak::Vasopressin.quantity(&body);
+    let one_fewer: Vec<_> = rates
+        .iter()
+        .copied()
+        .filter(|rate| rate.quantity() != omitted)
+        .collect();
+    assert_eq!(one_fewer.len() + 1, rates.len());
+    let missing = build(settling, length, &one_fewer);
+    assert!(
+        std::panic::catch_unwind(|| assert_body_rule(&body, &missing)).is_err(),
+        "RULE missed the omitted row"
+    );
+
+    let mut missed = Vec::new();
+    for (name, altered) in [
+        ("settling time", build(settling + 1, length, rates)),
+        ("window length", build(settling, length.saturating_add(1), rates)),
+    ] {
+        assert_ne!(altered.digest(), stated.digest());
+        if std::panic::catch_unwind(|| assert_body_rule(&body, &altered)).is_ok() {
+            missed.push(name);
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "RULE accepted an extra nanosecond in {missed:?}"
+    );
 }
 
 #[test]

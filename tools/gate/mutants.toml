@@ -4877,6 +4877,13 @@ new = '''    (Species::Energy, 1e4, 2e3, 3e2),'''
 test = "-p ng-validate --test body_run each_figure_of_rule_is_the_bodys_policy_bit_for_bit"
 
 [[mutant]]
+name = "body-settling-time-apart-from-rule"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''const SETTLING_TIME: u64 = 20 * SECOND;'''
+new = '''const SETTLING_TIME: u64 = 20 * SECOND + 1;'''
+test = "-p ng-validate --test body_run each_figure_of_rule_is_the_bodys_policy_bit_for_bit"
+
+[[mutant]]
 name = "edge-rates-read-no-sites"
 path = "crates/ng-validate/src/slice.rs"
 old = '''            Book::Element(element) => (drifts.element_rate(element, &sites(combination))?)'''
