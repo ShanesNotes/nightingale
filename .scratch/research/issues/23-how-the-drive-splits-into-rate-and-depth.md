@@ -1,7 +1,8 @@
 # 23: How the drive to breathe splits into rate and depth
 
 Type: research
-Status: open
+Status: claimed
+Claimed by: r23-split
 Blocked by: none
 Blocks: ../../body/issues/38-the-drive-moves-the-breaths-depth.md
 
