@@ -117,7 +117,8 @@ impl Start {
     /// The held run's own admission: admission seals the packet it admits and a run resumes only under its own, so
     /// the held run cannot branch from the controlled run's state.
     fn held() -> Self {
-        Self::admitted_with(|body| body_packet_with_the_drive_scale_held(body).expect("a packet"))
+        let rate = body_breath().expect("the breath").rate;
+        Self::admitted_with(|body| body_packet_with_the_drive_scale_held(body, rate).expect("a packet"))
     }
     fn admitted_with(packet: impl FnOnce(&CompiledBody) -> ParameterPacket<SyntheticFixture>) -> Self {
         let body = whole_body().expect("compiled");
@@ -1091,6 +1092,22 @@ fn each_figure_of_rule_is_the_bodys_policy_bit_for_bit() {
         "the coronary bed's hydrogen and the muscle bed's"
     );
     assert!(held.iter().all(|&count| count > 0), "{held:?}");
+}
+
+/// The second box's held rate for its leaks, a second.
+const QUARTER: f64 = 0.25;
+
+/// The held packet takes the breath rate it is given as its own, so a run held at a quarter is admitted on a packet of
+/// its own.
+#[test]
+fn the_held_packet_moves_with_the_breath_rate_it_is_given() {
+    let body = whole_body().expect("compiled");
+    let held = |rate: Measure<Rate<Dimensionless>>| {
+        let packet = body_packet_with_the_drive_scale_held(&body, rate).expect("a packet");
+        body.bind(packet).expect("bound").packet_hash().digest()
+    };
+    let rhythm = body_breath().expect("the breath").rate;
+    assert_ne!(held(Measure::new(QUARTER).expect("finite")), held(rhythm));
 }
 
 fn certified(start: &Start, minute: &Session<'_, Running>) -> Certificate {

@@ -545,21 +545,24 @@ pub fn body_packet_at_viscosity_exponent(
     body: &CompiledBody,
     exponent: Measure<Dimensionless>,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-    packet_of(body, exponent, [CENTRAL_GAIN, PERIPHERAL_GAIN])
+    packet_of(body, exponent, [CENTRAL_GAIN, PERIPHERAL_GAIN], BODY_RHYTHM.rate)
 }
 
-/// The body's packet with both chemoreflex gains zero, so the drive scale is its rest exactly while `ns.breath-rate`
-/// and the breath's two lengths set the rate.
+/// The body's packet with both chemoreflex gains zero, so the drive scale is its rest exactly while `ns.breath-rate`,
+/// stated as `rate`, and the breath's two lengths set the rate. Every other value stays the rhythm's.
 pub fn body_packet_with_the_drive_scale_held(
     body: &CompiledBody,
+    rate: Measure<Rate<Dimensionless>>,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-    packet_of(body, Measure::new(-1.0)?, [0.0, 0.0])
+    let rate = f64::from_bits(Compensated::of(&rate).bits()[0]);
+    packet_of(body, Measure::new(-1.0)?, [0.0, 0.0], rate)
 }
 
 fn packet_of(
     body: &CompiledBody,
     exponent: Measure<Dimensionless>,
     [central, peripheral]: [f64; 2],
+    breath_rate: f64,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let rate = AnchorId::new("heart rate");
     let phase = LawName {
@@ -652,7 +655,7 @@ fn packet_of(
     };
     packet.start_mode(breath, "rest", NOTE)?;
 
-    table(&mut packet, exponent)?;
+    table(&mut packet, exponent, breath_rate)?;
     set::<Dimensionless>(&mut packet, "ns.central-gain", Binding::Body, central)?;
     set::<Dimensionless>(&mut packet, "ns.peripheral-gain", Binding::Body, peripheral)?;
     oxygen_per_lactate(&mut packet, body)?;
@@ -677,6 +680,7 @@ fn packet_of(
 fn table(
     packet: &mut ParameterPacket<SyntheticFixture>,
     exponent: Measure<Dimensionless>,
+    breath_rate: f64,
 ) -> Result<(), AdmissionError> {
     let blood = Binding::Network(Network::Vascular);
     let (urinary, lymph) = (
@@ -727,7 +731,7 @@ fn table(
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05)?;
     set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0)?;
-    respiratory(packet)?;
+    respiratory(packet, breath_rate)?;
     set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.035)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.05)?;
     set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "fl.oncotic-slope", body, 20.0)?;
@@ -1224,7 +1228,10 @@ pub fn body_certificate(
     crate::certificate_with(body, windows, &BodyDrifts)
 }
 
-fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+fn respiratory(
+    packet: &mut ParameterPacket<SyntheticFixture>,
+    breath_rate: f64,
+) -> Result<(), AdmissionError> {
     let body = Binding::Body;
     for (key, value) in [
         ("rs.oxygen-inspired", 0.21),
@@ -1251,7 +1258,7 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Dimensionless>(packet, "rs.room-humidity", body, 0.5)?;
     set::<Pressure>(packet, "rs.room-vapour-pressure", body, 20.0)?;
     for (key, value) in [
-        ("ns.breath-rate", BODY_RHYTHM.rate),
+        ("ns.breath-rate", breath_rate),
         ("ns.drive-rise", BODY_RHYTHM.rise),
         ("ns.drive-fall", BODY_RHYTHM.fall),
         ("ns.rest-speed", 1.0),

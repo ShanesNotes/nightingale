@@ -4891,6 +4891,13 @@ new = '''                    allowance: Some(change),'''
 test = "-p ng-validate --test rhythm_certificate an_edge_drift_carries_the_change_beside_the_allowance_it_passed"
 
 [[mutant]]
+name = "held-packet-keeps-the-rhythms-breath-rate"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''        ("ns.breath-rate", breath_rate),'''
+new = '''        ("ns.breath-rate", BODY_RHYTHM.rate + 0.0 * breath_rate),'''
+test = "-p ng-validate --test body_run the_held_packet_moves_with_the_breath_rate_it_is_given"
+
+[[mutant]]
 name = "sleep-lowers-no-gain"
 path = "crates/ng-nervous/src/chemoreflex.rs"
 old = '''    let gain = k.subtract(gain, lowered);'''
