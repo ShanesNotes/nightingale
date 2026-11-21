@@ -9,8 +9,8 @@ use ng_contract::{
 };
 use ng_observe::{Observation, ObservedValue, Observer, ObserverCheckpoint, chained};
 use ng_record::{
-    AuthorizedInput, BranchId, CheckpointError, HistoryStore, ObservationRefusal, ObservationView,
-    RecordDigests, Running, Seal, Session, Step,
+    AuthorizedInput, BranchId, CheckpointError, CompactLink, HistoryStore, ObservationRefusal,
+    ObservationView, RecordDigests, Running, Seal, Session, Step, compact, expand,
 };
 
 pub trait ReplayCase {
@@ -596,18 +596,51 @@ fn pace_gate(
     })
 }
 
-/// Every link in memory, for tests and short runs. A long run's host keeps its links outside the process.
+/// Every link in memory, for tests and short runs, each as `ng_record::compact` writes it. A link's first 32 bytes
+/// are the seal of the link it follows, so the store finds that link by its seal, compacts the new one against it and
+/// expands it against the same one: a branch's first link follows the saved head it branched from, not the last link
+/// the store was given. A link that follows none it holds, such as a chain's first, is kept whole. A long run's host
+/// keeps its links outside the process.
 #[derive(Default)]
 pub struct MemoryStore {
-    links: RefCell<BTreeMap<Digest, Vec<u8>>>,
+    links: RefCell<BTreeMap<Digest, Held>>,
+}
+struct Held {
+    follows: Option<Digest>,
+    compact: Vec<u8>,
+}
+impl MemoryStore {
+    /// How many bytes the store holds for the link kept under `seal`.
+    pub fn kept_len(&self, seal: &Digest) -> Option<usize> {
+        self.links.borrow().get(seal).map(|held| held.compact.len())
+    }
+}
+fn kept(links: &BTreeMap<Digest, Held>, seal: Digest) -> Option<CompactLink<'_>> {
+    (links.get(&seal)).map(|held| CompactLink {
+        seal,
+        bytes: &held.compact,
+    })
 }
 impl HistoryStore for MemoryStore {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
-        self.links.borrow().get(seal).cloned()
+        let links = self.links.borrow();
+        let held = links.get(seal)?;
+        expand(
+            held.follows.and_then(|previous| kept(&links, previous)),
+            &held.compact,
+        )
     }
     fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
         let mut links = self.links.borrow_mut();
-        links.entry(seal).or_insert_with(|| link.to_vec());
+        if !links.contains_key(&seal) {
+            let previous =
+                (link.first_chunk()).and_then(|&follows| kept(&links, Digest::from_bytes(follows)));
+            let held = Held {
+                follows: previous.map(|previous| previous.seal),
+                compact: compact(previous, link),
+            };
+            links.insert(seal, held);
+        }
         Ok(())
     }
 }
