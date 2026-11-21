@@ -1315,8 +1315,11 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(
 
 /// Sleep enters 30 s after the anchor, where the awake walk starts. No accepted head falls on 30 s and an input stamped
 /// before the head it is enqueued at is refused, so the branch resumes the awake run's last head before 30 s, which
-/// costs half a minute of the body where the admitted checkpoint would cost a whole one.
+/// costs half a minute of the body where the admitted checkpoint would cost a whole one. The body wakes at 150 s and the
+/// branch ends at 300 s, so one admission holds sleep's onset, its course and a waking.
 const ASLEEP: u64 = 30;
+const WAKES: u64 = 150;
+const ENDS: u64 = 300;
 
 /// The branch's watch takes the awake run's moments up to the branch point, so it holds the branch's history from
 /// admission, as the branch's certificate does. Its core is its own, so its solves stay out of the awake run's count.
@@ -1333,13 +1336,19 @@ fn the_sleeping_branch<'s>(
         head < ASLEEP * SECOND,
         "the branch starts {head} ns after the anchor"
     );
-    let event = BoundaryEvent::new(
-        InputId::new(Digest::of_canonical(b"asleep")),
-        SimTime::from_ns(anchor_moment().nanoseconds() + ASLEEP * SECOND),
-        BoundaryInput::Sleep(Sleep::Nrem),
-    );
-    let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a test's own command"), event);
-    session.enqueue(input).expect("enqueued");
+    for (id, at, sleep) in [
+        (&b"asleep"[..], ASLEEP, Sleep::Nrem),
+        (b"awake again", WAKES, Sleep::Awake),
+    ] {
+        let event = BoundaryEvent::new(
+            InputId::new(Digest::of_canonical(id)),
+            SimTime::from_ns(anchor_moment().nanoseconds() + at * SECOND),
+            BoundaryInput::Sleep(sleep),
+        );
+        let input =
+            AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a test's own command"), event);
+        session.enqueue(input).expect("enqueued");
+    }
     let mut watch = Watch::new(start);
     watch.moments = (awake.moments.iter())
         .filter(|moment| moment.at < head)
@@ -1476,6 +1485,38 @@ fn the_sleeping_branchs_breathing_books(
             .expect("a string takes it");
         }
     }
+    report
+}
+
+/// Waking lifts the drive scale back over the awake run's and shortens the breath under its. Both are read over whole
+/// breaths from ten seconds after the waking, as sleep's signs are read from ten seconds after its onset, against each
+/// run's stretch from 40 s to 60 s.
+const WOKEN: [u64; 2] = [WAKES + 10, ENDS];
+
+fn the_sleeping_branch_wakes_and_runs_on(
+    start: &Start,
+    asleep: Session<'_, Running>,
+    watch: &mut Watch,
+    awake: &Watch,
+) -> String {
+    counted_until(start, asleep, ENDS * SECOND, &mut Minute::default(), watch);
+    let [woken, slept] = [WOKEN, SLEPT].map(|stretch| walked(watch, stretch));
+    let theirs = walked(awake, SLEPT);
+    let report = format!(
+        "awake again from {WAKES} s to {ENDS} s; over whole breaths from {} s, {} breaths, the drive scale {:.6} and the breath {:.4} s, against {:.6} and {:.4} s awake and {:.6} and {:.4} s asleep\n",
+        WOKEN[0],
+        woken.breaths,
+        woken.scale,
+        woken.length,
+        theirs.scale,
+        theirs.length,
+        slept.scale,
+        slept.length
+    );
+    assert!(
+        woken.scale > theirs.scale && woken.length < theirs.length,
+        "{report}waking does not lift the drive back over the awake run's"
+    );
     report
 }
 
@@ -2751,16 +2792,20 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     report += &the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
         &start, &minute, &watch,
     );
-    let held = Start::held();
-    report += &the_held_body_admits_where_the_controlled_body_does(&start, &held);
-    let (held_minute, held_watch) = the_held_minute(&held);
-    report += &the_held_runs_drive_scale_is_its_rest_at_every_step(&held, &held_watch);
-    report += &the_held_runs_breathing_books(&held, &held_minute, &held_watch);
-    report += &every_link_moves_its_reader_the_way_the_loop_needs(&start, &watch, &held_watch);
+    {
+        // The held run's own admission and store go once its tests are done, before the sleeping branch runs on.
+        let held = Start::held();
+        report += &the_held_body_admits_where_the_controlled_body_does(&start, &held);
+        let (held_minute, held_watch) = the_held_minute(&held);
+        report += &the_held_runs_drive_scale_is_its_rest_at_every_step(&held, &held_watch);
+        report += &the_held_runs_breathing_books(&held, &held_minute, &held_watch);
+        report += &every_link_moves_its_reader_the_way_the_loop_needs(&start, &watch, &held_watch);
+    }
     let core = ng_solver::Core::new(LONGEST_STEP);
-    let (asleep, asleep_watch, head) = the_sleeping_branch(&start, &branch, &core, &watch);
+    let (asleep, mut asleep_watch, head) = the_sleeping_branch(&start, &branch, &core, &watch);
     report += &sleep_lowers_ventilation_and_raises_arterial_carbon_dioxide(&asleep_watch, &watch, head);
     report += &the_sleeping_branchs_breathing_books(&start, &asleep, &asleep_watch);
+    report += &the_sleeping_branch_wakes_and_runs_on(&start, asleep, &mut asleep_watch, &watch);
     the_lining_moves_research_11s_form_over_the_first_minute(&start, &minute);
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
@@ -2818,6 +2863,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         asleep Of(NitrogenGas): worst 8.3456e3 from 34.110 s to 44.110 s; from 30 s any ten seconds 8.3450e3, inside a breath 8.9322e3
         asleep Of(Water): worst 1.9347e-2 from 37.572 s to 47.572 s; from 30 s any ten seconds 1.9305e-2, inside a breath 2.1802e-2
         asleep Of(Vasopressin): worst 1.4045e-2 from 35.356 s to 45.356 s; from 30 s any ten seconds 1.4187e-2, inside a breath 2.5728e-2
+        awake again from 150 s to 300 s; over whole breaths from 160 s, 29 breaths, the drive scale 1.056587 and the breath 4.7322 s, against 1.023836 and 4.8836 s awake and 0.873901 and 5.7215 s asleep
         two breaths from 64.316 s to 74.045 s
         Oxygen: in 4560.2375, out 3637.1692, across 899.2353, along 922.1879, gained 2.3833e1
         CarbonDioxide: in 8.6862, out 679.7044, across -667.3050, along -671.3639, gained -3.7132e0
