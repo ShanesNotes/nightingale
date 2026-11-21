@@ -30,4 +30,8 @@ From the independent check of nightingale#194: two choices are held only by the 
 - [ ] The one-unit fixture states inspired carbon dioxide at 0, so a law that left carbon dioxide out of nitrogen gas's rest passes every fixture test, and only the body's model hash holds it. The check reasoned this and did not run it
 - [ ] Each bed's inflow keeps its resistance at rest within 4 ulp, and at the pulmonary and the peritubular bed, whose debt share is 0, only the debt bound sees a debt
 
+From the check of nightingale#214's fix round: the pin of the drive scale's order of operations holds one state.
+
+- [ ] The awake scale's order of the arms is held where both wrong orders show. `crates/ng-validate/tests/chemoreflex.rs` pins the scale's bits at one state of the acidity packet, 3.025 s. It sees the arms added to each other first, which moves 456 of the packet's 6,004 states and is the row `drive-scale-groups-its-arms`. It does not see the central arm taken first, `(rest - falling) + rising`, which moves 901 states, not 3.025 s, and passes every fixture test. 209 states are moved by both orders, the first at 3.002 s, whose bits are `3ff02a0e1d330da6`, and the next at 3.042 s. A pin at 3.002 s, or of the packet's whole awake trace, holds main's order against both. On the saturation packet no order moves a bit
+
 **Non-goals:** any change to the body's model, its packet or its pins. A row budget, which foundation 14 owns.
