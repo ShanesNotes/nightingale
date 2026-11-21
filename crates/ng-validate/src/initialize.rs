@@ -306,6 +306,7 @@ pub(crate) struct AdmissionSolve {
     workspace: AdmissionWorkspace,
     origin: SimTime,
     fence: SimTime,
+    anchored: fn(SimTime) -> Vec<BoundaryEvent>,
 }
 impl AdmissionSolve {
     pub(crate) fn fence(&self) -> SimTime {
@@ -313,21 +314,24 @@ impl AdmissionSolve {
     }
 }
 
-/// The admission solve alone, on a port with no input. No core reaches it, and the admission system's identity leaves
-/// the port out, so a port with no input before the fence starts from this solve as from its own.
+/// The admission solve alone, on a port with only the inputs `anchored` states at the anchor. No core reaches it, and
+/// the admission system's identity leaves the port out, so a port with no other input before the fence starts from
+/// this solve as from its own.
 pub(crate) fn solve_admission(
     body: &CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,
     lens: &ObservationLens,
     origin: SimTime,
+    anchored: fn(SimTime) -> Vec<BoundaryEvent>,
 ) -> Result<AdmissionSolve, InitializationFailure> {
-    let system = system(body, packet, BoundaryPort::new(Vec::new())?, lens, origin)?;
+    let system = system(body, packet, BoundaryPort::new(anchored(origin))?, lens, origin)?;
     let workspace = initialize(&system, body);
     let fence = system.fence();
     Ok(AdmissionSolve {
         workspace,
         origin,
         fence,
+        anchored,
     })
 }
 
@@ -344,12 +348,14 @@ pub(crate) fn admit_from<'m>(
         workspace,
         origin,
         fence,
+        anchored,
     } = solved;
     if let Some(early) = events.iter().find(|event| event.at() < *fence) {
         let (id, fence) = (early.id(), *fence);
         return Err(AdmissionError::EventBeforeFence { id, fence }.into());
     }
-    let system = system(body, packet, BoundaryPort::new(events)?, lens, *origin)?;
+    let inputs = anchored(*origin).into_iter().chain(events).collect();
+    let system = system(body, packet, BoundaryPort::new(inputs)?, lens, *origin)?;
     let start = started(system, workspace.clone(), core, *origin)?;
     admit_start(body, core, start, crate::arena_seed(), store)
 }

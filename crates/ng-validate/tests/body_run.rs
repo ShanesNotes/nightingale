@@ -11,8 +11,9 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "944d90e8b323ba4856346826c5b85a43fc9c0715e6cd114e107050f9bd98aee6";
-const ADMITTED_SEAL: &str = "a8b0d0d25e18abc99d0b03daa707178bb3150245be922ca21bd67db8d43b6d6c";
+const LONGEST_STEP: u64 = 10 * MILLISECOND;
+const PACKET: &str = "c7ec85aee0622edf508da2a0ada7da12c2d77fe49c97c9e790583cbcdc006ef4";
+const ADMITTED_SEAL: &str = "f03722e1e96bc928e1876f55ffe0aa0d77a10515b92aaa4b0f95cb614294c364";
 
 struct Counted {
     core: ng_solver::Core,
@@ -121,13 +122,13 @@ impl Start {
     fn admitted_with(packet: impl FnOnce(&CompiledBody) -> ParameterPacket<SyntheticFixture>) -> Self {
         let body = whole_body().expect("compiled");
         let core = Counted {
-            core: ng_solver::Core::new(10 * MILLISECOND),
+            core: ng_solver::Core::new(LONGEST_STEP),
             solves: Cell::new(0),
         };
         let links = MemoryStore::default();
         let (saved, identity, provenance) = {
             let (packet, lens) = (packet(&body), body_lens(&body).expect("a lens"));
-            let port = BoundaryPort::new(Vec::new()).expect("no event");
+            let port = BoundaryPort::new(vec![body_awake(anchor_moment())]).expect("awake");
             let admitted = admit_at(&body, packet, port, &core, &lens, anchor_moment(), &links);
             let Admitted { session, provenance } =
                 admitted.unwrap_or_else(|refused| panic!("admission refused: {refused:?}"));
@@ -511,8 +512,6 @@ const BREATHING_BOOKS: [Book; 7] = [
 ];
 const DRY: f64 = 650.0;
 
-/// The most an inventory moved over the ten seconds from admission, over any ten seconds from twenty seconds on, and
-/// inside one whole breath from twenty seconds on.
 struct Figures {
     from_admission: f64,
     steady: f64,
@@ -533,6 +532,7 @@ fn paid_by_a_works_payer(body: &CompiledBody, terms: &[(RowId, i64)]) -> bool {
     })
 }
 
+#[derive(Clone)]
 struct Moment {
     at: u64,
     phase: f64,
@@ -681,10 +681,10 @@ impl Watch {
             .sum();
         area / (moments[moments.len() - 1].at - moments[0].at) as f64
     }
-    fn figures(&self) -> Vec<(Book, Figures)> {
+    fn figures(&self, steady: u64) -> Vec<(Book, Figures)> {
         let steady = (self.moments.iter())
-            .position(|moment| moment.at >= 20 * SECOND)
-            .expect("twenty seconds");
+            .position(|moment| moment.at >= steady * SECOND)
+            .expect("the steady stretch's start");
         let ten = (self.moments.iter())
             .position(|moment| moment.at >= 10 * SECOND)
             .expect("ten seconds");
@@ -857,9 +857,9 @@ fn the_pulmonary_plasma_stays_under_capacity_at_the_highest_alveolar_oxygen(watc
     )
 }
 
-fn no_held_pool_moves_at_admission_or_over_the_first_minute(
+fn the_first_minute_moves_no_held_pool_and_saves_a_branch(
     start: &Start,
-) -> (Session<'_, Running>, Minute, Watch) {
+) -> (Session<'_, Running>, Minute, Watch, Checkpoint) {
     let pools = start.held_pools();
     assert_eq!(pools.len(), 318);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
@@ -875,13 +875,24 @@ fn no_held_pool_moves_at_admission_or_over_the_first_minute(
     let mut minute = Minute::default();
     let mut watch = Watch::new(start);
     watch.see(&session);
+    let mut branch = None;
     for mark in 1..=6 {
+        if 10 * mark == ASLEEP {
+            let before = ASLEEP * SECOND - LONGEST_STEP;
+            session = counted_until(start, session, before, &mut minute, &mut watch);
+            branch = Some(session.checkpoint().expect("a checkpoint"));
+        }
         session = counted_until(start, session, 10 * mark * SECOND, &mut minute, &mut watch);
         for ((_, kind), (now, then)) in pools.iter().zip(amounts(&session).iter().zip(&admitted)) {
             assert_eq!(now, then, "{kind:?} moved by {} s", 10 * mark);
         }
     }
-    (session, minute, watch)
+    (
+        session,
+        minute,
+        watch,
+        branch.expect("the minute passes sleep's stamp"),
+    )
 }
 
 fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(
@@ -946,11 +957,11 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         MT skin bed glucose feed moved
     "#]]
     .assert_eq(&report);
-    let figures = watch.figures();
+    let figures = watch.figures(20);
     let mut report = String::new();
     let mut refused = Vec::new();
     for (book, at_payer, below, bound) in RULE {
-        let worst = worst_change(start, &certificate, book, at_payer);
+        let (worst, _) = worst_change(start, &certificate, book, at_payer);
         let breathing = figures.iter().find(|(of, _)| *of == book && !at_payer);
         if let Some((_, figures)) = breathing {
             writeln!(report, "{book:?}: {}", line(worst, figures)).expect("a string takes it");
@@ -996,14 +1007,19 @@ fn certified(start: &Start, minute: &Session<'_, Running>) -> Certificate {
     })
 }
 
-fn worst_change(start: &Start, certificate: &Certificate, book: Book, at_payer: bool) -> f64 {
+fn worst_change(
+    start: &Start,
+    certificate: &Certificate,
+    book: Book,
+    at_payer: bool,
+) -> (f64, Option<Interval>) {
     (certificate.results().iter())
         .filter(|result| {
             let combination = &start.body.conserved_basis().combinations()[result.quantity().index()];
             combination.book() == book && paid_by_a_works_payer(&start.body, combination.terms()) == at_payer
         })
-        .map(|result| lead(result.worst_drift()).abs())
-        .fold(0.0, |most, x| if x > most { x } else { most })
+        .map(|result| (lead(result.worst_drift()).abs(), Some(result.drift_window())))
+        .fold((0.0, None), |most, x| if x.0 > most.0 { x } else { most })
 }
 
 fn line(worst: f64, figures: &Figures) -> String {
@@ -1020,7 +1036,8 @@ fn line(worst: f64, figures: &Figures) -> String {
 const MAIN_CLOSINGS: &str = "aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s\n";
 
 /// No rest law reads the drive scale, so both admissions shut each valve at main's instants, and every row but the
-/// scale admits within admission's tolerance of the controlled run's.
+/// scale and every parameter admission calibrates, matched by key and binding, admits within admission's tolerance of
+/// the controlled run's.
 fn the_held_body_admits_where_the_controlled_body_does(start: &Start, held: &Start) -> String {
     let [controlled, holding] = [start, held].map(|each| closings(&each.provenance));
     assert_eq!([controlled.as_str(), holding.as_str()], [MAIN_CLOSINGS; 2]);
@@ -1042,8 +1059,38 @@ fn the_held_body_admits_where_the_controlled_body_does(start: &Start, held: &Sta
         share <= 1.0,
         "the held admission's {at:?} is {difference} from the controlled one's, {share} of admission's tolerance"
     );
+    let calibrated = |each: &Start| -> Vec<ValueRecord> {
+        (each.provenance.values().iter())
+            .filter(|record| matches!(record.provenance, ValueProvenance::Calibrated { .. }))
+            .copied()
+            .collect()
+    };
+    let (fitted, refitted) = (calibrated(start), calibrated(held));
+    assert_eq!(
+        fitted.len(),
+        refitted.len(),
+        "the two admissions calibrate different parameters"
+    );
+    let mut most = (0.0, 0.0, 0.0, None);
+    for record in &fitted {
+        let again = (refitted.iter())
+            .find(|again| again.name == record.name)
+            .unwrap_or_else(|| panic!("the held admission does not calibrate {:?}", record.name));
+        let (x, y) = (lead(record.value), lead(again.value));
+        let share = (x - y).abs() / tolerance.at(x, 1.0);
+        if share > most.0 {
+            most = (share, (x - y).abs(), (x - y).abs() / x.abs(), Some(record.name));
+        }
+    }
+    let (fitted_share, fitted_difference, relative, fitted_at) = most;
+    assert!(
+        fitted_share <= 1.0,
+        "the held admission calibrates {fitted_at:?} {fitted_difference} from the controlled one, {fitted_share} of \
+         admission's tolerance"
+    );
     format!(
-        "controlled admission: {controlled}held admission: {holding}largest difference over every row but the drive scale {difference:.3e}, {share:.3e} of admission's tolerance, at {at:?}\n"
+        "controlled admission: {controlled}held admission: {holding}largest difference over every row but the drive scale {difference:.3e}, {share:.3e} of admission's tolerance, at {at:?}; over the {} calibrated parameters {fitted_difference:.3e}, {relative:.3e} of its value and {fitted_share:.3e} of admission's tolerance, at {fitted_at:?}\n",
+        fitted.len()
     )
 }
 
@@ -1075,31 +1122,29 @@ fn the_held_runs_drive_scale_is_its_rest_at_every_step(held: &Start, watch: &Wat
 /// run long enough to bring its carbon dioxide under the held run's.
 const WALK: [u64; 2] = [30, 60];
 
+fn tidal(watch: &Watch, breath: &[usize]) -> f64 {
+    let (shallow, deep) = (watch.moments[breath[0]..=breath[1]].iter())
+        .map(|moment| moment.volume)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
+    deep - shallow
+}
+
 struct Walked {
     breaths: usize,
     length: f64,
     ventilation: f64,
     alveolar: [f64; 2],
-    arterial: f64,
-    oxygen: [f64; 2],
     scale: f64,
     deviations: [f64; 2],
     arms: [f64; 2],
 }
 
-fn walked(watch: &Watch) -> Walked {
-    let inside = |at: &usize| (WALK[0] * SECOND..=WALK[1] * SECOND).contains(&watch.moments[*at].at);
+fn walked(watch: &Watch, [from, to]: [u64; 2]) -> Walked {
+    let inside = |at: &usize| (from * SECOND..=to * SECOND).contains(&watch.moments[*at].at);
     let edges: Vec<usize> = watch.edges().into_iter().filter(inside).collect();
     let (from, to) = (edges[0], edges[edges.len() - 1]);
     let span = (watch.moments[to].at - watch.moments[from].at) as f64 / SECOND as f64;
-    let tidal: f64 = (edges.windows(2))
-        .map(|pair| {
-            let (shallow, deep) = (watch.moments[pair[0]..=pair[1]].iter())
-                .map(|moment| moment.volume)
-                .fold((f64::INFINITY, f64::NEG_INFINITY), widen);
-            deep - shallow
-        })
-        .sum();
+    let tidal: f64 = (edges.windows(2)).map(|pair| tidal(watch, pair)).sum();
     let mean = |of: &dyn Fn(&Sensed) -> f64| watch.mean(from, to, |moment| of(&moment.sensed));
     let arm = |at: usize| mean(&|sensed| watch.reflex.arms(sensed)[at]);
     Walked {
@@ -1107,8 +1152,6 @@ fn walked(watch: &Watch) -> Walked {
         length: span / (edges.len() - 1) as f64,
         ventilation: tidal / span,
         alveolar: [0, 1].map(|gas| watch.mean(from, to, |moment| moment.alveolar[gas])),
-        arterial: mean(&|sensed| sensed.pressure),
-        oxygen: [mean(&|sensed| sensed.oxygen), mean(&|sensed| sensed.saturation)],
         scale: mean(&|sensed| lead(sensed.scale)),
         deviations: [
             mean(&|sensed| sensed.acidity - sensed.set_points[0]),
@@ -1118,8 +1161,62 @@ fn walked(watch: &Watch) -> Walked {
     }
 }
 
+/// One quantity's means in two runs over the same stretch of the clock, so both end together whatever each run's
+/// breath. The stretch cuts a breath at each end. Putting the mean of the whole breath beside a cut piece in place of
+/// the piece's samples moves that run's mean by at most the piece's share of the stretch times the farthest any of its
+/// samples sits from that mean: `reach` sums this over both ends of both runs, so a margin past it holds however the
+/// cut breaths are counted.
+struct Compared {
+    means: [f64; 2],
+    spans: [f64; 2],
+    reach: f64,
+}
+impl Compared {
+    fn margin(&self) -> f64 {
+        self.means[0] - self.means[1]
+    }
+}
+
+fn compared(ours: &Watch, theirs: &Watch, [from, to]: [u64; 2], of: impl Fn(&Moment) -> f64) -> Compared {
+    let one = |watch: &Watch| {
+        let moments = &watch.moments;
+        let first = (moments.iter())
+            .position(|moment| moment.at >= from * SECOND)
+            .expect("the stretch's start");
+        let last = (moments.iter())
+            .rposition(|moment| moment.at <= to * SECOND)
+            .expect("the stretch's end");
+        let edges: Vec<usize> = (watch.edges().into_iter())
+            .filter(|edge| (first..=last).contains(edge))
+            .collect();
+        assert!(edges.len() >= 2, "no whole breath from {from} s to {to} s");
+        let span = |a: usize, b: usize| (moments[b].at - moments[a].at) as f64;
+        let cut = |[a, b]: [usize; 2], [whole, next]: [usize; 2]| {
+            let beside = watch.mean(whole, next, &of);
+            let farthest = (a..=b)
+                .map(|at| (of(&moments[at]) - beside).abs())
+                .fold(0.0, larger);
+            span(a, b) * farthest
+        };
+        let n = edges.len();
+        let reach = cut([first, edges[0]], [edges[0], edges[1]])
+            + cut([edges[n - 1], last], [edges[n - 2], edges[n - 1]]);
+        let whole = span(first, last);
+        (watch.mean(first, last, &of), whole / SECOND as f64, reach / whole)
+    };
+    let [(ours, our_span, our_reach), (theirs, their_span, their_reach)] = [ours, theirs].map(one);
+    Compared {
+        means: [ours, theirs],
+        spans: [our_span, their_span],
+        reach: our_reach + their_reach,
+    }
+}
+
 /// The breath's own under-ventilation is the perturbation. Each link is judged by means over whole breaths, since the
-/// scale's ripple with the beat, 0.74%, is more than the central arm moves it in a minute, 0.2%.
+/// scale's ripple with the beat, 0.74%, is more than the central arm moves it in a minute, 0.2%. The arterial link is
+/// the exception: the held run's whole breaths end 4.4 s before the controlled run's while its arterial carbon dioxide
+/// climbs about 0.01 a breath, so the link is judged over the clock, and from 25 s and 35 s, the two starts that flipped
+/// it over whole breaths.
 fn every_link_moves_its_reader_the_way_the_loop_needs(
     start: &Start,
     controlled: &Watch,
@@ -1128,7 +1225,11 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(
     let period = (lead(parameter(start, "ns.inspiration-length"))
         + lead(parameter(start, "ns.expiration-length")))
         / lead(parameter(start, "ns.breath-rate"));
-    let (ours, theirs) = (walked(controlled), walked(held));
+    let (ours, theirs) = (walked(controlled, WALK), walked(held, WALK));
+    let arterial = |from: u64| compared(controlled, held, [from, WALK[1]], |moment| moment.sensed.pressure);
+    let (judged, [earlier, later]) = (arterial(WALK[0]), [WALK[0] - 5, WALK[0] + 5].map(arterial));
+    let oxygen = compared(controlled, held, WALK, |moment| moment.sensed.oxygen).means;
+    let saturation = compared(controlled, held, WALK, |moment| moment.sensed.saturation).means;
     let [central, peripheral] = ours.deviations;
     let links = [
         (
@@ -1176,15 +1277,25 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(
         (
             "alveolar to arterial carbon dioxide",
             format!(
-                "{:.4} against held {:.4}; arterial oxygen pressure {:.4} against held {:.4}, saturation {:.6} against held {:.6}",
-                ours.arterial,
-                theirs.arterial,
-                ours.oxygen[0],
-                theirs.oxygen[0],
-                ours.oxygen[1],
-                theirs.oxygen[1]
+                "over the clock from {} s to {} s, {:.4} s and {:.4} s, {:.4} against held {:.4}, by {:+.3e} where the cut breaths reach {:.3e}; from {} s by {:+.3e}, from {} s by {:+.3e}; arterial oxygen pressure {:.4} against held {:.4}, saturation {:.6} against held {:.6}",
+                WALK[0],
+                WALK[1],
+                judged.spans[0],
+                judged.spans[1],
+                judged.means[0],
+                judged.means[1],
+                judged.margin(),
+                judged.reach,
+                WALK[0] - 5,
+                earlier.margin(),
+                WALK[0] + 5,
+                later.margin(),
+                oxygen[0],
+                oxygen[1],
+                saturation[0],
+                saturation[1]
             ),
-            ours.arterial < theirs.arterial,
+            judged.margin() < -judged.reach && earlier.margin() < 0.0 && later.margin() < 0.0,
         ),
     ];
     let mut report = format!(
@@ -1202,13 +1313,179 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(
     report
 }
 
-fn the_held_runs_breathing_books(held: &Start, minute: &Session<'_, Running>, watch: &Watch) -> String {
-    let certificate = certified(held, minute);
-    let figures = watch.figures();
+/// Sleep enters 30 s after the anchor, where the awake walk starts. No accepted head falls on 30 s and an input stamped
+/// before the head it is enqueued at is refused, so the branch resumes the awake run's last head before 30 s, which
+/// costs half a minute of the body where the admitted checkpoint would cost a whole one.
+const ASLEEP: u64 = 30;
+
+/// The branch's watch takes the awake run's moments up to the branch point, so it holds the branch's history from
+/// admission, as the branch's certificate does. Its core is its own, so its solves stay out of the awake run's count.
+fn the_sleeping_branch<'s>(
+    start: &'s Start,
+    saved: &Checkpoint,
+    core: &'s ng_solver::Core,
+    awake: &Watch,
+) -> (Session<'s, Running>, Watch, u64) {
+    let mut session =
+        Session::resume(saved, &start.identity, &start.body, core, &start.links).expect("resumed");
+    let head = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+    assert!(
+        head < ASLEEP * SECOND,
+        "the branch starts {head} ns after the anchor"
+    );
+    let event = BoundaryEvent::new(
+        InputId::new(Digest::of_canonical(b"asleep")),
+        SimTime::from_ns(anchor_moment().nanoseconds() + ASLEEP * SECOND),
+        BoundaryInput::Sleep(Sleep::Nrem),
+    );
+    let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a test's own command"), event);
+    session.enqueue(input).expect("enqueued");
+    let mut watch = Watch::new(start);
+    watch.moments = (awake.moments.iter())
+        .filter(|moment| moment.at < head)
+        .cloned()
+        .collect();
+    watch.see(&session);
+    let session = counted_until(
+        start,
+        session,
+        WALK[1] * SECOND,
+        &mut Minute::default(),
+        &mut watch,
+    );
+    (session, watch, head)
+}
+
+/// What the breath pieces cut at a stretch's two ends can move a run's ventilation over its whole breaths there. A
+/// piece counted at the ventilation of any breath that overlaps the stretch moves the mean by at most the piece's
+/// share of the stretch times the farthest such a breath sits from the mean. The minute ends inside a breath, which is
+/// taken to breathe within the range of the breaths before it.
+fn ventilation_reach(watch: &Watch, [from, to]: [u64; 2], mean: f64) -> f64 {
+    let at = |index: usize| watch.moments[index].at;
+    let edges = watch.edges();
+    let farthest = (edges.windows(2))
+        .filter(|breath| at(breath[1]) > from * SECOND && at(breath[0]) < to * SECOND)
+        .map(|breath| {
+            let length = (at(breath[1]) - at(breath[0])) as f64 / SECOND as f64;
+            (tidal(watch, breath) / length - mean).abs()
+        })
+        .fold(0.0, larger);
+    let inside: Vec<u64> = (edges.into_iter())
+        .map(at)
+        .filter(|edge| (from * SECOND..=to * SECOND).contains(edge))
+        .collect();
+    let cut = (inside[0] - from * SECOND) + (to * SECOND - inside[inside.len() - 1]);
+    cut as f64 / ((to - from) * SECOND) as f64 * farthest
+}
+
+/// Sleep's two signs against the awake run from the same head, judged as the awake walk judges its arterial link:
+/// ventilation over each run's whole breaths with what the cut pieces can move it, arterial carbon dioxide over the
+/// clock, and both again from five seconds earlier and later. The stretch starts ten seconds after sleep enters,
+/// because the arteries lag the lung and the longer breath moves their swing out of step with the awake run's: the
+/// sleeping run's arterial carbon dioxide still reads under the awake run's at single moments to 38 s, inside the
+/// second sleeping breath, and stays over it from 39 s.
+const SLEPT: [u64; 2] = [40, 60];
+
+fn sleep_lowers_ventilation_and_raises_arterial_carbon_dioxide(
+    asleep: &Watch,
+    awake: &Watch,
+    head: u64,
+) -> String {
+    let judged = |from: u64| {
+        let stretch = [from, SLEPT[1]];
+        let [ours, theirs] = [asleep, awake].map(|watch| walked(watch, stretch));
+        let reach = ventilation_reach(asleep, stretch, ours.ventilation)
+            + ventilation_reach(awake, stretch, theirs.ventilation);
+        let arterial = compared(asleep, awake, stretch, |moment| moment.sensed.pressure);
+        (ours, theirs, reach, arterial)
+    };
+    let (ours, theirs, reach, arterial) = judged(SLEPT[0]);
+    let [earlier, later] = [SLEPT[0] - 5, SLEPT[0] + 5]
+        .map(judged)
+        .map(|(ours, theirs, _, arterial)| (ours.ventilation - theirs.ventilation, arterial.margin()));
+    let lower = ours.ventilation - theirs.ventilation;
+    let report = format!(
+        "asleep from {ASLEEP} s, branched at {:.6} s; over whole breaths from {} s to {} s, {} breaths asleep and {} awake\n\
+         asleep the drive scale {:.6} and the breath {:.4} s, awake {:.6} and {:.4} s\n\
+         ventilation {:.2} a second asleep against {:.2} awake, by {lower:+.3e} where the cut pieces reach {reach:.3e}; from {} s by {:+.3e}, from {} s by {:+.3e}\n\
+         arterial carbon dioxide over the clock, {:.4} s and {:.4} s, {:.4} asleep against {:.4} awake, by {:+.3e} where the cut breaths reach {:.3e}; from {} s by {:+.3e}, from {} s by {:+.3e}\n\
+         alveolar carbon dioxide {:.4} asleep against {:.4} awake\n",
+        head as f64 / SECOND as f64,
+        SLEPT[0],
+        SLEPT[1],
+        ours.breaths,
+        theirs.breaths,
+        ours.scale,
+        ours.length,
+        theirs.scale,
+        theirs.length,
+        ours.ventilation,
+        theirs.ventilation,
+        SLEPT[0] - 5,
+        earlier.0,
+        SLEPT[0] + 5,
+        later.0,
+        arterial.spans[0],
+        arterial.spans[1],
+        arterial.means[0],
+        arterial.means[1],
+        arterial.margin(),
+        arterial.reach,
+        SLEPT[0] - 5,
+        earlier.1,
+        SLEPT[0] + 5,
+        later.1,
+        ours.alveolar[1],
+        theirs.alveolar[1]
+    );
+    assert!(
+        lower < -reach && earlier.0 < 0.0 && later.0 < 0.0,
+        "{report}sleep does not lower ventilation"
+    );
+    assert!(
+        arterial.margin() > arterial.reach && earlier.1 > 0.0 && later.1 > 0.0,
+        "{report}sleep does not raise arterial carbon dioxide"
+    );
+    report
+}
+
+/// The branch's certificate covers its whole history, the awake stretch and the transition with the sleeping stretch,
+/// since its windows have no start. Each worst change names its window, and the watch's figures from sleep's stamp on
+/// set the sleeping stretch apart.
+fn the_sleeping_branchs_breathing_books(
+    start: &Start,
+    branch: &Session<'_, Running>,
+    watch: &Watch,
+) -> String {
+    let certificate = certified(start, branch);
+    let figures = watch.figures(ASLEEP);
+    let seconds = |at: SimTime| (at.nanoseconds() - anchor_moment().nanoseconds()) as f64 / SECOND as f64;
     let mut report = String::new();
     for (book, at_payer, _, _) in RULE {
         if let Some((_, figures)) = figures.iter().find(|(of, _)| *of == book && !at_payer) {
-            let worst = worst_change(held, &certificate, book, at_payer);
+            let (worst, window) = worst_change(start, &certificate, book, at_payer);
+            let window = window.expect("a window");
+            writeln!(
+                report,
+                "asleep {book:?}: worst {worst:.4e} from {:.3} s to {:.3} s; from {ASLEEP} s any ten seconds {:.4e}, inside a breath {:.4e}",
+                seconds(window.start()),
+                seconds(window.end()),
+                figures.steady,
+                figures.inside_a_breath
+            )
+            .expect("a string takes it");
+        }
+    }
+    report
+}
+
+fn the_held_runs_breathing_books(held: &Start, minute: &Session<'_, Running>, watch: &Watch) -> String {
+    let certificate = certified(held, minute);
+    let figures = watch.figures(20);
+    let mut report = String::new();
+    for (book, at_payer, _, _) in RULE {
+        if let Some((_, figures)) = figures.iter().find(|(of, _)| *of == book && !at_payer) {
+            let (worst, _) = worst_change(held, &certificate, book, at_payer);
             writeln!(report, "held {book:?}: {}", line(worst, figures)).expect("a string takes it");
         }
     }
@@ -1401,23 +1678,23 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 944d90e8b323ba4856346826c5b85a43fc9c0715e6cd114e107050f9bd98aee6
-        seal 14753e3e586ee283e9e6fbde3f18f24cf65a9b41f669e31d77c34c37bc16c992
+        packet c7ec85aee0622edf508da2a0ada7da12c2d77fe49c97c9e790583cbcdc006ef4
+        seal f04394fc43ff567fc9b9138ce869add3af1cb82d4920d909ecf33db8af734f1f
         steps 198
         viscosity over its reference at the start 1.000092324
     "#]]
     .assert_eq(&pin);
     expect![[r#"
-         100.404686 ms  arterial pressure 134.595436  right atrial pressure 2.899838  portal vein pressure 6.243627  leg vein pressure 3.563185  heart rate 1.063911  sympathetic traffic 0.786252  filtration 1.670550  urine 0.015786  wall power 24546.873069  aortic flow 0.000000
-         201.522037 ms  arterial pressure 126.975732  right atrial pressure 3.333237  portal vein pressure 6.374803  leg vein pressure 3.722203  heart rate 1.081155  sympathetic traffic 0.085799  filtration 2.108909  urine 0.015786  wall power 15542.100702  aortic flow 39.654805
-         302.706352 ms  arterial pressure 118.697020  right atrial pressure 3.744205  portal vein pressure 6.158129  leg vein pressure 3.904980  heart rate 1.047384  sympathetic traffic 0.016483  filtration 2.342035  urine 0.015786  wall power 38216.953764  aortic flow 0.000000
-         403.022757 ms  arterial pressure 109.417396  right atrial pressure 3.252423  portal vein pressure 5.910982  leg vein pressure 4.252114  heart rate 1.004767  sympathetic traffic 0.012387  filtration 2.405432  urine 0.015786  wall power 14003.499403  aortic flow 0.000000
-         504.258003 ms  arterial pressure 100.951074  right atrial pressure 1.517484  portal vein pressure 5.658394  leg vein pressure 3.951843  heart rate 0.970402  sympathetic traffic 0.023270  filtration 2.343725  urine 0.015786  wall power 11997.268312  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.050732  right atrial pressure 0.922101  portal vein pressure 5.367241  leg vein pressure 3.258118  heart rate 0.947688  sympathetic traffic 0.075204  filtration 2.189160  urine 0.015786  wall power 8625.224991  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.067502  right atrial pressure 0.844003  portal vein pressure 5.145296  leg vein pressure 2.684889  heart rate 0.940766  sympathetic traffic 0.262970  filtration 1.993594  urine 0.015786  wall power 6296.317051  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.633379  right atrial pressure 1.012081  portal vein pressure 5.135669  leg vein pressure 2.440226  heart rate 0.952637  sympathetic traffic 0.642936  filtration 1.781198  urine 0.015786  wall power 4912.445666  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.719445  right atrial pressure 1.262543  portal vein pressure 5.411434  leg vein pressure 2.534952  heart rate 0.982910  sympathetic traffic 0.904771  filtration 1.567550  urine 0.015786  wall power 3946.273757  aortic flow 0.000000
-        1000.440947 ms  arterial pressure 68.693980  right atrial pressure 1.495867  portal vein pressure 5.777187  leg vein pressure 2.727024  heart rate 1.021751  sympathetic traffic 0.977546  filtration 1.378176  urine 0.015786  wall power 3075.457519  aortic flow 0.000000
+         100.404686 ms  arterial pressure 134.595436  right atrial pressure 2.899838  portal vein pressure 6.243627  leg vein pressure 3.563185  heart rate 1.063911  sympathetic traffic 0.786252  filtration 1.670550  urine 0.015786  wall power 24546.873073  aortic flow 0.000000
+         201.522035 ms  arterial pressure 126.975733  right atrial pressure 3.333237  portal vein pressure 6.374803  leg vein pressure 3.722203  heart rate 1.081155  sympathetic traffic 0.085799  filtration 2.108908  urine 0.015786  wall power 15542.100771  aortic flow 39.654803
+         302.706352 ms  arterial pressure 118.697020  right atrial pressure 3.744205  portal vein pressure 6.158129  leg vein pressure 3.904980  heart rate 1.047384  sympathetic traffic 0.016483  filtration 2.342035  urine 0.015786  wall power 38216.953770  aortic flow 0.000000
+         403.022757 ms  arterial pressure 109.417396  right atrial pressure 3.252423  portal vein pressure 5.910982  leg vein pressure 4.252114  heart rate 1.004767  sympathetic traffic 0.012387  filtration 2.405432  urine 0.015786  wall power 14003.499405  aortic flow 0.000000
+         504.258003 ms  arterial pressure 100.951074  right atrial pressure 1.517484  portal vein pressure 5.658394  leg vein pressure 3.951843  heart rate 0.970402  sympathetic traffic 0.023270  filtration 2.343725  urine 0.015786  wall power 11997.268313  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.050732  right atrial pressure 0.922101  portal vein pressure 5.367241  leg vein pressure 3.258118  heart rate 0.947688  sympathetic traffic 0.075204  filtration 2.189160  urine 0.015786  wall power 8625.224992  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.067502  right atrial pressure 0.844003  portal vein pressure 5.145296  leg vein pressure 2.684889  heart rate 0.940766  sympathetic traffic 0.262970  filtration 1.993594  urine 0.015786  wall power 6296.317052  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.633379  right atrial pressure 1.012081  portal vein pressure 5.135669  leg vein pressure 2.440226  heart rate 0.952637  sympathetic traffic 0.642936  filtration 1.781198  urine 0.015786  wall power 4912.445667  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.719445  right atrial pressure 1.262543  portal vein pressure 5.411434  leg vein pressure 2.534952  heart rate 0.982910  sympathetic traffic 0.904771  filtration 1.567550  urine 0.015786  wall power 3946.273758  aortic flow 0.000000
+        1000.440947 ms  arterial pressure 68.693980  right atrial pressure 1.495867  portal vein pressure 5.777187  leg vein pressure 2.727024  heart rate 1.021751  sympathetic traffic 0.977546  filtration 1.378176  urine 0.015786  wall power 3075.457520  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -2457,7 +2734,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(&start);
     each_beds_speciation_meets_its_forms_at_the_admitted_state(&start);
     let before = start.core.solves.get();
-    let (minute, counted, watch) = no_held_pool_moves_at_admission_or_over_the_first_minute(&start);
+    let (minute, counted, watch, branch) = the_first_minute_moves_no_held_pool_and_saves_a_branch(&start);
     let counts = Counts {
         rows: start.body.rows().len(),
         jacobian_nonzeros: start.body.sparsity().unknowns().len(),
@@ -2480,6 +2757,10 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     report += &the_held_runs_drive_scale_is_its_rest_at_every_step(&held, &held_watch);
     report += &the_held_runs_breathing_books(&held, &held_minute, &held_watch);
     report += &every_link_moves_its_reader_the_way_the_loop_needs(&start, &watch, &held_watch);
+    let core = ng_solver::Core::new(LONGEST_STEP);
+    let (asleep, asleep_watch, head) = the_sleeping_branch(&start, &branch, &core, &watch);
+    report += &sleep_lowers_ventilation_and_raises_arterial_carbon_dioxide(&asleep_watch, &watch, head);
+    report += &the_sleeping_branchs_breathing_books(&start, &asleep, &asleep_watch);
     the_lining_moves_research_11s_form_over_the_first_minute(&start, &minute);
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
@@ -2498,7 +2779,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         highest alveolar oxygen 102.524 (4.101 times P50) at 2.024 s: plasma oxygen pressure 100.886 (4.035 times P50), bound 0.971026 of capacity
         work of breathing: stated 5331.3, over two whole breaths from 49.687 s 5367.6
         alveolar water over whole breaths from 20.091 s: 1.02166 of the saturated vapour share
-        drive scale at admission 1.007406222041; over the first beat, to 0.998962223 s, 0.999997735918 by the trapezoid and 1.000013756971 from the set points
+        drive scale at admission 1.007406222041; over the first beat, to 0.998962223 s, 0.999997735913 by the trapezoid and 1.000013756971 from the set points
         Energy: worst 1.5287e3, from admission 7.0243e0, steady 1.5296e3, inside a breath 7.6119e2
         Element(Carbon): worst 6.6534e1, from admission 3.8811e1, steady 5.0087e1, inside a breath 2.0096e2
         Element(Oxygen): worst 1.8721e3, from admission 1.8458e3, steady 1.0175e3, inside a breath 4.4957e3
@@ -2508,7 +2789,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         Of(Vasopressin): worst 3.4251e-3, from admission 5.4883e-4, steady 3.2924e-3, inside a breath 2.0938e-2
         controlled admission: aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
         held admission: aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
-        largest difference over every row but the drive scale 8.052e-10, 8.260e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "systemic arteries", class: VesselSegment }, space: Lumen, species: Vasopressin })
+        largest difference over every row but the drive scale 8.052e-10, 8.260e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "systemic arteries", class: VesselSegment }, space: Lumen, species: Vasopressin }); over the 3 calibrated parameters 6.651e-12, 2.431e-14 of its value and 2.345e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
         held run: the drive scale is its rest's bits at all 11680 accepted steps
         held Energy: worst 1.4583e3, from admission 8.4422e0, steady 1.4594e3, inside a breath 7.3025e2
         held Element(Carbon): worst 4.6100e1, from admission 3.8271e1, steady 4.3161e1, inside a breath 2.0145e2
@@ -2524,7 +2805,19 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         the drive scale to the breath: 4.9012 s a breath against the period 5.0000 s, held 5.0001 s
         the breath to ventilation: 2234.14 a second against held 2201.44
         ventilation to alveolar carbon dioxide: 28.9237 against held 28.9602; alveolar oxygen 99.4185 against held 99.3669
-        alveolar to arterial carbon dioxide: 30.0003 against held 30.0020; arterial oxygen pressure 90.1278 against held 90.1683, saturation 0.958949 against held 0.958989
+        alveolar to arterial carbon dioxide: over the clock from 30 s to 60 s, 29.9997 s and 29.9986 s, 30.0006 against held 30.0094, by -8.739e-3 where the cut breaths reach 2.618e-3; from 25 s by -6.643e-3, from 35 s by -1.141e-2; arterial oxygen pressure 90.1228 against held 90.1065, saturation 0.958942 against held 0.958907
+        asleep from 30 s, branched at 29.991136 s; over whole breaths from 40 s to 60 s, 3 breaths asleep and 3 awake
+        asleep the drive scale 0.873901 and the breath 5.7215 s, awake 1.023836 and 4.8836 s
+        ventilation 1982.52 a second asleep against 2239.92 awake, by -2.574e2 where the cut pieces reach 5.728e0; from 35 s by -2.627e2, from 45 s by -2.535e2
+        arterial carbon dioxide over the clock, 19.9994 s and 19.9995 s, 30.1595 asleep against 30.0140 awake, by +1.456e-1 where the cut breaths reach 1.103e-2; from 35 s by +1.173e-1, from 45 s by +1.774e-1
+        alveolar carbon dioxide 29.3352 asleep against 28.9195 awake
+        asleep Energy: worst 3.4862e3 from 50.001 s to 60.001 s; from 30 s any ten seconds 3.4873e3, inside a breath 2.0459e3
+        asleep Element(Carbon): worst 3.3745e2 from 34.193 s to 44.193 s; from 30 s any ten seconds 3.3751e2, inside a breath 2.1640e2
+        asleep Element(Oxygen): worst 4.2660e3 from 31.808 s to 41.808 s; from 30 s any ten seconds 4.2625e3, inside a breath 4.6606e3
+        asleep Element(Hydrogen): worst 5.3436e-5 from 49.832 s to 59.832 s; from 30 s any ten seconds 5.3468e-5, inside a breath 3.1299e-5
+        asleep Of(NitrogenGas): worst 8.3456e3 from 34.110 s to 44.110 s; from 30 s any ten seconds 8.3450e3, inside a breath 8.9322e3
+        asleep Of(Water): worst 1.9347e-2 from 37.572 s to 47.572 s; from 30 s any ten seconds 1.9305e-2, inside a breath 2.1802e-2
+        asleep Of(Vasopressin): worst 1.4045e-2 from 35.356 s to 45.356 s; from 30 s any ten seconds 1.4187e-2, inside a breath 2.5728e-2
         two breaths from 64.316 s to 74.045 s
         Oxygen: in 4560.2375, out 3637.1692, across 899.2353, along 922.1879, gained 2.3833e1
         CarbonDioxide: in 8.6862, out 679.7044, across -667.3050, along -671.3639, gained -3.7132e0

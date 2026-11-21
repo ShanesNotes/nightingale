@@ -490,13 +490,19 @@ _Avoid_: activation (the heart's)
 At a junction that holds acetylcholine, the share of each traffic that releases it: the vagal traffic's and the pump drive's, each a site parameter. The sinoatrial junction takes the vagal traffic alone and the respiratory pump's junction the pump drive alone.
 
 **Drive scale**:
-The nervous card's factor on the breath's rate: its rest, plus the peripheral sensor's deviation and less the central sensor's, each over its width and times its gain. It is one in the admitted beat's mean, since admission solves each set point to its sensor's mean over the beat. Gains of zero hold it at its rest exactly. Only the breath's phase reads it.
+The nervous card's factor on the breath's rate: its rest, plus the peripheral sensor's deviation and less the central sensor's, each over its width and times its gain. It is one in the admitted beat's mean, since admission solves each set point to its sensor's mean over the beat. In non-REM sleep the wake drive leaves its rest and each gain falls by the gain's fall. Gains of zero hold it at its rest, less the wake drive asleep, exactly. Only the breath's phase reads it.
 
 **Central sensor**:
 The acidity blood chemistry states in the brain bed's plasma, read at the central chemoreceptor. Acidity under its set point raises the drive scale.
 
 **Peripheral sensor**:
 What the sampled systemic arteries carry to the peripheral chemoreceptor: arterial carbon dioxide over the peripheral offset, smoothed at zero, times the oxygen saturation's shortfall from one. A value over its set point raises the drive scale.
+
+**Wake drive**:
+What sleep takes from the drive scale's rest, a parameter of the nervous card. Asleep, the scale stands lower by it at the same sensor readings, as if both set points had moved. Awake, sleep reads zero and it moves nothing.
+
+**Gain's fall**:
+The share of each chemoreflex gain that sleep removes, a parameter of the nervous card between zero and one. Asleep, each arm's gain is one less the gain's fall of its awake value, so the drive scale answers each sensor less.
 
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.

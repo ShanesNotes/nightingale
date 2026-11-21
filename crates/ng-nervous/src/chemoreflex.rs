@@ -5,7 +5,8 @@ type Value<'b, 'k, U> = Expr<'b, 'k, Nervous, U>;
 
 /// The peripheral sensor is research 11's `x_p = (1 - S_a) smooth_max(PaCO2 - B_p, 0, w)` at the sampled arteries.
 /// Each set point follows its sensor slowly, as the baroreflex's does, so admission solves it to the sensor's mean
-/// over the beat and the drive scale's mean there is its rest.
+/// over the beat and the drive scale's mean there is its rest. Sleep `s` takes the wake drive `W` from the rest and
+/// lowers each arm's gain by `L s` of itself: `C = rest - W s + (1 - L s) (arms)`, research 22.
 pub(crate) fn declare<'b>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     reflex: RateClass,
@@ -27,6 +28,8 @@ pub(crate) fn declare<'b>(
     let peripheral_width =
         ns.parameter::<Deviation<Pressure>>(key("ns.peripheral-width"), Admissible::positive());
     let rest = ns.parameter::<Dimensionless>(key("ns.drive-scale-rest"), Admissible::positive());
+    let wake = ns.parameter::<Dimensionless>(key("ns.wake-drive"), Admissible::nonnegative());
+    let fall = ns.parameter::<Dimensionless>(key("ns.sleep-gain-fall"), Admissible::unit_interval());
 
     let sensors = Sensors {
         brain,
@@ -55,15 +58,19 @@ pub(crate) fn declare<'b>(
     ns.memory_rate(&peripheral, following);
 
     let residual = ns.kernel(|mut k| {
+        let (asleep, fall) = (k.asleep(), k.parameter(&fall));
+        let loss = k.scale(fall, asleep);
         let (measured, reference) = (sensors.measure(&mut k), k.state(&peripheral));
         let off = k.deviation(measured, reference);
         let (width, gain) = (k.parameter(&peripheral_width), k.parameter(&peripheral_gain));
-        let rising = arm(&mut k, off, width, gain);
+        let rising = arm(&mut k, off, width, (gain, loss));
         let (measured, reference) = (sensors.acidity(&mut k), k.state(&central));
         let off = k.deviation(measured, reference);
         let (width, gain) = (k.parameter(&central_width), k.parameter(&central_gain));
-        let falling = arm(&mut k, off, width, gain);
-        let rest = k.parameter(&rest);
+        let falling = arm(&mut k, off, width, (gain, loss));
+        let (rest, wake) = (k.parameter(&rest), k.parameter(&wake));
+        let lost = k.scale(wake, asleep);
+        let rest = k.subtract(rest, lost);
         let raised = k.add(rest, rising);
         let value = k.subtract(raised, falling);
         let held = k.algebraic(&scale);
@@ -101,9 +108,11 @@ fn arm<'b, 'k, U: Sensed>(
     k: &mut Kernel<'b, 'k, Nervous>,
     off: Value<'b, 'k, Deviation<U>>,
     width: Value<'b, 'k, Deviation<U>>,
-    gain: Value<'b, 'k, Dimensionless>,
+    (gain, loss): (Value<'b, 'k, Dimensionless>, Value<'b, 'k, Dimensionless>),
 ) -> Value<'b, 'k, Dimensionless> {
     let ratio = k.divide(off, width);
     let ratio = k.as_dimension(ratio);
+    let lowered = k.scale(gain, loss);
+    let gain = k.subtract(gain, lowered);
     k.scale(ratio, gain)
 }

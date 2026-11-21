@@ -1126,6 +1126,10 @@ pub trait CaseAssembly {
     fn compiled() -> Result<CompiledBody, AdmissionError>;
     fn packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError>;
     fn lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError>;
+    /// The lasting inputs the assembly reads, stated at the anchor for every start.
+    fn anchored(_: SimTime) -> Vec<BoundaryEvent> {
+        Vec::new()
+    }
 }
 
 pub struct Slice;
@@ -1156,7 +1160,8 @@ struct Start {
 impl<A: CaseAssembly> AssemblyCase<A> {
     pub fn new() -> Result<Self, InitializationFailure> {
         let body = A::compiled()?;
-        let solved = solve_admission(&body, A::packet(&body)?, &A::lens(&body)?, anchor_moment())?;
+        let (packet, lens) = (A::packet(&body)?, A::lens(&body)?);
+        let solved = solve_admission(&body, packet, &lens, anchor_moment(), A::anchored)?;
         Ok(Self {
             body,
             solved,
