@@ -227,6 +227,11 @@ impl<'r> ConservationView<'r> {
     pub fn basis(&self) -> &'r ConservedBasis {
         todo!()
     }
+    /// The rhythms the record's body declares, each with its phase. Not part of the basis, so one basis serves
+    /// models that declare different rhythms.
+    pub fn rhythms(&self) -> impl ExactSizeIterator<Item = (RhythmId, RowKind)> + 'r {
+        core::iter::empty()
+    }
     /// Admission to the accepted head; `None` before the first accepted step.
     pub fn span(&self) -> Option<Interval> {
         todo!()
@@ -254,6 +259,11 @@ pub struct HistorySegment {
 }
 impl HistorySegment {
     pub fn interval(&self) -> Interval {
+        todo!()
+    }
+    /// Whether the step this segment holds ends on an edge of `rhythm`, as its sealed link says. A segment takes
+    /// no edge.
+    pub fn ends_on_edge(&self, _rhythm: RhythmId) -> bool {
         todo!()
     }
     /// Polynomial family and degree of every curve in this segment.

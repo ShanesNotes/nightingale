@@ -38,6 +38,7 @@ pub struct CertificatePolicy {
     _quantities: Vec<QuantityPolicy>,
     _expected: ExpectedDrift,
     _windows: SlidingWindows,
+    _edges: Option<(EdgeWindows, Vec<EdgeRate>)>,
 }
 impl CertificatePolicy {
     /// Refuses unless every combination of the basis has exactly one entry, in basis order.
@@ -47,6 +48,13 @@ impl CertificatePolicy {
         _expected: ExpectedDrift,
         _windows: SlidingWindows,
     ) -> Result<Self, AdmissionError> {
+        todo!()
+    }
+    /// Adds windows between the edges of the rhythm `windows` names, each allowing each rated combination its rate
+    /// times the window's own length. Refuses rates that are not a subset of the basis in basis order, a settling
+    /// rate stated for some and not all, and a second call, since a policy judges one clock. A policy with none keeps the digest it had before they existed; one
+    /// with them seals every field of them.
+    pub fn between_edges(self, _windows: EdgeWindows, _rates: Vec<EdgeRate>) -> Result<Self, AdmissionError> {
         todo!()
     }
     pub fn digest(&self) -> Digest {
@@ -75,6 +83,39 @@ impl SlidingWindows {
         todo!()
     }
 }
+/// One combination's allowance between a rhythm's edges: a rate in its own units a second, which a window
+/// between edges allows times the window's own length. `settling` is the rate of a window whose opening edge
+/// comes before the policy's settling time.
+pub struct EdgeRate {
+    _quantity: QuantityId,
+    _settled: Compensated,
+    _settling: Option<Compensated>,
+}
+impl EdgeRate {
+    /// Refuses a dimension that is not what the combination balances.
+    pub fn new<U>(
+        _quantity: QuantityId,
+        _settled: Measure<Rate<U>>,
+        _settling: Option<Measure<Rate<U>>>,
+    ) -> Result<Self, AdmissionError> {
+        todo!()
+    }
+}
+/// Windows between the edges of the rhythm whose phase is `clock`, named by its row as a paced cycle names its
+/// clock. Every edge from `settling_ns` after admission on opens one window, which closes at the first edge at
+/// least `length_ns` later. No stretch with no edge, from admission to the first edge and from the last window's
+/// close, or from admission when none closed, to the head included, may pass `widest_ns`.
+pub struct EdgeWindows {
+    _clock: RowKind,
+    _settling_ns: u64,
+    _length_ns: NonZeroU64,
+    _widest_ns: u64,
+}
+impl EdgeWindows {
+    pub fn new(_clock: RowKind, _settling_ns: u64, _length_ns: NonZeroU64, _widest_ns: u64) -> Self {
+        todo!()
+    }
+}
 pub struct Certificate {
     _seal: HistorySeal,
     _basis: Digest,
@@ -84,6 +125,16 @@ pub struct Certificate {
     /// Gross inflow and outflow on each held route per window, from the route's own curves
     /// (`HistorySegment::held_inflow`, `held_outflow`), in `CoverageManifest::held_routes` order.
     _held_support: Vec<(HeldRouteId, f64, f64)>,
+    _rhythm: Option<RhythmResult>,
+}
+/// What the windows between one rhythm's edges found, to the head: how many were judged, each rated
+/// combination's worst window with its change and its allowance, the widest stretch with no edge, and the close
+/// of the last window judged, from which the tail is measured.
+pub struct RhythmResult {
+    _judged: u64,
+    _results: Vec<(QuantityId, Compensated, Compensated, Interval)>,
+    _widest: Interval,
+    _last_close: Option<SimTime>,
 }
 impl Certificate {
     pub fn seal(&self) -> HistorySeal {
@@ -100,6 +151,11 @@ impl Certificate {
     }
     /// How many stretches of window starts the walk covered, so a run that checked nothing shows zero.
     pub fn pieces(&self) -> u64 {
+        todo!()
+    }
+    /// The windows between a rhythm's edges, where the policy states them. A certificate with none prints as it
+    /// did before they existed.
+    pub fn rhythm(&self) -> Option<&RhythmResult> {
         todo!()
     }
 }
@@ -121,6 +177,12 @@ pub enum CertificateCheck {
     Coverage,
     /// a link the store did not give, or one that does not chain to the seal that asked for it
     History(CheckpointError),
+    /// inventory change over a window between a rhythm's edges, past its rate times the window's length
+    EdgeDrift,
+    /// a stretch with no edge, or from the last window's close to the head, longer than the policy allows
+    RhythmStopped,
+    /// a clock the policy names whose phase the record's body declares no rhythm of
+    UndeclaredRhythm,
 }
 pub struct CertificateFailure {
     _check: CertificateCheck,
@@ -131,7 +193,11 @@ pub struct CertificateFailure {
 /// Pure by construction of its inputs: one sealed history view and policy data. Window starts
 /// include every accepted segment boundary and its shift by one window; inside a segment the Bernstein
 /// coefficients bound interior extrema of the closure and drift differences. Closure failures win
-/// over drift, so a `Drift` failure says the ledger closed everywhere and the body still moved. It
+/// over drift, so a `Drift` failure says the ledger closed everywhere and the body still moved. The
+/// windows between a rhythm's edges rank after every fixed window: a stretch with no edge past its
+/// bound, then a window between edges past its allowance, by earliest close, then oldest opening,
+/// then basis order. A clock the body declares no rhythm of is refused by name after the basis
+/// check, before any link is read. It
 /// walks the store newest first and reports what a walk in time order would: the earliest failing
 /// window, and the earliest of equal worst windows.
 pub fn certify(_view: &ConservationView<'_>, _policy: &CertificatePolicy) -> Result<Certificate, CertificateFailure> {

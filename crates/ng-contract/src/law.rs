@@ -2676,6 +2676,13 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             resets: guard.resets,
         });
     }
+    /// Declares `phase` a rhythm's phase: each accepted step end at which a guard's landing resets it is one of the
+    /// rhythm's edges, and the record seals each edge. A fragment that never calls this declares no rhythm and adds
+    /// nothing to its body's model hash. Compile refuses a phase no guard resets, a phase declared twice and a phase
+    /// a hazard integrates.
+    pub fn rhythm(&mut self, phase: &StateSlot<'b, O, Dimensionless>) {
+        self.data.rhythms.push(phase.name);
+    }
     pub fn hazard(&mut self, guard: HazardGuard<'b, O>) {
         self.data.hazards.push(HazardDeclaration {
             integral: guard.integral,
@@ -2711,6 +2718,7 @@ pub(crate) struct FragmentData {
     pub(crate) streams: Vec<&'static str>,
     pub(crate) forcings: Vec<ForcingDeclaration>,
     pub(crate) hazards: Vec<HazardDeclaration>,
+    pub(crate) rhythms: Vec<&'static str>,
     pub(crate) validity: Vec<(u32, Validity)>,
     pub(crate) closed: Vec<&'static str>,
     pub(crate) reflections: Vec<(Family, Species, ParameterKey)>,
@@ -2741,6 +2749,7 @@ impl FragmentData {
             streams: Vec::new(),
             forcings: Vec::new(),
             hazards: Vec::new(),
+            rhythms: Vec::new(),
             validity: Vec::new(),
             closed: Vec::new(),
             reflections: Vec::new(),

@@ -595,6 +595,36 @@
 //! use solver_contract_sketch::ng_contract::*;
 //! fn read(parts: &ImageParts) -> PacketHash { parts.parameters().packet_hash() }
 //! ```
+//!
+//! A policy names a rhythm by its phase's row, so one policy serves every model of its basis, never by
+//! the number one body gave it.
+//! ```compile_fail,E0308
+//! use solver_contract_sketch::ng_contract::*;
+//! use solver_contract_sketch::ng_validate::EdgeWindows;
+//! fn by_body(rhythm: RhythmId, length: core::num::NonZeroU64) -> EdgeWindows {
+//!     EdgeWindows::new(rhythm, 0, length, 0)
+//! }
+//! ```
+//! Legal twin: by its phase.
+//! ```
+//! use solver_contract_sketch::ng_contract::*;
+//! use solver_contract_sketch::ng_validate::EdgeWindows;
+//! fn by_phase(phase: RowKind, length: core::num::NonZeroU64) -> EdgeWindows {
+//!     EdgeWindows::new(phase, 0, length, 0)
+//! }
+//! ```
+//!
+//! A segment says whether it ends on an edge and takes none: an edge comes only from the selected
+//! step's own firing.
+//! ```compile_fail,E0599
+//! use solver_contract_sketch::{ng_contract::RhythmId, ng_record::HistorySegment};
+//! fn mark(segment: &mut HistorySegment, rhythm: RhythmId) { segment.mark_edge(rhythm) }
+//! ```
+//! Legal twin: it is read.
+//! ```
+//! use solver_contract_sketch::{ng_contract::RhythmId, ng_record::HistorySegment};
+//! fn read(segment: &HistorySegment, rhythm: RhythmId) -> bool { segment.ends_on_edge(rhythm) }
+//! ```
 
 #![forbid(unsafe_code)]
 #![doc = include_str!("../../solver-contract.md")]

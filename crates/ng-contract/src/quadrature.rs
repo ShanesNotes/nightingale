@@ -4,8 +4,8 @@ use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::{Estimate, Stage};
 use crate::{
     Candidate, Compensated, CompiledBody, CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind,
-    ErrorScales, InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RowId, SimTime,
-    StageSet, StepTicket, TrialFailure, ValidityExcursion,
+    ErrorScales, InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RhythmId, RowId,
+    SimTime, StageSet, StepTicket, TrialFailure, ValidityExcursion,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -411,6 +411,7 @@ impl StepProposal {
                 end: state.values(),
             },
             fired: Vec::new(),
+            rhythm_edges: Vec::new(),
             state,
             continuation: history,
             forward: extents.forward,
@@ -484,6 +485,7 @@ pub struct VerifiedStep {
     reverse: Vec<Compensated>,
     excursions: Vec<ValidityExcursion>,
     fired: Vec<Fired>,
+    rhythm_edges: Vec<RhythmId>,
 }
 pub struct VerifiedParts {
     pub state: Candidate,
@@ -491,6 +493,7 @@ pub struct VerifiedParts {
     pub dense: DenseSegment,
     pub excursions: Vec<ValidityExcursion>,
     pub fired: Vec<Fired>,
+    pub rhythm_edges: Vec<RhythmId>,
 }
 impl VerifiedStep {
     pub fn ticket(&self) -> &StepTicket {
@@ -515,13 +518,14 @@ impl VerifiedStep {
     /// with no value there refuses the trial, and a range is judged on both sides of the instant.
     pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Result<Self, TrialFailure> {
         let at = self.ticket.interval().end();
-        let (state, fired) = problem.fired(&self.ticket, self.state, at)?;
+        let (state, fired, rhythm_edges) = problem.fired(&self.ticket, self.state, at)?;
         let values = problem.values_after_firing(&self.ticket, &state)?;
         let mut excursions = self.excursions;
         excursions.extend(problem.body.excursions(&values, &state.coordinates(), at));
         Ok(Self {
             state,
             fired,
+            rhythm_edges,
             excursions,
             ..self
         })
@@ -536,6 +540,7 @@ impl VerifiedStep {
             reverse: _,
             excursions,
             fired,
+            rhythm_edges,
         } = self;
         VerifiedParts {
             state,
@@ -543,6 +548,7 @@ impl VerifiedStep {
             dense,
             excursions,
             fired,
+            rhythm_edges,
         }
     }
 }

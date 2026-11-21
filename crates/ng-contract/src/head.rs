@@ -1,8 +1,8 @@
 use crate::{
     AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate, CompiledBody,
     CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind, ImageParts, InitialRevision,
-    MethodHistory, NumericalRefusal, RecordHash, RunIdentity, SimTime, StepExtents, StepProposal, StepTicket,
-    TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
+    MethodHistory, NumericalRefusal, RecordHash, RhythmId, RunIdentity, SimTime, StepExtents, StepProposal,
+    StepTicket, TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +134,7 @@ impl AcceptedHead {
             dense,
             excursions,
             fired,
+            rhythm_edges,
         } = step.into_parts();
         let digest = HeadDigest {
             image: self.hash.image(time, &state, &continuation, &dense, &applied),
@@ -149,6 +150,7 @@ impl AcceptedHead {
             digest,
             after_breakpoint,
             excursions,
+            rhythm_edges,
             extents: StepExtents {
                 run: identity.digest(),
                 start: self.digest,
@@ -174,6 +176,7 @@ impl AcceptedHead {
             digest,
             after_breakpoint: _,
             excursions: _,
+            rhythm_edges: _,
             extents,
         } = next;
         let from_admission = digest.from_admission && known == self.parts.pending.known();
@@ -202,6 +205,7 @@ pub struct NextHead {
     digest: HeadDigest,
     after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
+    rhythm_edges: Vec<RhythmId>,
     extents: StepExtents,
 }
 impl NextHead {
@@ -213,5 +217,9 @@ impl NextHead {
     }
     pub fn excursions(&self) -> &[ValidityExcursion] {
         &self.excursions
+    }
+    /// Each rhythm whose phase this step's firing reset, in `RhythmId` order: the step ends on an edge of each.
+    pub fn rhythm_edges(&self) -> &[RhythmId] {
+        &self.rhythm_edges
     }
 }

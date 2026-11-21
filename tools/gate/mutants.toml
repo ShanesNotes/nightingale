@@ -4886,3 +4886,281 @@ new = '''
         let pace = k.parameter(&fast);
 '''
 test = "-p ng-validate --test chemoreflex a_tenth_more_carbon_dioxide_made_raises_its_pressure_by_a_tenth_over_one_and_the_loops_gain"
+
+[[mutant]]
+name = "rhythm-sealed-after-the-basis"
+path = "crates/ng-contract/src/body.rs"
+old = '''
+        if !rhythms.is_empty() {
+            out.number(u64::MAX);
+            rhythms.seal(out);
+        }
+        basis.seal(out);
+'''
+new = '''
+        basis.seal(out);
+        if !rhythms.is_empty() {
+            out.number(u64::MAX);
+            rhythms.seal(out);
+        }
+'''
+test = "-p ng-contract --lib conservation::tests::a_declared_rhythm_enters_the_model_hash_before_the_basis_so_the_held_cards_still_end_its_stream"
+
+[[mutant]]
+name = "no-rhythm-still-tags-the-model-hash"
+path = "crates/ng-contract/src/body.rs"
+old = '''if !rhythms.is_empty() {'''
+new = '''if true {'''
+test = "-p ng-validate --test trace the_slices_model_hash_and_conserved_basis_stay_where_they_were"
+
+[[mutant]]
+name = "every-reset-phase-a-rhythm"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+    rhythms.sort_unstable();
+    Ok(rhythms)
+'''
+new = '''
+    rhythms.extend(guards.iter().filter_map(|guard| guard.resets));
+    rhythms.sort_unstable();
+    rhythms.dedup();
+    Ok(rhythms)
+'''
+test = "-p ng-validate --test rhythm_history a_body_that_declares_no_rhythm_writes_its_old_links_and_one_that_does_adds_its_edges_to_each"
+
+[[mutant]]
+name = "unreset-rhythm-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if at.is_empty() || !at.iter().all(reset) {'''
+new = '''if at.is_empty() {'''
+test = "-p ng-validate --test rhythm_history compile_refuses_a_rhythm_whose_phase_no_guard_resets_one_declared_twice_and_one_a_hazard_integrates"
+
+[[mutant]]
+name = "rhythm-declared-twice-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if fragment.rhythms[..declared].contains(&local) {'''
+new = '''if false {'''
+test = "-p ng-validate --test rhythm_history compile_refuses_a_rhythm_whose_phase_no_guard_resets_one_declared_twice_and_one_a_hazard_integrates"
+
+[[mutant]]
+name = "a-reset-gives-no-edge"
+path = "crates/ng-contract/src/problem.rs"
+old = '''edges.extend(self.body.layout.rhythm_of(row));'''
+new = ''''''
+test = "-p ng-validate --test rhythm_history each_edge_is_sealed_where_the_selected_landing_reset_the_phase_and_reads_back_from_every_link_and_a_resume"
+
+[[mutant]]
+name = "two-resets-two-edges"
+path = "crates/ng-contract/src/problem.rs"
+old = '''
+        edges.sort_unstable();
+        edges.dedup();
+'''
+new = '''
+        edges.sort_unstable();
+'''
+test = "-p ng-validate --test rhythm_history two_guards_that_reset_the_phase_in_one_firing_seal_one_edge"
+
+[[mutant]]
+name = "edge-left-off-its-link"
+path = "crates/ng-record/src/record.rs"
+old = '''.linked(chunk.edged(head.rhythm_edges()), head.image_digest());'''
+new = '''.linked(chunk, head.image_digest());'''
+test = "-p ng-validate --test rhythm_history each_edge_is_sealed_where_the_selected_landing_reset_the_phase_and_reads_back_from_every_link_and_a_resume"
+
+[[mutant]]
+name = "every-segment-ends-on-an-edge"
+path = "crates/ng-record/src/history.rs"
+old = '''.is_some_and(|&[start, end]| end > start)'''
+new = '''.is_some_and(|&[start, end]| end >= start)'''
+test = "-p ng-validate --test rhythm_history each_edge_is_sealed_where_the_selected_landing_reset_the_phase_and_reads_back_from_every_link_and_a_resume"
+
+[[mutant]]
+name = "edge-windows-take-every-segment-as-an-edge"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if !segment.ends_on_edge(self.rhythm) {'''
+new = '''if segment.interval().end().nanoseconds() == 0 {'''
+test = "-p ng-validate --test rhythm_certificate a_nitrogen_gas_leak_of_20_a_second_is_refused_between_edges_at_either_pace_and_either_sign"
+
+[[mutant]]
+name = "edge-clock-takes-any-declared-rhythm"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let declared = view.rhythms().find(|&(_, phase)| phase == clock);'''
+new = '''let declared = view.rhythms().next();'''
+test = "-p ng-validate --test rhythm_certificate one_policy_resolves_its_clock_where_a_model_declares_it_and_refuses_it_by_name_where_one_does_not"
+
+[[mutant]]
+name = "undeclared-clock-refused-as-coverage"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let undeclared = of_history(CertificateCheck::UndeclaredRhythm);'''
+new = '''let undeclared = of_history(CertificateCheck::Coverage);'''
+test = "-p ng-validate --test rhythm_certificate one_policy_resolves_its_clock_where_a_model_declares_it_and_refuses_it_by_name_where_one_does_not"
+
+[[mutant]]
+name = "edge-window-closes-past-its-length"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''.take_while(|(opened, _)| at - opened >= length)'''
+new = '''.take_while(|(opened, _)| at - opened > length)'''
+test = "-p ng-validate --test rhythm_certificate two_openings_that_mature_on_one_edge_are_each_judged_and_only_the_older_refuses_a_leak_it_alone_holds"
+
+[[mutant]]
+name = "edge-close-judges-only-the-youngest-opening"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let closed: Vec<_> = self.open.drain(..closing).collect();'''
+new = '''let closed: Vec<_> = self.open.drain(..closing).rev().take(1).collect();'''
+test = "-p ng-validate --test rhythm_certificate two_openings_that_mature_on_one_edge_are_each_judged_and_only_the_older_refuses_a_leak_it_alone_holds"
+
+[[mutant]]
+name = "edge-values-before-the-edges-step"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''inventory.and_then(|ends| ends.last().copied())'''
+new = '''inventory.and_then(|ends| ends.first().copied())'''
+test = "-p ng-validate --test rhythm_certificate an_amount_the_opening_step_books_cancels_and_one_the_closing_step_books_counts_once"
+
+[[mutant]]
+name = "edge-allowance-whole-seconds-only"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let allowance = per_second.scaled(whole).plus(rest);'''
+new = '''let allowance = per_second.scaled(whole);'''
+test = "-p ng-validate --test rhythm_certificate a_windows_allowance_is_its_rate_times_its_whole_seconds_and_its_part_second"
+
+[[mutant]]
+name = "edge-allowance-on-the-policys-length"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let length = window.length_ns();'''
+new = '''let length = self.limits.windows.length_ns.get();'''
+test = "-p ng-validate --test rhythm_certificate a_nitrogen_gas_leak_of_20_a_second_is_refused_between_edges_at_either_pace_and_either_sign"
+
+[[mutant]]
+name = "edge-worst-by-change-alone"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if !change.minus(allowance).at_most(held.change.minus(held.allowance)) {'''
+new = '''if !change.at_most(held.change) {'''
+test = "-p ng-validate --test rhythm_certificate the_worst_result_kept_is_the_window_furthest_past_its_allowance_not_the_largest_change"
+
+[[mutant]]
+name = "edge-tail-from-the-last-edge"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''self.stretch(self.last_close.unwrap_or(self.admission), head);'''
+new = '''self.stretch(self.since, head);'''
+test = "-p ng-validate --test rhythm_certificate the_tail_runs_from_the_last_close_judged_and_not_from_the_last_edge"
+
+[[mutant]]
+name = "edge-stretch-at-its-bound-fails"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if stretch.length_ns() > self.limits.windows.widest_ns && self.stopped.is_none() {'''
+new = '''if stretch.length_ns() >= self.limits.windows.widest_ns && self.stopped.is_none() {'''
+test = "-p ng-validate --test rhythm_certificate the_tail_runs_from_the_last_close_judged_and_not_from_the_last_edge"
+
+[[mutant]]
+name = "edge-widest-of-equal-is-the-latest"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''.is_none_or(|widest| stretch.length_ns() > widest.length_ns())'''
+new = '''.is_none_or(|widest| stretch.length_ns() >= widest.length_ns())'''
+test = "-p ng-validate --test rhythm_certificate an_amount_the_opening_step_books_cancels_and_one_the_closing_step_books_counts_once"
+
+[[mutant]]
+name = "edge-rate-of-the-closing-stretch"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let settled = opened - self.admission >= self.limits.windows.settling_ns;'''
+new = '''let settled = at - self.admission >= self.limits.windows.settling_ns;'''
+test = "-p ng-validate --test rhythm_certificate a_window_takes_the_rate_of_the_stretch_its_opening_edge_is_in"
+
+[[mutant]]
+name = "every-edge-opens-a-window"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if self.early || at - self.admission >= self.limits.windows.settling_ns {'''
+new = '''if true {'''
+test = "-p ng-validate --test rhythm_certificate a_leak_before_the_settling_time_is_judged_only_where_the_policy_states_a_rate_for_that_stretch"
+
+[[mutant]]
+name = "edge-drift-before-a-stopped-rhythm"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if let Some(failure) = self.stopped.or(self.drifted) {'''
+new = '''if let Some(failure) = self.drifted.or(self.stopped) {'''
+test = "-p ng-validate --test rhythm_certificate a_fixed_drift_outranks_a_stopped_rhythm_which_outranks_an_earlier_drift_between_edges"
+
+[[mutant]]
+name = "edge-windows-end-with-the-fixed-windows"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''        for segment in late {'''
+new = '''        for segment in late.take(0) {'''
+test = "-p ng-validate --test rhythm_certificate the_fixed_windows_judge_as_they_did_and_the_windows_between_edges_run_to_the_head_past_one_fixed_window"
+
+[[mutant]]
+name = "edge-windows-read-from-the-fixed-late-start"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''        Some(_) => order.from(span.start()),'''
+new = '''        Some(_) => order.from(SimTime::from_ns(first + length)),'''
+test = "-p ng-validate --test rhythm_certificate a_fixed_drift_outranks_a_stopped_rhythm_which_outranks_an_earlier_drift_between_edges"
+
+[[mutant]]
+name = "certificate-prints-an-absent-rhythm"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''
+        if let Some(rhythm) = rhythm {
+            out.field("rhythm", rhythm);
+'''
+new = '''
+        {
+            out.field("rhythm", rhythm);
+'''
+test = "-p ng-validate --test rhythm_certificate a_certificate_prints_as_its_derive_did_and_adds_its_rhythm_only_where_one_was_judged"
+
+[[mutant]]
+name = "edge-clock-left-out-of-the-policy-digest"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''bytes.extend_from_slice(clock.digest().as_bytes());'''
+new = '''bytes.extend_from_slice(&[0; 32]);'''
+test = "-p ng-validate --test rhythm_certificate a_fixed_policy_keeps_its_old_digest_and_each_field_of_the_windows_between_edges_moves_it"
+
+[[mutant]]
+name = "hazard-rhythm-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if fragment.hazards.iter().any(|hazard| hazard.integral == local) {'''
+new = '''if false {'''
+test = "-p ng-validate --test rhythm_history compile_refuses_a_rhythm_whose_phase_no_guard_resets_one_declared_twice_and_one_a_hazard_integrates"
+
+[[mutant]]
+name = "edge-early-by-all"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''early: limits.rates.iter().any(|rate| rate.settling.is_some()),'''
+new = '''early: limits.rates.iter().all(|rate| rate.settling.is_some()),'''
+test = "-p ng-validate --test rhythm_certificate an_empty_rate_list_opens_no_window_before_the_settling_time"
+
+[[mutant]]
+name = "edge-tail-from-the-last-edge-when-none-closed"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''self.stretch(self.last_close.unwrap_or(self.admission), head);'''
+new = '''self.stretch(self.last_close.unwrap_or(self.since), head);'''
+test = "-p ng-validate --test rhythm_certificate a_run_in_which_no_window_closed_is_one_stretch_from_admission_to_the_head"
+
+[[mutant]]
+name = "edge-close-judges-only-the-oldest-opening"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let closed: Vec<_> = self.open.drain(..closing).collect();'''
+new = '''let closed: Vec<_> = self.open.drain(..closing).take(1).collect();'''
+test = "-p ng-validate --test rhythm_certificate two_openings_that_mature_on_one_edge_are_each_judged_and_only_the_older_refuses_a_leak_it_alone_holds"
+
+[[mutant]]
+name = "edge-rate-quantity-left-out-of-the-policy-digest"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''bytes.extend_from_slice(&(quantity.index() as u64).to_be_bytes());'''
+new = '''let _ = quantity;'''
+test = "-p ng-validate --test rhythm_certificate a_fixed_policy_keeps_its_old_digest_and_each_field_of_the_windows_between_edges_moves_it"
+
+[[mutant]]
+name = "edge-clock-place-left-out-of-the-policy-digest"
+path = "crates/ng-contract/src/body.rs"
+old = '''        let mut out = Canonical::new("slot");
+        self.seal(&mut out);'''
+new = '''        let mut out = Canonical::new("slot");
+        self.law.seal(&mut out);'''
+test = "-p ng-validate --test rhythm_certificate a_fixed_policy_keeps_its_old_digest_and_each_field_of_the_windows_between_edges_moves_it"
+
+[[mutant]]
+name = "a-second-clock-replaces-the-first"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if self.edges.is_some() || !ordered ||'''
+new = '''if !ordered ||'''
+test = "-p ng-validate --test rhythm_certificate a_policy_refuses_a_second_clock"

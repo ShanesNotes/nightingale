@@ -1,9 +1,13 @@
+use core::fmt;
 use core::num::NonZeroU64;
 use ng_contract::{
     AdmissionError, Atoms, Book, BoundaryDirection, Charge, Compensated, CompiledBody, ConservedBasis,
-    CoverageManifest, Digest, Dimensionless, HeldRoute, Interval, Measure, QuantityId, SimTime, Substance,
+    CoverageManifest, Digest, Dimensionless, HeldRoute, Interval, Measure, QuantityId, Rate, RhythmId,
+    SimTime, Slot, Substance,
 };
 use ng_record::{CheckpointError, ConservationView, Curve, HistorySeal, HistorySegment, OldestFirst};
+
+const SECOND: u64 = 1_000_000_000;
 
 /// One combination's limits. `absolute + relative * gross exchange in the window` bounds closure, so a tiny
 /// exchange needs a tiny residual. `drift` stands in for 1.96 times the within-subject variation until the
@@ -97,12 +101,89 @@ impl SlidingWindows {
         self.coverage_ns
     }
 }
+/// One conserved quantity's allowance between a rhythm's edges: a rate in its own units a second, which a window
+/// between edges allows times the window's own length. `settling` is the rate of a window whose opening edge comes
+/// before the policy's settling time.
+#[derive(Clone, Copy, Debug)]
+pub struct EdgeRate {
+    quantity: QuantityId,
+    settled: Compensated,
+    settling: Option<Compensated>,
+}
+impl EdgeRate {
+    /// Refuses a dimension that is not what the combination balances.
+    pub fn new<U: Substance>(
+        quantity: QuantityId,
+        settled: Measure<Rate<U>>,
+        settling: Option<Measure<Rate<U>>>,
+    ) -> Result<Self, AdmissionError> {
+        if !quantity.book().measures::<U>() {
+            return Err(AdmissionError::QuantityDimension { quantity });
+        }
+        Ok(Self::of(quantity, &settled, settling.as_ref()))
+    }
+    /// Refuses a combination that is not an element's atoms.
+    pub fn element(
+        quantity: QuantityId,
+        settled: Measure<Rate<Atoms>>,
+        settling: Option<Measure<Rate<Atoms>>>,
+    ) -> Result<Self, AdmissionError> {
+        if !quantity.book().measures::<Atoms>() {
+            return Err(AdmissionError::QuantityDimension { quantity });
+        }
+        Ok(Self::of(quantity, &settled, settling.as_ref()))
+    }
+    fn of<U>(quantity: QuantityId, settled: &Measure<U>, settling: Option<&Measure<U>>) -> Self {
+        Self {
+            quantity,
+            settled: Compensated::of(settled),
+            settling: settling.map(Compensated::of),
+        }
+    }
+}
+/// Windows between the edges of the rhythm whose phase is `clock`. Every edge from `settling_ns` after admission on
+/// opens one window, which closes at the first edge at least `length_ns` later. No stretch with no edge, from
+/// admission to the first edge and from the last window's close to the head included, may pass `widest_ns`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EdgeWindows {
+    clock: Slot,
+    settling_ns: u64,
+    length_ns: NonZeroU64,
+    widest_ns: u64,
+}
+impl EdgeWindows {
+    pub fn new(clock: Slot, settling_ns: u64, length_ns: NonZeroU64, widest_ns: u64) -> Self {
+        Self {
+            clock,
+            settling_ns,
+            length_ns,
+            widest_ns,
+        }
+    }
+    pub fn clock(&self) -> Slot {
+        self.clock
+    }
+    pub fn settling_ns(&self) -> u64 {
+        self.settling_ns
+    }
+    pub fn length_ns(&self) -> NonZeroU64 {
+        self.length_ns
+    }
+    pub fn widest_ns(&self) -> u64 {
+        self.widest_ns
+    }
+}
+struct EdgePolicy {
+    windows: EdgeWindows,
+    rates: Vec<EdgeRate>,
+}
 pub struct CertificatePolicy {
     basis: Digest,
     quantities: Vec<QuantityPolicy>,
     expected: ExpectedDrift,
     windows: SlidingWindows,
     rounding: RowRounding,
+    edges: Option<EdgePolicy>,
 }
 struct RowRounding {
     last_places_an_update: u64,
@@ -130,7 +211,24 @@ impl CertificatePolicy {
             expected,
             windows,
             rounding,
+            edges: None,
         })
+    }
+    /// Adds windows between the edges of the rhythm `windows` names, each allowing each rated quantity its rate times
+    /// the window's own length. Refuses rates that are not a subset of the basis in basis order, a rate before the
+    /// settling time stated for some quantities and not for others, and a second call, since a policy judges one
+    /// clock.
+    pub fn between_edges(self, windows: EdgeWindows, rates: Vec<EdgeRate>) -> Result<Self, AdmissionError> {
+        let mut held = self.quantities.iter().map(|limits| limits.quantity);
+        let ordered = rates
+            .iter()
+            .all(|rate| held.any(|quantity| quantity == rate.quantity));
+        let settling = rates.iter().filter(|rate| rate.settling.is_some()).count();
+        if self.edges.is_some() || !ordered || (settling != 0 && settling != rates.len()) {
+            return Err(AdmissionError::PolicyCoverage);
+        }
+        let edges = Some(EdgePolicy { windows, rates });
+        Ok(Self { edges, ..self })
     }
     /// Each closure may also be `per_update` last places of its combination's total at the window's late end for each
     /// row update the window's accepted steps make in that combination, counted from `body`'s columns. That bounds
@@ -174,6 +272,7 @@ impl CertificatePolicy {
                     last_places_an_update,
                     updates_a_step,
                 },
+            edges,
         } = self;
         let mut bytes = basis.as_bytes().to_vec();
         bytes.extend_from_slice(&last_places_an_update.to_be_bytes());
@@ -196,6 +295,41 @@ impl CertificatePolicy {
             for value in [*absolute, Compensated::of(relative)].into_iter().chain(*drift) {
                 for limb in value.bits() {
                     bytes.extend_from_slice(&limb.to_be_bytes());
+                }
+            }
+        }
+        // A policy with no windows between edges adds nothing, so its digest is the one it had before they existed.
+        if let Some(EdgePolicy {
+            windows:
+                EdgeWindows {
+                    clock,
+                    settling_ns,
+                    length_ns,
+                    widest_ns,
+                },
+            rates,
+        }) = edges
+        {
+            bytes.extend_from_slice(clock.digest().as_bytes());
+            for number in [*settling_ns, length_ns.get(), *widest_ns, rates.len() as u64] {
+                bytes.extend_from_slice(&number.to_be_bytes());
+            }
+            for EdgeRate {
+                quantity,
+                settled,
+                settling,
+            } in rates
+            {
+                bytes.extend_from_slice(&(quantity.index() as u64).to_be_bytes());
+                let stated = [Some(*settled), *settling];
+                for value in stated {
+                    let limbs = value.map_or([0, 0, 0], |value| {
+                        let [hi, lo] = value.bits();
+                        [1, hi, lo]
+                    });
+                    for limb in limbs {
+                        bytes.extend_from_slice(&limb.to_be_bytes());
+                    }
                 }
             }
         }
@@ -279,7 +413,60 @@ impl HeldSupport {
         self.outflow_window
     }
 }
-#[derive(Debug)]
+/// The window between edges where one rated quantity came nearest its allowance, or passed it by most, the
+/// earliest of equal: its change, as a magnitude, and the rate times its length it was allowed.
+#[derive(Clone, Copy, Debug)]
+pub struct EdgeResult {
+    quantity: QuantityId,
+    change: Compensated,
+    allowance: Compensated,
+    window: Interval,
+}
+impl EdgeResult {
+    pub fn quantity(&self) -> QuantityId {
+        self.quantity
+    }
+    pub fn change(&self) -> Compensated {
+        self.change
+    }
+    pub fn allowance(&self) -> Compensated {
+        self.allowance
+    }
+    pub fn window(&self) -> Interval {
+        self.window
+    }
+}
+/// What the windows between one rhythm's edges found, to the head.
+#[derive(Clone, Debug)]
+pub struct RhythmResult {
+    windows: EdgeWindows,
+    judged: u64,
+    results: Vec<EdgeResult>,
+    widest: Interval,
+    last_close: Option<SimTime>,
+}
+impl RhythmResult {
+    pub fn windows(&self) -> EdgeWindows {
+        self.windows
+    }
+    /// How many windows between edges were judged.
+    pub fn judged(&self) -> u64 {
+        self.judged
+    }
+    /// One per rated quantity in basis order, or none when no window was judged.
+    pub fn results(&self) -> &[EdgeResult] {
+        &self.results
+    }
+    /// The widest stretch with no edge, from admission to the first edge and from the last close to the head
+    /// included, the earliest of equal.
+    pub fn widest(&self) -> Interval {
+        self.widest
+    }
+    /// The close of the last window judged, from which the tail is measured.
+    pub fn last_close(&self) -> Option<SimTime> {
+        self.last_close
+    }
+}
 pub struct Certificate {
     seal: HistorySeal,
     basis: Digest,
@@ -290,6 +477,38 @@ pub struct Certificate {
     coverage: CoverageManifest,
     support: Vec<HeldSupport>,
     pieces: u64,
+    rhythm: Option<RhythmResult>,
+}
+/// Prints as the derive did before a certificate could hold a rhythm, and adds the rhythm where one was judged.
+impl fmt::Debug for Certificate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            seal,
+            basis,
+            policy,
+            windows,
+            span,
+            results,
+            coverage,
+            support,
+            pieces,
+            rhythm,
+        } = self;
+        let mut out = f.debug_struct("Certificate");
+        out.field("seal", seal)
+            .field("basis", basis)
+            .field("policy", policy)
+            .field("windows", windows)
+            .field("span", span)
+            .field("results", results)
+            .field("coverage", coverage)
+            .field("support", support)
+            .field("pieces", pieces);
+        if let Some(rhythm) = rhythm {
+            out.field("rhythm", rhythm);
+        }
+        out.finish()
+    }
 }
 impl Certificate {
     pub fn seal(&self) -> HistorySeal {
@@ -322,6 +541,10 @@ impl Certificate {
     pub fn pieces(&self) -> u64 {
         self.pieces
     }
+    /// The windows between a rhythm's edges, where the policy states them.
+    pub fn rhythm(&self) -> Option<&RhythmResult> {
+        self.rhythm.as_ref()
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CertificateCheck {
@@ -333,6 +556,12 @@ pub enum CertificateCheck {
     Coverage,
     /// a link the store did not give, or one that does not chain to the seal that asked for it
     History(CheckpointError),
+    /// inventory change over a window between a rhythm's edges, past its rate times the window's length
+    EdgeDrift,
+    /// a stretch with no edge, or from the last window's close to the head, longer than the policy allows
+    RhythmStopped,
+    /// a clock the policy names whose phase the record's body declares no rhythm of
+    UndeclaredRhythm,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct CertificateFailure {
@@ -576,6 +805,136 @@ enum Need {
     Finish,
 }
 
+struct Rhythm<'p> {
+    limits: &'p EdgePolicy,
+    rhythm: RhythmId,
+    admission: u64,
+    early: bool,
+    since: u64,
+    open: Vec<(u64, Vec<Compensated>)>,
+    judged: u64,
+    last_close: Option<u64>,
+    widest: Option<Interval>,
+    worst: Vec<Option<EdgeResult>>,
+    stopped: Option<CertificateFailure>,
+    drifted: Option<CertificateFailure>,
+}
+impl<'p> Rhythm<'p> {
+    fn new(limits: &'p EdgePolicy, rhythm: RhythmId, admission: u64) -> Self {
+        Self {
+            limits,
+            rhythm,
+            admission,
+            early: limits.rates.iter().any(|rate| rate.settling.is_some()),
+            since: admission,
+            open: Vec::new(),
+            judged: 0,
+            last_close: None,
+            widest: None,
+            worst: vec![None; limits.rates.len()],
+            stopped: None,
+            drifted: None,
+        }
+    }
+    fn arrive(&mut self, segment: &HistorySegment) {
+        if !segment.ends_on_edge(self.rhythm) {
+            return;
+        }
+        let at = segment.interval().end().nanoseconds();
+        self.stretch(self.since, at);
+        self.since = at;
+        let ends = (self.limits.rates.iter()).map(|rate| {
+            let inventory = segment.inventory(rate.quantity).on(segment.interval());
+            inventory.and_then(|ends| ends.last().copied())
+        });
+        let Some(values) = ends.collect::<Option<Vec<_>>>() else {
+            self.stopped.get_or_insert(of_history(CertificateCheck::Coverage));
+            return;
+        };
+        let length = self.limits.windows.length_ns.get();
+        let closing = (self.open.iter())
+            .take_while(|(opened, _)| at - opened >= length)
+            .count();
+        let closed: Vec<_> = self.open.drain(..closing).collect();
+        for (opened, before) in closed {
+            self.judge((opened, &before), (at, &values));
+        }
+        if self.early || at - self.admission >= self.limits.windows.settling_ns {
+            self.open.push((at, values));
+        }
+    }
+    fn judge(&mut self, (opened, before): (u64, &[Compensated]), (at, after): (u64, &[Compensated])) {
+        let Some(window) = Interval::new(SimTime::from_ns(opened), SimTime::from_ns(at)) else {
+            return;
+        };
+        let settled = opened - self.admission >= self.limits.windows.settling_ns;
+        let length = window.length_ns();
+        let whole = i64::try_from(length / SECOND).unwrap_or(i64::MAX);
+        let rates = self.limits.rates.iter().zip(before.iter().zip(after));
+        for ((rate, (&start, &end)), worst) in rates.zip(&mut self.worst) {
+            let per_second = match (settled, rate.settling) {
+                (false, Some(settling)) => settling,
+                _ => rate.settled,
+            };
+            let rest = Compensated::between(Compensated::ZERO, per_second, length % SECOND, SECOND);
+            let allowance = per_second.scaled(whole).plus(rest);
+            let change = end.minus(start).abs();
+            if !change.at_most(allowance) && self.drifted.is_none() {
+                self.drifted = Some(CertificateFailure {
+                    check: CertificateCheck::EdgeDrift,
+                    quantity: Some(rate.quantity),
+                    window: Some(window),
+                    residual: change,
+                });
+            }
+            let judged = EdgeResult {
+                quantity: rate.quantity,
+                change,
+                allowance,
+                window,
+            };
+            let held = worst.get_or_insert(judged);
+            if !change.minus(allowance).at_most(held.change.minus(held.allowance)) {
+                *held = judged;
+            }
+        }
+        self.judged += 1;
+        self.last_close = Some(at);
+    }
+    fn stretch(&mut self, from: u64, to: u64) {
+        let Some(stretch) = Interval::new(SimTime::from_ns(from), SimTime::from_ns(to)) else {
+            return;
+        };
+        if stretch.length_ns() > self.limits.windows.widest_ns && self.stopped.is_none() {
+            self.stopped = Some(CertificateFailure {
+                check: CertificateCheck::RhythmStopped,
+                quantity: None,
+                window: Some(stretch),
+                residual: Compensated::ZERO,
+            });
+        }
+        if self
+            .widest
+            .is_none_or(|widest| stretch.length_ns() > widest.length_ns())
+        {
+            self.widest = Some(stretch);
+        }
+    }
+    fn finish(mut self, head: u64) -> Result<RhythmResult, CertificateFailure> {
+        self.stretch(self.last_close.unwrap_or(self.admission), head);
+        if let Some(failure) = self.stopped.or(self.drifted) {
+            return Err(failure);
+        }
+        Ok(RhythmResult {
+            windows: self.limits.windows,
+            judged: self.judged,
+            results: self.worst.into_iter().flatten().collect(),
+            widest: self.widest.ok_or(of_history(CertificateCheck::Coverage))?,
+            last_close: self.last_close.map(SimTime::from_ns),
+        })
+    }
+}
+
 struct Windows<'p> {
     policy: &'p CertificatePolicy,
     routes: &'p [HeldRoute],
@@ -588,9 +947,16 @@ struct Windows<'p> {
     failed: Option<CertificateFailure>,
     pieces: u64,
     done: bool,
+    rhythm: Option<Rhythm<'p>>,
 }
 impl<'p> Windows<'p> {
-    fn new(policy: &'p CertificatePolicy, routes: &'p [HeldRoute], first: u64, last: u64) -> Self {
+    fn new(
+        policy: &'p CertificatePolicy,
+        routes: &'p [HeldRoute],
+        (first, last): (u64, u64),
+        rhythm: Option<RhythmId>,
+    ) -> Self {
+        let edges = policy.edges.as_ref().zip(rhythm);
         Self {
             policy,
             routes,
@@ -603,6 +969,12 @@ impl<'p> Windows<'p> {
             failed: None,
             pieces: 0,
             done: false,
+            rhythm: edges.map(|(limits, rhythm)| Rhythm::new(limits, rhythm, first)),
+        }
+    }
+    fn arrive(&mut self, segment: &HistorySegment) {
+        if let Some(rhythm) = &mut self.rhythm {
+            rhythm.arrive(segment);
         }
     }
     fn offer(
@@ -721,6 +1093,8 @@ impl<'p> Windows<'p> {
         });
         let support = support.collect::<Option<Vec<_>>>().ok_or(coverage)?;
         let results = results.ok_or(coverage)?;
+        let head = span.end().nanoseconds();
+        let rhythm = self.rhythm.map(|rhythm| rhythm.finish(head)).transpose()?;
         Ok(Certificate {
             seal: view.seal(),
             basis: self.policy.basis,
@@ -731,13 +1105,16 @@ impl<'p> Windows<'p> {
             coverage: view.basis().coverage().clone(),
             support,
             pieces: self.pieces,
+            rhythm,
         })
     }
 }
 
 /// Closure failures win over drift, so a `Drift` failure says the ledger closed everywhere and the body
 /// still moved. It reads the history in time order and reports the earliest failing window, and the earliest of
-/// equal worst windows.
+/// equal worst windows. The windows between a rhythm's edges rank after every fixed window: a stretch with no edge
+/// past its bound, the earliest, then a window between edges past its allowance, by earliest close, then oldest
+/// opening, then basis order.
 pub fn certify(
     view: &ConservationView<'_>,
     policy: &CertificatePolicy,
@@ -746,6 +1123,15 @@ pub fn certify(
     if policy.basis != view.basis().digest() {
         return Err(coverage);
     }
+    let rhythm = match &policy.edges {
+        Some(limits) => {
+            let clock = limits.windows.clock;
+            let declared = view.rhythms().find(|&(_, phase)| phase == clock);
+            let undeclared = of_history(CertificateCheck::UndeclaredRhythm);
+            Some(declared.ok_or(undeclared)?.0)
+        }
+        None => None,
+    };
     let span = view.span().ok_or(coverage)?;
     if span.length_ns() < policy.windows.coverage_ns {
         return Err(coverage);
@@ -760,18 +1146,32 @@ pub fn certify(
     } else {
         span.end().nanoseconds() - length
     };
-    let mut windows = Windows::new(policy, view.basis().coverage().held_routes(), first, last);
+    let routes = view.basis().coverage().held_routes();
+    let mut windows = Windows::new(policy, routes, (first, last), rhythm);
     let read = |cursor: &mut OldestFirst<'_>| cursor.next().ok_or(coverage)?.map_err(history);
     let mut early = order.from(span.start());
-    let mut late = order.from(SimTime::from_ns(first + length));
+    let mut late = match rhythm {
+        Some(_) => order.from(span.start()),
+        None => order.from(SimTime::from_ns(first + length)),
+    };
     let (mut trailing, mut leading) = (read(&mut early)?, read(&mut late)?);
+    windows.arrive(&leading.1);
     loop {
         match windows.offer((trailing.0, &trailing.1), (leading.0, &leading.1)) {
             Need::Trailing => trailing = read(&mut early)?,
-            Need::Leading => leading = read(&mut late)?,
-            Need::Finish => return windows.finish(view, span),
+            Need::Leading => {
+                leading = read(&mut late)?;
+                windows.arrive(&leading.1);
+            }
+            Need::Finish => break,
         }
     }
+    if rhythm.is_some() {
+        for segment in late {
+            windows.arrive(&segment.map_err(history)?.1);
+        }
+    }
+    windows.finish(view, span)
 }
 
 #[cfg(test)]
