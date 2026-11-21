@@ -58,7 +58,7 @@ Tickets 01, 02, 03, 04, 05, 07, 23, 26, 27 and 29 and research tickets 11 to 15 
 | [14](issues/14-liver-glucose-hub.md) The liver is the glucose hub | 02, 13, research 13 | Fuel loop. Budget: 12%, shared by 13 to 16 |
 | [15](issues/15-insulin-and-glucagon.md) Insulin and glucagon | 14, 17, research 13 | Fuel loop. Budget: 12%, shared by 13 to 16 |
 | [16](issues/16-fuel-stores.md) Fuel stores close over a day | 09, 15, research 13 | Fuel loop, closed. Budget: 12%, shared by 13 to 16 |
-| [17](issues/17-volume-hormones.md) Volume hormones and the kidney's pressure answer | 06, 26, research 14 | Water and salt loop, closed. Budget: 12% |
+| [17](issues/17-volume-hormones.md) Volume hormones and the kidney's pressure answer | 06, 26, research 14, [native-contract 100](../native-contract/issues/100-the-body-moves-after-admission-what-moves-and-why.md) and [101](../native-contract/issues/101-the-pumps-work-is-paid-by-a-beds-fuel.md) | Water and salt loop, closed. Its plan is done, and its split is ruled when the ticket is scheduled. Budget: 12% |
 | [18](issues/18-acid-loop.md) The acid loop | 08, 09, 11, 14, 17, 29, research 14 | Acid loop, closed. Budget: 12% |
 | [19](issues/19-minerals-and-bone.md) Minerals and bone | 13, 15, 17, research 15 | Pass 2 |
 | [20](issues/20-cortisol-rhythm.md) Cortisol's daily rhythm | 05, 14, research 15 | Pass 2 |
