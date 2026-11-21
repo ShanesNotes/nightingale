@@ -2769,7 +2769,8 @@ fn the_lining_moves_research_11s_form_over_the_first_minute(start: &Start, minut
 }
 
 /// Twice what the awake minute's whole breaths give on the head that reads each lymph over its enclosure, rounded up
-/// to one figure: the lung's interstitial water a second, and the pulmonary lymph's mean off its admitted rate.
+/// to one figure: the lung's interstitial water a second, +7.6078e-5 there and -4.5507e-3 where the lymph read the
+/// whole tissue pressure, and the pulmonary lymph's mean off its admitted rate, +2.8094e-4 there and +8.349e-1.
 const LUNG_POOL_RATE: f64 = 2e-4;
 const LUNG_LYMPH_SHARE: f64 = 6e-4;
 
