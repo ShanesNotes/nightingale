@@ -140,6 +140,15 @@ impl EdgeRate {
             settling: settling.map(Compensated::of),
         }
     }
+    pub fn quantity(&self) -> QuantityId {
+        self.quantity
+    }
+    pub fn settled(&self) -> Compensated {
+        self.settled
+    }
+    pub fn settling(&self) -> Option<Compensated> {
+        self.settling
+    }
 }
 /// Windows between the edges of the rhythm whose phase is `clock`. Every edge from `settling_ns` after admission on
 /// opens one window, which closes at the first edge at least `length_ns` later. No stretch with no edge, from
@@ -229,6 +238,14 @@ impl CertificatePolicy {
         }
         let edges = Some(EdgePolicy { windows, rates });
         Ok(Self { edges, ..self })
+    }
+    /// The drift bound of one combination over a fixed window. Charge has none.
+    pub fn drift(&self, quantity: QuantityId) -> Option<Compensated> {
+        let limits = self.quantities.iter().find(|limits| limits.quantity == quantity);
+        limits.and_then(|limits| limits.drift)
+    }
+    pub fn edges(&self) -> Option<(EdgeWindows, &[EdgeRate])> {
+        (self.edges.as_ref()).map(|edges| (edges.windows, edges.rates.as_slice()))
     }
     /// Each closure may also be `per_update` last places of its combination's total at the window's late end for each
     /// row update the window's accepted steps make in that combination, counted from `body`'s columns. That bounds
@@ -569,6 +586,7 @@ pub struct CertificateFailure {
     quantity: Option<QuantityId>,
     window: Option<Interval>,
     residual: Compensated,
+    allowance: Option<Compensated>,
 }
 impl CertificateFailure {
     pub fn check(&self) -> CertificateCheck {
@@ -583,6 +601,11 @@ impl CertificateFailure {
     pub fn residual(&self) -> Compensated {
         self.residual
     }
+    /// The allowance an edge drift's change exceeded, its edge rate times the window's length. `residual` gives the
+    /// change, and no other failure has an allowance.
+    pub fn allowance(&self) -> Option<Compensated> {
+        self.allowance
+    }
 }
 
 fn of_history(check: CertificateCheck) -> CertificateFailure {
@@ -591,6 +614,7 @@ fn of_history(check: CertificateCheck) -> CertificateFailure {
         quantity: None,
         window: None,
         residual: Compensated::ZERO,
+        allowance: None,
     }
 }
 
@@ -753,6 +777,7 @@ fn pair(
                 quantity: Some(quantity),
                 window: Some(interval),
                 residual,
+                allowance: None,
             };
             match balance.outcome {
                 Outcome::Open => return Err(failure(CertificateCheck::Closure, balance.closure)),
@@ -885,6 +910,7 @@ impl<'p> Rhythm<'p> {
                     quantity: Some(rate.quantity),
                     window: Some(window),
                     residual: change,
+                    allowance: Some(allowance),
                 });
             }
             let judged = EdgeResult {
@@ -911,6 +937,7 @@ impl<'p> Rhythm<'p> {
                 quantity: None,
                 window: Some(stretch),
                 residual: Compensated::ZERO,
+                allowance: None,
             });
         }
         if self

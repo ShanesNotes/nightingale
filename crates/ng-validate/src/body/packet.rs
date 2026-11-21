@@ -3,7 +3,7 @@ use ng_contract::*;
 
 use super::anatomy::at;
 use super::schema::{BEDS, FAT_ENERGY, GLUCOSE_ENERGY};
-use crate::{CertificatePolicy, DriftTable, SlidingWindows};
+use crate::{CertificatePolicy, DriftTable, EdgeWindows, SlidingWindows};
 
 const SECOND: u64 = 1_000_000_000;
 const POINTS: u32 = 100;
@@ -545,21 +545,24 @@ pub fn body_packet_at_viscosity_exponent(
     body: &CompiledBody,
     exponent: Measure<Dimensionless>,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-    packet_of(body, exponent, [CENTRAL_GAIN, PERIPHERAL_GAIN])
+    packet_of(body, exponent, [CENTRAL_GAIN, PERIPHERAL_GAIN], BODY_RHYTHM.rate)
 }
 
-/// The body's packet with both chemoreflex gains zero, so the drive scale is its rest exactly while `ns.breath-rate`
-/// and the breath's two lengths set the rate.
+/// The body's packet with both chemoreflex gains zero, so the drive scale is its rest exactly while `ns.breath-rate`,
+/// stated as `rate`, and the breath's two lengths set the rate. Every other value stays the rhythm's.
 pub fn body_packet_with_the_drive_scale_held(
     body: &CompiledBody,
+    rate: Measure<Rate<Dimensionless>>,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-    packet_of(body, Measure::new(-1.0)?, [0.0, 0.0])
+    let rate = f64::from_bits(Compensated::of(&rate).bits()[0]);
+    packet_of(body, Measure::new(-1.0)?, [0.0, 0.0], rate)
 }
 
 fn packet_of(
     body: &CompiledBody,
     exponent: Measure<Dimensionless>,
     [central, peripheral]: [f64; 2],
+    breath_rate: f64,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let rate = AnchorId::new("heart rate");
     let phase = LawName {
@@ -652,7 +655,7 @@ fn packet_of(
     };
     packet.start_mode(breath, "rest", NOTE)?;
 
-    table(&mut packet, exponent)?;
+    table(&mut packet, exponent, breath_rate)?;
     set::<Dimensionless>(&mut packet, "ns.central-gain", Binding::Body, central)?;
     set::<Dimensionless>(&mut packet, "ns.peripheral-gain", Binding::Body, peripheral)?;
     oxygen_per_lactate(&mut packet, body)?;
@@ -677,6 +680,7 @@ fn packet_of(
 fn table(
     packet: &mut ParameterPacket<SyntheticFixture>,
     exponent: Measure<Dimensionless>,
+    breath_rate: f64,
 ) -> Result<(), AdmissionError> {
     let blood = Binding::Network(Network::Vascular);
     let (urinary, lymph) = (
@@ -727,7 +731,7 @@ fn table(
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05)?;
     set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0)?;
-    respiratory(packet)?;
+    respiratory(packet, breath_rate)?;
     set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.035)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.05)?;
     set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "fl.oncotic-slope", body, 20.0)?;
@@ -1124,53 +1128,96 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
     set::<Concentration<CarbonDioxide>>(packet, "bc.carbamino-half-rise", body, CARBAMINO.half_rise)
 }
 
-/// The body's own drift bounds for energy, for the elements its reactions join and for each species that moves on it.
-/// As on the slice (solver contract, section 7), each is fixture data that stands in for 1.96 times a within-subject
-/// variation: twice the quantity's worst change over a ten-second window of this body's first minute from its admitted
-/// start, rounded up to one significant figure. It is a synthetic target that scores a solver and judges no body. The
-/// body's measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set
-/// (record 0004). Energy's worst change is 1,347, in the window from 47 s. Oxygen's and carbon's change is mostly the
-/// blood gases' swing within a beat, read across windows that hold no whole number of beats, and hydrogen's is a bed's
-/// cell fuels and water settling, under 7.5e-6 at every bed but the payers of the stroke work and of the work of
-/// breathing, whose cells settle as their works do, the coronary bed's by 0.077 over the first ten seconds whatever
-/// their start, so they take a bound of their own. The species are the held gut's and skin's
-/// water and salts, vasopressin's held secretion and clearance, and nitrogen gas, whose worst change is 0.380 in
-/// the first ten seconds and which falls a steady 0.22 to 0.26 in each ten seconds after, following the gas volume as
-/// the net exchange settles with the body's stores. Oxygen and carbon dioxide as species keep only held
-/// pools that never move, so the slice's bound for an unmoved species holds them.
-const ENERGY_DRIFT: f64 = 4e3;
-const ELEMENT_DRIFTS: [(Element, f64); 3] = [
-    (Element::Carbon, 5e2),
-    (Element::Hydrogen, 7e-5),
-    (Element::Oxygen, 9e3),
+/// The body's own bounds for energy, for the elements its reactions join and for each species that moves on it, each
+/// as (the drift over any ten seconds, the edge rate between breath edges, the rate of a window between edges that
+/// opens before the settling time). As on the slice (solver contract, section 7), each is fixture data that stands in
+/// for 1.96 times a within-subject variation, a synthetic target that scores a solver and judges no body. The body's
+/// measured day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set (record
+/// 0004).
+///
+/// Each is sized on the suite's reference run, the sleeping branch of `body_run`: the body admitted, asleep from 30 s
+/// after the anchor, awake again from 150 s, to 300 s. A drift bound is twice the larger of the worst ten-second change
+/// and the most one breath moves the quantity, an edge rate twice the worst rate of a window between edges that opens
+/// from the settling time on, a settling rate twice the worst of one that opens before it, and the widest stretch twice
+/// the widest gap between edges, each rounded up to one significant figure. The onset is pinned at 30 s because the
+/// figures are taken there, inside the admission's own fall of energy, which puts energy's above a settled onset's, so
+/// moving the onset moves them. On a longer run the salts leave their bounds from about 350 s (body ticket 17).
+/// Energy's figures belong to the held feeds and the held heat exit, and are measured again when body tickets 12 and 13
+/// to 16 land. The payers of the stroke work and of the work of breathing take a hydrogen bound of their own, since
+/// their cells settle as their works do, and each is judged on its own. Oxygen and carbon dioxide as species keep only
+/// held pools that never move, so the slice's bound for an unmoved species holds them.
+const ELEMENT_BOUNDS: [(Element, f64, f64, f64); 3] = [
+    (Element::Carbon, 7e2, 3e1, 1e1),
+    (Element::Hydrogen, 2e-4, 2e-5, 2e-6),
+    (Element::Oxygen, 1e4, 4e1, 7.0),
 ];
-const PAYER_HYDROGEN_DRIFT: f64 = 0.2;
+const PAYER_HYDROGEN: (f64, f64, f64) = (0.4, 4e-2, 2e-2);
 const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
-const SPECIES_DRIFTS: [(Species, f64); 7] = [
-    (Species::Energy, ENERGY_DRIFT),
-    (Species::Water, 5e-2),
-    (Species::Sodium, 3e-4),
-    (Species::Chloride, 3e-4),
-    (Species::Potassium, 2e-5),
-    (Species::Vasopressin, 5e-2),
-    (Species::NitrogenGas, 2e4),
+const SPECIES_BOUNDS: [(Species, f64, f64, f64); 7] = [
+    (Species::Energy, 1e4, 1e3, 3e2),
+    (Species::Water, 5e-2, 4e-3, 3e-3),
+    (Species::Sodium, 2e-3, 2e-4, 9e-6),
+    (Species::Chloride, 2e-3, 2e-4, 1e-5),
+    (Species::Potassium, 9e-5, 8e-6, 5e-7),
+    (Species::Vasopressin, 6e-2, 2e-3, 4e-4),
+    (Species::NitrogenGas, 2e4, 2e1, 8.0),
 ];
+const SETTLING_TIME: u64 = 20 * SECOND;
+const EDGE_WINDOW: NonZeroU64 = NonZeroU64::MIN.saturating_add(10 * SECOND - 1);
+const WIDEST_STRETCH: u64 = 20 * SECOND;
 
 struct BodyDrifts;
+impl BodyDrifts {
+    fn of_species(species: Species) -> Option<(f64, f64, f64)> {
+        let named = SPECIES_BOUNDS.iter().find(|(named, ..)| *named == species);
+        named.map(|&(_, drift, settled, settling)| (drift, settled, settling))
+    }
+    fn of_element(element: Element, at: &[SiteId]) -> Option<(f64, f64, f64)> {
+        if element == Element::Hydrogen && at.iter().all(|site| PAYERS.contains(&site.key())) {
+            return Some(PAYER_HYDROGEN);
+        }
+        let named = ELEMENT_BOUNDS.iter().find(|(named, ..)| *named == element);
+        named.map(|&(_, drift, settled, settling)| (drift, settled, settling))
+    }
+    fn rates<U>(bounds: Option<(f64, f64, f64)>) -> Result<Option<[Measure<Rate<U>>; 2]>, AdmissionError> {
+        let rates =
+            bounds.map(|(_, settled, settling)| Ok([Measure::new(settled)?, Measure::new(settling)?]));
+        rates.transpose()
+    }
+}
 impl DriftTable for BodyDrifts {
     fn names(&self, species: Species) -> bool {
-        SPECIES_DRIFTS.iter().any(|(named, _)| *named == species)
+        Self::of_species(species).is_some()
     }
     fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
-        let named = SPECIES_DRIFTS.iter().find(|(named, _)| *named == Q::SPECIES);
-        Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
+        Measure::new(Self::of_species(Q::SPECIES).map_or(f64::NAN, |(drift, ..)| drift))
     }
     fn element(&self, element: Element, at: &[SiteId]) -> Result<Option<Measure<Atoms>>, AdmissionError> {
-        if element == Element::Hydrogen && at.iter().all(|site| PAYERS.contains(&site.key())) {
-            return Measure::new(PAYER_HYDROGEN_DRIFT).map(Some);
-        }
-        let named = ELEMENT_DRIFTS.iter().find(|(named, _)| *named == element);
-        named.map(|(_, drift)| Measure::new(*drift)).transpose()
+        (Self::of_element(element, at))
+            .map(|(drift, ..)| Measure::new(drift))
+            .transpose()
+    }
+    fn edges(&self) -> Option<EdgeWindows> {
+        let phase = LawName {
+            owner: Nervous::CARD,
+            local: "breath phase",
+        };
+        Some(EdgeWindows::new(
+            phase.into(),
+            SETTLING_TIME,
+            EDGE_WINDOW,
+            WIDEST_STRETCH,
+        ))
+    }
+    fn rate<Q: Substance>(&self) -> Result<Option<[Measure<Rate<Q>>; 2]>, AdmissionError> {
+        Self::rates(Self::of_species(Q::SPECIES))
+    }
+    fn element_rate(
+        &self,
+        element: Element,
+        at: &[SiteId],
+    ) -> Result<Option<[Measure<Rate<Atoms>>; 2]>, AdmissionError> {
+        Self::rates(Self::of_element(element, at))
     }
 }
 
@@ -1181,7 +1228,10 @@ pub fn body_certificate(
     crate::certificate_with(body, windows, &BodyDrifts)
 }
 
-fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+fn respiratory(
+    packet: &mut ParameterPacket<SyntheticFixture>,
+    breath_rate: f64,
+) -> Result<(), AdmissionError> {
     let body = Binding::Body;
     for (key, value) in [
         ("rs.oxygen-inspired", 0.21),
@@ -1208,7 +1258,7 @@ fn respiratory(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Adm
     set::<Dimensionless>(packet, "rs.room-humidity", body, 0.5)?;
     set::<Pressure>(packet, "rs.room-vapour-pressure", body, 20.0)?;
     for (key, value) in [
-        ("ns.breath-rate", BODY_RHYTHM.rate),
+        ("ns.breath-rate", breath_rate),
         ("ns.drive-rise", BODY_RHYTHM.rise),
         ("ns.drive-fall", BODY_RHYTHM.fall),
         ("ns.rest-speed", 1.0),

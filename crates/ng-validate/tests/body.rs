@@ -930,7 +930,7 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
     );
     expect![[r#"
         rows 1464 {"algebraic": 195, "amount": 1251, "memory": 18}, columns 1463, jacobian nonzeros 10150, blocks 431, largest block 651, parameter slots 747, conserved combinations 398, held pools 318, held route columns 88
-        model hash 177b07e4ae6f8549c6d3042993de40cbed221c3d0c29a18a8808817dfc96921e
+        model hash 386ec1d2d46fa733bfd723b2bc1afdd7bd8126feb7a0821d7a74e0fdf8881eb7
         conserved basis de45607d7612d7f3cad530d632e838b8a6dc0395dbc0d6d85da7f1222b42267d
         stated packet 8ba515aff686d041ba9ad243452e0b5f6b2f5c6caf60d0f8bf9cb9c7dd0cbb74
     "#]].assert_eq(&pin);
@@ -1045,23 +1045,33 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     };
     let stated = Stated {
         species: [
-            (Species::Energy, 4e3),
+            (Species::Energy, 1e4),
             (Species::Water, 5e-2),
-            (Species::Sodium, 3e-4),
-            (Species::Chloride, 3e-4),
-            (Species::Potassium, 2e-5),
-            (Species::Vasopressin, 5e-2),
+            (Species::Sodium, 2e-3),
+            (Species::Chloride, 2e-3),
+            (Species::Potassium, 9e-5),
+            (Species::Vasopressin, 6e-2),
             (Species::NitrogenGas, 2e4),
         ],
         elements: [
-            (Element::Carbon, 5e2),
-            (Element::Hydrogen, 7e-5),
-            (Element::Oxygen, 9e3),
+            (Element::Carbon, 7e2),
+            (Element::Hydrogen, 2e-4),
+            (Element::Oxygen, 1e4),
         ],
-        payer_hydrogen: 0.2,
+        payer_hydrogen: 0.4,
     };
-    let policy = body_certificate(&body, windows)?.digest();
-    assert_eq!(policy, digest(&stated)?);
+    // The body's policy also states windows between breath edges, which `body_run`'s RULE holds, so its drift bounds
+    // are compared one combination at a time.
+    let (body_policy, stated_policy) = (
+        body_certificate(&body, windows)?,
+        certificate_with(&body, windows, &stated)?,
+    );
+    for quantity in body.conserved_basis().ids() {
+        let [ours, theirs] =
+            [&body_policy, &stated_policy].map(|policy| policy.drift(quantity).map(|drift| drift.bits()));
+        assert_eq!(ours, theirs, "{quantity:?}");
+    }
+    let policy = stated_policy.digest();
     for by in [0.5, 2.0] {
         for index in 0..stated.species.len() {
             let mut moved = stated;

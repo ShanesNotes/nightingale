@@ -166,6 +166,22 @@ pub(super) const CELL_WATER_OUT: [&str; 11] = [
     "bone bed cell water out",
 ];
 
+pub(super) const OXYGEN_LEAK: &str = "oxygen leak";
+pub(super) const CARBON_LEAK: &str = "carbon dioxide leak";
+pub(super) const NITROGEN_LEAK: &str = "nitrogen gas leak";
+pub(super) const VASOPRESSIN_LEAK: &str = "vasopressin leak";
+
+pub(super) fn leaks(schema: &mut Schema) -> Result<(), AdmissionError> {
+    let into = BoundaryDirection::IntoBody;
+    let arteries = site::<VesselSegment>("systemic arteries")?;
+    schema.boundary::<Oxygen>(OXYGEN_LEAK, into, arteries, Space::Lumen)?;
+    schema.boundary::<CarbonDioxide>(CARBON_LEAK, into, arteries, Space::Lumen)?;
+    let lung = site::<CapillaryBed>("pulmonary bed")?;
+    schema.boundary::<NitrogenGas>(NITROGEN_LEAK, into, lung, Space::Gas)?;
+    let veins = site::<VesselSegment>("central veins")?;
+    schema.boundary::<Vasopressin>(VASOPRESSIN_LEAK, into, veins, Space::Lumen)
+}
+
 fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     let portal = site::<VesselSegment>("portal vein")?;
     let into = BoundaryDirection::IntoBody;
