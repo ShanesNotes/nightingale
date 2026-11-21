@@ -313,7 +313,6 @@ fn a_walk_in_time_order_refuses_the_link_a_walk_newest_first_refuses() {
     assert_eq!(refusal(&[], &[]), None);
 }
 
-/// Hands each link on to `kept` and remembers each as it was given, in order.
 #[derive(Default)]
 struct Given<S> {
     kept: S,
@@ -329,7 +328,6 @@ impl<S: HistoryStore> HistoryStore for Given<S> {
     }
 }
 
-/// Keeps each link as it was given.
 #[derive(Default)]
 struct Raw(RefCell<Vec<(Digest, Vec<u8>)>>);
 impl HistoryStore for Raw {
@@ -348,7 +346,7 @@ impl HistoryStore for Raw {
 }
 
 fn follows(link: &[u8]) -> Digest {
-    Digest::from_bytes(*link.first_chunk().expect("a link opens on the seal it follows"))
+    ng_record::follows(link).expect("a link opens on the seal it follows")
 }
 
 fn to<'s>(session: Session<'s, Running>, seconds: u64) -> Session<'s, Running> {
@@ -358,7 +356,6 @@ fn to<'s>(session: Session<'s, Running>, seconds: u64) -> Session<'s, Running> {
     session
 }
 
-/// Bounds no run of the reservoirs reaches, so the certificate holds the worst of every window it walked.
 fn loose(basis: &ConservedBasis) -> CertificatePolicy {
     let water = |value| Measure::<Water>::new(value).expect("finite");
     let ratio = || Measure::<Dimensionless>::new(1e-9).expect("finite");
@@ -370,7 +367,6 @@ fn loose(basis: &ConservedBasis) -> CertificatePolicy {
     CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows).expect("a policy")
 }
 
-/// A run's store, where three links sit among the links it was given, and the certificate of the run's branch.
 struct Branched<S> {
     store: Given<S>,
     after_the_head: usize,
@@ -388,9 +384,6 @@ impl<S> Branched<S> {
     }
 }
 
-/// Saves a checkpoint at 20 s and the head at 40 s, resumes the head to 50 s, then resumes the checkpoint with a
-/// delivery the run never had, to 30 s. So the link after the head follows the last link the store was given, and the
-/// branch's first link follows one it was given long before.
 fn branched<S: HistoryStore + Default + 'static>() -> Branched<S> {
     let (case, core, store) = (twenty_minutes(), Core::new(STEP), Given::<S>::default());
     let given = || store.links.borrow().len();

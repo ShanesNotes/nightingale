@@ -989,12 +989,8 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
     report
 }
 
-/// A figure of the body's policy beside the one-figure value next under it, `(below, figure)`. It holds while
-/// `below < 2 × measured ≤ figure`.
 type Figure = (f64, f64);
 
-/// Each row of the body's policy, sized on the reference run: the quantities it holds, then its drift over any ten
-/// seconds, its edge rate and its settling rate.
 const RULE: [(Book, bool, [Figure; 3]); 11] = [
     (Book::Energy, false, [(9e3, 1e4), (9e2, 1e3), (2e2, 3e2)]),
     (
@@ -1048,11 +1044,8 @@ const RULE: [(Book, bool, [Figure; 3]); 11] = [
         [(5e-2, 6e-2), (1e-3, 2e-3), (3e-4, 4e-4)],
     ),
 ];
-/// The widest stretch with no breath edge, in seconds, held as RULE's figures are.
 const WIDEST: Figure = (1e1, 2e1);
 
-/// Whether RULE's row holds a combination: the body states its bounds by species and element, energy's species
-/// among them, and apart for hydrogen at a works payer.
 fn holds(body: &CompiledBody, (book, at_payer): (Book, bool), quantity: QuantityId) -> bool {
     let combination = &body.conserved_basis().combinations()[quantity.index()];
     match (book, combination.book()) {
@@ -1068,9 +1061,6 @@ fn exactly(figure: f64) -> [u64; 2] {
     Compensated::of(&Measure::<Dimensionless>::new(figure).expect("finite")).bits()
 }
 
-/// RULE's figures are the body's policy, bit for bit: each combination a row holds takes the row's drift bound, edge
-/// rate and settling rate, the two payers' hydrogen are two combinations each with its own rate, no other combination
-/// is rated, and the widest stretch is WIDEST's.
 #[test]
 fn each_figure_of_rule_is_the_bodys_policy_bit_for_bit() {
     let body = whole_body().expect("compiled");
@@ -1114,8 +1104,6 @@ fn each_figure_of_rule_is_the_bodys_policy_bit_for_bit() {
     assert!(held.iter().all(|&count| count > 0), "{held:?}");
 }
 
-/// The held packet takes the breath rate it is given as its own, so a run held at a quarter is admitted on a packet of
-/// its own.
 #[test]
 fn the_held_packet_moves_with_the_breath_rate_it_is_given() {
     let body = whole_body().expect("compiled");
@@ -1449,8 +1437,7 @@ fn every_link_moves_its_reader_the_way_the_loop_needs(
 
 /// Sleep enters 30 s after the anchor, where the awake walk starts. No accepted head falls on 30 s and an input stamped
 /// before the head it is enqueued at is refused, so the branch resumes the awake run's last head before 30 s, which
-/// costs half a minute of the body where the admitted checkpoint would cost a whole one. The body wakes at 150 s and the
-/// branch ends at 300 s, so one admission holds sleep's onset, its course and a waking.
+/// costs half a minute of the body where the admitted checkpoint would cost a whole one.
 const ASLEEP: u64 = 30;
 const WAKES: u64 = 150;
 const ENDS: u64 = 300;
@@ -1622,9 +1609,6 @@ fn the_sleeping_branchs_breathing_books(
     report
 }
 
-/// Waking lifts the drive scale back over the awake run's and shortens the breath under its. Both are read over whole
-/// breaths from ten seconds after the waking, as sleep's signs are read from ten seconds after its onset, against each
-/// run's stretch from 40 s to 60 s.
 const WOKEN: [u64; 2] = [WAKES + 10, ENDS];
 
 fn the_sleeping_branch_wakes_and_runs_on<'s>(
@@ -1666,10 +1650,6 @@ fn within(refused: &mut Vec<String>, name: String, measured: f64, (below, figure
     }
 }
 
-/// The reference run, from admission through the onset and the waking to 300 s, passes the body's policy, and each of
-/// RULE's figures holds to it: a drift bound to the larger of the worst ten-second change and the most one breath
-/// moves the quantity, an edge rate to the worst rate of a window between edges that opens from the settling time on,
-/// a settling rate to the worst of one that opens before it, and the widest stretch to the widest gap between edges.
 /// The certificate keeps one window a combination, so the rates are read from the record's sealed edges, on the
 /// windows the evaluator opens.
 fn the_reference_run_passes_the_bodys_policy_and_rule_holds_each_figure_to_it(
@@ -1774,8 +1754,6 @@ fn the_reference_run_passes_the_bodys_policy_and_rule_holds_each_figure_to_it(
     report
 }
 
-/// The held run is the second box's run with no leak at 0.20 a second, the rhythm's own rate: `certified` passes it
-/// under the body's policy over its minute.
 fn the_held_runs_breathing_books(held: &Start, minute: &Session<'_, Running>, watch: &Watch) -> String {
     let certificate = certified(held, minute);
     let figures = watch.figures(20);
@@ -1789,21 +1767,13 @@ fn the_held_runs_breathing_books(held: &Start, minute: &Session<'_, Running>, wa
     report
 }
 
-/// The second box's held rate for its leaks, a second.
 const QUARTER: f64 = 0.25;
-/// The run with no leak at a quarter runs a minute, as the held run does. The leaking body's two runs end once the
-/// first window between edges that opens at the settling time has closed: at four seconds a breath that is the window
-/// from about 20 s to 32 s.
 const QUARTER_ENDS: u64 = 60;
 const LEAK_ENDS: u64 = 40;
 const LOOSE: f64 = 1e30;
 const LEAK_NOTE: &str = "synthetic: a test's leak";
-/// A row's net leak meets its size within this share of it.
 const NET_BAND: f64 = 0.05;
 
-/// The second box's leaks. Each is sized net: over the window it is refused in, its row's change less the run with no
-/// leak's meets its size within `NET_BAND`. Its sign opposes the row's mean change in the run with no leak from the
-/// settling time on: oxygen, carbon and nitrogen gas fall there, and vasopressin rises.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Leak {
     Oxygen,
@@ -1821,7 +1791,6 @@ impl Leak {
             Leak::Vasopressin => Book::Of(Species::Vasopressin),
         }
     }
-    /// The net leak a second, in its row's units.
     fn size(self) -> f64 {
         match self {
             Leak::Oxygen => 6e1,
@@ -1830,11 +1799,11 @@ impl Leak {
             Leak::Vasopressin => -3e-3,
         }
     }
-    /// The rate the packet states for the leak's route, a second, and the pool the route runs into, each sized so its
-    /// row nets its size over the window it is refused in. The lungs breathe most of the nitrogen gas in their gas out
-    /// within a breath, so its route is near six times its size. That gas lowers oxygen's row by about a third of each
-    /// unit and carbon's by about a fortieth, so carbon dioxide's route takes back carbon's share, and oxygen gas's
-    /// route makes up what oxygen's row lacks of its size after the two oxygen atoms each carbon dioxide brings.
+    /// Each route's rate is sized so its row nets its size over the window it is refused in. The lungs breathe most of
+    /// the nitrogen gas in their gas out within a breath, so its route is near six times its size. That gas lowers
+    /// oxygen's row by about a third of each unit and carbon's by about a fortieth, so carbon dioxide's route takes
+    /// back carbon's share, and oxygen gas's route makes up what oxygen's row lacks of its size after the two oxygen
+    /// atoms each carbon dioxide brings.
     fn route(self) -> (f64, &'static str) {
         match self {
             Leak::Oxygen => (5.82, "oxygen gas into the arteries' blood"),
@@ -1843,7 +1812,6 @@ impl Leak {
             Leak::Vasopressin => (self.size(), "vasopressin into the central veins' blood"),
         }
     }
-    /// The body's own edge rate for this row.
     fn settled(self, body: &CompiledBody, windows: SlidingWindows) -> Compensated {
         let (policy, quantity) = (
             body_certificate(body, windows).expect("the body's policy"),
@@ -1854,8 +1822,6 @@ impl Leak {
             .unwrap_or_else(|| panic!("the body rates {self:?}'s {quantity:?}"))
             .settled()
     }
-    /// This row's rate alone, at the figure the body's policy states for it, with no settling rate, so every window it
-    /// judges opens from the settling time on; every fixed bound is one no leak reaches.
     fn alone(self, body: &CompiledBody, windows: SlidingWindows) -> CertificatePolicy {
         let (quantity, rate) = (self.quantity(body), lead(self.settled(body, windows)));
         let rate = match self {
@@ -1869,7 +1835,6 @@ impl Leak {
             .between_edges(edge_windows(body), vec![rate])
             .expect("its rates")
     }
-    /// The body's own combination of this row: the row holds one, and each leak runs into a pool it holds.
     fn quantity(self, body: &CompiledBody) -> QuantityId {
         let mut held = (body.conserved_basis().ids()).filter(|quantity| quantity.book() == self.book());
         match (held.next(), held.next()) {
@@ -1879,7 +1844,6 @@ impl Leak {
     }
 }
 
-/// Every fixed bound loose and no windows between edges.
 struct Loose;
 impl DriftTable for Loose {
     fn names(&self, _: Species) -> bool {
@@ -1897,7 +1861,6 @@ fn finite<U>(value: f64) -> Measure<U> {
     Measure::new(value).expect("finite")
 }
 
-/// A room the body reads only through its leaks' gate: its humidity, from `at` after the anchor.
 fn room(at: u64, humidity: f64) -> BoundaryEvent {
     let id = InputId::new(Digest::of_canonical(&humidity.to_bits().to_be_bytes()));
     let input = BoundaryInput::Room(Room {
@@ -1913,7 +1876,6 @@ fn room(at: u64, humidity: f64) -> BoundaryEvent {
     BoundaryEvent::new(id, SimTime::from_ns(anchor_moment().nanoseconds() + at), input)
 }
 
-/// The held packet at `rate` with each leak's route at its rate.
 fn leaking_packet(body: &CompiledBody, rate: f64) -> ParameterPacket<SyntheticFixture> {
     let mut packet = body_packet_with_the_drive_scale_held(body, finite(rate)).expect("a packet");
     let (key, at) = (ParameterKey::new, Binding::Body);
@@ -1950,7 +1912,6 @@ fn leaking_packet(body: &CompiledBody, rate: f64) -> ParameterPacket<SyntheticFi
     packet
 }
 
-/// The run's sealed breath edges from admission, each with the inventory of each of `quantities` there.
 fn at_the_edges(run: &Session<'_, Running>, clock: Slot, quantities: &[QuantityId]) -> Vec<(u64, Vec<f64>)> {
     let view = run.conservation();
     let span = view.span().expect("a span");
@@ -1984,16 +1945,12 @@ fn edge_windows(body: &CompiledBody) -> EdgeWindows {
     windows
 }
 
-/// The first edge at or after the settling time.
 fn settled_edge(windows: EdgeWindows, edges: &[(u64, Vec<f64>)]) -> usize {
     (edges.iter())
         .position(|(at, _)| at - anchor_moment().nanoseconds() >= windows.settling_ns())
         .expect("an edge after the settling time")
 }
 
-/// The first window between edges that opens from the settling time on, at the leaking run's edges, with the indices
-/// of its two edges and each row's net change a second over it: the leaking run's change less the run with no leak's,
-/// each read at its own edges.
 fn nets(
     windows: EdgeWindows,
     control: &[(u64, Vec<f64>)],
@@ -2023,12 +1980,6 @@ fn nets(
     (window, [open, close], nets)
 }
 
-/// At a quarter a second with the drive scale held, one admission of the leaking body with its room shut carries the
-/// run with no leak and the run whose room opens at the settling time. The run with no leak passes each leak's own
-/// policy. Over the first window between edges that opens from the settling time on, each row's net leak opposes the
-/// row's mean change in the run with no leak from the settling time on and meets the leak's size within `NET_BAND`;
-/// then each leak's own policy refuses the leaking run between edges in that window, by the body's own combination of
-/// the leak's row, its change past the body's own rate for the row.
 fn at_a_quarter_each_leak_is_refused_between_edges_against_its_drift() -> String {
     let start = Start::leaking(QUARTER);
     assert_eq!(lead(parameter(&start, "ns.breath-rate")), QUARTER);
@@ -2123,8 +2074,6 @@ fn at_a_quarter_each_leak_is_refused_between_edges_against_its_drift() -> String
     report
 }
 
-/// At a quarter a second with the drive scale held, the whole body with no leak passes the body's policy over a
-/// minute.
 fn at_a_quarter_the_run_with_no_leak_passes_the_bodys_policy() -> String {
     let start = Start::held_at(finite(QUARTER));
     assert_eq!(lead(parameter(&start, "ns.breath-rate")), QUARTER);
@@ -2136,9 +2085,6 @@ fn at_a_quarter_the_run_with_no_leak_passes_the_bodys_policy() -> String {
     )
 }
 
-/// The second box at a quarter a second with the drive scale held: the leaking body's certificate refuses each leak
-/// by name between edges, and the whole body with no leak passes the body's policy. Its run at 0.20 is the run test's
-/// held run, which `certified` passes. Each admission and store goes before the next.
 #[test]
 fn at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges() {
     let mut report = at_a_quarter_each_leak_is_refused_between_edges_against_its_drift();

@@ -244,7 +244,6 @@ impl CertificatePolicy {
         let limits = self.quantities.iter().find(|limits| limits.quantity == quantity);
         limits.and_then(|limits| limits.drift)
     }
-    /// The windows between edges and each rated combination's rates, where the policy states them.
     pub fn edges(&self) -> Option<(EdgeWindows, &[EdgeRate])> {
         (self.edges.as_ref()).map(|edges| (edges.windows, edges.rates.as_slice()))
     }
@@ -602,8 +601,8 @@ impl CertificateFailure {
     pub fn residual(&self) -> Compensated {
         self.residual
     }
-    /// The allowance a window between edges passed, its edge rate times its length, beside the change `residual`
-    /// gives.
+    /// The allowance an edge drift's change exceeded, its edge rate times the window's length. `residual` gives the
+    /// change, and no other failure has an allowance.
     pub fn allowance(&self) -> Option<Compensated> {
         self.allowance
     }

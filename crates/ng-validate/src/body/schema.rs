@@ -171,8 +171,6 @@ pub(super) const CARBON_LEAK: &str = "carbon dioxide leak";
 pub(super) const NITROGEN_LEAK: &str = "nitrogen gas leak";
 pub(super) const VASOPRESSIN_LEAK: &str = "vasopressin leak";
 
-/// The routes of the body's four test leaks: oxygen and carbon dioxide into the arteries' blood, nitrogen gas into
-/// the pulmonary bed's gas, and vasopressin into the central veins.
 pub(super) fn leaks(schema: &mut Schema) -> Result<(), AdmissionError> {
     let into = BoundaryDirection::IntoBody;
     let arteries = site::<VesselSegment>("systemic arteries")?;
