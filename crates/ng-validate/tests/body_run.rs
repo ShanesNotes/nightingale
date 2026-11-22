@@ -3857,9 +3857,7 @@ fn over_admissions_cycle_each_tissue_heat_stores_transfers_net_within_its_tolera
     let lens = body_lens(&body)?;
     let at = anchor_moment();
     let port = BoundaryPort::new(WholeBody::anchored(at))?;
-    let request = InitializationRequest::at(at).reading(&lens);
-    let system = body.initialization(body.bind(body_packet(&body)?)?, port, request)?;
-    let mut solved = initialize(&system, &body);
+    let (system, mut solved) = solve_fixture(&body, body_packet(&body)?, port, &lens, at)?;
     let rows = CYCLE_NETS.map(|(store, _)| {
         (body.rows().iter())
             .position(|row| {

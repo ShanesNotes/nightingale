@@ -169,7 +169,7 @@
 //! }
 //! ```
 //! Solver contract: “The numbers are synthetic by type: the validation crate accepts only a fixture packet.”
-//! ```compile_fail,E0308
+//! ```compile_fail,E0603
 //! use ng_contract::*;
 //! use ng_record::{HistoryStore, Session};
 //! use ng_validate::*;
@@ -407,7 +407,7 @@ pub use healthy::{
     AnchorReturn, BareLens, CheckVerdict, DayActivities, RangeFailure, RangeGap, RangeReport, RangeResult,
     ReadingCheckError, ReadingChecks, ReturnGap, ReturnReport,
 };
-pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved, initialize};
+pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved, solve_fixture};
 pub use reference::ReferenceIntegrator;
 pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, MemoryStore, ReplayCase, ReplayEvidence,

@@ -222,7 +222,7 @@ fn step(
 ///
 /// It judges nothing. It stops where it stands at a point outside a law's domain, on a singular update, when no
 /// trial of an update has a value or when a sweep cannot settle a crossing, and `admit` is the one judge of a start.
-pub fn initialize(system: &InitializationSystem<'_>, body: &CompiledBody) -> AdmissionWorkspace {
+fn initialize(system: &InitializationSystem<'_>, body: &CompiledBody) -> AdmissionWorkspace {
     let mut workspace = system.workspace();
     if system.cycles() {
         march(system, &mut workspace, MARCH_BEATS, true);
@@ -324,8 +324,8 @@ pub(crate) fn solve_admission(
     origin: SimTime,
     anchored: fn(SimTime) -> Vec<BoundaryEvent>,
 ) -> Result<AdmissionSolve, InitializationFailure> {
-    let system = system(body, packet, BoundaryPort::new(anchored(origin))?, lens, origin)?;
-    let workspace = initialize(&system, body);
+    let (system, workspace) =
+        solve_fixture(body, packet, BoundaryPort::new(anchored(origin))?, lens, origin)?;
     let fence = system.fence();
     Ok(AdmissionSolve {
         workspace,
@@ -390,9 +390,21 @@ pub(crate) fn solved_start(
     lens: &ObservationLens,
     origin: SimTime,
 ) -> Result<InitialRevision, InitializationFailure> {
+    let (system, solved) = solve_fixture(body, packet, boundary, lens, origin)?;
+    started(system, solved, core, origin)
+}
+
+/// A fixture packet's admission system and its solve, before `admit` judges the solve.
+pub fn solve_fixture<'m>(
+    body: &'m CompiledBody,
+    packet: ParameterPacket<SyntheticFixture>,
+    boundary: BoundaryPort,
+    lens: &ObservationLens,
+    origin: SimTime,
+) -> Result<(InitializationSystem<'m>, AdmissionWorkspace), InitializationFailure> {
     let system = system(body, packet, boundary, lens, origin)?;
     let solved = initialize(&system, body);
-    started(system, solved, core, origin)
+    Ok((system, solved))
 }
 
 pub(crate) fn admit_start<'m>(
