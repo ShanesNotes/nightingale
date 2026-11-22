@@ -27,4 +27,4 @@ Blocks: none
 - [Body ticket 36](../../body/issues/36-the-whole-body-answers-posture.md) holds what a posture change does to the certificate: the body with no leak is refused at 75 s, and a vasopressin leak of 3e-3 a second is certified through 70 s.
 - [Body ticket 28](../../body/issues/28-two-synthetic-days.md) holds that no 48-hour protocol uses the body's policy yet.
 
-**Non-goals:** the rated bounds' figures, which stay native-contract 85's and are sized by its rule, and a cause for the salts' drift (body ticket 17).
+**Non-goals:** the rated bounds' figures, which stay native-contract 85's and are sized by its rule, and a cause for the salts' drift, which is native-contract 100's open box on the admitted beat and body ticket 17's.
