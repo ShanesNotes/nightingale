@@ -168,6 +168,26 @@
 //!     admit_solved(body, packet, port, core, lens, store)
 //! }
 //! ```
+//! Solver contract: “The numbers are synthetic by type: the validation crate accepts only a fixture packet.”
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! use ng_record::{HistoryStore, Session};
+//! use ng_validate::*;
+//! fn clinical<'m>(body: &'m CompiledBody, packet: ParameterPacket<Reviewed>, port: BoundaryPort,
+//!     core: &'m dyn CoupledSolver, lens: &ObservationLens, store: &'m dyn HistoryStore)
+//!     -> Result<Admitted<'m>, InitializationFailure> {
+//!     let at = SimTime::from_ns(0);
+//!     let request = InitializationRequest::at(at).reading(lens);
+//!     let system = body.initialization(body.bind(packet)?, port, request)?;
+//!     let solved = ng_validate::initialize(&system, body);
+//!     let history = MethodHistory::new(core.resolution().policy(), at, Vec::new());
+//!     let start = system.admit(solved, history)?;
+//!     let provenance = start.provenance().clone();
+//!     let identity = RunIdentity::new(body.model_hash(), start.packet_hash(), arena_seed(), core.resolution());
+//!     let session = Session::admit(body, core, start, identity, store)?;
+//!     Ok(Admitted { session, provenance })
+//! }
+//! ```
 //! ```
 //! use ng_contract::*;
 //! use ng_record::HistoryStore;
