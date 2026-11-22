@@ -3,6 +3,7 @@
 use crate::boundary::DriveFrame;
 use crate::catalog::{PerfusionTemperatures, SkinThermoreceptor};
 use crate::evaluate::Inputs;
+use crate::law::StoreTemperature;
 use crate::scope::{CORE_TEMPERATURE, TISSUE_TEMPERATURE};
 use crate::*;
 
@@ -39,6 +40,12 @@ enum Reads {
     OffSkin,
     Discarded,
     Guard,
+    Kept,
+    Forged,
+    TermAtSkin,
+    TermAtMuscle,
+    TermUnrealized,
+    NoSite,
 }
 
 struct Map {
@@ -190,7 +197,73 @@ fn read_at_the_carriage<'b>(cv: &mut FragmentBuilder<'b, Cardiovascular>, reads:
                 on.to(&off).expect("two values"),
             ));
         }
+        Reads::Kept => {
+            let (out, _) = cv.site_field::<Beds<Skin>, Temperature>("kept", Admissible::finite());
+            let value = cv.site_kernel(|mut k| {
+                let value = k.read(&forged);
+                k.finish(value, cv.every_mode(), class)
+            });
+            cv.define_at(&out, value);
+        }
+        Reads::Forged => {
+            let port =
+                ReadPort::<Cardiovascular, Temperature>::temperature(StoreTemperature::SkinThermoreceptor);
+            let sensed = cv.algebraic::<Temperature>("forged", Admissible::finite());
+            let residual = cv.kernel(|mut k| {
+                let (own, read) = (k.algebraic(&sensed), k.read(&port));
+                let value = k.subtract(own, read);
+                k.finish(value, cv.every_mode(), class)
+            });
+            cv.residual(&sensed, residual);
+        }
+        Reads::TermAtSkin => {
+            let term = cv.site_term::<Beds<Skin>, Temperature, _>("skin term", |mut k| {
+                let value = temperatures.tissue(&mut k);
+                k.finish_term(value)
+            });
+            host(cv, "skin host", &term, class);
+        }
+        Reads::TermAtMuscle => {
+            let term = cv.site_term::<Beds<Muscle>, Temperature, _>("muscle term", |mut k| {
+                let value = temperatures.tissue(&mut k);
+                k.finish_term(value)
+            });
+            host(cv, "muscle host", &term, class);
+        }
+        Reads::TermUnrealized => {
+            let term = cv.site_term::<Beds<Fat>, Temperature, _>("fat term", |mut k| {
+                let value = k.read(&forged);
+                k.finish_term(value)
+            });
+            host(cv, "fat host", &term, class);
+        }
+        Reads::NoSite => {
+            let (out, _) = cv.site_field::<Beds<Fat>, Temperature>("no site", Admissible::finite());
+            let value = cv.site_kernel(|mut k| {
+                let value = k.read(&forged);
+                k.finish(value, cv.every_mode(), class)
+            });
+            cv.define_at(&out, value);
+        }
     }
+}
+
+/// A CV field at every bed that adds `term` at each bed of the term's set.
+fn host<'b, D: SiteSet>(
+    cv: &mut FragmentBuilder<'b, Cardiovascular>,
+    name: &'static str,
+    term: &SiteTerm<'b, Cardiovascular, D, Temperature>,
+    class: RateClass,
+) where
+    CapillaryBed: Includes<D>,
+{
+    let (out, _) = cv.site_field::<CapillaryBed, Temperature>(name, Admissible::finite());
+    let value = cv.site_kernel(|mut k| {
+        let zero = k.zero::<Temperature>();
+        let value = k.add_from(zero, term);
+        k.finish(value, cv.every_mode(), class)
+    });
+    cv.define_at(&out, value);
 }
 
 fn sense<'b>(ns: &mut FragmentBuilder<'b, Nervous>, class: RateClass) {
@@ -488,6 +561,30 @@ fn an_off_skin_place_and_an_ungranted_field_refuse_even_in_a_discarded_read_or_a
     }
 }
 
+/// The catalog checks the reader of a protected read kept in a law, a projection forged for another card, the
+/// variant of a site term at each bed it is realized at, and a term or a law no site realizes, by the reader's right.
+#[test]
+fn the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_site_realizes() {
+    let tissue = named("MT", TISSUE_TEMPERATURE);
+    let cases = [
+        (Reads::Kept, "kept", tissue),
+        (Reads::Forged, "forged", named("MT", "skin_temperature")),
+        (Reads::TermAtMuscle, "muscle host", named("MT", "temperature")),
+        (Reads::TermUnrealized, "fat host", tissue),
+        (Reads::NoSite, "no site", tissue),
+    ];
+    for (reads, local, field) in cases {
+        let law = named("CV", local);
+        let found = compiled(Mark::SampledAtSkin, reads).err();
+        assert_eq!(
+            found,
+            refused(CompileDefect::UnwiredRead { law, field }),
+            "{local}"
+        );
+    }
+    compiled(Mark::SampledAtSkin, Reads::TermAtSkin).unwrap_or_else(|refused| panic!("{refused:?}"));
+}
+
 /// The map with no heat pools, for laws that move none.
 fn bare() -> Result<Schema, AdmissionError> {
     let mut schema = Schema::new(map(Mark::SampledAtSkin)?.0)?;
@@ -769,4 +866,273 @@ fn a_store_read_whose_store_is_missing_or_no_tissue_heat_store_is_refused() {
     );
     assert_eq!(missing(Missing::ExitAtABedsHeat), no_read("dry heat loss"));
     assert_eq!(missing(Missing::ExitAtTheElasticStore), no_read("dry heat loss"));
+}
+
+/// The map with a heat pool at each of its three stores.
+fn heated() -> (Schema, Map) {
+    let (anatomy, sites) = map(Mark::SampledAtSkin).expect("a map");
+    let mut schema = Schema::new(anatomy).expect("a schema");
+    for space in [Space::Plasma, Space::Interstitium, Space::Cells, Space::Lumen] {
+        schema.leave_out(space, "a bench of heat alone");
+    }
+    for store in [sites.root, sites.skin, sites.airway] {
+        schema.pool::<Energy>(store, Space::Thermal).expect("a store");
+    }
+    (schema, sites)
+}
+
+/// MT's temperatures, each defined as zero, for an assembly that reads them and never their values.
+fn zeroed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, stores: &TissueTemperatures<'b>, class: RateClass) {
+    let value = mt.kernel(|mut k| {
+        let value = k.zero::<Temperature>();
+        k.finish(value, mt.every_mode(), class)
+    });
+    mt.define(&stores.core, value);
+    let value = mt.site_kernel(|mut k| {
+        let value = k.zero::<Temperature>();
+        k.finish(value, mt.every_mode(), class)
+    });
+    mt.define_at(&stores.other, value);
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Sender {
+    Absent,
+    Undefined,
+    OtherDimension,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Reader {
+    Carriage,
+    DiscardedCarriage,
+    Thermoreceptor,
+}
+
+fn sent(sender: Sender, reader: Reader) -> Option<AdmissionError> {
+    let class = class();
+    let body = assemble(heated().0, |mut body| {
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        match sender {
+            Sender::Absent => {}
+            Sender::Undefined => {
+                let stores = ports.temperatures(&mut mt);
+                let value = mt.kernel(|mut k| {
+                    let value = k.zero::<Temperature>();
+                    k.finish(value, mt.every_mode(), class)
+                });
+                mt.define(&stores.core, value);
+            }
+            Sender::OtherDimension => {
+                mt.owe_defined::<Energy>(TISSUE_TEMPERATURE, law::Over::OtherTissueHeatStores);
+                let other: Output<'_, Metabolism, PerSite<TissueSite, Energy>> =
+                    Output::named(TISSUE_TEMPERATURE);
+                let value = mt.site_kernel(|mut k| {
+                    let value = k.zero::<Energy>();
+                    k.finish(value, mt.every_mode(), class)
+                });
+                mt.define_at(&other, value);
+            }
+        }
+        body.add(mt.finish());
+        match reader {
+            Reader::Carriage | Reader::DiscardedCarriage => {
+                let (mut cv, _) = body.cardiovascular()?.parts();
+                let temperatures: PerfusionTemperatures<'_> = cv.receive();
+                let (out, _) = cv.site_field::<Beds<Skin>, Temperature>("tissue end", Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    let read = temperatures.tissue(&mut k);
+                    let value = match reader {
+                        Reader::Carriage => read,
+                        _ => k.zero::<Temperature>(),
+                    };
+                    k.finish(value, cv.every_mode(), class)
+                });
+                cv.define_at(&out, value);
+                body.add(cv.finish());
+            }
+            Reader::Thermoreceptor => {
+                let (mut ns, _) = body.nervous()?.parts();
+                sense(&mut ns, class);
+                body.add(ns.finish());
+            }
+        }
+        body.compile()
+    });
+    body.err()
+}
+
+/// Each projected grant with and without its sender's row: no row is `UnemittedField`, a declared row no law defines
+/// `OmittedLaw`, and a row in another dimension `FieldDimension`, for a kept read and a discarded one.
+#[test]
+fn each_projected_grant_refuses_a_missing_an_undefined_and_a_wrongly_dimensioned_sender() {
+    let field = named("MT", TISSUE_TEMPERATURE);
+    let (carriage, sensor) = (named("CV", "tissue end"), named("NS", "sensed skin"));
+    for (reader, law) in [(Reader::Carriage, carriage), (Reader::Thermoreceptor, sensor)] {
+        let absent = refused(CompileDefect::UnemittedField { law, field });
+        assert_eq!(sent(Sender::Absent, reader), absent);
+        let omitted = refused(CompileDefect::OmittedLaw { law: field });
+        assert_eq!(sent(Sender::Undefined, reader), omitted);
+    }
+    for (reader, law) in [
+        (Reader::Carriage, carriage),
+        (Reader::DiscardedCarriage, carriage),
+        (Reader::Thermoreceptor, sensor),
+    ] {
+        let dimension = refused(CompileDefect::FieldDimension { law, field });
+        assert_eq!(sent(Sender::OtherDimension, reader), dimension);
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Expressed {
+    Inflow,
+    StoreHeat,
+    StoreTemperature,
+}
+
+fn expressed(read: Expressed) -> Option<AdmissionError> {
+    let class = class();
+    let body = assemble(heated().0, |mut body| {
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let stores = ports.temperatures(&mut mt);
+        zeroed(&mut mt, &stores, class);
+        match read {
+            Expressed::StoreHeat => {
+                let (explicit, _) = mt.explicit_field::<TissueSite, Energy>("explicit heat");
+                mt.express_at(&explicit, |mut k| {
+                    let value = k.at_site(&stores.tissue_heat);
+                    k.finish_term(value)
+                });
+            }
+            Expressed::StoreTemperature => {
+                let at_bed = stores.published().at_bed();
+                let (explicit, _) = mt.explicit_field::<CapillaryBed, Temperature>("explicit temperature");
+                mt.express_at(&explicit, |mut k| {
+                    let value = k.at_site(&at_bed);
+                    k.finish_term(value)
+                });
+            }
+            Expressed::Inflow => {}
+        }
+        body.add(mt.finish());
+        if read == Expressed::Inflow {
+            let (mut cv, _) = body.cardiovascular()?.parts();
+            let (explicit, _) = cv.explicit_field::<CapillaryBed, Rate<Water>>("explicit inflow");
+            cv.express_at(&explicit, |mut k| {
+                let value = k.bed_inflow();
+                k.finish_term(value)
+            });
+            body.add(cv.finish());
+        }
+        body.compile()
+    });
+    body.err()
+}
+
+#[test]
+fn an_explicit_field_reading_the_inflow_a_stores_heat_or_a_stores_temperature_is_refused() {
+    let cases = [
+        (Expressed::Inflow, named("CV", "explicit inflow")),
+        (Expressed::StoreHeat, named("MT", "explicit heat")),
+        (Expressed::StoreTemperature, named("MT", "explicit temperature")),
+    ];
+    for (read, law) in cases {
+        assert_eq!(
+            expressed(read),
+            refused(CompileDefect::NoSuchRead { law }),
+            "{}",
+            law.local
+        );
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Choice {
+    Base,
+    CoreEnd,
+    DryExit,
+    CoreHeat,
+}
+
+/// One assembly whose CV law reads one end of the carriage, whose MT residual reads the temperature at one of two
+/// exits of the skin's store, and whose MT field reads the heat of its own store or the core's.
+fn hashed(choice: Choice) -> ModelHash {
+    let class = class();
+    let (mut schema, sites) = heated();
+    schema
+        .process::<SkinEvaporativeHeat>(sites.skin, Space::Thermal)
+        .expect("an exit");
+    schema
+        .process::<DryHeatLoss>(sites.skin, Space::Thermal)
+        .expect("an exit");
+    let body = assemble(schema, |mut body| {
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let stores = ports.temperatures(&mut mt);
+        zeroed(&mut mt, &stores, class);
+        let (evaporative, dry) = (
+            ports.boundary::<SkinEvaporativeHeat>()?,
+            ports.boundary::<DryHeatLoss>()?,
+        );
+        for exit in [&evaporative, &dry] {
+            let still = mt.kernel(|mut k| {
+                let zero = k.zero::<Rate<Energy>>();
+                k.finish(zero, mt.every_mode(), class)
+            });
+            mt.transfer(Transfer::new(&exit.route, still));
+        }
+        let route = ports.conduction(&mut mt);
+        let still = mt.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, mt.every_mode(), class)
+        });
+        mt.transfer_at(&route, still);
+        let published = stores.published();
+        let at_exit = match choice {
+            Choice::DryExit => published.at_exit(&dry),
+            _ => published.at_exit(&evaporative),
+        };
+        let sensed = mt.algebraic::<Temperature>("exit temperature", Admissible::finite());
+        let residual = mt.kernel(|mut k| {
+            let (own, read) = (k.algebraic(&sensed), k.read(&at_exit));
+            let value = k.subtract(own, read);
+            k.finish(value, mt.every_mode(), class)
+        });
+        mt.residual(&sensed, residual);
+        let (out, _) = mt.site_field::<TissueSite, Energy>("store heat", Admissible::finite());
+        let value = mt.site_kernel(|mut k| {
+            let value = match choice {
+                Choice::CoreHeat => k.read(&stores.core_heat),
+                _ => k.at_site(&stores.tissue_heat),
+            };
+            k.finish(value, mt.every_mode(), class)
+        });
+        mt.define_at(&out, value);
+        body.add(mt.finish());
+        let (mut cv, _) = body.cardiovascular()?.parts();
+        let temperatures: PerfusionTemperatures<'_> = cv.receive();
+        let (out, _) = cv.site_field::<Beds<Skin>, Temperature>("end", Admissible::finite());
+        let value = cv.site_kernel(|mut k| {
+            let value = match choice {
+                Choice::CoreEnd => temperatures.core(&mut k),
+                _ => temperatures.tissue(&mut k),
+            };
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.define_at(&out, value);
+        body.add(cv.finish());
+        body.compile()
+    });
+    body.unwrap_or_else(|refused| panic!("{refused:?}")).model_hash()
+}
+
+/// The two exits sit on one store, so their reads bind one row and only the exit's identity in the program tells
+/// them apart.
+#[test]
+fn changing_a_carriage_end_an_exit_or_the_store_a_heat_read_finds_changes_the_model_hash() {
+    let base = hashed(Choice::Base);
+    assert_eq!(hashed(Choice::Base), base);
+    for choice in [Choice::CoreEnd, Choice::DryExit, Choice::CoreHeat] {
+        assert_ne!(hashed(choice), base, "{choice:?}");
+    }
 }

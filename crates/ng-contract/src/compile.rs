@@ -1536,6 +1536,7 @@ fn place(
             _ => None,
         };
         for &(_, kernel) in &law.laws {
+            check_rights(law.name, kernel, places)?;
             let off_site = |&(context, _): &(Context, Target)| !matches!(context, Context::Site(_));
             if kernel.placing.is_some() && targets.iter().any(off_site) {
                 return Err(CompileDefect::TermOffSite { law: law.name });
@@ -1631,7 +1632,7 @@ fn place(
                         (program, variant)
                     }
                 };
-                check_granted(law.name, reads, context, places)?;
+                check_granted(law.name, reads, Some(context), places)?;
                 placement.instances.push(Placed {
                     program,
                     context,
@@ -1799,12 +1800,20 @@ fn check_wired(
     Ok(())
 }
 
+/// Every read a law or guard could make, with each of its site terms written in, checked for its reader's right
+/// before any site is placed: a term or a law that no site realizes still has its grants checked.
+fn check_rights(law: LawName, kernel: &KernelData, places: &Places) -> Result<(), CompileDefect> {
+    let every = kernel.at(|_| true);
+    check_granted(law, every.as_ref().unwrap_or(kernel), None, places)
+}
+
 /// Each read of a store's heat or temperature, kept or discarded, is MT's own or a projected field's grant at the
-/// place its arrow allows. Checked before the read is placed, so the reader and place refuse first.
+/// place its arrow allows. Checked before the read is placed, so the reader and place refuse first. With no context
+/// only the reader's right is checked.
 fn check_granted(
     law: LawName,
     kernel: &KernelData,
-    context: Context,
+    context: Option<Context>,
     places: &Places,
 ) -> Result<(), CompileDefect> {
     let coded = (kernel.code.iter().enumerate()).filter_map(|(at, op)| match op {
@@ -1848,7 +1857,7 @@ fn effect_granted(
     field: LawName,
     place: Where,
     lenient: bool,
-    context: Context,
+    context: Option<Context>,
     places: &Places,
 ) -> Result<(), CompileDefect> {
     let Some(row) = catalog::effect_read(law.owner) else {
@@ -1858,8 +1867,10 @@ fn effect_granted(
     if field.local != row.quantity || place != Where::Junction || lenient {
         return Err(unwired);
     }
-    let Context::Site(site) = context else {
-        return Err(unwired);
+    let site = match context {
+        None => return Ok(()),
+        Some(Context::Site(site)) => site,
+        Some(_) => return Err(unwired),
     };
     match places.anatomy.in_set(row.sites).contains(&site) {
         true => Ok(()),
@@ -1872,7 +1883,7 @@ fn granted(
     law: LawName,
     read: StoreTemperature,
     place: Where,
-    context: Context,
+    context: Option<Context>,
     places: &Places,
 ) -> Result<(), CompileDefect> {
     let schema = places.schema;
@@ -1901,6 +1912,9 @@ fn granted(
     if law.owner != arrow.to {
         return Err(unwired);
     }
+    let Some(context) = context else {
+        return Ok(());
+    };
     match (projection, context) {
         (Projection::CarriageEnds, Context::Site(bed)) if carried_into(schema, bed).is_some() => Ok(()),
         (Projection::CarriageEnds, _) => Err(unwired),
@@ -2788,6 +2802,7 @@ fn guards(
             let written = written(law, zero, fields)?;
             let program = written.as_ref().unwrap_or(zero);
             let contexts = places_of(anatomy, reaches, schema, fragment.owner, mode.over);
+            check_rights(law, zero, places)?;
             check_ends(law, zero, &contexts, anatomy)?;
             for at in contexts {
                 check_landing(law, zero, fields, at, anatomy)?;
@@ -2807,7 +2822,7 @@ fn guards(
                     inputs: Vec::new(),
                     resets: reset,
                 };
-                check_granted(law, zero, at, places)?;
+                check_granted(law, zero, Some(at), places)?;
                 guards.push((layout, addresses(law, route, program, at, places)?));
                 check_wired(law, zero, at, places)?;
             }
