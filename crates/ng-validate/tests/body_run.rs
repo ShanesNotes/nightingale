@@ -2159,14 +2159,14 @@ fn at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak
     report += &at_a_quarter_the_run_with_no_leak_passes_the_bodys_policy();
     expect![[r#"
         leaking body at 0.25 a second: with its gate shut it passes each leak's own policy over 40 s; its rows' mean change from 20.001 s to 36.001 s
-        Element(Oxygen) moves -4.3443e0 a second; its leak, +5.82e0 a second of oxygen gas into the arteries' blood, nets +5.9995e1 from 20.001 s to 32.001 s against its size +6e1
-        Element(Carbon) moves -3.5228e0 a second; its leak, +5.39e1 a second of carbon dioxide into the arteries' blood, nets +4.9960e1 from 20.001 s to 32.001 s against its size +5e1
-        Of(NitrogenGas) moves -7.0156e-1 a second; its leak, +1.73e2 a second of nitrogen gas into the pulmonary bed's gas, nets +2.9978e1 from 20.001 s to 32.001 s against its size +3e1
-        Of(Vasopressin) moves +2.1393e-5 a second; its leak, -3e-3 a second of vasopressin into the central veins' blood, nets -2.9825e-3 from 20.001 s to 32.001 s against its size -3e-3
-        Element(Oxygen) refused between edges from 20.001 s to 32.001 s: changed +6.6877e2 against 4.8001e2
-        Element(Carbon) refused between edges from 20.001 s to 32.001 s: changed +5.5721e2 against 3.6001e2
-        Of(NitrogenGas) refused between edges from 20.001 s to 32.001 s: changed +3.5087e2 against 2.4000e2
-        Of(Vasopressin) refused between edges from 20.001 s to 32.001 s: changed -3.5566e-2 against 2.4000e-2
+        Element(Oxygen) moves -4.3428e0 a second; its leak, +5.82e0 a second of oxygen gas into the arteries' blood, nets +5.9990e1 from 20.001 s to 32.001 s against its size +6e1
+        Element(Carbon) moves -3.5237e0 a second; its leak, +5.39e1 a second of carbon dioxide into the arteries' blood, nets +4.9959e1 from 20.001 s to 32.001 s against its size +5e1
+        Of(NitrogenGas) moves -7.0087e-1 a second; its leak, +1.73e2 a second of nitrogen gas into the pulmonary bed's gas, nets +2.9971e1 from 20.001 s to 32.001 s against its size +3e1
+        Of(Vasopressin) moves +1.3370e-4 a second; its leak, -7e-3 a second of vasopressin into the central veins' blood, nets -6.9593e-3 from 20.001 s to 32.001 s against its size -7e-3
+        Element(Oxygen) refused between edges from 20.001 s to 32.001 s: changed +6.6873e2 against 4.8001e2
+        Element(Carbon) refused between edges from 20.001 s to 32.001 s: changed +5.5719e2 against 3.6000e2
+        Of(NitrogenGas) refused between edges from 20.001 s to 32.001 s: changed +3.5081e2 against 2.4000e2
+        Of(Vasopressin) refused between edges from 20.001 s to 32.001 s: changed -8.2044e-2 against 6.0001e-2
         held run at 0.25 a second: passes the body's policy over 60 s, 12 windows between edges
     "#]].assert_eq(&report);
 }
