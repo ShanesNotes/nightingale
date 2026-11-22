@@ -4,7 +4,7 @@ Type: research
 Status: ready-for-human
 Blocked by: none
 
-[Research 23](23-how-the-drive-splits-into-rate-and-depth.md) gives body ticket 38 the split of the drive into rate and depth from the works on hand, and body 38 builds from it. Four of its boxes need works that sit behind a paywall, which only the developer reviewer can obtain. They are here, each with the work that could settle it. This ticket blocks nothing.
+[Research 23](23-how-the-drive-splits-into-rate-and-depth.md) gives body ticket 38 the split of the drive into rate and depth from the works on hand, and body 38 builds from it. The four unanswered boxes are here with the evidence each needs and the paywalled works the developer reviewer could obtain. This ticket blocks nothing.
 
 **Question:** What do the works below give toward these four boxes, once obtained? Research 23's Answer holds what the works on hand give toward each.
 
