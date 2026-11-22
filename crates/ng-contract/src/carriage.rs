@@ -1,12 +1,9 @@
-//! Carriage: CV posts blood's carriage of heat at a bed from the bed's own signed inflow, the core store's temperature
-//! and the temperature of the nearest tissue heat store above the bed.
 use crate::boundary::DriveFrame;
 use crate::catalog::PerfusionTemperatures;
 use crate::evaluate::Inputs;
 use crate::scope::{CORE_TEMPERATURE, TISSUE_TEMPERATURE};
 use crate::*;
 
-/// Heat per volume of blood per kelvin, written as the carriage's rate per kelvin per volume flow.
 type BloodHeat = Quotient<Quotient<Rate<Energy>, Temperature>, Rate<Volume>>;
 
 const PARTIAL_VOLUME: f64 = 2.0;
@@ -47,7 +44,6 @@ struct Sites {
     vein: SiteId,
 }
 
-/// One bed inside an unheated group inside the skin's store, fed from the artery and drained to the vein.
 fn sites(feed: Feed) -> (AnatomyBuilder, Sites) {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at());
@@ -151,7 +147,6 @@ fn compiled(feed: Feed) -> Result<(CompiledBody, Sites), AdmissionError> {
     Ok((body, sites))
 }
 
-/// The carriage law: `c_blood × volume flow × (T_core − T_tissue)`, with the volume flow from the bed's inflow.
 fn carry<'b>(
     cv: &mut FragmentBuilder<'b, Cardiovascular>,
     ports: &CardiovascularPorts<'b>,
@@ -247,7 +242,6 @@ impl Bench {
         self.set(core_row, core);
         self.set(tissue_row, tissue);
     }
-    /// The carriage column at the bed and the rate its law posts.
     fn carried(&self) -> (&Column, f64) {
         let frame = DriveFrame::default();
         let inputs = Inputs {

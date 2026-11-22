@@ -1,7 +1,3 @@
-//! The skin arteriole: a CV field on the skin's beds holds the log of the factor the dilator and the skin's own
-//! warmth put on the arteriole's resistance, and the plain-edge law reads it at its downstream end. The skin's edge
-//! scales its resistance by the exponential of the field; every other plain edge answers pressure as before, and the
-//! hepatic card's sinusoids are left out.
 use crate::boundary::DriveFrame;
 use crate::catalog::PerfusionTemperatures;
 use crate::evaluate::Inputs;
@@ -16,10 +12,8 @@ const SKIN_TEMPERATURE: f64 = 5.0;
 const DILATOR: f64 = 0.5;
 const CONSTRICTOR: f64 = 2.0;
 const RATIO: &str = "skin log resistance ratio";
-/// What the skin's factor adds to the plain-edge law: the read of the field, the exponential and the scaling.
-const ADDED: usize = 3;
+const SKIN_FACTOR_OPS: usize = 3;
 
-/// What the assembly does with the skin's log resistance ratio.
 #[derive(Clone, Copy, PartialEq)]
 enum Ratio {
     Read,
@@ -53,8 +47,6 @@ fn cv(local: &'static str) -> LawName {
     LawName { owner: "CV", local }
 }
 
-/// A ring of one artery, the skin bed inside the skin's heat store, one vein and the liver's bed, with one junction
-/// supplying every blood site.
 fn map(ratio: Ratio) -> Result<(Anatomy, Sites), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at());
@@ -91,7 +83,6 @@ fn map(ratio: Ratio) -> Result<(Anatomy, Sites), AdmissionError> {
     Ok((map.finish()?, sites))
 }
 
-/// MT's store temperatures, each held at the thermal zero, with conduction still, so a test may set the store's row.
 fn publish<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>) {
     let class = class();
     let stores = ports.temperatures(mt);
@@ -113,7 +104,6 @@ fn publish<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts
     mt.transfer_at(&route, still);
 }
 
-/// The receptor layer's effect of each transmitter at every junction that holds it bound.
 fn bind(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let class = class();
     let (mut rc, ports) = body.receptor()?.parts();
@@ -237,7 +227,6 @@ struct Bench {
     unknowns: Vec<f64>,
 }
 
-/// The assembly bound with synthetic values, with the pressures, the two effects and the skin store's temperature set.
 fn bench(ratio: Ratio) -> Bench {
     let (body, sites) = compiled(ratio).unwrap_or_else(|why| panic!("{why:?}"));
     let mut packet: ParameterPacket<SyntheticFixture> = ParameterPacket::new();
@@ -312,11 +301,9 @@ impl Bench {
     fn set(&mut self, row: usize, value: f64) {
         self.unknowns[row] = value;
     }
-    /// The skin's log resistance ratio row, at the one skin bed.
     fn ratio(&self) -> usize {
         self.algebraic("CV", RATIO, Context::Site(self.sites.bed))
     }
-    /// The three plain vascular edges, the skin's feeder first.
     fn plain(&self) -> [Context; 3] {
         let edge = |from, to| Context::Edge { from, to };
         [
@@ -335,8 +322,6 @@ impl Bench {
             factors: &[],
         }
     }
-    /// Each residual of one law, by its place, to the bit: the row less what the law's kernel computes there, since
-    /// every row here is one its own law defines. The column instances of a transfer are left out.
     fn residuals(&self, law: LawName) -> Vec<(Context, u64)> {
         let frame = DriveFrame::default();
         let inputs = self.inputs(&frame);
@@ -350,7 +335,6 @@ impl Bench {
         found.sort_by_key(|(context, _)| *context);
         found
     }
-    /// The slope of each plain edge's flow row in one row's column, by edge.
     fn slopes(&self, column: usize) -> Vec<(Context, u64)> {
         let frame = DriveFrame::default();
         let inputs = self.inputs(&frame);
@@ -377,7 +361,6 @@ impl Bench {
     }
 }
 
-/// The log of the factor on the skin arteriole: the dilator's effect plus the skin's warmth over its width.
 fn log_ratio() -> f64 {
     DILATOR + (SKIN_TEMPERATURE - REFERENCE) / WIDTH
 }
@@ -443,7 +426,7 @@ fn only_the_skin_edges_flow_has_a_slope_in_the_skin_log_ratio() {
     assert_eq!(edge, feeder, "the skin's feeding edge alone");
     // The residual is the row less the flow, and the flow is the pressure head over a resistance the exponential of
     // the field scales, so the residual's slope in the field is the flow itself, up to the last bit of the two ways
-    // of reaching it. Its sign says the flow falls as the field rises.
+    // of reaching it.
     let flow = (UP - DOWN) / (RESISTANCE * CONSTRICTOR * crate::pinned::exp(log_ratio()));
     let slope = f64::from_bits(slope);
     assert!(
@@ -488,7 +471,7 @@ fn the_skin_read_covers_the_plain_edges_and_leaves_out_the_hepatic_cards_sinusoi
     };
     assert_eq!(
         plain - before,
-        ADDED,
+        SKIN_FACTOR_OPS,
         "{} against {}",
         kinds(Ratio::Read),
         kinds(Ratio::Unread)

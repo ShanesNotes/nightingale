@@ -605,8 +605,6 @@ fn a_named_work_on_a_map_whose_root_is_a_vessel_is_refused() -> Result<(), Admis
     Ok(())
 }
 
-/// The whole body's map with a group of no heat and an inner store under the skin heat site, and the skin bed and the
-/// bare bed placed as `case` says.
 fn nearest_store_body(case: &str) -> Result<Anatomy, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let body = map.site::<TissueSite>("body", at()?);
@@ -639,7 +637,6 @@ fn nearest_store_body(case: &str) -> Result<Anatomy, AdmissionError> {
     map.finish()
 }
 
-/// A case, the stores it adds beside the core, skin and airway stores, and each carrying bed with its store.
 type Nearest = (
     &'static str,
     &'static [&'static str],

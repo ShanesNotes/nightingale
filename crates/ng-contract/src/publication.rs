@@ -1,5 +1,3 @@
-//! Publication: MT defines each tissue heat store's temperature from that store's own heat and capacity, and CV at
-//! the carriage's tissue end, NS at the skin thermoreceptor and MT at its skin exit read the one skin row.
 use crate::boundary::DriveFrame;
 use crate::catalog::{PerfusionTemperatures, SkinThermoreceptor};
 use crate::evaluate::Inputs;
@@ -88,7 +86,6 @@ fn map(mark: Mark) -> Result<(Anatomy, Map), AdmissionError> {
     Ok((map.finish()?, sites))
 }
 
-/// MT's temperature law: `T_0 + H / C`, with one body capacity for the core store and one site capacity for the rest.
 fn publish<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>, class: RateClass) {
     let stores = ports.temperatures(mt);
     let key = ParameterKey::new;
@@ -248,7 +245,6 @@ fn read_at_the_carriage<'b>(cv: &mut FragmentBuilder<'b, Cardiovascular>, reads:
     }
 }
 
-/// A CV field at every bed that adds `term` at each bed of the term's set.
 fn host<'b, D: SiteSet>(
     cv: &mut FragmentBuilder<'b, Cardiovascular>,
     name: &'static str,
@@ -315,8 +311,6 @@ struct Bench {
     modes: Vec<usize>,
 }
 
-/// The granted assembly bound with synthetic values: the core, skin and airway stores' heats, and the airway's
-/// capacity apart from the skin's.
 fn bound(heats: [f64; 3], airway_capacity: f64) -> Bench {
     let (body, sites) =
         compiled(Mark::SampledAtSkin, Reads::Granted).unwrap_or_else(|refused| panic!("{refused:?}"));
@@ -404,7 +398,6 @@ impl Bench {
             species: Species::Energy,
         })
     }
-    /// The store's temperature: its defining law's value, with every algebraic unknown at zero.
     fn temperature(&self, store: SiteId) -> f64 {
         let frame = DriveFrame::default();
         let values = self.body.instance_values(&self.inputs(&frame)).expect("finite");
@@ -414,7 +407,6 @@ impl Bench {
             .and_then(|(_, value)| value);
         -defining.expect("one law defines the row")
     }
-    /// The slope of a temperature row's residual in a store's heat, zero where the row does not read it.
     fn slope(&self, temperature: SiteId, heat: SiteId) -> f64 {
         let frame = DriveFrame::default();
         let jacobian = self.body.jacobian(&self.inputs(&frame), 0.0).expect("finite");
@@ -561,8 +553,6 @@ fn an_off_skin_place_and_an_ungranted_field_refuse_even_in_a_discarded_read_or_a
     }
 }
 
-/// The catalog checks the reader of a protected read kept in a law, a projection forged for another card, the
-/// variant of a site term at each bed it is realized at, and a term or a law no site realizes, by the reader's right.
 #[test]
 fn the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_site_realizes() {
     let tissue = named("MT", TISSUE_TEMPERATURE);
@@ -585,7 +575,6 @@ fn the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_sit
     compiled(Mark::SampledAtSkin, Reads::TermAtSkin).unwrap_or_else(|refused| panic!("{refused:?}"));
 }
 
-/// The map with no heat pools, for laws that move none.
 fn bare() -> Result<Schema, AdmissionError> {
     let mut schema = Schema::new(map(Mark::SampledAtSkin)?.0)?;
     for space in [Space::Plasma, Space::Interstitium, Space::Cells, Space::Lumen] {
@@ -868,7 +857,6 @@ fn a_store_read_whose_store_is_missing_or_no_tissue_heat_store_is_refused() {
     assert_eq!(missing(Missing::ExitAtTheElasticStore), no_read("dry heat loss"));
 }
 
-/// The map with a heat pool at each of its three stores.
 fn heated() -> (Schema, Map) {
     let (anatomy, sites) = map(Mark::SampledAtSkin).expect("a map");
     let mut schema = Schema::new(anatomy).expect("a schema");
@@ -881,7 +869,6 @@ fn heated() -> (Schema, Map) {
     (schema, sites)
 }
 
-/// MT's temperatures, each defined as zero, for an assembly that reads them and never their values.
 fn zeroed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, stores: &TissueTemperatures<'b>, class: RateClass) {
     let value = mt.kernel(|mut k| {
         let value = k.zero::<Temperature>();
@@ -962,8 +949,6 @@ fn sent(sender: Sender, reader: Reader) -> Option<AdmissionError> {
     body.err()
 }
 
-/// Each projected grant with and without its sender's row: no row is `UnemittedField`, a declared row no law defines
-/// `OmittedLaw`, and a row in another dimension `FieldDimension`, for a kept read and a discarded one.
 #[test]
 fn each_projected_grant_refuses_a_missing_an_undefined_and_a_wrongly_dimensioned_sender() {
     let field = named("MT", TISSUE_TEMPERATURE);
@@ -1055,8 +1040,6 @@ enum Choice {
     CoreHeat,
 }
 
-/// One assembly whose CV law reads one end of the carriage, whose MT residual reads the temperature at one of two
-/// exits of the skin's store, and whose MT field reads the heat of its own store or the core's.
 fn hashed(choice: Choice) -> ModelHash {
     let class = class();
     let (mut schema, sites) = heated();

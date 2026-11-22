@@ -627,18 +627,18 @@ coupling_map! {
 /// }
 /// ```
 impl<'b> PerfusionTemperatures<'b> {
-    /// The core store's temperature, at a bed whose carriage route runs into another store. Compile refuses a bed
-    /// whose nearest store is the core store.
+    /// The core store's temperature at a bed whose carriage route runs into another store. A kernel off the
+    /// capillary beds does not build, and compile refuses a bed whose nearest store is the core store.
     /// ```compile_fail,E0277
     /// use ng_contract::{catalog::*, *};
     /// fn wrong<'b, 'k>(t: &PerfusionTemperatures<'b>, k: &mut Kernel<'b, 'k, Cardiovascular, VesselSegment>) {
-    ///     let _ = t.tissue(k);
+    ///     let _ = t.core(k);
     /// }
     /// ```
     /// ```
     /// use ng_contract::{catalog::*, *};
     /// fn read<'b, 'k>(t: &PerfusionTemperatures<'b>, k: &mut Kernel<'b, 'k, Cardiovascular, Beds<Skin>>) {
-    ///     let _ = t.tissue(k);
+    ///     let _ = t.core(k);
     /// }
     /// ```
     pub fn core<'k, C: SiteSet>(
@@ -710,7 +710,6 @@ impl<'b> SkinThermoreceptor<'b> {
     }
 }
 
-/// The arrow and field of a projection. The const checks below hold each projection to one field.
 pub(crate) fn projected(projection: Projection) -> (&'static Arrow, &'static WiredField) {
     let fields = ARROWS
         .iter()
@@ -720,7 +719,6 @@ pub(crate) fn projected(projection: Projection) -> (&'static Arrow, &'static Wir
         .next()
         .expect("the catalog projects each grant at one field")
 }
-/// A plain read of `field` is its sender's own, or the receiver's of an arrow from that sender that emits it.
 pub(crate) fn reads_plainly(reader: &'static str, field: LawName) -> bool {
     let emits = |arrow: &Arrow| {
         let wired = arrow.carries.wired().iter();
@@ -1226,7 +1224,7 @@ speciation_readers! {
 /// What a card reads of S10, the autonomic efferents the receptor layer issues at a junction: one row for each
 /// reader whose read the catalog grants, beside the 38 arrows and beside the speciation readers, with the
 /// quantity it reads, the sites its kernel stands at and the body ticket that builds the reading law. A card
-/// with no row reads an effect at the junction of whatever site it stands at, as CV, MS and RN do.
+/// with no row reads an effect at the junction of whatever site it stands at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectReader {
     pub reader: &'static str,
@@ -1240,7 +1238,6 @@ pub const EFFECT_READERS: [EffectReader; 1] = [EffectReader {
     quantity: Species::Acetylcholine.names()[4],
     body_ticket: 12,
 }];
-/// The S10 row of a reader, where the catalog grants it one.
 pub(crate) fn effect_read(reader: &'static str) -> Option<&'static EffectReader> {
     EFFECT_READERS.iter().find(|row| row.reader == reader)
 }

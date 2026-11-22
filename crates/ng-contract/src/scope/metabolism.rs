@@ -314,12 +314,11 @@ impl<'b> MetabolismPorts<'b> {
         TissueTemperatures {
             core: core.core_temperature,
             other: Output::named(TISSUE_TEMPERATURE),
-            core_heat: ReadPort::heat(StoreHeat::Root),
-            tissue_heat: ReadPort::heat(StoreHeat::Here),
+            core_heat: ReadPort::heat(StoreHeat::Core),
+            tissue_heat: ReadPort::heat(StoreHeat::OwnSite),
         }
     }
-    /// The acetylcholine effect at the junction supplying a skin bed, MT's one read of S10. The catalog grants MT this
-    /// field at the strict junction read of a skin bed and nothing else.
+    /// The acetylcholine effect at the junction supplying a skin bed, MT's one read of S10.
     pub fn sweat_effect(&self) -> SkinSweatEffect<'b> {
         SkinSweatEffect {
             effect: super::effect::<_, _, Acetylcholine>(),

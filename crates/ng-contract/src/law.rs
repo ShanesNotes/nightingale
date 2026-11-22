@@ -1538,15 +1538,11 @@ pub(crate) enum Source {
     TissueHeat(StoreHeat),
     TissueTemperature(StoreTemperature),
 }
-/// Which tissue heat store's energy MT reads: the core store's, from any kernel, or the store at the kernel's own
-/// tissue site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StoreHeat {
-    Root,
-    Here,
+    Core,
+    OwnSite,
 }
-/// Which tissue heat store's temperature a read finds, from the reader's own place. Compile finds the store, then its
-/// row: the core store's is MT's `core_temperature` at the body, any other's MT's `tissue_temperature` at its site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StoreTemperature {
     OwnBed,

@@ -803,7 +803,6 @@ fn places_of(
     }
 }
 
-/// A tissue heat store: a tissue site with a thermal energy pool. The core store is the one at the root.
 fn holds_heat(schema: &Schema, site: SiteId) -> bool {
     site.class() == Class::TissueSite
         && schema
@@ -813,18 +812,15 @@ fn holds_heat(schema: &Schema, site: SiteId) -> bool {
 fn core_store(schema: &Schema) -> Option<SiteId> {
     (schema.anatomy.root()).filter(|&root| holds_heat(schema, root))
 }
-/// The store a bed sits in: from the bed's parent toward the root, the first tissue heat store.
 fn store_above(schema: &Schema, bed: SiteId) -> Option<SiteId> {
     let anatomy = &schema.anatomy;
     core::iter::successors(anatomy.parent(bed), |&site| anatomy.parent(site))
         .find(|&site| holds_heat(schema, site))
 }
-/// The store blood carries heat into at a bed, where that store is not the core store.
 fn carried_into(schema: &Schema, bed: SiteId) -> Option<SiteId> {
     let store = store_above(schema, bed)?;
     (bed.class() == Class::CapillaryBed && Some(store) != schema.anatomy.root()).then_some(store)
 }
-/// A store's temperature row: the core store's is the body's, every other store's is at its site.
 fn temperature_at(schema: &Schema, store: SiteId) -> (LawName, Context) {
     let owner = crate::Metabolism::CARD;
     match schema.anatomy.root() == Some(store) {
@@ -949,20 +945,16 @@ impl Rows {
         self.defined.binary_search(&law).ok()?;
         self.slot(law, at)
     }
-    /// The defined row of this owner, name and place, with no fallback to the body's.
     fn exactly(&self, law: LawName, at: Context) -> Option<usize> {
         self.defined.binary_search(&law).ok()?;
         self.here(law, at)
     }
-    /// The flow row a bound inflow binds: the flow slot's own row, of the kind its hydraulic
-    /// family declares and of a water rate.
     fn inflow_row(&self, flow: Slot, kind: RowKind) -> Option<usize> {
         let row = self.here(flow.law, flow.at)?;
         let rate = crate::quantity::dimension::<crate::Rate<crate::Water>>();
         let found = &self.rows[row];
         (found.kind == kind && found.dimension == rate).then_some(row)
     }
-    /// The row of this owner, name and place, of any kind, with no fallback to the body's.
     fn here(&self, law: LawName, at: Context) -> Option<usize> {
         let found = self
             .slots
@@ -1800,16 +1792,14 @@ fn check_wired(
     Ok(())
 }
 
-/// Every read a law or guard could make, with each of its site terms written in, checked for its reader's right
-/// before any site is placed: a term or a law that no site realizes still has its grants checked.
+/// Checked on the unplaced kernel, so a term or law that no site realizes still has its grants checked.
 fn check_rights(law: LawName, kernel: &KernelData, places: &Places) -> Result<(), CompileDefect> {
     let every = kernel.at(|_| true);
     check_granted(law, every.as_ref().unwrap_or(kernel), None, places)
 }
 
-/// Each read of a store's heat or temperature, kept or discarded, is MT's own or a projected field's grant at the
-/// place its arrow allows. Checked before the read is placed, so the reader and place refuse first. With no context
-/// only the reader's right is checked.
+/// Discarded reads are checked too, and before placement, so a reader or place defect refuses first. With no
+/// context only the reader's right is checked.
 fn check_granted(
     law: LawName,
     kernel: &KernelData,
@@ -1831,8 +1821,8 @@ fn check_granted(
             }
             Source::TissueHeat(store) if law.owner != crate::Metabolism::CARD => {
                 let local = match store {
-                    StoreHeat::Root => "core_heat",
-                    StoreHeat::Here => "tissue_heat",
+                    StoreHeat::Core => "core_heat",
+                    StoreHeat::OwnSite => "tissue_heat",
                 };
                 let field = LawName {
                     owner: crate::Metabolism::CARD,
@@ -1850,8 +1840,6 @@ fn check_granted(
     Ok(())
 }
 
-/// A read of an effect the receptor layer issues is S10's row for its reader: that one quantity, at the strict junction
-/// read, in a context the row's sites hold. A reader the catalog gives no row reads at its junction as before.
 fn effect_granted(
     law: LawName,
     field: LawName,
@@ -1878,7 +1866,6 @@ fn effect_granted(
     }
 }
 
-/// A store temperature read is MT's own, or a projected field's at the place its arrow allows.
 fn granted(
     law: LawName,
     read: StoreTemperature,
@@ -2334,7 +2321,6 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
     }
 }
 
-/// The store a temperature read finds from the reader's place, or none where it has no such store.
 fn store_read(
     schema: &Schema,
     read: StoreTemperature,
@@ -2363,7 +2349,6 @@ fn store_read(
         StoreTemperature::SkinThermoreceptor => landed.filter(|&site| serves_skin(schema, site)),
     }
 }
-/// A store that some skin bed sits in.
 fn serves_skin(schema: &Schema, store: SiteId) -> bool {
     let anatomy = &schema.anatomy;
     let skin = |bed: &&SiteId| anatomy.tissue(**bed) == Some(crate::Tissue::Skin);
@@ -2452,11 +2437,11 @@ fn addresses(
             }
             Source::TissueHeat(store) => {
                 let site = match (store, context) {
-                    (StoreHeat::Root, _) => core_store(schema),
-                    (StoreHeat::Here, Context::Site(site)) => {
+                    (StoreHeat::Core, _) => core_store(schema),
+                    (StoreHeat::OwnSite, Context::Site(site)) => {
                         Some(site).filter(|&site| holds_heat(schema, site))
                     }
-                    (StoreHeat::Here, _) => None,
+                    (StoreHeat::OwnSite, _) => None,
                 };
                 let site = site.ok_or(CompileDefect::NoSuchRead { law })?;
                 let pool = PoolRef {

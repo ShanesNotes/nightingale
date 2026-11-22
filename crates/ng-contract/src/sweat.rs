@@ -1,7 +1,3 @@
-//! Sweat: MT reads the acetylcholine effect at the junction supplying the skin bed and the temperature of the store
-//! the bed sits in, puts one sweat rate on a body row, and a non-draining boundary of its own reads that row. The
-//! same fixed skin reference serves NS's read at the thermoreceptor, CV's at the tissue end of the carriage and MT's
-//! at the bed.
 use crate::boundary::DriveFrame;
 use crate::catalog::{PerfusionTemperatures, SkinThermoreceptor};
 use crate::evaluate::Inputs;
@@ -30,7 +26,6 @@ fn class() -> RateClass {
     RateClass::new(RateBand::Wave, 1_000_000_000).expect("a class")
 }
 
-/// What the map says of the nerve that supplies the skin bed.
 #[derive(Clone, Copy, PartialEq)]
 enum Nerve {
     Supplied,
@@ -39,7 +34,6 @@ enum Nerve {
     NoReceptor,
 }
 
-/// How MT's sweat kernel asks for the effect.
 #[derive(Clone, Copy, PartialEq)]
 enum Reads {
     Granted,
@@ -56,8 +50,6 @@ struct Sites {
     junction: SiteId,
 }
 
-/// The skin bed inside the skin's heat store, fed from the artery, beside a muscle bed in the core store. One
-/// junction supplies both beds.
 fn map(nerve: Nerve) -> Result<(Anatomy, Sites), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at());
@@ -97,7 +89,6 @@ fn map(nerve: Nerve) -> Result<(Anatomy, Sites), AdmissionError> {
     Ok((map.finish()?, sites))
 }
 
-/// MT's two temperature rows, each held at the thermal zero so a test may set the store's row itself.
 fn publish<'b>(
     mt: &mut FragmentBuilder<'b, Metabolism>,
     ports: &MetabolismPorts<'b>,
@@ -122,9 +113,6 @@ fn publish<'b>(
     stores.published()
 }
 
-/// The sweat law: one site kernel at the one skin bed, the most it secretes against the skin's warmth above the
-/// reference, scaled by the muscarinic effect, put on a body row, and MT's evaporative heat boundary, which drains
-/// nothing, reading that row. The law receives the two grants it uses and nothing else.
 fn secrete<'b>(
     mt: &mut FragmentBuilder<'b, Metabolism>,
     effect: &SkinSweatEffect<'b>,
@@ -192,7 +180,6 @@ fn secrete<'b>(
     mt.transfer(Transfer::new(&exit.route, evaporated));
 }
 
-/// A loss law receives its read of the temperature at its own exit and nothing else.
 fn lose<'b>(
     mt: &mut FragmentBuilder<'b, Metabolism>,
     at_exit: &ReadPort<'b, Metabolism, Temperature>,
@@ -212,7 +199,6 @@ fn lose<'b>(
     mt.transfer(Transfer::new(&exit.route, rate));
 }
 
-/// The receptor layer's effect at every junction that holds acetylcholine bound.
 fn bind(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let class = class();
     let (mut rc, ports) = body.receptor()?.parts();
@@ -330,7 +316,6 @@ impl Bench {
     fn set(&mut self, row: usize, value: f64) {
         self.unknowns[row] = value;
     }
-    /// The value and the context of every instance of one law.
     fn values(&self, law: LawName) -> Vec<(Context, f64)> {
         let frame = DriveFrame::default();
         let inputs = Inputs {
@@ -452,15 +437,12 @@ fn the_catalog_refuses_the_lenient_read_another_ligand_a_read_off_the_junction_a
     );
 }
 
-/// Whether the three cards declare the skin reference alike.
 #[derive(Clone, Copy, PartialEq)]
 enum Declared {
     Alike,
     Conflicting,
 }
 
-/// NS at the skin thermoreceptor, CV at the tissue end of the carriage and MT at the skin bed, each comparing its own
-/// skin read with the one fixed skin reference.
 fn compared(declared: Declared) -> Result<CompiledBody, AdmissionError> {
     let (anatomy, sites) = map(Nerve::Supplied)?;
     let mut schema = Schema::new(anatomy)?;

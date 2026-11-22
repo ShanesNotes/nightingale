@@ -41,7 +41,6 @@ pub use processes::*;
 pub use respiratory::RespiratoryPorts;
 
 pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
-/// The core store's temperature, arrow 91's emitted scalar.
 pub(crate) const CORE_TEMPERATURE: &str = "core_temperature";
 /// Every other tissue heat store's temperature, MT's own row at the store's site.
 pub(crate) const TISSUE_TEMPERATURE: &str = "tissue_temperature";
