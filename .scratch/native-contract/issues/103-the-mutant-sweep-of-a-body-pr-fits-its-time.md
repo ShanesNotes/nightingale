@@ -16,12 +16,12 @@ Blocks: none
 
 **What the proofs show.** Established, from each run's `time:` lines and its sweep's summary lines.
 
-- Three full proofs, each with gate scope everything: nightingale#222's two heads took 11,865 s and 12,360 s, and nightingale#224's head took 13,123 s.
+- Three full proofs, each with gate scope everything. nightingale#222's two heads took 11,865 s and 12,360 s, as two jobs on the same build worker, and the two ran together for 5,140 s. nightingale#224's head took 13,123 s with neither of them beside it, while the nightly run below ran on the other build worker. The logs show the overlap and not what it cost either proof.
 - In the last, `40-mutants` took 10,585 s, its first part 2,681 s and its rest 7,904 s, and `10-rust` took 2,381 s. It replayed all 673 rows: 40 in the first part, all caught, and 633 in the rest, 625 caught and 8 caught at build.
 - The nightly run of the whole gate on main `dfc9cf05` passed in 7,829 s on another build worker, from a warm target: `40-mutants` took 6,142 s, its first part 2 s and its rest 6,140 s, over 670 rows, 662 caught and 8 caught at build, and `10-rust` took 1,585 s.
 - Not claimed: a cause for the difference between the proof's sweep and the nightly run's. The two runs differ in the build worker, in a warm against a fresh target, and in how the rows fall between the sweep's two parts.
 
-What follows. Proofs run one at a time, and the proof scripts' walls and the nightly run's time limit are sized from a proof's time, so each grows with the sweep.
+What follows. The proof scripts' walls and the nightly run's time limit are sized from a proof's time, so each grows with the sweep.
 
 **How the sweep chooses and runs rows today.**
 
@@ -44,7 +44,7 @@ Foundation tickets 13 (parked), 14 and 17, in `.scratch/foundation/issues/`, hol
 
 The rule each option keeps is the repo's: a test that once missed a mistake keeps seeing it.
 
-- [ ] A table of one full sweep's time by row, grouped by test file and by what each row's test spends its time on, beside the same sweep timed on each build worker, from a warm and from a fresh target. This box may restate the 5,400 s of the third box, with its reason
+- [ ] A table of one full sweep's time by row, grouped by test file and by what each row's test spends its time on, beside the same sweep timed on each build worker, from a warm and from a fresh target, and a proof timed beside another on the same build worker. This box may restate the 5,400 s of the third box, with its reason
 - [ ] The pick, by that table and by two or three cheap prototypes where a fork remains
 - [ ] The built change, done when the sweep of a PR that touches the body's suite takes at most 5,400 s on one build worker, with every row still replayed whenever its code or its test changes
 - [ ] The nightly run's time limit and the proof scripts' walls restated from the new time
