@@ -11,7 +11,7 @@ Blocked by: none
 
 ## The certificate under a tilt
 
-Every value is synthetic. One test, which is not in the suite, ran once on main. It takes the leaking body, its held packet and its shut and open room branches from `at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges` in `crates/ng-validate/tests/body_run.rs`. It holds the drive scale at one and the breath rate at 0.20 a second. From one admission both branches take the same five posture steps, at 30, 38, 46, 54 and 62 s after the anchor moment, each lowering the trunk angle's sine by a fifth of 0.117, so the last ends at -0.117 with the legs horizontal. On one branch a vasopressin leak of +3e-3 a second runs from 60 s, and every other route is zero.
+Every value is synthetic. One test, which is not in the suite, ran on main in two runs, one for each end time, and each result was measured once. It takes the leaking body, its held packet and its shut and open room branches from `at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges` in `crates/ng-validate/tests/body_run.rs`. It holds the drive scale at one and the breath rate at 0.20 a second. From one admission both branches take the same five posture steps, at 30, 38, 46, 54 and 62 s after the anchor moment, each lowering the trunk angle's sine by a fifth of 0.117, so the last ends at -0.117 with the legs horizontal. On one branch a vasopressin leak of +3e-3 a second runs from 60 s, and the patch sets the other three leak routes to zero while the body's own transfers go on.
 
 **Established, measured once on main.**
 
