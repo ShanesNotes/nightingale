@@ -1334,7 +1334,9 @@ fn smooth_max(a: f64, b: f64, width: f64) -> f64 {
 }
 
 /// The pleural pressure at rest that `WALL_REST` is stated at, the design pressure of the enclosure around the lung's
-/// and the heart's beds.
+/// and the heart's beds. No packet value sets it: the lung's and the wall's rest volumes and elastances give it, and
+/// `the_chest_rests_at_the_pressure_its_beds_lymph_thresholds_are_stated_over` holds it to them. The chest beds'
+/// thresholds do not follow a changed design: that test refuses one until its author restates them.
 const PLEURAL_REST: f64 = -3.0;
 /// The abdomen's held pressure, the enclosure around the gut's and the liver's beds.
 const ABDOMINAL_PRESSURE: f64 = 4.0;
@@ -1376,6 +1378,8 @@ pub struct BodyBreath {
     pub pump_pressure: Measure<Pressure>,
     /// The pump's force at rest: `PImax` times the junction's steady effect at the rest drive.
     pub rest_force: Measure<Pressure>,
+    /// `PLEURAL_REST`, which the chest beds' lymph thresholds are stated over.
+    pub pleural_rest: Measure<Pressure>,
 }
 
 pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
@@ -1392,6 +1396,7 @@ pub fn body_breath() -> Result<BodyBreath, AdmissionError> {
         alveolar_ventilation: Measure::new(alveolar_ventilation())?,
         pump_pressure: Measure::new(rhythm.pump())?,
         rest_force: Measure::new(rhythm.rest_force())?,
+        pleural_rest: Measure::new(PLEURAL_REST)?,
     })
 }
 
