@@ -867,6 +867,9 @@ fn start_guess(row: RowKind) -> f64 {
     }
 }
 
+const PLEURAL_PRESSURE: f64 = -3.0;
+const ABDOMINAL_PRESSURE: f64 = 4.0;
+
 /// Every parameter the fixture sets by hand: synthetic values, nobody's physiology. A key's default binds at the
 /// body, a class or a network, and a site or an edge that differs says so.
 fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> Result<(), AdmissionError> {
@@ -927,8 +930,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     set::<Rate<Energy>>(packet, "cv.heat-width", body, 100.0, note)?;
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05, note)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05, note)?;
-    set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0, note)?;
-    set::<Pressure>(packet, "rs.pleural-pressure", body, -3.0, note)?;
+    set::<Pressure>(packet, "gi.abdominal-pressure", body, ABDOMINAL_PRESSURE, note)?;
+    set::<Pressure>(packet, "rs.pleural-pressure", body, PLEURAL_PRESSURE, note)?;
     set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.035, note)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.05, note)?;
     set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "fl.oncotic-slope", body, 20.0, note)?;
@@ -1067,7 +1070,17 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         0.005,
         note,
     )?;
-    set::<Pressure>(packet, "fl.lymph-threshold", lymph, -2.0, note)?;
+    let opening = -2.0;
+    set::<Pressure>(packet, "fl.lymph-threshold", lymph, opening, note)?;
+    for (at, enclosure) in [(lung, PLEURAL_PRESSURE), (splanchnic, ABDOMINAL_PRESSURE)] {
+        set::<Pressure>(
+            packet,
+            "fl.lymph-threshold",
+            edge(at, veins),
+            opening - enclosure,
+            note,
+        )?;
+    }
     set::<Pressure>(packet, "fl.lymph-width", lymph, 0.5, note)?;
 
     let (tubule, duct, bladder) = (

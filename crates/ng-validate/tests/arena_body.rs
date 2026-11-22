@@ -955,6 +955,73 @@ fn lumen_ion(row: &Row, ions: &[Species]) -> bool {
     )
 }
 
+/// At each enclosed bed, with the tissue's amounts held, a swing of the enclosure's pressure moves the tissue's
+/// pressure one for one and leaves the bed's lymph where it stood, while the tissue's own pressure still moves it.
+/// Each lymph row is held at zero, so its residual is its law's flow.
+#[test]
+fn a_swing_of_the_enclosure_at_a_held_tissue_volume_leaves_the_beds_lymph_where_it_stood()
+-> Result<(), InitializationFailure> {
+    let body = arena_body()?;
+    let (packet, lens) = (arena_packet(&body)?, arena_lens(&body)?);
+    let parameters = body.bind(packet)?;
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(anchor_moment()).reading(&lens);
+    let system = body.initialization(parameters, port, request)?;
+    let row = |kind: RowKind| {
+        let found = body.rows().iter().find(|row| row.kind() == kind);
+        found.unwrap_or_else(|| panic!("no row {kind:?}")).id().index()
+    };
+    let veins = vessel("central veins");
+    for (bed, (owner, space)) in [
+        ("pulmonary bed", ("RS", "pleural space")),
+        ("splanchnic bed", ("GI", "abdominal space")),
+    ] {
+        let at = site::<CapillaryBed>(bed);
+        let enclosure = row(algebraic(
+            owner,
+            "enclosure_pressure",
+            Context::Site(site::<EnclosedSpace>(space)),
+        ));
+        let tissue = row(algebraic("FL", "interstitial pressure", Context::Site(at)));
+        let lymph = row(algebraic("FL", "lymph", Context::Edge { from: at, to: veins }));
+        let read = |swing: f64, own: f64| -> Result<[f64; 2], InitializationFailure> {
+            let mut workspace = system.workspace();
+            for slot in 0..workspace.fitted_slots().start {
+                let index = slot % system.rows();
+                let unknown = &mut workspace.unknowns_mut()[slot];
+                if index == enclosure {
+                    *unknown += swing;
+                } else if index == tissue {
+                    *unknown += swing + own;
+                } else if index == lymph {
+                    *unknown = 0.0;
+                }
+            }
+            let residuals = system.stage_residuals(&workspace, workspace.legs_of(0)[0])?;
+            Ok([residuals[tissue], residuals[lymph]])
+        };
+        let [still, flow] = read(0.0, 0.0)?;
+        for swing in [-1.0, 1.0] {
+            let [moved, swung] = read(swing, 0.0)?;
+            assert!(
+                (moved - still).abs() <= 1e-12,
+                "{bed}: the enclosure's swing of {swing} leaves the tissue's own law off by {}",
+                moved - still
+            );
+            assert!(
+                (swung - flow).abs() <= 1e-12 * flow.abs(),
+                "{bed}: the enclosure's swing of {swing} moves the lymph from {flow} to {swung}"
+            );
+            let [_, own] = read(0.0, swing)?;
+            assert!(
+                (own - flow).abs() >= 1e-2 * flow.abs(),
+                "{bed}: the tissue's own swing of {swing} leaves the lymph at {own} from {flow}"
+            );
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn a_tubule_with_no_ions_reclaims_none() -> Result<(), InitializationFailure> {
     let body = arena_body()?;

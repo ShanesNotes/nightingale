@@ -118,6 +118,29 @@ fn viscosity_at_a_positive_exponent_follows_the_row() -> Result<(), Initializati
     Ok(())
 }
 
+/// Ticket 100: the pulmonary and coronary beds' lymph thresholds are stated over the pleural pressure at rest, which
+/// no packet value sets, so the packet's own design must rest there: its pleural row closes at it.
+#[test]
+fn the_chest_rests_at_the_pressure_its_beds_lymph_thresholds_are_stated_over()
+-> Result<(), InitializationFailure> {
+    let body = whole_body()?;
+    let rest = f64::from_bits(Compensated::of(&body_breath()?.pleural_rest).bits()[0]);
+    let pleura = index(
+        &body,
+        algebraic(
+            "RS",
+            "enclosure_pressure",
+            Context::Site(site::<EnclosedSpace>("pleural space")),
+        ),
+    );
+    let off = staged(&body, &[vec![(pleura, rest)]])?[0][pleura];
+    assert!(
+        off.abs() < 1e-12,
+        "the pleural row is off by {off} at {rest}, the pressure the chest beds' lymph thresholds are stated over"
+    );
+    Ok(())
+}
+
 #[test]
 fn viscosity_at_two_hematocrits_follows_the_row() -> Result<(), InitializationFailure> {
     let body = whole_body()?;
