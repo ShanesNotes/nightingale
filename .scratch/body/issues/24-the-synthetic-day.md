@@ -2,9 +2,9 @@
 
 Type: task
 Status: open
-Blocked by: 11, 38, 12, 16, 17, 18, 23, 25, 27, 30, 33, ../../native-contract/issues/37-the-return-check-reads-its-runs-own-anchors.md, ../../native-contract/issues/40-the-range-check-names-a-short-stretch.md, ../../native-contract/issues/64-the-landing-reads-a-guard-that-did-not-cross.md, ../../native-contract/issues/95-the-record-trims-its-history.md
+Blocked by: 11, 38, 12, 16, 17, 18, 23, 25, 27, 30, 33, 36, ../../native-contract/issues/37-the-return-check-reads-its-runs-own-anchors.md, ../../native-contract/issues/40-the-range-check-names-a-short-stretch.md, ../../native-contract/issues/64-the-landing-reads-a-guard-that-did-not-cross.md, ../../native-contract/issues/95-the-record-trims-its-history.md
 
-**What to build:** The whole body, with no hold left that pass 1 names, lives 24 hours of the synthetic day on one named build worker: sleep, two posture changes, three meals, drinks and room air. This is the map's destination for pass 1. It is not the first milestone: every number is synthetic, and only a reviewed packet can pass I19.
+**What to build:** The whole body, with no hold left that pass 1 names, lives 24 hours of the synthetic day on one named build worker: sleep, two posture changes, three meals, drinks and room air. This is the map's destination for pass 1. It is not the first milestone: every number is synthetic, and only a reviewed packet can pass I19. It waits on [ticket 36](36-the-whole-body-answers-posture.md), since on main the body's certificate refuses the body with no leak after a tilt, and this day holds two posture changes.
 
 - [ ] The certificate passes on the 24 h window: every book closes, and each amount's drift stays inside its synthetic bound
 - [ ] Each row of the contract's day table passes by direction, the rows the slice could not show included
