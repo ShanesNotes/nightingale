@@ -14,3 +14,4 @@ One series from 0001, one decision per file (`NNNN-slug.md`). An agent reads the
 | [0008](0008-the-certificate-checks-each-window-as-the-run-goes.md) | The certificate checks each window as the run goes, and a run keeps a verifiable chain, not every ledger chunk |
 | [0009](0009-a-step-reads-its-error-from-its-two-half-stages.md) | A step reads its error from its two half stages, and after a breakpoint from the doubled set |
 | [0010](0010-a-reaction-counts-its-reference-n-times.md) | A reaction counts its reference species N times, used or made, and the contract divides its rate by N |
+| [0011](0011-blood-carries-heat-into-the-store-a-bed-sits-in-and-each-card-reads-through-a-grant.md) | Blood carries heat into the store a bed sits in, and each card reads a store's temperature through a grant |
