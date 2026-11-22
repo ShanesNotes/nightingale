@@ -47,7 +47,7 @@ The rule each option keeps is the repo's: a test that once missed a mistake keep
 
 - [ ] A table of one full sweep's time by row, grouped by test file and by what each row's test spends its time on, beside the same sweep timed on each build worker, from a warm and from a fresh target, and a proof timed beside another on the same build worker. This box may restate the 5,400 s of the third box, with its reason
 - [ ] The pick, by that table and by two or three cheap prototypes where a fork remains
-- [ ] The built change, done when the sweep of a PR that touches the body's suite takes at most 5,400 s on one build worker, with every row still replayed whenever its code or its test changes. It closes the gap above before any choice of rows by what changed is relied on
+- [ ] The built change, done when a proof's full replay of every row, as the proof script runs it, from a fresh target with nothing else running on the build workers it uses, takes at most 5,400 s of wall time, with every row still replayed whenever its code or its test changes. It closes the gap above before any choice of rows by what changed is relied on. The 5,400 s stays a target, which the first box may restate
 - [ ] The nightly run's time limit and the proof scripts' walls restated from the new time
 
 **Non-goals:** which rows the gate keeps, and a row's limit ([native-contract 84](84-a-mutant-rows-budget-follows-its-tests-own-time.md)).
