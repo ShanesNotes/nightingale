@@ -11,6 +11,7 @@ Blocked by: 06, 27
 - [ ] The cost of the body's step by part, as [ticket 07](07-what-limits-the-step.md)'s Answer splits the slice's: the core against the record, and a step's fixed cost. [Ticket 26](26-cost-budget.md)'s first box left it here
 - [ ] Whether the halved step's rule holds on every firing the body adds: a ticket after a breakpoint takes the doubled stages
 - [ ] Every number carries its machine, its run count and its spread (pstack `benchmark-checklist`)
+- [ ] Each plan's long-run salt rates on the body, which no box above reads: the body's total sodium, chloride and potassium as rates over the five windows of [native-contract 100](../../native-contract/issues/100-the-body-moves-after-admission-what-moves-and-why.md)'s part 5, awake and with the breath held, at the plan's own stepping and at one finer, and whether main's certificate passes each to 700 s. For the halved step, the step aim and the floor are varied apart. Native-contract 100's part 5 has the halved step's figures at three steppings moved together.
 
 **Non-goals:** the arena's pick between cores, and any gain bought by dropping a law.
 
