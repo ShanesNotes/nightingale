@@ -3876,8 +3876,8 @@ test = "-p ng-validate --test body each_beds_glycolysis_and_lactate_burn_carry_t
 [[mutant]]
 name = "water-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Species::Water, 5e-2, 4e-3, 3e-3),'''
-new = '''(Species::Water, 0.1, 4e-3, 3e-3),'''
+old = '''(Species::Water, 2e-1, 8e-3, 4e-3),'''
+new = '''(Species::Water, 4e-1, 8e-3, 4e-3),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -4872,8 +4872,8 @@ test = "-p ng-validate --test body the_whole_body_holds_its_rows_columns_and_dig
 [[mutant]]
 name = "body-edge-rate-apart-from-rule"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''    (Species::Energy, 1e4, 1e3, 3e2),'''
-new = '''    (Species::Energy, 1e4, 2e3, 3e2),'''
+old = '''    (Species::Energy, 2e6, 2e5, 1e5),'''
+new = '''    (Species::Energy, 2e6, 4e5, 1e5),'''
 test = "-p ng-validate --test body_run each_figure_of_rule_is_the_bodys_policy_bit_for_bit"
 
 [[mutant]]
@@ -5295,3 +5295,40 @@ path = "crates/ng-validate/src/body/packet.rs"
 old = '''set::<Volume>(packet, "rs.lung-rest-volume", body, 38_250.0)?;'''
 new = '''set::<Volume>(packet, "rs.lung-rest-volume", body, 50_750.0)?;'''
 test = "-p ng-validate --test viscosity the_chest_rests_at_the_pressure_its_beds_lymph_thresholds_are_stated_over"
+
+
+[[mutant]]
+name = "conduction-reads-the-core-capacity-at-its-site"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let here = stores.temperature(&mut k, here, &stores.shell);'''
+new = '''        let here = stores.temperature(&mut k, here, &stores.core);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+
+[[mutant]]
+name = "dry-heat-clothes-radiation-alone"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let value = clothed(&mut k, &clothing, both, bare);'''
+new = '''        let value = clothed(&mut k, &clothing, radiant, bare);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+
+[[mutant]]
+name = "convection-adds-its-exponent"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let power = k.scale(log, exponent);'''
+new = '''        let power = k.add(log, exponent);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+
+[[mutant]]
+name = "evaporation-reads-a-saturated-room"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let in_room = k.scale(in_air, humidity);'''
+new = '''        let in_room = in_air;'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+
+[[mutant]]
+name = "evaporation-posts-twice-its-heat"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let value = k.algebraic(&rate);'''
+new = '''        let once = k.algebraic(&rate);
+        let value = k.add(once, once);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"

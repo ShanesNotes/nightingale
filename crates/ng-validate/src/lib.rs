@@ -168,6 +168,26 @@
 //!     admit_solved(body, packet, port, core, lens, store)
 //! }
 //! ```
+//! Solver contract: “The numbers are synthetic by type: the validation crate accepts only a fixture packet.”
+//! ```compile_fail,E0603
+//! use ng_contract::*;
+//! use ng_record::{HistoryStore, Session};
+//! use ng_validate::*;
+//! fn clinical<'m>(body: &'m CompiledBody, packet: ParameterPacket<Reviewed>, port: BoundaryPort,
+//!     core: &'m dyn CoupledSolver, lens: &ObservationLens, store: &'m dyn HistoryStore)
+//!     -> Result<Admitted<'m>, InitializationFailure> {
+//!     let at = SimTime::from_ns(0);
+//!     let request = InitializationRequest::at(at).reading(lens);
+//!     let system = body.initialization(body.bind(packet)?, port, request)?;
+//!     let solved = ng_validate::initialize(&system, body);
+//!     let history = MethodHistory::new(core.resolution().policy(), at, Vec::new());
+//!     let start = system.admit(solved, history)?;
+//!     let provenance = start.provenance().clone();
+//!     let identity = RunIdentity::new(body.model_hash(), start.packet_hash(), arena_seed(), core.resolution());
+//!     let session = Session::admit(body, core, start, identity, store)?;
+//!     Ok(Admitted { session, provenance })
+//! }
+//! ```
 //! ```
 //! use ng_contract::*;
 //! use ng_record::HistoryStore;
@@ -370,8 +390,9 @@ pub use arena::{Arena, ArenaProtocol};
 pub use body::{
     BodyBreath, BodyCase, FluidRoute, HOLD_TABLE, Held, Hold, KEEP_BACKS, KeepBack, Release, WholeBody,
     body_anatomy, body_awake, body_breath, body_certificate, body_lens, body_packet,
-    body_packet_at_viscosity_exponent, body_packet_with_the_drive_scale_held, body_schema, body_start_guess,
-    whole_body, whole_body_leaking,
+    body_packet_at_viscosity_exponent, body_packet_with_steady_evaporation,
+    body_packet_with_the_drive_scale_held, body_room, body_schema, body_start_guess, whole_body,
+    whole_body_leaking,
 };
 pub use burning::BurningBeds;
 pub use certificate::{
@@ -386,7 +407,7 @@ pub use healthy::{
     AnchorReturn, BareLens, CheckVerdict, DayActivities, RangeFailure, RangeGap, RangeReport, RangeResult,
     ReadingCheckError, ReadingChecks, ReturnGap, ReturnReport,
 };
-pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
+pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved, solve_fixture};
 pub use reference::ReferenceIntegrator;
 pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, MemoryStore, ReplayCase, ReplayEvidence,

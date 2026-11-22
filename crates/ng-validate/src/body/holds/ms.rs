@@ -2,10 +2,8 @@ use super::{FIXED, hours};
 use ng_contract::*;
 use ng_musculoskeletal::pump;
 
-const SKIN_WATER: &str = "skin water";
-
 pub(super) fn musculoskeletal(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
-    let declaration = HeldDeclaration::<Musculoskeletal>::new(vec![SKIN_WATER], Vec::new(), FIXED)
+    let declaration = HeldDeclaration::<Musculoskeletal>::new(Vec::new(), Vec::new(), FIXED)
         .pool::<Magnesium, Beds<Bone>>(Space::Cells)
         .pool::<Phosphate, Beds<Bone>>(Space::Cells)
         .pool::<Magnesium, Besides<Bone>>(Space::Cells)
@@ -22,8 +20,8 @@ pub(super) fn musculoskeletal(body: &mut Assembly<'_>) -> Result<(), AdmissionEr
         .pool::<Phosphate, CapillaryBed>(Space::Interstitium);
     let mut held = body.hold(declaration)?;
     {
-        let (laws, ports) = held.stand_ins();
-        stand_ins(laws, ports)?;
+        let (laws, _) = held.stand_ins();
+        stand_ins(laws)?;
     }
     let (mut laws, ports) = body.musculoskeletal(Some(held))?.parts();
     pump(&mut laws, &ports)?;
@@ -31,25 +29,10 @@ pub(super) fn musculoskeletal(body: &mut Assembly<'_>) -> Result<(), AdmissionEr
     Ok(())
 }
 
-/// Held until the fluids move the skin's water (ticket 17).
-fn stand_ins<'b>(
-    laws: &mut FragmentBuilder<'b, Musculoskeletal>,
-    ports: &HeldPorts<'b, Musculoskeletal>,
-) -> Result<(), AdmissionError> {
-    let BoundaryRoute { route, .. } = ports.route::<Water>(SKIN_WATER)?;
-    let steady = laws.parameter::<Rate<Water>>(ParameterKey::new("ms.skin-water"), Admissible::nonnegative());
-    let wandering = laws.forcing(
-        "skin water variability",
-        ParameterKey::new("ms.skin-water-period"),
-        ParameterKey::new("ms.skin-water-amplitude"),
-    );
+/// The patient stirs once, at random. MS is held, so the stir moves no law: it is the body's stochastic fixture (solver
+/// contract §7).
+fn stand_ins(laws: &mut FragmentBuilder<'_, Musculoskeletal>) -> Result<(), AdmissionError> {
     let class = hours()?;
-    let rate = laws.kernel(|mut k| {
-        let (value, factor) = (k.parameter(&steady), k.forcing(&wandering));
-        let varied = k.scale(value, factor);
-        k.finish(varied, laws.every_mode(), class)
-    });
-    laws.transfer(Transfer::new(&route, rate));
     let pace =
         laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ms.stir-rate"), Admissible::nonnegative());
     let dice = laws.stream("stir");

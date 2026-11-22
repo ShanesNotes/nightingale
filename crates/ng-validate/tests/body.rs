@@ -470,7 +470,6 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         EN Pool(NatriureticPeptide, Interstitium, Class(CapillaryBed)) Ticket(17, "FL") 01:485, 554
         EN Pool(ParathyroidHormone, Interstitium, Class(CapillaryBed)) Ticket(19, "FL") 01:485, 555
         EN Pool(Cortisol, Interstitium, Class(CapillaryBed)) Ticket(20, "FL") 01:485, 556
-        MS Route("skin water") Ticket(12, "MT") 01:651, 875
         MS Pool(Magnesium, Cells, Tissue(Bone)) Ticket(19, "MS") 01:38, 277
         MS Pool(Phosphate, Cells, Tissue(Bone)) Ticket(19, "MS") 01:38, 277
         MS Pool(Magnesium, Cells, Besides(Bone)) Ticket(19, "FL") 01:38, 278
@@ -503,12 +502,9 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         BC Pool(AminoAcids, Cells, Tissue(Tubule)) Ticket(18, "RN") 01:209
         BC Pool(DietBase, Interstitium, Class(CapillaryBed)) Ticket(18, "FL") 01:546, 881
         BC Pool(FixedAcid, Interstitium, Class(CapillaryBed)) Ticket(18, "FL") 01:253, 881
-        MT Route("skin evaporation") Ticket(12, "MT") 01:61
         MT Route("sweat water") Ticket(12, "MT") 01:62
         MT Route("sweat sodium") Ticket(12, "MT") 01:82
         MT Route("sweat chloride") Ticket(12, "MT") 01:115
-        MT Route("dry heat loss") Ticket(12, "MT") 01:170
-        MT Route("skin evaporative heat") Ticket(12, "MT") 01:171
         MT Route("pulmonary bed glucose feed") Ticket(16, "MT") 01:190
         MT Route("pulmonary bed fatty acid feed") Ticket(16, "MT") 01:200
         MT Route("pulmonary bed cell water out") Ticket(17, "FL") 01:58, 880
@@ -618,9 +614,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 147: routes 88, pools 59
-        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 15, "MT": 44, "RS": 1}
-        by ticket {"09": 3, "12": 8, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 143: routes 84, pools 59
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 14, "MT": 41, "RS": 1}
+        by ticket {"09": 3, "12": 4, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -929,16 +925,16 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1464 {"algebraic": 195, "amount": 1251, "memory": 18}, columns 1463, jacobian nonzeros 10154, blocks 431, largest block 651, parameter slots 747, conserved combinations 398, held pools 318, held route columns 88
-        model hash 295d2d37c024b0728ac31f92f32bf40db3af5cc22bc02e2031cf0cc004b3b5f0
-        conserved basis de45607d7612d7f3cad530d632e838b8a6dc0395dbc0d6d85da7f1222b42267d
-        stated packet 9e2f98a1340a135ac9064aa6476a2b20f668f0ce44efd09c702cae61e0361a54
+        rows 1465 {"algebraic": 196, "amount": 1251, "memory": 18}, columns 1463, jacobian nonzeros 10162, blocks 415, largest block 669, parameter slots 761, conserved combinations 396, held pools 318, held route columns 84
+        model hash be9016bb66748635d1c87d442f2fe2ef43bea39e89de8b06ec8438d369e15326
+        conserved basis 1bf2932821027a356d7765de3b4b00d83ca12a00052ed472c40acc3f1baade8f
+        stated packet ff66376d7d9576cd2fd2c76d6330e763d8aa73be3973568e9cb235b181c8737a
     "#]].assert_eq(&pin);
     Ok(())
 }
 
 #[test]
-fn admission_refuses_the_body_before_any_solve_unless_its_port_states_sleep_at_the_anchor()
+fn admission_refuses_the_body_before_any_solve_unless_its_port_states_sleep_and_the_room_at_the_anchor()
 -> Result<(), AdmissionError> {
     let body = whole_body()?;
     let lens = body_lens(&body)?;
@@ -947,11 +943,11 @@ fn admission_refuses_the_body_before_any_solve_unless_its_port_states_sleep_at_t
         let request = InitializationRequest::at(anchor_moment()).reading(&lens);
         Ok(body.initialization(parameters, port, request).err())
     };
-    let unstated = AdmissionError::InputUnstated {
-        input: Lasting::Sleep,
-    };
-    assert_eq!(refused(Vec::new())?, Some(unstated));
-    assert_eq!(refused(vec![body_awake(anchor_moment())])?, None);
+    let unstated = |input| Some(AdmissionError::InputUnstated { input });
+    let (awake, room) = (|| body_awake(anchor_moment()), || body_room(anchor_moment()));
+    assert_eq!(refused(vec![room()])?, unstated(Lasting::Sleep));
+    assert_eq!(refused(vec![awake()])?, unstated(Lasting::AirTemperature));
+    assert_eq!(refused(vec![awake(), room()])?, None);
     Ok(())
 }
 
@@ -1045,9 +1041,9 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     };
     let stated = Stated {
         species: [
-            (Species::Energy, 1e4),
-            (Species::Water, 5e-2),
-            (Species::Sodium, 5e-3),
+            (Species::Energy, 2e6),
+            (Species::Water, 2e-1),
+            (Species::Sodium, 6e-3),
             (Species::Chloride, 6e-3),
             (Species::Potassium, 3e-4),
             (Species::Vasopressin, 6e-2),
