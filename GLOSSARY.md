@@ -358,7 +358,7 @@ The temperature that every heat store's amount is measured from. A heat store's 
 The heat stores at tissue sites: the core store, the skin store at the skin heat site and the airway store at the conducting airway. Conduction carries heat from the core store to the other two.
 
 **Dry heat loss**:
-The skin store's heat to the room by radiation and convection, a rate. It reads the room's air speed and clothing.
+The skin store's heat to the room by radiation and convection, a rate. It reads the room's radiant and air temperatures, its air speed and clothing.
 
 **Skin evaporative heat**:
 The skin store's heat that leaves with the water evaporating from the skin, a rate. The water leaves the skin bed at that rate over the latent heat, so the two stand in one fixed proportion.
