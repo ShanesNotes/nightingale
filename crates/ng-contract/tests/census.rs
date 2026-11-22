@@ -1,7 +1,7 @@
 use ng_contract::Sites;
 use ng_contract::catalog::{
-    ARROWS, Arrow, Carries, Census, Disposition, HeldField, HeldRead, Projection, SPECIATION_READERS,
-    SpeciationReader, WiredField, WiredRead,
+    ARROWS, Arrow, Carries, Census, Disposition, EFFECT_READERS, HeldField, HeldRead, Projection,
+    SPECIATION_READERS, SpeciationReader, WiredField, WiredRead,
 };
 
 const ATRIAL: WiredField = WiredField {
@@ -309,6 +309,25 @@ fn the_readers_table_refuses_two_rows_for_one_reader_and_set() {
     assert!(SpeciationReader::one_row_per_reader_and_set(&once));
     let twice = [reader("NS", &[ACIDITY], &[]), reader("NS", &[], &[HELD])];
     assert!(!SpeciationReader::one_row_per_reader_and_set(&twice));
+}
+
+#[test]
+fn shared_substrate_ten_gains_metabolisms_reader_of_the_acetylcholine_effect_at_the_skins_beds() {
+    assert_eq!(EFFECT_READERS.len(), 1, "one reader beside the 38 arrows");
+    let row = EFFECT_READERS[0];
+    assert_eq!(row.reader, "MT");
+    assert_eq!(row.sites, Sites::Tissue(ng_contract::Tissue::Skin));
+    assert_eq!(row.quantity, "effect acetylcholine");
+    assert_eq!(row.body_ticket, 12);
+    for arrow in ARROWS {
+        let Carries::Fields { wired, held } = arrow.carries else {
+            continue;
+        };
+        let named = (wired.iter().map(|field| field.name)).chain(held.iter().map(|field| field.name));
+        for name in named {
+            assert_ne!(name, row.quantity, "the read is no field of an arrow");
+        }
+    }
 }
 
 #[test]

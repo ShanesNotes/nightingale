@@ -1300,6 +1300,19 @@ impl<'b, 'k, S> Kernel<'b, 'k, crate::Cardiovascular, S> {
         read
     }
 }
+#[cfg(test)]
+impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
+    /// `at_junction_if_supplied` for any card, so a synthetic test assembly can ask for the lenient read on a port the
+    /// catalog grants at the strict one alone, and show that the catalog refuses it.
+    pub(crate) fn lenient_at_junction<U: Dimension>(
+        &mut self,
+        port: &ReadPort<'b, O, PerSite<crate::Junction, U>>,
+    ) -> Expr<'b, 'k, O, U> {
+        let read = self.at_junction(port);
+        self.accepts_no_nerve.push(read.at);
+        read
+    }
+}
 impl<'b, 'k, O> Kernel<'b, 'k, O> {
     /// A per-site value at a landmark. Compile refuses a landmark the map does not place, or one placed off the port.
     pub fn at_landmark<C: SiteSet, U: Dimension>(
@@ -1432,11 +1445,11 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     ///     let _ = k.downstream_if_in(&debt.oxygen_debt_per_bed);
     /// }
     /// ```
-    /// An end whose set cannot hold the port's sites does not compile: a blood end reading one tissue's beds,
+    /// An end whose set cannot hold the port's sites does not compile: a blood end reading an enclosure,
     /// ```compile_fail,E0277
     /// use ng_contract::*;
-    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, tone: ReadPort<'b, Cardiovascular, PerSite<Beds<Muscle>, Dimensionless>>) {
-    ///     let _ = k.downstream_if_in(&tone);
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, held: ReadPort<'b, Cardiovascular, PerSite<EnclosedSpace, Dimensionless>>) {
+    ///     let _ = k.downstream_if_in(&held);
     /// }
     /// ```
     /// and a tubule's end reading every bed:
@@ -1450,6 +1463,14 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     /// use ng_contract::{catalog::*, *};
     /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, debt: OxygenDebtPerBed<Reads<'b, Cardiovascular>>) {
     ///     let _ = k.downstream_if_in(&debt.oxygen_debt_per_bed);
+    /// }
+    /// ```
+    /// A blood end reads one tissue's beds, since blood includes them:
+    /// ```
+    /// use ng_contract::*;
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, skin: ReadPort<'b, Cardiovascular, PerSite<Beds<Skin>, Dimensionless>>)
+    ///     -> Expr<'b, 'k, Cardiovascular, Dimensionless> {
+    ///     k.downstream_if_in(&skin)
     /// }
     /// ```
     pub fn downstream_if_in<D: SiteSet, U: Dimension>(

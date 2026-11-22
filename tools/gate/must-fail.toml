@@ -228,7 +228,7 @@ mutants = [
   "edge-read-end-off-set-passes-a-guard-off-a-route",
 ]
 doctests = [
-  { path = "crates/ng-contract/src/law.rs", code = "E0277", text = "PerSite<Beds<Muscle>, Dimensionless>" },
+  { path = "crates/ng-contract/src/law.rs", code = "E0277", text = "PerSite<EnclosedSpace, Dimensionless>" },
   { path = "crates/ng-contract/src/law.rs", code = "E0308", text = "Kernel<'b, 'k, Cardiovascular, TubuleEdge>" },
 ]
 

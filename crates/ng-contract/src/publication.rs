@@ -95,7 +95,7 @@ fn publish<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts
         let value = k.add(zero, rise);
         k.finish(value, mt.every_mode(), class)
     });
-    mt.define(&stores.core.0, value);
+    mt.define(&stores.core, value);
     let value = mt.site_kernel(|mut k| {
         let (heat, capacity, zero) = (
             k.at_site(&stores.tissue_heat),
@@ -107,11 +107,12 @@ fn publish<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts
         let value = k.add(zero, rise);
         k.finish(value, mt.every_mode(), class)
     });
-    mt.define_at(&stores.other.0, value);
+    mt.define_at(&stores.other, value);
     let route = ports.conduction(mt);
     let conductance = mt.parameter::<Conductance>(key("mt.conductance"), Admissible::positive());
+    let published = stores.published();
     let rate = mt.site_kernel(|mut k| {
-        let (core, own) = (k.read(&stores.core.1), k.at_site(&stores.other.1));
+        let (core, own) = (k.read(&published.core), k.at_site(&published.other));
         let (across, conductance) = (k.subtract(core, own), k.parameter(&conductance));
         let product = k.multiply(conductance, across);
         let value = k.as_dimension(product);
@@ -126,7 +127,7 @@ fn publish<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts
         k.finish(zero, mt.every_mode(), class)
     });
     mt.transfer(Transfer::new(&exit.route, still));
-    let at_exit = stores.at_exit(&exit);
+    let at_exit = published.at_exit(&exit);
     let sensed = mt.algebraic::<Temperature>("exit temperature", Admissible::finite());
     let residual = mt.kernel(|mut k| {
         let (own, read) = (k.algebraic(&sensed), k.read(&at_exit));
@@ -134,7 +135,7 @@ fn publish<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts
         k.finish(value, mt.every_mode(), class)
     });
     mt.residual(&sensed, residual);
-    let at_bed = stores.at_bed();
+    let at_bed = published.at_bed();
     let (out, _) = mt.site_field::<CapillaryBed, Temperature>("bed temperature", Admissible::finite());
     let value = mt.site_kernel(|mut k| {
         let value = k.at_site(&at_bed);
@@ -523,12 +524,12 @@ fn the_temperatures_stand_at_every_store_whatever_transfers_mt_asks_for() -> Res
             let value = k.zero::<Temperature>();
             k.finish(value, mt.every_mode(), class)
         });
-        mt.define(&stores.core.0, value);
+        mt.define(&stores.core, value);
         let value = mt.site_kernel(|mut k| {
             let value = k.zero::<Temperature>();
             k.finish(value, mt.every_mode(), class)
         });
-        mt.define_at(&stores.other.0, value);
+        mt.define_at(&stores.other, value);
         body.add(mt.finish());
         let (mut cv, ports) = body.cardiovascular()?.parts();
         let route = ports.heat_carried(&mut cv);
@@ -720,12 +721,12 @@ fn missing(missing: Missing) -> Option<AdmissionError> {
             let value = k.as_dimension(ratio);
             k.finish(value, mt.every_mode(), class)
         });
-        mt.define(&stores.core.0, value);
+        mt.define(&stores.core, value);
         let value = mt.site_kernel(|mut k| {
             let value = k.zero::<Temperature>();
             k.finish(value, mt.every_mode(), class)
         });
-        mt.define_at(&stores.other.0, value);
+        mt.define_at(&stores.other, value);
         match missing {
             Missing::HeatAtAnUnheatedSite => {
                 let (out, _) = mt.site_field::<TissueSite, Energy>("every site's heat", Admissible::finite());
@@ -737,7 +738,7 @@ fn missing(missing: Missing) -> Option<AdmissionError> {
             }
             Missing::ExitAtABedsHeat | Missing::ExitAtTheElasticStore => {
                 let exit = ports.boundary::<DryHeatLoss>()?;
-                let at_exit = stores.at_exit(&exit);
+                let at_exit = stores.published().at_exit(&exit);
                 let rate = mt.kernel(|mut k| {
                     let (temperature, conductance) = (k.read(&at_exit), k.parameter(&conductance));
                     let product = k.multiply(conductance, temperature);

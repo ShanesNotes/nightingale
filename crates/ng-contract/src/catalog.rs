@@ -7,9 +7,9 @@ use crate::{
     Acidity, Ammonia, Beds, BloodChemistry, Body, Brain, CapillaryBed, CarbonDioxidePartialPressure,
     Cardiovascular, Class, Concentration, Dimensionless, Endocrine, Energy, Fluids, Gastrointestinal,
     Hematology, Hepatic, Immune, Includes, Landmark, LawName, Lung, Metabolism, Musculoskeletal, Nervous,
-    Owner, Oxygen, OxygenPartialPressure, OxygenSaturation, PerSite, Phase, Pressure, Rate, Renal, Renin,
-    Respiratory, SiteSet, Sites, Speciated, Speciation, Temperature, Tissue, TissueSite, Tubule, Viscosity,
-    Volume,
+    Owner, Oxygen, OxygenPartialPressure, OxygenSaturation, PerSite, Phase, Pressure, Rate, Receptor, Renal,
+    Renin, Respiratory, SiteSet, Sites, Skin, Speciated, Speciation, Species, Temperature, Tissue,
+    TissueSite, Tubule, Viscosity, Volume,
 };
 use core::marker::PhantomData;
 
@@ -1221,6 +1221,76 @@ speciation_readers! {
         });
     Renal at Beds<Tubule>, "the peritubular bed's acidity, for the kidney's acid feedback",
         held [Acidity "ticket 18's text names the strong ion difference as what the kidney's feedback reads"];
+}
+
+/// What a card reads of S10, the autonomic efferents the receptor layer issues at a junction: one row for each
+/// reader whose read the catalog grants, beside the 38 arrows and beside the speciation readers, with the
+/// quantity it reads, the sites its kernel stands at and the body ticket that builds the reading law. A card
+/// with no row reads an effect at the junction of whatever site it stands at, as CV, MS and RN do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EffectReader {
+    pub reader: &'static str,
+    pub sites: Sites,
+    pub quantity: &'static str,
+    pub body_ticket: u8,
+}
+pub const EFFECT_READERS: [EffectReader; 1] = [EffectReader {
+    reader: <Metabolism as Owner>::CARD,
+    sites: <Beds<Skin> as SiteSet>::SET,
+    quantity: Species::Acetylcholine.names()[4],
+    body_ticket: 12,
+}];
+/// The S10 row of a reader, where the catalog grants it one.
+pub(crate) fn effect_read(reader: &'static str) -> Option<&'static EffectReader> {
+    EFFECT_READERS.iter().find(|row| row.reader == reader)
+}
+const _: () = {
+    let mut i = 0;
+    while i < EFFECT_READERS.len() {
+        let row = &EFFECT_READERS[i];
+        assert!(
+            !same(row.reader, <Receptor as Owner>::CARD),
+            "the receptor layer is no reader of its own effects"
+        );
+        assert!(
+            row.body_ticket >= FIRST_WIRING_TICKET && row.body_ticket <= LAST_WIRING_TICKET,
+            "a read names no body ticket from 06 to 25"
+        );
+        assert!(at_beds(row.sites), "a reader's sites are a set of capillary beds");
+        let mut j = i + 1;
+        while j < EFFECT_READERS.len() {
+            assert!(
+                !same(row.reader, EFFECT_READERS[j].reader),
+                "a reader has two rows"
+            );
+            j += 1;
+        }
+        i += 1;
+    }
+};
+const _: () = {
+    let plan: [(&str, Sites, &str, u8); 1] =
+        [("MT", Sites::Tissue(Tissue::Skin), "effect acetylcholine", 12)];
+    let mut i = 0;
+    while i < EFFECT_READERS.len() {
+        let row = &EFFECT_READERS[i];
+        let (reader, sites, quantity, ticket) = plan[i];
+        assert!(
+            same(row.reader, reader)
+                && same_sites(row.sites, sites)
+                && same(row.quantity, quantity)
+                && row.body_ticket == ticket,
+            "an effect read is not the plan's"
+        );
+        i += 1;
+    }
+    assert!(EFFECT_READERS.len() == plan.len());
+};
+const fn at_beds(sites: Sites) -> bool {
+    matches!(
+        sites,
+        Sites::Class(Class::CapillaryBed) | Sites::Tissue(_) | Sites::Besides(_)
+    )
 }
 
 #[derive(Clone, Copy)]

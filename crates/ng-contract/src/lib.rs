@@ -1647,12 +1647,16 @@ mod ring;
 mod scheme;
 mod scope;
 mod seam;
+#[cfg(test)]
+mod skin_vessels;
 mod sources;
 #[cfg(test)]
 mod speciated;
 mod species;
 mod split;
 mod state;
+#[cfg(test)]
+mod sweat;
 mod system;
 mod time;
 #[cfg(test)]

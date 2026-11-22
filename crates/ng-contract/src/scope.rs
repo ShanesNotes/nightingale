@@ -35,7 +35,7 @@ pub use gastrointestinal::GastrointestinalPorts;
 pub use hematology::HematologyPorts;
 pub use hepatic::HepaticPorts;
 pub use immune::ImmunePorts;
-pub use metabolism::{MetabolismPorts, TissueTemperatures};
+pub use metabolism::{MetabolismPorts, SkinSweatEffect, StoreTemperatures, TissueTemperatures};
 pub use musculoskeletal::MusculoskeletalPorts;
 pub use processes::*;
 pub use respiratory::RespiratoryPorts;
@@ -45,7 +45,7 @@ pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
 pub(crate) const CORE_TEMPERATURE: &str = "core_temperature";
 /// Every other tissue heat store's temperature, MT's own row at the store's site.
 pub(crate) const TISSUE_TEMPERATURE: &str = "tissue_temperature";
-const BLOOD_PRESSURE: &str = "blood pressure";
+pub(crate) const BLOOD_PRESSURE: &str = "blood pressure";
 pub(crate) const BINARY64_EXACT: i64 = 1 << 53;
 
 /// The anatomy and the composition data laws never see: which species live in which spaces, where a route crosses

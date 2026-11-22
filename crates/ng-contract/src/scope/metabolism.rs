@@ -1,15 +1,18 @@
 use super::{CORE_TEMPERATURE, TISSUE_TEMPERATURE, process_route};
 use crate::catalog::{CoreTemperature, Defines};
-use crate::law::{Brand, Family, Over, StoreHeat, StoreTemperature};
+use crate::law::{Brand, Expr, Family, Kernel, Over, StoreHeat, StoreTemperature};
 use crate::{
-    AdmissionError, Besides, BoundaryProcess, BoundaryRoute, CapillaryBed, CellFuel, Energy, FatStore,
-    FragmentBuilder, HeatRoute, LawName, Liver, Metabolism, Output, Owner, PerSite, ReadPort, Respired,
-    SiteField, SiteRoute, SiteSet, Species, Temperature, TissueSite, Triglyceride, Wall,
+    Acetylcholine, AdmissionError, Beds, Besides, BoundaryProcess, BoundaryRoute, CapillaryBed, CellFuel,
+    Dimensionless, Energy, FatStore, FragmentBuilder, HeatRoute, LawName, Liver, Metabolism, Output, Owner,
+    PerSite, ReadPort, Respired, SiteRoute, SiteSet, Skin, Species, Temperature, TissueSite, Triglyceride,
+    Wall,
 };
 use core::marker::PhantomData;
 
-/// MT's tissue heat stores: the core store's temperature as arrow 91's scalar, every other store's at its site, and
-/// the store heats MT defines them from. Each is declared once, so a fragment that declares one again is refused.
+/// MT's tissue heat stores: the handle that defines the core store's temperature as arrow 91's scalar, the handle that
+/// defines every other store's at its site, and the store heats MT's law reads to define them. Each temperature is
+/// declared once, so a fragment that declares one again is refused. Only the law that defines the rows takes this
+/// bundle: a law that uses a store's temperature takes `published`'s reads, or one of them.
 ///
 /// A store's temperature is a temperature: a law that gives it the store's heat is refused.
 /// ```compile_fail,E0308
@@ -19,7 +22,7 @@ use core::marker::PhantomData;
 ///     mt: &mut FragmentBuilder<'b, Metabolism>,
 ///     v: PureKernel<'b, Metabolism, Energy, TissueSite>,
 /// ) {
-///     mt.define_at(&t.other.0, v);
+///     mt.define_at(&t.other, v);
 /// }
 /// ```
 /// ```
@@ -29,20 +32,53 @@ use core::marker::PhantomData;
 ///     mt: &mut FragmentBuilder<'b, Metabolism>,
 ///     v: PureKernel<'b, Metabolism, Temperature, TissueSite>,
 /// ) {
-///     mt.define_at(&t.other.0, v);
+///     mt.define_at(&t.other, v);
 /// }
 /// ```
 #[non_exhaustive]
 pub struct TissueTemperatures<'b> {
-    pub core: (
-        Output<'b, Metabolism, Temperature>,
-        ReadPort<'b, Metabolism, Temperature>,
-    ),
-    pub other: SiteField<'b, Metabolism, TissueSite, Temperature>,
+    pub core: Output<'b, Metabolism, Temperature>,
+    pub other: Output<'b, Metabolism, PerSite<TissueSite, Temperature>>,
     pub core_heat: ReadPort<'b, Metabolism, Energy>,
     pub tissue_heat: ReadPort<'b, Metabolism, PerSite<TissueSite, Energy>>,
 }
 impl<'b> TissueTemperatures<'b> {
+    /// The two published temperatures as reads, with no store heat and no handle that defines a row.
+    pub fn published(&self) -> StoreTemperatures<'b> {
+        let owner = Metabolism::CARD;
+        StoreTemperatures {
+            core: ReadPort::field(LawName {
+                owner,
+                local: CORE_TEMPERATURE,
+            }),
+            other: ReadPort::field(LawName {
+                owner,
+                local: TISSUE_TEMPERATURE,
+            }),
+        }
+    }
+}
+
+/// What MT reads of its own published store temperatures: the core store's row, every other store's at its site, and
+/// the narrower reads at a bed and at a heat exit. It holds no store heat and no handle that defines a row, so a sweat
+/// or loss law that takes it can reach neither.
+/// ```compile_fail,E0609
+/// use ng_contract::*;
+/// fn wrong<'b, 'k>(t: &StoreTemperatures<'b>, k: &mut Kernel<'b, 'k, Metabolism>) {
+///     let _ = k.read(&t.core_heat);
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn read<'b, 'k>(t: &StoreTemperatures<'b>, k: &mut Kernel<'b, 'k, Metabolism>) {
+///     let _ = k.read(&t.core);
+/// }
+/// ```
+pub struct StoreTemperatures<'b> {
+    pub core: ReadPort<'b, Metabolism, Temperature>,
+    pub other: ReadPort<'b, Metabolism, PerSite<TissueSite, Temperature>>,
+}
+impl<'b> StoreTemperatures<'b> {
     /// The temperature of the store a bed sits in: the core store's where no other store holds the bed.
     pub fn at_bed(&self) -> ReadPort<'b, Metabolism, PerSite<CapillaryBed, Temperature>> {
         ReadPort::temperature(StoreTemperature::OwnBed)
@@ -51,19 +87,19 @@ impl<'b> TissueTemperatures<'b> {
     /// pool. The exit is MT's own and moves energy.
     /// ```compile_fail,E0308
     /// use ng_contract::*;
-    /// fn wrong<'b>(t: &TissueTemperatures<'b>, w: &BoundaryRoute<'b, Water, Metabolism>) {
+    /// fn wrong<'b>(t: &StoreTemperatures<'b>, w: &BoundaryRoute<'b, Water, Metabolism>) {
     ///     let _ = t.at_exit(w);
     /// }
     /// ```
     /// ```compile_fail,E0308
     /// use ng_contract::*;
-    /// fn wrong<'b>(t: &TissueTemperatures<'b>, r: &BoundaryRoute<'b, Energy, Respiratory>) {
+    /// fn wrong<'b>(t: &StoreTemperatures<'b>, r: &BoundaryRoute<'b, Energy, Respiratory>) {
     ///     let _ = t.at_exit(r);
     /// }
     /// ```
     /// ```
     /// use ng_contract::*;
-    /// fn read<'b>(t: &TissueTemperatures<'b>, e: &BoundaryRoute<'b, Energy, Metabolism>) {
+    /// fn read<'b>(t: &StoreTemperatures<'b>, e: &BoundaryRoute<'b, Energy, Metabolism>) {
     ///     let _ = t.at_exit(e);
     /// }
     /// ```
@@ -72,6 +108,60 @@ impl<'b> TissueTemperatures<'b> {
         exit: &BoundaryRoute<'b, Energy, Metabolism>,
     ) -> ReadPort<'b, Metabolism, Temperature> {
         ReadPort::temperature(StoreTemperature::OwnExit(exit.name()))
+    }
+}
+
+/// What MT reads of the acetylcholine the nerve releases at the junction supplying a skin bed: the one effect the
+/// receptor layer issues there, at the strict junction read and nowhere else. The catalog refuses any other reader,
+/// field or place of it, a hand-built port included.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn wrong<'b>(p: &MetabolismPorts<'b>) -> ReadPort<'b, Metabolism, PerSite<Blood, Dimensionless>> {
+///     p.sweat_effect()
+/// }
+/// ```
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn wrong<'b, 'k>(g: &SkinSweatEffect<'b>, k: &mut Kernel<'b, 'k, Metabolism, Body>) {
+///     let _ = g.at_skin(k);
+/// }
+/// ```
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn wrong<'b, 'k>(g: &SkinSweatEffect<'b>, k: &mut Kernel<'b, 'k, Metabolism, Beds<Muscle>>) {
+///     let _ = g.at_skin(k);
+/// }
+/// ```
+/// The gland cannot opt into zero where its nerve is missing: the lenient junction read is CV's alone.
+/// ```compile_fail,E0599
+/// use ng_contract::*;
+/// fn wrong<'b, 'k>(g: &SkinSweatEffect<'b>, k: &mut Kernel<'b, 'k, Metabolism, CapillaryBed>) {
+///     let _ = k.at_junction_if_supplied(g);
+/// }
+/// ```
+/// The grant has one ligand.
+/// ```compile_fail,E0107
+/// use ng_contract::*;
+/// fn wrong(p: &MetabolismPorts<'_>) {
+///     let _ = p.sweat_effect::<Norepinephrine>();
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn read<'b, 'k>(g: &SkinSweatEffect<'b>, k: &mut Kernel<'b, 'k, Metabolism, Beds<Skin>>)
+///     -> Expr<'b, 'k, Metabolism, Dimensionless> {
+///     g.at_skin(k)
+/// }
+/// ```
+pub struct SkinSweatEffect<'b> {
+    effect: ReadPort<'b, Metabolism, PerSite<crate::Junction, Dimensionless>>,
+}
+impl<'b> SkinSweatEffect<'b> {
+    pub fn at_skin<'k>(
+        &self,
+        laws: &mut Kernel<'b, 'k, Metabolism, Beds<Skin>>,
+    ) -> Expr<'b, 'k, Metabolism, Dimensionless> {
+        laws.at_junction(&self.effect)
     }
 }
 
@@ -221,24 +311,18 @@ impl<'b> MetabolismPorts<'b> {
     pub fn temperatures(&self, laws: &mut FragmentBuilder<'b, Metabolism>) -> TissueTemperatures<'b> {
         let core: CoreTemperature<Defines<'b, Metabolism>> = laws.emit();
         laws.owe_defined::<Temperature>(TISSUE_TEMPERATURE, Over::OtherTissueHeatStores);
-        let owner = Metabolism::CARD;
         TissueTemperatures {
-            core: (
-                core.core_temperature,
-                ReadPort::field(LawName {
-                    owner,
-                    local: CORE_TEMPERATURE,
-                }),
-            ),
-            other: (
-                Output::named(TISSUE_TEMPERATURE),
-                ReadPort::field(LawName {
-                    owner,
-                    local: TISSUE_TEMPERATURE,
-                }),
-            ),
+            core: core.core_temperature,
+            other: Output::named(TISSUE_TEMPERATURE),
             core_heat: ReadPort::heat(StoreHeat::Root),
             tissue_heat: ReadPort::heat(StoreHeat::Here),
+        }
+    }
+    /// The acetylcholine effect at the junction supplying a skin bed, MT's one read of S10. The catalog grants MT this
+    /// field at the strict junction read of a skin bed and nothing else.
+    pub fn sweat_effect(&self) -> SkinSweatEffect<'b> {
+        SkinSweatEffect {
+            effect: super::effect::<_, _, Acetylcholine>(),
         }
     }
     pub fn boundary<P: BoundaryProcess<Card = Metabolism>>(

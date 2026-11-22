@@ -954,6 +954,14 @@ impl Rows {
         self.defined.binary_search(&law).ok()?;
         self.here(law, at)
     }
+    /// The flow row a bound inflow binds: the flow slot's own row, of the kind its hydraulic
+    /// family declares and of a water rate.
+    fn inflow_row(&self, flow: Slot, kind: RowKind) -> Option<usize> {
+        let row = self.here(flow.law, flow.at)?;
+        let rate = crate::quantity::dimension::<crate::Rate<crate::Water>>();
+        let found = &self.rows[row];
+        (found.kind == kind && found.dimension == rate).then_some(row)
+    }
     /// The row of this owner, name and place, of any kind, with no fallback to the body's.
     fn here(&self, law: LawName, at: Context) -> Option<usize> {
         let found = self
@@ -1799,13 +1807,12 @@ fn check_granted(
     context: Context,
     places: &Places,
 ) -> Result<(), CompileDefect> {
-    let inputs = (kernel.code.iter())
-        .filter_map(|op| match op {
-            Op::Input(input) => Some(input),
-            _ => None,
-        })
-        .chain(kernel.unreached.iter().map(|read| &read.input));
-    for input in inputs {
+    let coded = (kernel.code.iter().enumerate()).filter_map(|(at, op)| match op {
+        Op::Input(input) => Some((input, kernel.accepts_no_nerve.contains(&at))),
+        _ => None,
+    });
+    let discarded = (kernel.unreached.iter()).map(|read| (&read.input, read.accepts_no_nerve));
+    for (input, lenient) in coded.chain(discarded) {
         let &Input::Read(source, place) = input else {
             continue;
         };
@@ -1825,10 +1832,39 @@ fn check_granted(
                 return Err(CompileDefect::UnwiredRead { law, field });
             }
             Source::TissueTemperature(read) => granted(law, read, place, context, places)?,
+            Source::Field(field) if field.owner == crate::Receptor::CARD => {
+                effect_granted(law, field, place, lenient, context, places)?;
+            }
             _ => {}
         }
     }
     Ok(())
+}
+
+/// A read of an effect the receptor layer issues is S10's row for its reader: that one quantity, at the strict junction
+/// read, in a context the row's sites hold. A reader the catalog gives no row reads at its junction as before.
+fn effect_granted(
+    law: LawName,
+    field: LawName,
+    place: Where,
+    lenient: bool,
+    context: Context,
+    places: &Places,
+) -> Result<(), CompileDefect> {
+    let Some(row) = catalog::effect_read(law.owner) else {
+        return Ok(());
+    };
+    let unwired = CompileDefect::UnwiredRead { law, field };
+    if field.local != row.quantity || place != Where::Junction || lenient {
+        return Err(unwired);
+    }
+    let Context::Site(site) = context else {
+        return Err(unwired);
+    };
+    match places.anatomy.in_set(row.sites).contains(&site) {
+        true => Ok(()),
+        false => Err(unwired),
+    }
 }
 
 /// A store temperature read is MT's own, or a projected field's at the place its arrow allows.
@@ -2560,10 +2596,7 @@ fn addresses(
                     Family::Valves => RowKind::Memory(flow),
                     _ => RowKind::Algebraic(flow),
                 };
-                let rate = crate::quantity::dimension::<crate::Rate<crate::Water>>();
-                let row = (rows.here(flow.law, flow.at))
-                    .filter(|&row| rows.rows[row].kind == kind && rows.rows[row].dimension == rate);
-                unknown(row.ok_or(CompileDefect::NoSuchRead { law })?)
+                unknown((rows.inflow_row(flow, kind)).ok_or(CompileDefect::NoSuchRead { law })?)
             }
             (Input::Inflow, Context::Edge { from, .. }) => {
                 let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
@@ -3311,7 +3344,8 @@ fn modes(fragments: &[FragmentData], places: &Places) -> Vec<ModeLayout> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Terminal, reaches_of};
+    use super::{Rows, Terminal, reaches_of};
+    use crate::body::{Row, RowKind, Slot, UnknownId};
     use crate::law::Family;
     use crate::*;
 
@@ -3481,6 +3515,55 @@ mod tests {
                 (Stands::Site("airway"), core, ("airway", Space::Thermal)),
                 (Stands::Site("skin"), core, ("skin", Space::Thermal)),
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_bound_inflow_takes_its_familys_row_kind_and_a_water_rate() -> Result<(), AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let vessel = map.site::<VesselSegment>("vessel", at()?);
+        let bed = map.site::<CapillaryBed>("bed", at()?);
+        let at = Context::Edge {
+            from: vessel.id(),
+            to: bed.id(),
+        };
+        let flow = |family: Family| Slot {
+            law: LawName {
+                owner: Cardiovascular::CARD,
+                local: family.name(),
+            },
+            at,
+        };
+        let (circulation, valves) = (flow(Family::Circulation), flow(Family::Valves));
+        let row = |index: usize, kind, dimension: String| Row {
+            unknown: UnknownId::at(index),
+            kind,
+            admissible: AdmissibleSet::Finite,
+            dimension,
+        };
+        let water = crate::quantity::dimension::<Rate<Water>>();
+        let energy = crate::quantity::dimension::<Rate<Energy>>();
+        let mut slots = vec![(circulation, 0), (valves, 1)];
+        slots.sort_unstable();
+        let rows = Rows {
+            rows: vec![
+                row(0, RowKind::Algebraic(circulation), water),
+                row(1, RowKind::Memory(valves), energy),
+            ],
+            amounts: Vec::new(),
+            slots,
+            defined: Vec::new(),
+        };
+        assert_eq!(
+            rows.inflow_row(circulation, RowKind::Algebraic(circulation)),
+            Some(0)
+        );
+        assert_eq!(rows.inflow_row(circulation, RowKind::Memory(circulation)), None);
+        assert_eq!(rows.inflow_row(valves, RowKind::Memory(valves)), None);
+        assert_eq!(
+            rows.inflow_row(flow(Family::Sinusoids), RowKind::Algebraic(circulation)),
+            None
         );
         Ok(())
     }

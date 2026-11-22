@@ -109,12 +109,12 @@ fn compiled(feed: Feed) -> Result<(CompiledBody, Sites), AdmissionError> {
             let value = k.zero::<Temperature>();
             k.finish(value, mt.every_mode(), class)
         });
-        mt.define(&stores.core.0, value);
+        mt.define(&stores.core, value);
         let value = mt.site_kernel(|mut k| {
             let value = k.zero::<Temperature>();
             k.finish(value, mt.every_mode(), class)
         });
-        mt.define_at(&stores.other.0, value);
+        mt.define_at(&stores.other, value);
         body.add(mt.finish());
         let (mut cv, ports) = body.cardiovascular()?.parts();
         let circulation = ports.circulation(&mut cv);

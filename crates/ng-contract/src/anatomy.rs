@@ -131,6 +131,9 @@ pub trait Includes<Inner: SiteSet>: SiteSet {}
 impl<C: SiteSet> Includes<C> for C {}
 impl Includes<Veins> for Blood {}
 impl Includes<CapillaryBed> for Blood {}
+/// Blood includes every capillary bed, and a capillary bed includes one tissue's beds, so an edge of the blood network
+/// reads a field on one tissue's beds at its downstream end.
+impl<T: TissueKind> Includes<Beds<T>> for Blood {}
 impl<T: TissueKind> Includes<Beds<T>> for CapillaryBed {}
 /// Every capillary bed and every vessel segment `AnatomyBuilder::sample` marks. A segment joins the set only when the
 /// map samples it, so a sampled segment's speciation costs its rows only in a body that samples it.
