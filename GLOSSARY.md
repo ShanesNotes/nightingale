@@ -342,6 +342,9 @@ The species a card's wall or passage port may move, closed in the contract, such
 **Sinusoids**:
 The liver bed's own edges: every plain vascular edge with an end at a bed that serves the liver. The hepatic card's law holds their flow, and circulation reaches every other plain vascular edge.
 
+**Bed inflow**:
+The signed flow of a capillary bed's one feeder, signed in the vascular network's direction (record 0011). A bed's feeder is an incoming vascular edge of it. A read of the inflow refuses a bed with several feeders, a sinusoid the hepatic card holds and an edge with no flow row.
+
 **Passage**:
 A route along a network, one species at a time: the airway's gas, the gut's transit, absorption into a bed, fat into the lymph, shedding from the gut's cells and secretion from the tubule's cells.
 
@@ -356,6 +359,9 @@ The temperature that every heat store's amount is measured from. A heat store's 
 
 **Tissue heat stores**:
 The heat stores at tissue sites: the core store, the skin store at the skin heat site and the airway store at the conducting airway. Conduction carries heat from the core store to the other two.
+
+**Carriage**:
+The heat blood carries at a capillary bed from the core store to the nearest tissue heat store above the bed: from the bed's parent toward the root, the first tissue site with a thermal energy pool (record 0011). A bed has a carriage route exactly when that store is not the core store, so two beds in one store have two routes. Its rate is a coefficient of heat per volume per kelvin, times the bed inflow as a volume flow, times the core's temperature less that store's. CV posts it at the bed. It is apart from the bed's own heat, which goes from its bed heat to the core store.
 
 **Dry heat loss**:
 The skin store's heat to the room by radiation and convection, a rate. It reads the room's radiant and air temperatures, its air speed and clothing.
@@ -524,6 +530,12 @@ A coupling field the coupling catalog names with the body ticket whose laws defi
 
 **Held field**:
 A value an arrow of the coupling map names that no law defines or reads at rung 0, so it is no coupling field and no member of its arrow's port. One end of its arrow holds it with a reason, and the catalog keeps its unit, so a later rung can wire it.
+
+**Read grant**:
+A typed object through which a card reads a field, reaching only the field and the place the card is entitled to, so a wrong read is a type error or a compile refusal (record 0011). CV and NS read a store's temperature, and MT the skin junction's acetylcholine effect, only through one. A sweat or loss law receives only the grants it uses. The catalog checks the reader, the field and the place of each read.
+
+**Projected field**:
+A field read through a read grant at a place, from rows its sender defines, with no row of its own (record 0011). CV reads arrow 90's temperature so as two coordinates, the core and the tissue end of a bed's carriage route, and NS reads arrow 91's skin temperature so at the skin thermoreceptor. An emitted field is an algebraic row, and a projected one never is. The catalog's check refuses a forged projection.
 
 **Shared substrate**:
 One of the ten resources the systems share (S1 to S10 in the coupling map), such as the vascular registry, or water and osmoles per space.
@@ -828,6 +840,9 @@ All 13 systems, the receptor layer and the boundary, as body ticket 01 plans the
 
 **Assembly**:
 The set of systems one compiled body holds: the slice or the whole body. Each assembly has its own census. The code's `Assembly` is the builder that issues each card's scope and compiles one body from them: it builds an assembly in this sense and is not one.
+
+**Synthetic test assembly**:
+A body a contract test compiles with synthetic values to exercise a contract interface apart from any production caller (record 0011). It is neither the slice nor the whole body, so it is no assembly in the sense above and has no census.
 
 **Held stand-in**:
 A system's laws that stand in for physiology, held by a declaration that names every route on which they supply or remove an amount, so stability bought with held support shows in the certificate. A card outside the slice stands in whole, and a card with a crate keeps only its named holds this way.
