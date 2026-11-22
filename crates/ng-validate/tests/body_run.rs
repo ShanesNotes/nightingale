@@ -126,12 +126,12 @@ impl Start {
             |body: &CompiledBody| body_packet_with_the_drive_scale_held(body, rate).expect("a packet");
         Self::admitted_with(body, packet, Vec::new())
     }
-    /// The leaking body held at `rate` with its room shut, so one admission carries the run with no leak and the run
-    /// that opens the room.
+    /// The leaking body held at `rate` with its gate shut, so one admission carries the run with no leak and the run
+    /// that opens the gate.
     fn leaking(rate: f64) -> Self {
         let body = whole_body_leaking().expect("compiled");
         let packet = |body: &CompiledBody| leaking_packet(body, rate);
-        Self::admitted_with(body, packet, vec![room(0, 0.0)])
+        Self::admitted_with(body, packet, vec![gate(0, Gate::Shut)])
     }
     fn admitted_with(
         body: CompiledBody,
@@ -1936,19 +1936,9 @@ fn finite<U>(value: f64) -> Measure<U> {
     Measure::new(value).expect("finite")
 }
 
-fn room(at: u64, humidity: f64) -> BoundaryEvent {
-    let id = InputId::new(Digest::of_canonical(&humidity.to_bits().to_be_bytes()));
-    let input = BoundaryInput::Room(Room {
-        air: finite(307.0),
-        radiant: finite(308.0),
-        humidity: finite(humidity),
-        air_speed: finite(0.0),
-        pressure: finite(765.0),
-        oxygen: finite(0.21),
-        carbon_dioxide: finite(0.0004),
-        clothing: finite(0.9),
-    });
-    BoundaryEvent::new(id, SimTime::from_ns(anchor_moment().nanoseconds() + at), input)
+fn gate(at: u64, gate: Gate) -> BoundaryEvent {
+    let id = InputId::new(Digest::of_canonical(&[u8::from(gate == Gate::Open)]));
+    BoundaryEvent::new(id, SimTime::from_ns(anchor_moment().nanoseconds() + at), BoundaryInput::Void(gate))
 }
 
 fn leaking_packet(body: &CompiledBody, rate: f64) -> ParameterPacket<SyntheticFixture> {
@@ -2077,7 +2067,7 @@ fn at_a_quarter_each_leak_is_refused_between_edges_against_its_drift() -> String
     let drifts =
         (0..quantities.len()).map(|row| (to.1[row] - from.1[row]) / ((to.0 - from.0) as f64 / SECOND as f64));
     let mut session = start.session();
-    let opens = room(windows.settling_ns(), 1.0);
+    let opens = gate(windows.settling_ns(), Gate::Open);
     let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a test's own command"), opens);
     session.enqueue(input).expect("enqueued");
     let leaking = until(session, LEAK_ENDS * SECOND);
@@ -2085,7 +2075,7 @@ fn at_a_quarter_each_leak_is_refused_between_edges_against_its_drift() -> String
     let (window, [open, close], nets) = nets(windows, &control, &edges);
     assert!(window.start().nanoseconds() - anchor_moment().nanoseconds() >= windows.settling_ns());
     let mut report = format!(
-        "leaking body at {QUARTER} a second: with its room shut it passes each leak's own policy over {LEAK_ENDS} s; its rows' mean change from {:.3} s to {:.3} s\n",
+        "leaking body at {QUARTER} a second: with its gate shut it passes each leak's own policy over {LEAK_ENDS} s; its rows' mean change from {:.3} s to {:.3} s\n",
         seconds(from.0),
         seconds(to.0)
     );
@@ -2165,7 +2155,7 @@ fn at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak
     let mut report = at_a_quarter_each_leak_is_refused_between_edges_against_its_drift();
     report += &at_a_quarter_the_run_with_no_leak_passes_the_bodys_policy();
     expect![[r#"
-        leaking body at 0.25 a second: with its room shut it passes each leak's own policy over 40 s; its rows' mean change from 20.001 s to 36.001 s
+        leaking body at 0.25 a second: with its gate shut it passes each leak's own policy over 40 s; its rows' mean change from 20.001 s to 36.001 s
         Element(Oxygen) moves -4.3443e0 a second; its leak, +5.82e0 a second of oxygen gas into the arteries' blood, nets +5.9995e1 from 20.001 s to 32.001 s against its size +6e1
         Element(Carbon) moves -3.5228e0 a second; its leak, +5.39e1 a second of carbon dioxide into the arteries' blood, nets +4.9960e1 from 20.001 s to 32.001 s against its size +5e1
         Of(NitrogenGas) moves -7.0156e-1 a second; its leak, +1.73e2 a second of nitrogen gas into the pulmonary bed's gas, nets +2.9978e1 from 20.001 s to 32.001 s against its size +3e1

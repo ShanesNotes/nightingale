@@ -94,7 +94,7 @@ fn leak<'b, Q: Substance>(
     let route = ports.route::<Q>(route)?.route;
     let rate = laws.parameter::<Rate<Q>>(ParameterKey::new(key), Admissible::finite());
     let kernel = laws.kernel(|mut k| {
-        let (rate, open) = (k.parameter(&rate), k.room_humidity());
+        let (rate, open) = (k.parameter(&rate), k.voiding());
         let value = k.scale(rate, open);
         k.finish(value, laws.every_mode(), class)
     });
@@ -108,9 +108,9 @@ pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
 }
 
 /// The whole body with four steady leaks for its certificate's tests, each into the body at the signed rate its
-/// parameter states times the room's humidity, so a room of humidity zero shuts them and one of humidity one opens
-/// them: `bd.oxygen-leak` and `bd.carbon-dioxide-leak` into the arteries' blood, `bd.nitrogen-gas-leak` into the
-/// pulmonary bed's gas, and `bd.vasopressin-leak` into the central veins. Nothing else reads the room.
+/// parameter states times the void gate, so a shut gate shuts them and an open one opens them: `bd.oxygen-leak` and
+/// `bd.carbon-dioxide-leak` into the arteries' blood, `bd.nitrogen-gas-leak` into the pulmonary bed's gas, and
+/// `bd.vasopressin-leak` into the central veins. Nothing else reads the gate.
 pub fn whole_body_leaking() -> Result<CompiledBody, AdmissionError> {
     let mut schema = body_schema()?;
     schema::leaks(&mut schema)?;
