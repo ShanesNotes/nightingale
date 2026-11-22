@@ -1,0 +1,30 @@
+# 104: What no test of the body's policy holds yet
+
+From: the checks of nightingale#222 and nightingale#224, [native-contract 85](85-the-certificates-windows-end-on-breath-edges.md)'s second PR and [native-contract 100](100-the-body-moves-after-admission-what-moves-and-why.md)'s fix
+
+Spec: `body_certificate` in `crates/ng-validate/src/body/packet.rs`, `certificate_with` in `crates/ng-validate/src/slice.rs`, and `RULE` and the leak tests in `crates/ng-validate/tests/body_run.rs`
+
+Type: task
+
+Status: open
+
+Blocked by: none
+
+Blocks: none
+
+**Why.** I19 holds the whole body for 48 hours under its certificate, and the body's policy is only as strong as the tests that would see it change. The checks of the two PRs that built and re-sized that policy found four things no test holds. Every value is synthetic.
+
+- [ ] Each fixed drift bound of the body's policy that native-contract 85's table does not rate is under a rule test, or carries its reason. Today `assert_body_rule` in `crates/ng-validate/tests/body_run.rs` holds the rated rows only: it skips a conserved quantity no row of `RULE` holds once it finds it unrated, so a change to an unrated bound fails nothing but the identity pins. A check's test changed albumin's fixed bound from 1 to 2 in a policy built as `rule_refuses_the_bodys_policy_with_windows_one_nanosecond_longer` builds one, and the rule test accepted it. The unrated fixed bounds, from `certificate_with`: each species `SPECIES_BOUNDS` does not name takes the slice's `species_drift`, which is `UNMOVED_DRIFT`, 1, for every species but sodium, chloride, potassium, vasopressin and water, so albumin, the transmitters, and oxygen and carbon dioxide as species take it; and an element `ELEMENT_BOUNDS` does not name takes `SYNTHETIC_DRIFT`, 1e4
+- [ ] Sodium, chloride and potassium each have a leak test on the body, as the four leaks of `Leak::ALL` (oxygen, carbon, nitrogen gas and vasopressin) do. Native-contract 100's fix loosened their bounds, each the ten-second bound and the edge rate: sodium from 2e-3 and 2e-4 to 5e-3 and 5e-4, chloride from 2e-3 and 2e-4 to 6e-3 and 6e-4, and potassium from 9e-5 and 8e-6 to 3e-4 and 3e-5 (`SPECIES_BOUNDS`, on main before nightingale#224 at `dfc9cf05` and on main after it). No test shows that the policy refuses a salt leak of a stated size
+- [ ] A body test reads the coronary bed's lymph against its admitted rate, and says for the gut's and the liver's whether it reads them or why not. Today the suite reads only the pulmonary lymph (`the_lungs_interstitial_water_and_lymph_keep_their_admitted_rates_over_the_awake_minutes_breaths`), so a threshold left wrong at another enclosed bed would be caught only by the identity pins. The coronary bed is the one other bed the breath swings
+- [ ] A body that declares a rhythm is judged by a policy with windows between edges, or this ticket states why nothing enforces it. `certificate_with` and `CertificatePolicy::between_edges` are public, so a caller can build a policy with no edges or with fewer rates, as the leak test's `Leak::alone` does, and nothing refuses a body that declares a rhythm under a policy with none
+
+**Notes.**
+
+- A leak present from admission is taken into the admitted state, so the body's leak tests show the refusal of a leak that starts after admission, not of one present at it: under the mutant row `leak-gate-left-open` the shut branch carries every leak from admission and still passes each leak's own policy over 40 s.
+- At a breath rate of 0.20 a second every row's drift has the opposite sign to its drift at 0.25, so native-contract 85's "against its drift" holds for the leak test's signs at 0.25 only, though a check refused all 16 cases, both directions at both rates (ticket 85, "What the second PR built").
+- [Body ticket 12](../../body/issues/12-heat-balance.md) holds that the leaking body's gate reads the room's humidity and must move before 12e.
+- [Body ticket 36](../../body/issues/36-the-whole-body-answers-posture.md) holds what a posture change does to the certificate: the body with no leak is refused at 75 s, and a vasopressin leak of 3e-3 a second is certified through 70 s.
+- [Body ticket 28](../../body/issues/28-two-synthetic-days.md) holds that no 48-hour protocol uses the body's policy yet.
+
+**Non-goals:** the bounds' figures, which stay native-contract 85's and are sized by its rule, and a cause for the salts' drift (body ticket 17).
