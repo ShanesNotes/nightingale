@@ -40,8 +40,6 @@ impl<'b> Stores<'b> {
     }
 }
 
-/// The tissue heat stores' laws: conduction from the core store to each store it reaches, and the skin's dry heat loss
-/// and evaporation to the room.
 pub fn tissue_heat<'b>(
     laws: &mut FragmentBuilder<'b, Mt>,
     ports: &MetabolismPorts<'b>,

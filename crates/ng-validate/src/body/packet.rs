@@ -17,10 +17,8 @@ const HEMOGLOBIN: f64 = 2.0;
 /// (research 11, Nunn pp. 244 to 245).
 const SHUNT: f64 = 0.09 * 0.98 / 0.02;
 
-/// The tissue heat stores' capacities and each one's reference temperature, so its reference amount is `C (T_ref - T_0)`
-/// above the thermal zero `T_0`, 0 degrees Celsius on the room's absolute scale (ticket 12's second ruling), and a
-/// store's temperature is the thermal zero plus its amount over its capacity. The skin store's capacity serves the
-/// conducting airway's store too, as a model default.
+/// The thermal zero is 0 degrees Celsius on the room's absolute scale (ticket 12's second ruling). The skin store's
+/// capacity serves the conducting airway's store too, as a model default.
 const THERMAL_ZERO: f64 = 273.15;
 const CORE_CAPACITY: f64 = 4e9;
 const SKIN_CAPACITY: f64 = 1.7e8;

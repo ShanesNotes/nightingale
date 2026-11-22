@@ -3640,7 +3640,6 @@ const RESTING: Weather = Weather {
     speed: 1.0,
     clothing: 0.6,
 };
-/// A second point: warmer air than walls, drier, windier and more clothed.
 const WINDY: Weather = Weather {
     air: 303.15,
     radiant: 301.15,
@@ -3718,7 +3717,6 @@ fn site_parameter(start: &Start, name: &'static str, at: SiteId) -> Compensated 
         .unwrap_or_else(|| panic!("no parameter {name} at {}", at.key()))
 }
 
-/// Each heat column's mean rate over the window from `at`, by its name and, for conduction, the store it reaches.
 fn heat_rates(start: &Start, session: &Session<'_, Running>, at: u64) -> [f64; 5] {
     let body = &start.body;
     let columns = every_column(body);

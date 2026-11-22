@@ -151,10 +151,10 @@ fn assembled(schema: Schema, leaking: bool) -> Result<CompiledBody, AdmissionErr
 mod placement {
     use super::*;
 
-    /// Ticket 12's placement: with the contract unchanged, the whole body compiles with each heat law reading the
-    /// temperature of the store it moves, conduction both ends' and the skin's losses the skin store's.
+    /// Ticket 12's placement: with the contract unchanged, the whole body compiles with conduction from the core
+    /// to the skin and airway stores, and the skin's losses out of the skin store and the skin bed.
     #[test]
-    fn each_heat_law_reads_the_temperature_of_the_store_it_moves() -> Result<(), AdmissionError> {
+    fn each_heat_law_moves_the_stores_ticket_12_places_it_on() -> Result<(), AdmissionError> {
         let body = whole_body()?;
         let laws = [
             "conduction",
