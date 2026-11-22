@@ -2,15 +2,12 @@ use super::super::schema::{CELL_WATER_OUT, FAT_FEED, GLUCOSE_FEED};
 use super::FIXED;
 use ng_contract::catalog::{MyocardialWorkAndBedFlow, PlasmaGases, Reads, WorkOfBreathing};
 use ng_contract::*;
-use ng_metabolism::{GasRoutes, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
+use ng_metabolism::{GasRoutes, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion, tissue_heat};
 
 constant_routes! {Metabolism;
-    SkinEvaporation => "mt.skin-evaporation",
     Sweat<Water> => "mt.sweat-water",
     Sweat<Sodium> => "mt.sweat-sodium",
     Sweat<Chloride> => "mt.sweat-chloride",
-    DryHeatLoss => "mt.dry-heat-loss",
-    SkinEvaporativeHeat => "mt.skin-evaporative-heat",
 }
 
 pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
@@ -40,6 +37,7 @@ pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
     let breathing: WorkOfBreathing<Reads<'_, Metabolism>> = laws.receive();
     burn(&mut laws, &cells, Some(work), Some(breathing))?;
     bed_heat(&mut laws, &ports)?;
+    tissue_heat(&mut laws, &ports)?;
     body.add(laws.finish());
     Ok(())
 }
