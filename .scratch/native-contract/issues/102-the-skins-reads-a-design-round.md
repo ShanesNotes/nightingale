@@ -4,7 +4,9 @@ From: [body ticket 12](../../body/issues/12-heat-balance.md)'s plan, its first d
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc102-build
 
 Blocked by: none
 
