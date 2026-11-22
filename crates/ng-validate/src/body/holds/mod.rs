@@ -59,13 +59,13 @@ fn enclosure_law<'b, S: OutsideSlice>(
     Ok(())
 }
 
-pub(super) fn hold_every_card(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
+pub(super) fn hold_every_card(body: &mut Assembly<'_>, heat: bool) -> Result<(), AdmissionError> {
     rs::respiratory(body)?;
     gi::gastrointestinal(body)?;
     en::endocrine(body)?;
     ms::musculoskeletal(body)?;
     bc::blood_chemistry(body)?;
-    mt::metabolism(body)?;
+    mt::metabolism(body, heat)?;
     hp::hepatic(body)?;
     im::immune(body)?;
     hc::hematology(body)

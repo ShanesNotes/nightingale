@@ -104,7 +104,7 @@ fn leak<'b, Q: Substance>(
 
 /// The composition root of the whole body: the slice's systems, and every other card held.
 pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
-    assembled(body_schema()?, false)
+    assembled(body_schema()?, false, false)
 }
 
 /// The whole body with four steady leaks for its certificate's tests, each into the body at the signed rate its
@@ -114,12 +114,12 @@ pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
 pub fn whole_body_leaking() -> Result<CompiledBody, AdmissionError> {
     let mut schema = body_schema()?;
     schema::leaks(&mut schema)?;
-    assembled(schema, true)
+    assembled(schema, true, false)
 }
 
-fn assembled(schema: Schema, leaking: bool) -> Result<CompiledBody, AdmissionError> {
+fn assembled(schema: Schema, leaking: bool, heat: bool) -> Result<CompiledBody, AdmissionError> {
     assemble(schema, |mut body| {
-        holds::hold_every_card(&mut body)?;
+        holds::hold_every_card(&mut body, heat)?;
         exits(&mut body, leaking)?;
         let fragment = ng_cardiovascular::declare_in_the_whole_body(body.cardiovascular()?)?;
         body.add(fragment);
@@ -133,4 +133,58 @@ fn assembled(schema: Schema, leaking: bool) -> Result<CompiledBody, AdmissionErr
         body.add(fragment);
         body.compile()
     })
+}
+
+#[cfg(test)]
+mod placement {
+    use super::*;
+
+    /// Ticket 12's placement: with the contract unchanged, the whole body compiles with each heat law reading the
+    /// temperature of the store it moves, conduction both ends' and the skin's losses the skin store's.
+    #[test]
+    fn each_heat_law_reads_the_temperature_of_the_store_it_moves() -> Result<(), AdmissionError> {
+        let body = assembled(body_schema()?, false, true)?;
+        let laws = [
+            "conduction",
+            "dry heat loss",
+            "skin evaporation",
+            "skin evaporative heat",
+        ];
+        let mut placed: Vec<(&str, Vec<(&str, Species, Space, i64)>)> = (body.columns().iter())
+            .filter(|column| {
+                column.origin().owner == Metabolism::CARD && laws.contains(&column.origin().local)
+            })
+            .map(|column| {
+                let terms = (column.terms().iter())
+                    .filter_map(|&(row, sign)| match body.rows()[row.index()].kind() {
+                        RowKind::Amount { site, space, species } => Some((site.key(), species, space, sign)),
+                        RowKind::Memory(_) | RowKind::Algebraic(_) => None,
+                    })
+                    .collect();
+                (column.origin().local, terms)
+            })
+            .collect();
+        placed.sort();
+        let thermal = |site, sign| (site, Species::Energy, Space::Thermal, sign);
+        assert_eq!(
+            placed,
+            [
+                (
+                    "conduction",
+                    vec![thermal("body", -1), thermal("conducting airway", 1)]
+                ),
+                (
+                    "conduction",
+                    vec![thermal("body", -1), thermal("skin heat site", 1)]
+                ),
+                ("dry heat loss", vec![thermal("skin heat site", -1)]),
+                (
+                    "skin evaporation",
+                    vec![("skin bed", Species::Water, Space::Interstitium, -1)]
+                ),
+                ("skin evaporative heat", vec![thermal("skin heat site", -1)]),
+            ]
+        );
+        Ok(())
+    }
 }

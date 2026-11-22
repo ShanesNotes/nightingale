@@ -10,6 +10,8 @@
 
 mod burn;
 mod diffusion;
+mod heat;
 
 pub use burn::{bed_heat, burn};
 pub use diffusion::{CellOxygen, GasRoutes, carbon_dioxide_diffusion, oxygen_diffusion};
+pub use heat::tissue_heat;
