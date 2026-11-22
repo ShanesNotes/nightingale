@@ -130,6 +130,18 @@ Blood chemistry speciates the blood at every capillary bed and at each vessel se
 | NS | `Speciated` | oxygen saturation (11), carbon dioxide partial pressure (11) | none |
 | RN | `Beds<Tubule>` | none | acidity |
 
+## Read grants
+
+Some reads reach only one value at one place, through a read grant. Each row names the reader, where the value comes from, the field or effect it reads, the place it reads it and the body ticket that builds the reading law. The crate's projected fields and `EFFECT_READERS` hold these rows, and `census-check.py` compares the two row by row.
+
+| Reader | Source | Field | Place | Body ticket |
+|---|---|---|---|---|
+| CV | line 90 from MT | `temperature` | `CarriageEnds` | 12 |
+| NS | line 91 from MT | `skin_temperature` | `SkinThermoreceptor` | 12 |
+| MT | S10 from RC | `Acetylcholine` | `Beds<Skin>` | 12 |
+
+`CarriageEnds` is the two ends of a bed's carriage route: the core store and the nearest tissue heat store above the bed. `SkinThermoreceptor` is the landmark's sampled site, a tissue heat store a skin bed sits in. Both read MT's store temperatures, and neither has a row of its own. MT reads the acetylcholine effect at the junction supplying each of the skin's beds. MT also reads its own store temperatures: at a bed, the store the bed sits in; at a heat exit, the store at the exit's inside thermal end; and in conduction, the core's and its own site's.
+
 ## Tests the map implies
 
 From the arena atlas (line 1892), and enforced by the contract's ownership registry in both drafts:

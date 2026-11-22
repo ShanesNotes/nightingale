@@ -265,10 +265,10 @@ A site class, or the sites a relation picks across classes: those of one network
 A capillary bed or a sampled segment: where speciation stands. The speciated sites are a site set.
 
 **Landmark**:
-A place a whole-body law reads by what it is, such as the carotid sinus or the macula densa. The map says where it stands, so the law names no site.
+A place a whole-body law reads by what it is, such as the carotid sinus or the macula densa. The map says where it stands, so the law names no site. It has two sites: its sampled site, whose rows a law reads there, and the site whose height it sits at. The skin thermoreceptor reads the temperature of its sampled site, which must be a tissue heat store a skin bed sits in.
 
 **Supply**:
-Which junction's nerve reaches a site. The map states it, or states that no nerve reaches the site, so a lost line is refused and never reads as no effect. A read of a junction at a site no nerve reaches is refused too, unless that read says it accepts no nerve.
+Which junction's nerve reaches a site. The map states it, or states that no nerve reaches the site, so a lost line is refused and never reads as no effect. A read of a junction at a site no nerve reaches is refused too, unless that read says it accepts no nerve. MT's sweat grant reads the acetylcholine effect at the junction that supplies a skin bed, and never accepts no nerve.
 
 **Enclosure**:
 A bounded space (the skull, the pericardium, the chest, the abdomen, a limb compartment) whose pressure, set by the volume inside it and the stiffness of its wall, is felt by every tissue bed inside it.
@@ -349,16 +349,16 @@ The signed flow of a capillary bed's one feeder, signed in the vascular network'
 A route along a network, one species at a time: the airway's gas, the gut's transit, absorption into a bed, fat into the lymph, shedding from the gut's cells and secretion from the tubule's cells.
 
 **Heat route**:
-A route that moves energy between heat stores: each bed's heat to the core store, the heat blood carries into the store a bed sits in, conduction between stores, and the pumps' work into a bed's heat.
+A route that moves energy between heat stores: each bed's heat to the core store, the heat blood carries from the core store into the nearest tissue heat store above a bed, at the bed's signed inflow, conduction between stores, and the pumps' work into a bed's heat.
 
 **Core store**:
-The heat store of the containment root, the site that stands for the whole body. Each bed's heat reaches it.
+The heat store of the containment root, the site that stands for the whole body. Each bed's heat reaches it. It is the nearest store of a bed no other tissue heat store contains, and such a bed has no carriage route.
 
 **Thermal zero**:
 The temperature that every heat store's amount is measured from. A heat store's amount is energy above the thermal zero, so its temperature is the thermal zero plus its amount over its capacity. The packet declares it once.
 
 **Tissue heat stores**:
-The heat stores at tissue sites: the core store, the skin store at the skin heat site and the airway store at the conducting airway. Conduction carries heat from the core store to the other two.
+The heat stores at tissue sites: the core store, the skin store at the skin heat site and the airway store at the conducting airway. Conduction carries heat from the core store to the other two. Each store has its own capacity, and MT publishes each one's temperature from its own heat and capacity: the core store's as the core temperature, and each other store's as its tissue temperature.
 
 **Carriage**:
 The heat blood carries at a capillary bed from the core store to the nearest tissue heat store above the bed: from the bed's parent toward the root, the first tissue site with a thermal energy pool (record 0011). A bed has a carriage route exactly when that store is not the core store, so two beds in one non-core store have two routes. Its rate is a coefficient of heat per volume per kelvin, times the bed inflow as a volume flow, times the core's temperature less that store's. CV posts it at the bed. It is apart from the bed's own heat, which goes from its bed heat to the core store.
@@ -461,6 +461,9 @@ The algebraic rows that split a space's total of a gas or a weak acid into its f
 **Speciation reader**:
 A card whose laws read what blood chemistry states at the sites of one set: a row of a table of its own beside the coupling map's arrows, with each quantity wired by the body ticket that builds the reading law or held by the reader with a reason. Compile refuses a read no row wires.
 
+**Effect reader**:
+A card whose laws read an effect the receptor layer issues at a junction under a row of the catalog's own table for shared substrate ten, beside the coupling map's arrows and the speciation readers. A row names the quantity, the site set its kernel stands at and the body ticket that builds the reading law. MT reads the acetylcholine effect at the junction supplying the skin's beds, through its sweat grant. Compile refuses such a card's read of another quantity, a read of it that accepts no nerve, and a read off the junction or off the row's sites. A card with no row reads an effect at the junction of whatever site it stands at.
+
 **Wall diffusion**:
 A transfer of a dissolved gas across a capillary wall or a cell membrane, at a conductance times the difference of its partial pressures either side.
 _Avoid_: crossing (a guard's)
@@ -523,7 +526,7 @@ What sleep takes from the drive scale's rest, a parameter of the nervous card. A
 The share of each chemoreflex gain that sleep removes, a parameter of the nervous card between zero and one. Asleep, each arm's gain is one less the gain's fall of its awake value, so the drive scale answers each sensor less.
 
 **Coupling field**:
-One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.
+One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site. A projected field is the exception: it has no row of its own, and its receiver reads it through a read grant from its sender's rows.
 
 **Wired field**:
 A coupling field the coupling catalog names with the body ticket whose laws define and read it.

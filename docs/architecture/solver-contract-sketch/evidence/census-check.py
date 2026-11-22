@@ -1,6 +1,7 @@
 """Compare the crate's coupling catalog with the "Direct couplings" graph of
 docs/atlas/coupling-map.md, row by row, and hold the sketch's copy of the table to the crate's,
-byte for byte. Compare the crate's speciation readers with the map's "Speciation's readers" table, row by row.
+byte for byte. Compare the crate's speciation readers with the map's "Speciation's readers" table, row by row, and
+the crate's projected fields and effect readers with the map's "Read grants" table, row by row.
 
 Run from solver-contract-sketch/:  python3 -I evidence/census-check.py
 tools/verify (verify.d/20-sketch.sh) runs this as a gate. A change to the crate's catalog or owner
@@ -375,6 +376,33 @@ for reader, sites, wired, held in crate_readers:
     if any(ticket not in BODY_TICKETS for _, ticket in wired):
         failures.append(f"reader {reader} at {sites}: a wired read names no body ticket from 06 to 25")
 
+EFFECT_ROW = re.compile(r"EffectReader \{\s*reader: <(\w+) as Owner>::CARD,\s*sites: <(.+?) as SiteSet>::SET,\s*"
+                        r"quantity: Species::(\w+)\.names\(\)\[4\],\s*body_ticket: (\d+),\s*\}")
+effect_rows = EFFECT_ROW.findall(readers_source)
+crate_grants = [(r["to"], f"line {r['line']} from {r['from']}", name, place,
+                 next(ticket for wired, _, ticket in r["wired"] if wired == name))
+                for r in rows for name, place in r["projected"]]
+crate_grants += [(CARD.get(reader, reader), "S10 from RC", species, sites, int(ticket))
+                 for reader, sites, species, ticket in effect_rows]
+declared = re.search(r"EFFECT_READERS: \[EffectReader; (\d+)\]", readers_source)
+if not declared or int(declared.group(1)) != len(effect_rows):
+    failures.append("the effect readers' table does not parse")
+map_grants = []
+in_grants = False
+for text in open(MAP, encoding="utf-8").read().splitlines():
+    if text.startswith("## Read grants"):
+        in_grants = True
+    elif in_grants and text.startswith("## "):
+        break
+    cells = [cell.strip().strip("`") for cell in text.strip().strip("|").split("|")]
+    if in_grants and text.startswith("| ") and len(cells) == 5 and cells[0] not in ("Reader", "---"):
+        map_grants.append((*cells[:4], int(cells[4])))
+if not map_grants or map_grants != crate_grants:
+    failures.append(f"the read grants differ: map {map_grants}, catalog {crate_grants}")
+for reader, source, field, place, ticket in crate_grants:
+    if ticket not in BODY_TICKETS:
+        failures.append(f"read grant {reader} of {field}: names no body ticket from 06 to 25")
+
 print(f"map source: {MAP} (Direct couplings, lines {arrows[0][0]}-{arrows[-1][0]})")
 print(f"map edges = {len(arrows)}; catalog rows = {len(rows)}")
 print("slice census: " + "; ".join(f"{k} = {v}" for k, v in slice_census.items()))
@@ -382,8 +410,9 @@ for kind in SLICE_LINES:
     print(f"  {kind:<10} {[r['line'] for r in rows if r['slice'] == kind]}")
 print("whole body census: " + "; ".join(f"{k} = {v}" for k, v in body_census.items()))
 print(f"speciation's readers: map rows = {len(map_readers)}; catalog rows = {len(crate_readers)}")
-print("parse, line, endpoints and label equality, order, uniqueness, reasons, holders, tickets, both censuses and "
-      "speciation's readers:",
+print(f"read grants: map rows = {len(map_grants)}; catalog rows = {len(crate_grants)}")
+print("parse, line, endpoints and label equality, order, uniqueness, reasons, holders, tickets, both censuses, "
+      "speciation's readers and the read grants:",
       "PASS" if not failures else "FAIL")
 for failure in failures:
     print("  " + failure)
