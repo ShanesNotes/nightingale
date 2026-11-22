@@ -4428,6 +4428,118 @@ new = '''            Ok(at) if self.payers[at].1 == bed => Ok(()),
 test = "-p ng-contract --test routes the_same_bed_named_twice_for_one_work_is_refused"
 
 [[mutant]]
+name = "bed-inflow-takes-the-first-of-two-feeders"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let [(from, to)] = into[..] else {'''
+new = '''let Some(&(from, to)) = into.first() else {'''
+test = "-p ng-contract --lib carriage::two_feeders_a_sinusoid_and_an_edge_with_no_flow_row_refuse_the_bed_inflow"
+
+[[mutant]]
+name = "bed-inflow-reads-the-outgoing-flow"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(anatomy.vascular()).filter(|edge| edge.1 == bed).collect();'''
+new = '''(anatomy.vascular()).filter(|edge| edge.0 == bed).collect();'''
+test = "-p ng-contract --lib carriage::the_bed_inflow_binds_the_one_feeders_flow_row_or_the_valves_flow_memory"
+
+[[mutant]]
+name = "carriage-stops-at-a-parent-with-no-heat"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+    core::iter::successors(anatomy.parent(bed), |&site| anatomy.parent(site))
+        .find(|&site| holds_heat(schema, site))
+'''
+new = '''
+    anatomy.parent(bed).filter(|&site| holds_heat(schema, site))
+'''
+test = "-p ng-contract --test routes blood_carries_heat_into_the_nearest_tissue_heat_store_above_each_bed"
+
+[[mutant]]
+name = "thermoreceptor-reads-at-the-height-site"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.0),'''
+new = '''Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.1),'''
+test = "-p ng-contract --lib publication::the_carriages_tissue_end_the_skin_thermoreceptor_and_the_skin_exit_read_the_one_skin_row"
+
+[[mutant]]
+name = "projection-read-by-the-wrong-reader"
+path = "crates/ng-contract/src/compile.rs"
+old = '''    if law.owner != arrow.to {'''
+new = '''    if false && law.owner != arrow.to {'''
+test = "-p ng-contract --lib publication::the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_site_realizes"
+
+[[mutant]]
+name = "missing-store-reads-the-core-row"
+path = "crates/ng-contract/src/compile.rs"
+old = '''store_read(schema, read, context, landed).ok_or(CompileDefect::NoSuchRead { law })?;'''
+new = '''store_read(schema, read, context, landed).or(schema.anatomy.root()).ok_or(CompileDefect::NoSuchRead { law })?;'''
+test = "-p ng-contract --lib publication::a_store_read_whose_store_is_missing_or_no_tissue_heat_store_is_refused"
+
+[[mutant]]
+name = "carriage-column-ends-reversed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(held != core).then(|| at(bed, [core, held]))'''
+new = '''(held != core).then(|| at(bed, [held, core]))'''
+test = "-p ng-contract --lib carriage::the_inflow_is_signed_and_one_column_debits_the_core_store_and_credits_the_beds_store"
+
+[[mutant]]
+name = "exit-identity-left-out-of-the-model-hash"
+path = "crates/ng-contract/src/law.rs"
+old = '''
+                    StoreTemperature::OwnExit(route) => {
+                        out.number(1);
+                        out.text(route);
+                    }
+'''
+new = '''
+                    StoreTemperature::OwnExit(_) => {
+                        out.number(1);
+                    }
+'''
+test = "-p ng-contract --lib publication::changing_a_carriage_end_an_exit_or_the_store_a_heat_read_finds_changes_the_model_hash"
+
+[[mutant]]
+name = "sweat-read-takes-the-lenient-junction-read"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if field.local != row.quantity || place != Where::Junction || lenient {'''
+new = '''if field.local != row.quantity || place != Where::Junction || (lenient && false) {'''
+test = "-p ng-contract --lib sweat::the_catalog_refuses_the_lenient_read_another_ligand_a_read_off_the_junction_and_one_off_the_skin"
+
+[[mutant]]
+name = "sweat-read-off-the-skins-beds"
+path = "crates/ng-contract/src/compile.rs"
+old = '''    match places.anatomy.in_set(row.sites).contains(&site) {'''
+new = '''    match places.anatomy.in_set(row.sites).contains(&site) || true {'''
+test = "-p ng-contract --lib sweat::the_catalog_refuses_the_lenient_read_another_ligand_a_read_off_the_junction_and_one_off_the_skin"
+
+[[mutant]]
+name = "sweat-read-of-another-ligand"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if field.local != row.quantity || place != Where::Junction || lenient {'''
+new = '''if place != Where::Junction || lenient {'''
+test = "-p ng-contract --lib sweat::the_catalog_refuses_the_lenient_read_another_ligand_a_read_off_the_junction_and_one_off_the_skin"
+
+[[mutant]]
+name = "bound-inflow-takes-any-kind-and-dimension"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(found.kind == kind && found.dimension == rate).then_some(row)'''
+new = '''(found.kind == kind || found.dimension == rate || true).then_some(row)'''
+test = "-p ng-contract --lib compile::tests::a_bound_inflow_takes_its_familys_row_kind_and_a_water_rate"
+
+[[mutant]]
+name = "parameter-descriptors-never-conflict"
+path = "crates/ng-contract/src/compile.rs"
+old = '''a.context != b.context || a.dimension != b.dimension || a.set != b.set'''
+new = '''false && (a.context != b.context || a.dimension != b.dimension || a.set != b.set)'''
+test = "-p ng-contract --lib sweat::the_three_skin_reads_bind_one_reference_slot_and_a_card_that_declares_it_otherwise_is_refused"
+
+[[mutant]]
+name = "skin-edge-reads-every-downstream-site"
+path = "crates/ng-contract/src/law.rs"
+old = '''self.read_at(port.source, Where::DownIn(D::SET))'''
+new = '''self.read_at(port.source, Where::Down)'''
+test = "-p ng-contract --lib skin_vessels::the_skin_edge_scales_its_resistance_by_the_exponential_of_the_field_and_every_other_edge_is_unmoved"
+
+[[mutant]]
 name = "edge-read-at-the-upstream-end"
 path = "crates/ng-contract/src/compile.rs"
 old = '''Where::Down | Where::DownIn(_) => ends.map(|end| end.1),'''
