@@ -16,4 +16,6 @@ Blocked by: 19, 20, 21, 22, 24, `.scratch/native-contract/issues/95-the-record-t
 
 **Non-goals:** any clinical claim, and the speed aim itself.
 
+A note from the check of native-contract 85's second PR: no 48-hour protocol uses the body's policy yet. The milestone protocol (`ArenaProtocol::milestone` in `crates/ng-validate/src/arena.rs`) runs on the slice under `arena_certificate`, whose drift table states no windows between edges, and only the body's tests read `body_certificate`.
+
 From [ticket 06](06-whole-body-on-holds.md)'s plan: the hold table this ticket lists gains the cell anion, which body 01's table of the holds rung 0 keeps (01:635-651) leaves out. BC holds it in the cells of every bed, because no rung 0 law moves it, and [ticket 17](17-volume-hormones.md) reads it (01:547).

@@ -90,6 +90,7 @@ Ruled, a model default: the lymph law reads the tissue pressure over the pressur
 - The salts, established on the three passes, each balance closed route by route. Main gains each salt until about 229 s and loses it on every later breath, at a growing rate. The fix gains each salt over every interval between breath edges, at a growing rate. The held pass gains about twice what the fix gains: from admission to about 1,499 s, +2.4066 sodium against +1.1984. The gut's inputs are equal in all three passes, and the whole difference is the urinary route. Near 290 to 300 s sodium changes at -7.23e-5 a second on main and +2.47e-4 on the fix. By 1,490 to 1,500 s it is -6.21e-3 on main and +1.74e-3 on the fix, so by then the fix's imbalance is the smaller.
 - Inferred. The suite's reference run prints magnitudes, so its worst ten seconds of sodium near 290 s, 2.955 times main's with the fix, sits just past main's change of sign. The signed ledger of that sleep and wake run is not measured.
 - Not claimed: a cause for the salts' gain. The held pass shows it too, so it is not the breath's. It belongs to the third box and to body ticket 17.
+- The lymph tests' gaps are [native-contract 104](104-what-no-test-of-the-bodys-policy-holds-yet.md)'s.
 
 ### Part 2. The gases
 
