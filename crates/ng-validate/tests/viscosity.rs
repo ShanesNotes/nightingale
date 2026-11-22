@@ -58,7 +58,7 @@ fn staged_in(
 ) -> Result<Vec<Vec<Vec<f64>>>, InitializationFailure> {
     let lens = body_lens(body)?;
     let parameters = body.bind(packet)?;
-    let port = BoundaryPort::new(vec![body_awake(anchor_moment())])?;
+    let port = BoundaryPort::new(vec![body_awake(anchor_moment()), body_room(anchor_moment())])?;
     let request = InitializationRequest::at(anchor_moment()).reading(&lens);
     let system = body.initialization(parameters, port, request)?;
     let mut workspace = system.workspace();
@@ -442,7 +442,7 @@ fn refused_at_its_row(kind: RowKind) -> Result<(), InitializationFailure> {
     let held = &body.rows()[index(&body, kind)];
     let lens = body_lens(&body)?;
     let parameters = body.bind(body_packet(&body)?)?;
-    let port = BoundaryPort::new(vec![body_awake(anchor_moment())])?;
+    let port = BoundaryPort::new(vec![body_awake(anchor_moment()), body_room(anchor_moment())])?;
     let request = InitializationRequest::at(anchor_moment()).reading(&lens);
     let system = body.initialization(parameters, port, request)?;
     let mut trial = system.workspace();

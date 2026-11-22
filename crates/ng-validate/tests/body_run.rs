@@ -145,7 +145,7 @@ impl Start {
         let links = MemoryStore::default();
         let (saved, identity, provenance) = {
             let (packet, lens) = (packet(&body), body_lens(&body).expect("a lens"));
-            let events = [body_awake(anchor_moment())]
+            let events = [body_awake(anchor_moment()), body_room(anchor_moment())]
                 .into_iter()
                 .chain(anchored)
                 .collect();
@@ -1938,7 +1938,11 @@ fn finite<U>(value: f64) -> Measure<U> {
 
 fn gate(at: u64, gate: Gate) -> BoundaryEvent {
     let id = InputId::new(Digest::of_canonical(&[u8::from(gate == Gate::Open)]));
-    BoundaryEvent::new(id, SimTime::from_ns(anchor_moment().nanoseconds() + at), BoundaryInput::Void(gate))
+    BoundaryEvent::new(
+        id,
+        SimTime::from_ns(anchor_moment().nanoseconds() + at),
+        BoundaryInput::Void(gate),
+    )
 }
 
 fn leaking_packet(body: &CompiledBody, rate: f64) -> ParameterPacket<SyntheticFixture> {
@@ -3518,6 +3522,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         &reference,
         &asleep_watch,
     );
+    report += &the_reference_run_loses_the_heat_it_makes_over_whole_breaths(&start, &reference);
     drop(reference);
     the_lining_moves_research_11s_form_over_the_first_minute(&start, &minute);
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
@@ -3618,3 +3623,390 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(&start);
     the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned_over_whole_beats(&start);
 }
+
+/// A room the skin's losses read: absolute temperatures, a share, air speed as its ratio to 0.1 m/s, and clo.
+struct Weather {
+    air: f64,
+    radiant: f64,
+    humidity: f64,
+    speed: f64,
+    clothing: f64,
+}
+/// The body's own room, as `body_room` states it.
+const RESTING: Weather = Weather {
+    air: 298.15,
+    radiant: 298.15,
+    humidity: 0.5,
+    speed: 1.0,
+    clothing: 0.6,
+};
+/// A second point: warmer air than walls, drier, windier and more clothed.
+const WINDY: Weather = Weather {
+    air: 303.15,
+    radiant: 301.15,
+    humidity: 0.3,
+    speed: 15.0,
+    clothing: 1.0,
+};
+const HEAT_WINDOW: u64 = MILLISECOND;
+
+fn weather(at: u64, room: &Weather) -> BoundaryEvent {
+    let id = InputId::new(Digest::of_canonical(&room.air.to_bits().to_be_bytes()));
+    let input = BoundaryInput::Room(Room {
+        air: finite(room.air),
+        radiant: finite(room.radiant),
+        humidity: finite(room.humidity),
+        air_speed: finite(room.speed),
+        pressure: finite(760.0),
+        oxygen: finite(0.21),
+        carbon_dioxide: finite(0.0004),
+        clothing: finite(room.clothing),
+    });
+    BoundaryEvent::new(id, SimTime::from_ns(anchor_moment().nanoseconds() + at), input)
+}
+
+/// Each tissue heat law's rate by its form, at the stores' amounts and a room, with the packet's values.
+struct HeatForms {
+    to_skin: f64,
+    to_airway: f64,
+    dry: f64,
+    evaporation: f64,
+}
+impl HeatForms {
+    fn at(start: &Start, [core, skin, airway]: [f64; 3], room: &Weather) -> Self {
+        let value = |name| lead(parameter(start, name));
+        let site = |name, store| lead(site_parameter(start, name, site::<TissueSite>(store)));
+        let zero = value("mt.thermal-zero");
+        let (core_capacity, skin_capacity) = (value("mt.core-capacity"), value("mt.skin-capacity"));
+        let (core, airway) = (zero + core / core_capacity, zero + airway / skin_capacity);
+        let skin = zero + skin / skin_capacity;
+        let (still, width) = (value("mt.still-air-speed"), value("mt.air-speed-width"));
+        let effective =
+            0.5 * (room.speed + still + ((room.speed - still) * (room.speed - still) + width * width).sqrt());
+        assert_eq!(value("mt.air-speed-exponent"), 0.5, "Stolwijk's square root");
+        let convective = value("mt.convective-conductance") * (effective / still).sqrt();
+        let radiant = value("mt.radiant-conductance");
+        let bare = radiant * (skin - room.radiant) + convective * (skin - room.air);
+        let clothed = |clothing: f64, conductance: f64| clothing / (clothing + conductance * room.clothing);
+        let dry = bare * clothed(value("mt.clothing-conductance"), radiant + convective);
+        let saturated = |temperature: f64| {
+            value("mt.vapour-reference")
+                * exp(value("mt.vapour-a") - value("mt.vapour-b") / (temperature + value("mt.vapour-c")))
+        };
+        let gradient = saturated(skin) - room.humidity * saturated(room.air);
+        let open = value("mt.lewis-relation") * convective * gradient;
+        let capacity = open * clothed(value("mt.clothing-vapour-conductance"), convective);
+        Self {
+            to_skin: site("mt.heat-conductance", "skin heat site") * (core - skin),
+            to_airway: site("mt.heat-conductance", "conducting airway") * (core - airway),
+            dry,
+            evaporation: value("mt.diffusion-wettedness") * capacity,
+        }
+    }
+}
+
+fn site_parameter(start: &Start, name: &'static str, at: SiteId) -> Compensated {
+    (start.provenance.values().iter())
+        .find_map(|record| match record.name {
+            ValueName::Parameter { key, binding }
+                if key == ParameterKey::new(name) && binding == Binding::Site(at) =>
+            {
+                Some(record.value)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no parameter {name} at {}", at.key()))
+}
+
+/// Each heat column's mean rate over the window from `at`, by its name and, for conduction, the store it reaches.
+fn heat_rates(start: &Start, session: &Session<'_, Running>, at: u64) -> [f64; 5] {
+    let body = &start.body;
+    let columns = every_column(body);
+    let from = anchor_moment().nanoseconds() + at;
+    let (early, late) = (
+        extents(session, &columns, from),
+        extents(session, &columns, from + HEAT_WINDOW),
+    );
+    let rate = |local: &str, reaches: Option<&str>| -> f64 {
+        let column = (body.columns().iter().enumerate())
+            .filter(|(_, column)| column.origin().owner == "MT" && column.origin().local == local)
+            .find(|(_, column)| {
+                reaches.is_none_or(|store| {
+                    (column.terms().iter()).any(|(row, sign)| {
+                        *sign > 0
+                            && matches!(body.rows()[row.index()].kind(), RowKind::Amount { site, .. } if site.key() == store)
+                    })
+                })
+            })
+            .unwrap_or_else(|| panic!("no column {local}"))
+            .0;
+        (late[column] - early[column]) / (HEAT_WINDOW as f64 / SECOND as f64)
+    };
+    [
+        rate("conduction", Some("skin heat site")),
+        rate("conduction", Some("conducting airway")),
+        rate("dry heat loss", None),
+        rate("skin evaporative heat", None),
+        rate("skin evaporation", None),
+    ]
+}
+
+fn stores(start: &Start, session: &Session<'_, Running>) -> [f64; 3] {
+    let view = session.record().accepted();
+    ["body", "skin heat site", "conducting airway"].map(|store| {
+        let row = (start.body.rows().iter())
+            .find(|row| {
+                matches!(row.kind(), RowKind::Amount { site, species: Species::Energy, space: Space::Thermal }
+                    if site.key() == store)
+            })
+            .expect("a tissue heat store");
+        lead(view.value(row.id()))
+    })
+}
+
+/// Ticket 12's first box: conduction to each store it reaches and each of the skin's losses match their forms at two
+/// stated points, the body's room at 1 s and a windier, drier, more clothed room from 1.001 s, each a mean over a
+/// millisecond inside the form's own values at its two ends, and evaporation posts water and heat in one proportion,
+/// the latent heat. The airway store sits within a millionth of a degree of the core, so its conduction moves with
+/// the beat inside the millisecond, and the mean is held between the ends rather than to either.
+/// The forcing's amplitude is zero, so evaporation is its form exactly.
+#[test]
+fn each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion()
+{
+    let body = whole_body().expect("compiled");
+    let packet = |body: &CompiledBody| body_packet_with_steady_evaporation(body).expect("a packet");
+    let start = Start::admitted_with(body, packet, Vec::new());
+    let latent = lead(parameter(&start, "mt.latent-heat"));
+    let mut report = String::new();
+    let mut session = until(start.session(), SECOND);
+    for (from, room) in [(SECOND, &RESTING), (SECOND + HEAT_WINDOW, &WINDY)] {
+        if from > SECOND {
+            let input = AuthorizedInput::from_command_receipt(
+                Digest::of_canonical(b"a windy room"),
+                weather(from, room),
+            );
+            session.enqueue(input).expect("enqueued");
+        }
+        let held = stores(&start, &session);
+        let early = HeatForms::at(&start, held, room);
+        session = until(session, from + HEAT_WINDOW);
+        let late = HeatForms::at(&start, stores(&start, &session), room);
+        let ends = |at: fn(&HeatForms) -> f64| (at(&early), at(&late));
+        let [to_skin, to_airway, dry, heat, water] = heat_rates(&start, &session, from);
+        assert!(
+            (water * latent - heat).abs() <= 1e-12 * heat,
+            "evaporation's water {water:e} a second against its heat {heat:e} over the latent heat {latent:e}"
+        );
+        let pairs = [
+            ("conduction to the skin", to_skin, ends(|form| form.to_skin)),
+            ("conduction to the airway", to_airway, ends(|form| form.to_airway)),
+            ("dry heat loss", dry, ends(|form| form.dry)),
+            ("skin evaporative heat", heat, ends(|form| form.evaporation)),
+        ];
+        for (name, moved, (first, last)) in pairs {
+            let (low, high) = if first < last {
+                (first, last)
+            } else {
+                (last, first)
+            };
+            let slack = 1e-5 * (first.abs() + last.abs());
+            assert!(
+                low - slack <= moved && moved <= high + slack,
+                "{name} at {from} ns moves {moved:e} a second, its form {first:e} to {last:e}"
+            );
+            writeln!(
+                report,
+                "{name} at {:.3} s: {moved:.6e} a second",
+                seconds(anchor_moment().nanoseconds() + from)
+            )
+            .expect("a string takes it");
+        }
+    }
+    expect![[r#""#]].assert_eq(&report);
+}
+
+/// Each tissue heat store's tolerance over admission's cycle: admission's recheck on that store at main before ticket
+/// 12, `1e-9` of its size plus `1e-10` of its amount, when the core store held 1.3144115e9 and the skin and airway
+/// stores 2e7 each. The thermal zero raises the amounts and so the recheck's own tolerance, and this one stays.
+const CYCLE_NETS: [(&str, f64); 3] = [
+    ("body", 0.131441),
+    ("skin heat site", 0.002),
+    ("conducting airway", 0.002),
+];
+
+fn joules(value: f64) -> Compensated {
+    Compensated::of(&Measure::<Energy>::new(value).expect("finite"))
+}
+
+/// Ticket 12's second box, part (a): over admission's own cycle each tissue heat store's transfers net to zero within
+/// its tolerance. Radau's end stage reads `x_end - x_origin - h (3/4 f(interior) + 1/4 f(end))`, so on a copy of the
+/// leg with both stages at one stage's state and each store's origin there too, a store's end residual is `-h f` at
+/// that state. The weighted sum of those over every leg is the store's net. The stores close the cycle, so the net is
+/// also minus the sum of the end stages' residuals on the solve itself, and the two agree.
+#[test]
+fn over_admissions_cycle_each_tissue_heat_stores_transfers_net_within_its_tolerance()
+-> Result<(), InitializationFailure> {
+    let body = whole_body()?;
+    let lens = body_lens(&body)?;
+    let at = anchor_moment();
+    let port = BoundaryPort::new(WholeBody::anchored(at))?;
+    let request = InitializationRequest::at(at).reading(&lens);
+    let system = body.initialization(body.bind(body_packet(&body)?)?, port, request)?;
+    let mut solved = initialize(&system, &body);
+    let rows = CYCLE_NETS.map(|(store, _)| {
+        (body.rows().iter())
+            .position(|row| {
+                matches!(row.kind(), RowKind::Amount { site, species: Species::Energy, space: Space::Thermal }
+                    if site.key() == store)
+            })
+            .expect("a tissue heat store")
+    });
+    let width = system.rows();
+    let wrap = solved.endpoint(0).start;
+    let mut origin = wrap;
+    let (mut nets, mut defects) = ([Compensated::ZERO; 3], [Compensated::ZERO; 3]);
+    let legs: Vec<LegHandle> = (1..=system.points())
+        .flat_map(|point| solved.legs_of(point % system.points()))
+        .collect();
+    for leg in legs {
+        let end = solved.leg_slots(leg).start;
+        let interior = end + width;
+        let residuals = system.stage_residuals(&solved, leg)?;
+        for (defect, &row) in defects.iter_mut().zip(&rows) {
+            *defect = defect.minus(joules(residuals[row]));
+        }
+        for (stage, weight) in [(interior, 0.75), (end, 0.25)] {
+            let state = solved.unknowns_mut()[stage..stage + width].to_vec();
+            let mut copy = solved.clone();
+            let values = copy.unknowns_mut();
+            values[end..interior].copy_from_slice(&state);
+            values[interior..interior + width].copy_from_slice(&state);
+            for &row in &rows {
+                values[origin + row] = state[row];
+            }
+            let residuals = system.stage_residuals(&copy, leg)?;
+            for (net, &row) in nets.iter_mut().zip(&rows) {
+                *net = net.plus(joules(-weight * residuals[row]));
+            }
+        }
+        origin = end;
+    }
+    assert_eq!(origin, wrap, "the legs close the cycle");
+    let mut report = String::new();
+    for ((&(store, tolerance), net), defect) in CYCLE_NETS.iter().zip(nets).zip(defects) {
+        let (net, defect) = (lead(net), lead(defect));
+        assert!(
+            net.abs() <= tolerance && (net - defect).abs() <= 1e-6 * tolerance,
+            "the {store} store nets {net:e} over the cycle, against {tolerance:e} and its residuals' {defect:e}"
+        );
+        writeln!(
+            report,
+            "{store}: nets {net:+.3e} over the cycle against {tolerance:e}"
+        )
+        .expect("a string takes it");
+    }
+    let core = ng_solver::Core::new(LONGEST_STEP);
+    system.admit(
+        solved,
+        MethodHistory::new(core.resolution().policy(), at, Vec::new()),
+    )?;
+    expect![[r#"
+        body: nets -1.033e-10 over the cycle against 1.31441e-1
+        skin heat site: nets -1.007e-12 over the cycle against 2e-3
+        conducting airway: nets +6.474e-11 over the cycle against 2e-3
+    "#]]
+    .assert_eq(&report);
+    Ok(())
+}
+
+/// Ticket 12's second box, part (c): heat made less heat lost over whole breaths, as a share of heat made, in every
+/// window between breath edges of the reference run that opens from the settling time, within twice the worst
+/// rounded up to one figure (native-contract 85's rule). Heat made is what reaches the core store from the beds and
+/// the circulation, and heat lost is what leaves a tissue heat store for the room.
+const HEAT_SHARE: Figure = (0.0, f64::INFINITY);
+
+fn the_reference_run_loses_the_heat_it_makes_over_whole_breaths(
+    start: &Start,
+    reference: &Session<'_, Running>,
+) -> String {
+    let body = &start.body;
+    let thermal = |row: RowId, store: &str| {
+        matches!(body.rows()[row.index()].kind(), RowKind::Amount { site, species: Species::Energy, space: Space::Thermal }
+            if site.key() == store)
+    };
+    let tissue = |row: RowId| {
+        ["body", "skin heat site", "conducting airway"]
+            .iter()
+            .any(|store| thermal(row, store))
+    };
+    let (mut made, mut lost) = (Vec::new(), Vec::new());
+    for (at, column) in body.columns().iter().enumerate() {
+        let terms = column.terms();
+        if terms.iter().any(|&(row, sign)| sign > 0 && thermal(row, "body")) {
+            made.push(at);
+        } else if column.receipt().is_some() && terms.iter().any(|&(row, sign)| sign < 0 && tissue(row)) {
+            lost.push(at);
+        }
+    }
+    let columns = every_column(body);
+    let view = reference.conservation();
+    let span = view.span().expect("a span");
+    let windows = edge_windows(body);
+    let (clock, _) = (view.rhythms())
+        .find(|&(_, phase)| phase == windows.clock())
+        .expect("the breath's rhythm");
+    let order = view.in_time_order().expect("the history in time order");
+    let mut edges: Vec<(u64, f64, f64)> = Vec::new();
+    for segment in order.from(span.start()) {
+        let (_, segment) = segment.expect("a link");
+        if segment.ends_on_edge(clock) {
+            let interval = segment.interval();
+            let moved = |at: &usize| {
+                let (forward, reverse) = segment.exchange(columns[*at]);
+                let reached = |curve: Curve<'_>| lead(curve.on(interval).expect("its own")[1]);
+                reached(forward) - reached(reverse)
+            };
+            edges.push((
+                interval.end().nanoseconds(),
+                made.iter().map(moved).sum(),
+                lost.iter().map(moved).sum(),
+            ));
+        }
+    }
+    let (length, settling) = (windows.length_ns().get(), windows.settling_ns());
+    let mut shares = Vec::new();
+    for (open, &(opened, made_then, lost_then)) in edges.iter().enumerate() {
+        let Some(&(closed, made_now, lost_now)) = edges[open + 1..]
+            .iter()
+            .find(|(closed, ..)| closed - opened >= length)
+        else {
+            continue;
+        };
+        if opened - span.start().nanoseconds() >= settling {
+            let made = made_now - made_then;
+            shares.push(((made - (lost_now - lost_then)) / made, opened, closed));
+        }
+    }
+    let (worst, opened, closed) = (shares.iter()).copied().fold((0.0, 0, 0), |most, share| {
+        if share.0.abs() > f64::abs(most.0) {
+            share
+        } else {
+            most
+        }
+    });
+    let mut refused = Vec::new();
+    within(
+        &mut refused,
+        "heat made less heat lost".into(),
+        worst.abs(),
+        HEAT_SHARE,
+    );
+    assert!(refused.is_empty(), "{refused:?}");
+    format!(
+        "heat made less heat lost over whole breaths, as a share of heat made: worst {worst:+.4e} from {:.3} s to {:.3} s over {} windows\n",
+        seconds(opened),
+        seconds(closed),
+        shares.len()
+    )
+}
+

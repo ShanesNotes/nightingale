@@ -118,7 +118,11 @@ fn arena(arguments: &[String]) {
     let origin = anchor_moment();
     let end = SimTime::from_ns(origin.nanoseconds() + simulated_s * 1_000 * MS);
     let (packet, lens, anchored) = if whole {
-        (body_packet(&body), body_lens(&body), vec![body_awake(origin)])
+        (
+            body_packet(&body),
+            body_lens(&body),
+            vec![body_awake(origin), body_room(origin)],
+        )
     } else {
         (arena_packet(&body), arena_lens(&body), Vec::new())
     };
@@ -362,7 +366,11 @@ fn cost(arguments: &[String]) {
         solves: core::cell::Cell::new(0),
     };
     let (packet, lens, anchored) = if whole {
-        (body_packet(&body), body_lens(&body), vec![body_awake(anchor_moment())])
+        (
+            body_packet(&body),
+            body_lens(&body),
+            vec![body_awake(anchor_moment()), body_room(anchor_moment())],
+        )
     } else {
         (arena_packet(&body), arena_lens(&body), Vec::new())
     };
