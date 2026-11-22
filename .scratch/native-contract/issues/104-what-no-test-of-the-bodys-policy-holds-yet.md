@@ -23,7 +23,7 @@ Blocks: none
 
 - A leak present from admission is taken into the admitted state, so the body's leak tests show the refusal of a leak that starts after admission, not of one present at it: under the mutant row `leak-gate-left-open` the shut branch carries every leak from admission and still passes each leak's own policy over 40 s.
 - At a breath rate of 0.20 a second every row's drift has the opposite sign to its drift at 0.25, so native-contract 85's "against its drift" holds for the leak test's signs at 0.25 only, though a check refused all 16 cases, both directions at both rates (ticket 85, "What the second PR built").
-- [Body ticket 12](../../body/issues/12-heat-balance.md) holds that the leaking body's gate reads the room's humidity and must move before 12e.
+- [Body ticket 12](../../body/issues/12-heat-balance.md) holds that the leaking body's gate reads the room's humidity, which 12a's evaporation law reads too, so the gate moves before that law lands.
 - [Body ticket 36](../../body/issues/36-the-whole-body-answers-posture.md) holds what a posture change does to the certificate: the body with no leak is refused at 75 s, and a vasopressin leak of 3e-3 a second is certified through 70 s.
 - [Body ticket 28](../../body/issues/28-two-synthetic-days.md) holds that no 48-hour protocol uses the body's policy yet.
 
