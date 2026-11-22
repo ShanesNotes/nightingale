@@ -228,7 +228,7 @@ fn blood_carries_heat_from_the_core_store_to_the_store_a_bed_sits_in_at_that_bed
             let zero = k.zero::<Rate<Energy>>();
             k.finish(zero, cv.every_mode(), class)
         });
-        cv.transfer_at(&route, still);
+        route.post(&mut cv, still);
         body.add(cv.finish());
         body.compile()
     })?;
@@ -686,7 +686,7 @@ fn blood_carries_heat_into_the_nearest_tissue_heat_store_above_each_bed() -> Res
                 let zero = k.zero::<Rate<Energy>>();
                 k.finish(zero, cv.every_mode(), class)
             });
-            cv.transfer_at(&route, still);
+            route.post(&mut cv, still);
             body.add(cv.finish());
             let (mut mt, ports) = body.metabolism(None)?.parts();
             let conduction = ports.conduction(&mut mt);

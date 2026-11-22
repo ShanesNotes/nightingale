@@ -952,6 +952,10 @@ impl Rows {
     /// The defined row of this owner, name and place, with no fallback to the body's.
     fn exactly(&self, law: LawName, at: Context) -> Option<usize> {
         self.defined.binary_search(&law).ok()?;
+        self.here(law, at)
+    }
+    /// The row of this owner, name and place, of any kind, with no fallback to the body's.
+    fn here(&self, law: LawName, at: Context) -> Option<usize> {
         let found = self
             .slots
             .binary_search_by_key(&Slot { law, at }, |entry| entry.0);
@@ -1684,6 +1688,7 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
                 | Source::TissueTemperature(_),
                 _,
             ) => true,
+            Input::BedInflow => true,
             Input::Read(Source::Field(name), _) => explicit.iter().any(|(field, _)| field.name == *name),
             _ => false,
         };
@@ -2532,6 +2537,34 @@ fn addresses(
                         .ok_or(CompileDefect::NoSuchRead { law })?,
                 )
             }
+            (Input::BedInflow, Context::Site(bed)) if law.owner == crate::Cardiovascular::CARD => {
+                let into: Vec<(SiteId, SiteId)> = (anatomy.vascular()).filter(|edge| edge.1 == bed).collect();
+                let [(from, to)] = into[..] else {
+                    return Err(CompileDefect::NoSuchRead { law });
+                };
+                if !anatomy.is_valve((from, to)) && sinusoidal(anatomy, (from, to)) {
+                    return Err(CompileDefect::NoSuchRead { law });
+                }
+                let family = match anatomy.is_valve((from, to)) {
+                    true => Family::Valves,
+                    false => Family::Circulation,
+                };
+                let flow = Slot {
+                    law: LawName {
+                        owner: law.owner,
+                        local: family.name(),
+                    },
+                    at: Context::Edge { from, to },
+                };
+                let kind = match family {
+                    Family::Valves => RowKind::Memory(flow),
+                    _ => RowKind::Algebraic(flow),
+                };
+                let rate = crate::quantity::dimension::<crate::Rate<crate::Water>>();
+                let row = (rows.here(flow.law, flow.at))
+                    .filter(|&row| rows.rows[row].kind == kind && rows.rows[row].dimension == rate);
+                unknown(row.ok_or(CompileDefect::NoSuchRead { law })?)
+            }
             (Input::Inflow, Context::Edge { from, .. }) => {
                 let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
                     .filter(|edge| edge.1 == from)
@@ -2575,7 +2608,8 @@ fn addresses(
                 | Input::EdgeParameter(_)
                 | Input::EndParameter(..)
                 | Input::Inflow
-                | Input::EdgeFlow,
+                | Input::EdgeFlow
+                | Input::BedInflow,
                 _,
             ) => return Err(CompileDefect::NoSuchRead { law }),
         })

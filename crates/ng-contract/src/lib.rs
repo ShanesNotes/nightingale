@@ -1615,6 +1615,8 @@ mod admission;
 mod anatomy;
 mod body;
 mod boundary;
+#[cfg(test)]
+mod carriage;
 pub mod catalog;
 mod chance;
 mod compensated;

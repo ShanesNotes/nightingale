@@ -342,6 +342,7 @@ pub(crate) enum Input {
     Height(Where),
     Inflow,
     EdgeFlow,
+    BedInflow,
 }
 /// Where a read lands, from the kernel's own place. The compiler resolves it against the map, so a law says what it
 /// reads and never where that is.
@@ -484,6 +485,7 @@ impl Seal for Input {
             }
             Input::Inflow => out.number(13),
             Input::EdgeFlow => out.number(14),
+            Input::BedInflow => out.number(15),
         }
     }
 }
@@ -1312,6 +1314,48 @@ impl<'b, 'k, O> Kernel<'b, 'k, O> {
         let sensor = self.input(Input::Height(Where::Sensor(landmark)));
         let site = self.input(Input::Height(Where::Mark(landmark)));
         self.subtract(sensor, site)
+    }
+}
+impl<'b, 'k> Kernel<'b, 'k, crate::Cardiovascular, CapillaryBed> {
+    /// The signed flow of the one vascular edge into this bed, in the network's direction: the circulation edge's row
+    /// or the valve's flow memory. Compile refuses a bed with two feeders, a sinusoid the hepatic card holds, and an
+    /// edge with no flow row.
+    /// ```
+    /// use ng_contract::*;
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, CapillaryBed>) -> Expr<'b, 'k, Cardiovascular, Rate<Volume>> {
+    ///     let water = k.bed_inflow();
+    ///     k.volume_flow(water)
+    /// }
+    /// ```
+    /// The read is CV's.
+    /// ```compile_fail,E0599
+    /// use ng_contract::*;
+    /// fn wrong<'b, 'k>(k: &mut Kernel<'b, 'k, Metabolism, CapillaryBed>) {
+    ///     let _ = k.bed_inflow();
+    /// }
+    /// ```
+    /// The flow is water until `volume_flow` converts it.
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn wrong<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, CapillaryBed>) -> Expr<'b, 'k, Cardiovascular, Rate<Volume>> {
+    ///     k.bed_inflow()
+    /// }
+    /// ```
+    /// A body or an edge has no bed inflow.
+    /// ```compile_fail,E0599
+    /// use ng_contract::*;
+    /// fn wrong<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Body>) {
+    ///     let _ = k.bed_inflow();
+    /// }
+    /// ```
+    /// ```compile_fail,E0599
+    /// use ng_contract::*;
+    /// fn wrong<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>) {
+    ///     let _ = k.bed_inflow();
+    /// }
+    /// ```
+    pub fn bed_inflow(&mut self) -> Expr<'b, 'k, crate::Cardiovascular, Rate<Water>> {
+        self.input(Input::BedInflow)
     }
 }
 impl<'b, 'k, O> Kernel<'b, 'k, O, CapillaryBed> {

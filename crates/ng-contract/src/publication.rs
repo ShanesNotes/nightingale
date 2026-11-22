@@ -536,7 +536,7 @@ fn the_temperatures_stand_at_every_store_whatever_transfers_mt_asks_for() -> Res
             let zero = k.zero::<Rate<Energy>>();
             k.finish(zero, cv.every_mode(), class)
         });
-        cv.transfer_at(&route, still);
+        route.post(&mut cv, still);
         body.add(cv.finish());
         let (mut rs, ports) = body.respiratory(None)?.parts();
         let exit = ports.boundary::<AirwayHeat>()?;

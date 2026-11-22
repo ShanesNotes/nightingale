@@ -7,8 +7,9 @@ use crate::{
     CompiledBody, Dimensionless, EdgeRoute, EnclosedSpace, Endocrine, Energy, FilterEdge, Fluids, Fragment,
     FragmentBuilder, Gastrointestinal, HeatRoute, Hematology, Hepatic, Immune, Junction, LawName, LymphEdge,
     Makeup, Measure, Metabolism, Musculoskeletal, Nervous, Output, OutsideSlice, Owner, Pair, PartialVolume,
-    Passage, PerSite, Pressure, Quotient, ReadPort, Receptor, ReclaimEdge, Renal, Respiratory, SiteId,
-    SiteRoute, SiteSet, Sites, Species, Substance, TubuleEdge, Urinary, ValveEdge, Wall, Water,
+    Passage, PerSite, Pressure, PureKernel, Quotient, Rate, ReadPort, Receptor, ReclaimEdge, Renal,
+    Respiratory, SiteId, SiteRoute, SiteSet, Sites, Species, Substance, TubuleEdge, Urinary, ValveEdge, Wall,
+    Water,
 };
 use core::marker::PhantomData;
 
@@ -691,15 +692,76 @@ impl<'b> CardiovascularPorts<'b> {
         laws.request(Family::Dissipation);
         Pair::serving(crate::law::Obligation::Family(Family::Dissipation))
     }
-    /// Heat blood carries from the core store to the store a bed sits in, at that bed, so the law reads the bed's own
-    /// flow.
-    pub fn heat_carried(
-        &self,
-        laws: &mut FragmentBuilder<'b, Cardiovascular>,
-    ) -> SiteRoute<'b, Cardiovascular, CapillaryBed, Energy> {
+    /// Heat blood carries from the core store to the nearest tissue heat store above a bed, at that bed, so the law
+    /// reads the bed's own flow. The request owes its law whether or not the carriage is posted.
+    pub fn heat_carried(&self, laws: &mut FragmentBuilder<'b, Cardiovascular>) -> BloodCarriage<'b> {
         let family = Family::Heat(HeatRoute::CarriedByBlood);
         laws.request(family);
-        SiteRoute::requested(family)
+        BloodCarriage {
+            route: SiteRoute::requested(family),
+        }
+    }
+}
+/// Blood's carriage of heat at each bed with a store of its own: one paired column from the core store to that store.
+/// It posts a rate and reads no amount.
+/// ```compile_fail,E0599
+/// use ng_contract::*;
+/// fn wrong(carriage: &BloodCarriage<'_>) {
+///     let _ = carriage.to_amount::<Energy>();
+/// }
+/// ```
+pub struct BloodCarriage<'b> {
+    route: SiteRoute<'b, Cardiovascular, CapillaryBed, Energy>,
+}
+impl<'b> BloodCarriage<'b> {
+    /// Posts the carriage law: CV's energy rate at each bed, positive from the core store into the bed's store.
+    /// ```
+    /// use ng_contract::*;
+    /// fn post<'b>(
+    ///     carriage: &BloodCarriage<'b>,
+    ///     cv: &mut FragmentBuilder<'b, Cardiovascular>,
+    ///     rate: PureKernel<'b, Cardiovascular, Rate<Energy>, CapillaryBed>,
+    /// ) {
+    ///     carriage.post(cv, rate);
+    /// }
+    /// ```
+    /// The rate is a bed's, in energy, from CV.
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn wrong<'b>(
+    ///     carriage: &BloodCarriage<'b>,
+    ///     cv: &mut FragmentBuilder<'b, Cardiovascular>,
+    ///     rate: PureKernel<'b, Cardiovascular, Rate<Energy>, VascularEdge>,
+    /// ) {
+    ///     carriage.post(cv, rate);
+    /// }
+    /// ```
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn wrong<'b>(
+    ///     carriage: &BloodCarriage<'b>,
+    ///     cv: &mut FragmentBuilder<'b, Cardiovascular>,
+    ///     rate: PureKernel<'b, Cardiovascular, Rate<Water>, CapillaryBed>,
+    /// ) {
+    ///     carriage.post(cv, rate);
+    /// }
+    /// ```
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn wrong<'b>(
+    ///     carriage: &BloodCarriage<'b>,
+    ///     cv: &mut FragmentBuilder<'b, Cardiovascular>,
+    ///     rate: PureKernel<'b, Metabolism, Rate<Energy>, CapillaryBed>,
+    /// ) {
+    ///     carriage.post(cv, rate);
+    /// }
+    /// ```
+    pub fn post(
+        &self,
+        cv: &mut FragmentBuilder<'b, Cardiovascular>,
+        rate: PureKernel<'b, Cardiovascular, Rate<Energy>, CapillaryBed>,
+    ) {
+        cv.transfer_at(&self.route, rate);
     }
 }
 pub struct FluidsPorts<'b> {
