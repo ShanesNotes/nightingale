@@ -1,7 +1,8 @@
 # 12: Heat balance
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: b12a
 Blocked by: 05, 09, `.scratch/research/issues/12-law-forms-heat.md`
 
 **What to build:** Two heat stores at rung 0, the core store and the skin store, with blood carrying heat between them. Skin loses heat to the room by radiation, convection and evaporation. Evaporation is one rate that posts water and its latent heat through two routes in a fixed proportion, which the first box's test and a mutant row hold (the ruling on evaporation below). The thermostat reads core and skin temperature, the skin's through a skin thermoreceptor. It acts on the tone of skin vessels and on sweat through autonomic release at the skin junction, and on shivering through a somatic motor drive, arrow 87's shiver drive, which the muscle bed's heat reads. Sweat carries sodium and chloride with its water. Its set point follows the clock and steps down in sleep. Heat production comes from [ticket 09](09-tissues-respire.md) and changes with the day's activity. The body starts at its own heat balance, because a start at a textbook temperature drifts for hours.
