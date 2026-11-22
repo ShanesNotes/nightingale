@@ -1,11 +1,79 @@
-use super::process_route;
-use crate::law::{Brand, Family};
+use super::{CORE_TEMPERATURE, TISSUE_TEMPERATURE, process_route};
+use crate::catalog::{CoreTemperature, Defines};
+use crate::law::{Brand, Family, Over, StoreHeat, StoreTemperature};
 use crate::{
     AdmissionError, Besides, BoundaryProcess, BoundaryRoute, CapillaryBed, CellFuel, Energy, FatStore,
-    FragmentBuilder, HeatRoute, Liver, Metabolism, Respired, SiteRoute, SiteSet, Species, TissueSite,
-    Triglyceride, Wall,
+    FragmentBuilder, HeatRoute, LawName, Liver, Metabolism, Output, Owner, PerSite, ReadPort, Respired,
+    SiteField, SiteRoute, SiteSet, Species, Temperature, TissueSite, Triglyceride, Wall,
 };
 use core::marker::PhantomData;
+
+/// MT's tissue heat stores: the core store's temperature as arrow 91's scalar, every other store's at its site, and
+/// the store heats MT defines them from. Each is declared once, so a fragment that declares one again is refused.
+///
+/// A store's temperature is a temperature: a law that gives it the store's heat is refused.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn wrong<'b>(
+///     t: &TissueTemperatures<'b>,
+///     mt: &mut FragmentBuilder<'b, Metabolism>,
+///     v: PureKernel<'b, Metabolism, Energy, TissueSite>,
+/// ) {
+///     mt.define_at(&t.other.0, v);
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn defined<'b>(
+///     t: &TissueTemperatures<'b>,
+///     mt: &mut FragmentBuilder<'b, Metabolism>,
+///     v: PureKernel<'b, Metabolism, Temperature, TissueSite>,
+/// ) {
+///     mt.define_at(&t.other.0, v);
+/// }
+/// ```
+#[non_exhaustive]
+pub struct TissueTemperatures<'b> {
+    pub core: (
+        Output<'b, Metabolism, Temperature>,
+        ReadPort<'b, Metabolism, Temperature>,
+    ),
+    pub other: SiteField<'b, Metabolism, TissueSite, Temperature>,
+    pub core_heat: ReadPort<'b, Metabolism, Energy>,
+    pub tissue_heat: ReadPort<'b, Metabolism, PerSite<TissueSite, Energy>>,
+}
+impl<'b> TissueTemperatures<'b> {
+    /// The temperature of the store a bed sits in: the core store's where no other store holds the bed.
+    pub fn at_bed(&self) -> ReadPort<'b, Metabolism, PerSite<CapillaryBed, Temperature>> {
+        ReadPort::temperature(StoreTemperature::OwnBed)
+    }
+    /// The temperature of the store at an MT heat exit's inside thermal end. Compile refuses an exit at any other
+    /// pool. The exit is MT's own and moves energy.
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn wrong<'b>(t: &TissueTemperatures<'b>, w: &BoundaryRoute<'b, Water, Metabolism>) {
+    ///     let _ = t.at_exit(w);
+    /// }
+    /// ```
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn wrong<'b>(t: &TissueTemperatures<'b>, r: &BoundaryRoute<'b, Energy, Respiratory>) {
+    ///     let _ = t.at_exit(r);
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn read<'b>(t: &TissueTemperatures<'b>, e: &BoundaryRoute<'b, Energy, Metabolism>) {
+    ///     let _ = t.at_exit(e);
+    /// }
+    /// ```
+    pub fn at_exit(
+        &self,
+        exit: &BoundaryRoute<'b, Energy, Metabolism>,
+    ) -> ReadPort<'b, Metabolism, Temperature> {
+        ReadPort::temperature(StoreTemperature::OwnExit(exit.name()))
+    }
+}
 
 pub struct MetabolismPorts<'b> {
     processes: Vec<&'static str>,
@@ -134,6 +202,44 @@ impl<'b> MetabolismPorts<'b> {
         let family = Family::Heat(HeatRoute::Conduction);
         laws.request(family);
         SiteRoute::requested(family)
+    }
+    /// Declares the core store's temperature through arrow 91 and every other tissue heat store's at its site, each
+    /// owing MT's law, with the store heats that law reads. The store sites come from the schema's pools, whatever
+    /// transfer laws the fragment asks for. Only MT declares them.
+    /// ```compile_fail,E0599
+    /// use ng_contract::*;
+    /// fn wrong<'b>(p: &NervousPorts<'b>, ns: &mut FragmentBuilder<'b, Nervous>) {
+    ///     let _ = p.temperatures(ns);
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn declared<'b>(p: &MetabolismPorts<'b>, mt: &mut FragmentBuilder<'b, Metabolism>) -> TissueTemperatures<'b> {
+    ///     p.temperatures(mt)
+    /// }
+    /// ```
+    pub fn temperatures(&self, laws: &mut FragmentBuilder<'b, Metabolism>) -> TissueTemperatures<'b> {
+        let core: CoreTemperature<Defines<'b, Metabolism>> = laws.emit();
+        laws.owe_defined::<Temperature>(TISSUE_TEMPERATURE, Over::OtherTissueHeatStores);
+        let owner = Metabolism::CARD;
+        TissueTemperatures {
+            core: (
+                core.core_temperature,
+                ReadPort::field(LawName {
+                    owner,
+                    local: CORE_TEMPERATURE,
+                }),
+            ),
+            other: (
+                Output::named(TISSUE_TEMPERATURE),
+                ReadPort::field(LawName {
+                    owner,
+                    local: TISSUE_TEMPERATURE,
+                }),
+            ),
+            core_heat: ReadPort::heat(StoreHeat::Root),
+            tissue_heat: ReadPort::heat(StoreHeat::Here),
+        }
     }
     pub fn boundary<P: BoundaryProcess<Card = Metabolism>>(
         &self,

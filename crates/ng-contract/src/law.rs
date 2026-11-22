@@ -550,6 +550,25 @@ impl Seal for Source {
                 out.number(8);
                 input.seal(out);
             }
+            Source::TissueHeat(store) => {
+                out.number(9);
+                out.number(store as u64);
+            }
+            Source::TissueTemperature(read) => {
+                out.number(10);
+                match read {
+                    StoreTemperature::OwnBed => out.number(0),
+                    StoreTemperature::OwnExit(route) => {
+                        out.number(1);
+                        out.text(route);
+                    }
+                    StoreTemperature::CarriageEnd(end) => {
+                        out.number(2);
+                        out.number(end as u64);
+                    }
+                    StoreTemperature::SkinThermoreceptor => out.number(3),
+                }
+            }
         }
     }
 }
@@ -1032,7 +1051,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
     fn read_at<U: Dimension>(&mut self, source: Source, place: Where) -> Expr<'b, 'k, O, U> {
         let read = self.input(Input::Read(source, place));
-        if let Source::Field(_) = source {
+        if let Source::Field(_) | Source::TissueTemperature(_) = source {
             self.fields.push(FieldRead {
                 at: read.at,
                 expects: dimension::<U>(),
@@ -1451,6 +1470,24 @@ pub(crate) enum Source {
     Extravascular,
     Reacting(&'static str, Species),
     Lasting(Lasting),
+    TissueHeat(StoreHeat),
+    TissueTemperature(StoreTemperature),
+}
+/// Which tissue heat store's energy MT reads: the core store's, from any kernel, or the store at the kernel's own
+/// tissue site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StoreHeat {
+    Root,
+    Here,
+}
+/// Which tissue heat store's temperature a read finds, from the reader's own place. Compile finds the store, then its
+/// row: the core store's is MT's `core_temperature` at the body, any other's MT's `tissue_temperature` at its site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StoreTemperature {
+    OwnBed,
+    OwnExit(&'static str),
+    CarriageEnd(End),
+    SkinThermoreceptor,
 }
 impl<'b, O, U> ReadPort<'b, O, U> {
     fn of(source: Source) -> Self {
@@ -1465,6 +1502,12 @@ impl<'b, O, U> ReadPort<'b, O, U> {
     }
     pub(crate) fn pool(species: Species) -> Self {
         Self::of(Source::Pool(species))
+    }
+    pub(crate) fn heat(store: StoreHeat) -> Self {
+        Self::of(Source::TissueHeat(store))
+    }
+    pub(crate) fn temperature(read: StoreTemperature) -> Self {
+        Self::of(Source::TissueTemperature(read))
     }
 }
 impl<'b, O, C: SiteSet> ReadPort<'b, O, PerSite<C, Pressure>> {
@@ -1496,6 +1539,7 @@ pub(crate) enum Over {
     HeldEnclosures,
     Route(Family),
     WherePool(Sites, Space, Species),
+    OtherTissueHeatStores,
 }
 pub(crate) trait Carried {
     fn over() -> Over;
@@ -1899,6 +1943,9 @@ impl<'b, Q, O> BoundaryRoute<'b, Q, O> {
             route: Pair::serving(Obligation::Boundary(boundary)),
             drive: ReadPort::of(Source::Drive(boundary)),
         }
+    }
+    pub(crate) fn name(&self) -> &'static str {
+        self.route.serves.local()
     }
 }
 

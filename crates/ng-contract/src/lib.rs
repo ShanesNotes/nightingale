@@ -1637,6 +1637,8 @@ mod packet;
 mod pinned;
 mod problem;
 mod provenance;
+#[cfg(test)]
+mod publication;
 mod quadrature;
 mod quantity;
 mod ring;

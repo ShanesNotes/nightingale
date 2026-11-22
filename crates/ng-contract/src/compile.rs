@@ -3,7 +3,7 @@ use crate::body::{
     HazardLayout, Instance, Layout, ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Receipt, Row,
     RowId, RowKind, Slot, Sparsity, StreamLayout, Target, UnknownId,
 };
-use crate::catalog::SpeciationReader;
+use crate::catalog::{self, Projection, SpeciationReader};
 use crate::chance::key_word;
 use crate::conservation::{Balanced, admission_totals, conserved_basis, weight};
 use crate::elimination::Elimination;
@@ -12,10 +12,13 @@ use crate::identity::{Canonical, Seal};
 use crate::law::{
     End, ExplicitLaw, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation,
     Op, Over, ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration,
-    SlotKind, Source, Unwritable, Validity, Where,
+    SlotKind, Source, StoreHeat, StoreTemperature, Unwritable, Validity, Where,
 };
 use crate::scheme::greatest_common_divisor;
-use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, PoolRef, RouteBoundary};
+use crate::scope::{
+    BINARY64_EXACT, CORE_TEMPERATURE, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, PoolRef, RouteBoundary,
+    TISSUE_TEMPERATURE,
+};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
     Compliance, HeatRoute, Lasting, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage,
@@ -793,7 +796,56 @@ fn places_of(
             .filter(|&site| schema.pools().any(|pool| pool == (site, space, species)))
             .map(Context::Site)
             .collect(),
+        Over::OtherTissueHeatStores => (anatomy.in_set(Sites::Class(Class::TissueSite)).into_iter())
+            .filter(|&site| anatomy.root() != Some(site) && holds_heat(schema, site))
+            .map(Context::Site)
+            .collect(),
     }
+}
+
+/// A tissue heat store: a tissue site with a thermal energy pool. The core store is the one at the root.
+fn holds_heat(schema: &Schema, site: SiteId) -> bool {
+    site.class() == Class::TissueSite
+        && schema
+            .pools()
+            .any(|pool| pool == (site, Space::Thermal, Species::Energy))
+}
+fn core_store(schema: &Schema) -> Option<SiteId> {
+    (schema.anatomy.root()).filter(|&root| holds_heat(schema, root))
+}
+/// The store a bed sits in: from the bed's parent toward the root, the first tissue heat store.
+fn store_above(schema: &Schema, bed: SiteId) -> Option<SiteId> {
+    let anatomy = &schema.anatomy;
+    core::iter::successors(anatomy.parent(bed), |&site| anatomy.parent(site))
+        .find(|&site| holds_heat(schema, site))
+}
+/// The store blood carries heat into at a bed, where that store is not the core store.
+fn carried_into(schema: &Schema, bed: SiteId) -> Option<SiteId> {
+    let store = store_above(schema, bed)?;
+    (bed.class() == Class::CapillaryBed && Some(store) != schema.anatomy.root()).then_some(store)
+}
+/// A store's temperature row: the core store's is the body's, every other store's is at its site.
+fn temperature_at(schema: &Schema, store: SiteId) -> (LawName, Context) {
+    let owner = crate::Metabolism::CARD;
+    match schema.anatomy.root() == Some(store) {
+        true => (
+            LawName {
+                owner,
+                local: CORE_TEMPERATURE,
+            },
+            Context::Body,
+        ),
+        false => (
+            LawName {
+                owner,
+                local: TISSUE_TEMPERATURE,
+            },
+            Context::Site(store),
+        ),
+    }
+}
+fn store_temperature(field: LawName) -> bool {
+    field.owner == crate::Metabolism::CARD && [CORE_TEMPERATURE, TISSUE_TEMPERATURE].contains(&field.local)
 }
 
 struct Rows {
@@ -896,6 +948,14 @@ impl Rows {
     fn defined(&self, law: LawName, at: Context) -> Option<usize> {
         self.defined.binary_search(&law).ok()?;
         self.slot(law, at)
+    }
+    /// The defined row of this owner, name and place, with no fallback to the body's.
+    fn exactly(&self, law: LawName, at: Context) -> Option<usize> {
+        self.defined.binary_search(&law).ok()?;
+        let found = self
+            .slots
+            .binary_search_by_key(&Slot { law, at }, |entry| entry.0);
+        found.ok().map(|at| self.slots[at].1)
     }
     fn declared(&self, law: LawName, at: Context) -> usize {
         self.slot(law, at)
@@ -1191,7 +1251,7 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
             .collect(),
         Family::Heat(HeatRoute::CarriedByBlood) => beds()
             .filter_map(|bed| {
-                let (core, held) = (store(Space::Thermal)?, heat(anatomy.parent(bed)?));
+                let (core, held) = (store(Space::Thermal)?, heat(store_above(schema, bed)?));
                 (held != core).then(|| at(bed, [core, held]))
             })
             .collect(),
@@ -1559,6 +1619,7 @@ fn place(
                         (program, variant)
                     }
                 };
+                check_granted(law.name, reads, context, places)?;
                 placement.instances.push(Placed {
                     program,
                     context,
@@ -1615,7 +1676,12 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
             Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,
             Input::SiteParameter(_) => true,
             Input::Read(
-                Source::Drive(_) | Source::RoutePool(..) | Source::Reacting(..) | Source::Flow(_),
+                Source::Drive(_)
+                | Source::RoutePool(..)
+                | Source::Reacting(..)
+                | Source::Flow(_)
+                | Source::TissueHeat(_)
+                | Source::TissueTemperature(_),
                 _,
             ) => true,
             Input::Read(Source::Field(name), _) => explicit.iter().any(|(field, _)| field.name == *name),
@@ -1718,6 +1784,94 @@ fn check_wired(
         }
     }
     Ok(())
+}
+
+/// Each read of a store's heat or temperature, kept or discarded, is MT's own or a projected field's grant at the
+/// place its arrow allows. Checked before the read is placed, so the reader and place refuse first.
+fn check_granted(
+    law: LawName,
+    kernel: &KernelData,
+    context: Context,
+    places: &Places,
+) -> Result<(), CompileDefect> {
+    let inputs = (kernel.code.iter())
+        .filter_map(|op| match op {
+            Op::Input(input) => Some(input),
+            _ => None,
+        })
+        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let &Input::Read(source, place) = input else {
+            continue;
+        };
+        match source {
+            Source::Field(field) if store_temperature(field) && !catalog::reads_plainly(law.owner, field) => {
+                return Err(CompileDefect::UnwiredRead { law, field });
+            }
+            Source::TissueHeat(store) if law.owner != crate::Metabolism::CARD => {
+                let local = match store {
+                    StoreHeat::Root => "core_heat",
+                    StoreHeat::Here => "tissue_heat",
+                };
+                let field = LawName {
+                    owner: crate::Metabolism::CARD,
+                    local,
+                };
+                return Err(CompileDefect::UnwiredRead { law, field });
+            }
+            Source::TissueTemperature(read) => granted(law, read, place, context, places)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// A store temperature read is MT's own, or a projected field's at the place its arrow allows.
+fn granted(
+    law: LawName,
+    read: StoreTemperature,
+    place: Where,
+    context: Context,
+    places: &Places,
+) -> Result<(), CompileDefect> {
+    let schema = places.schema;
+    let owner = crate::Metabolism::CARD;
+    let projection = match read {
+        StoreTemperature::OwnBed | StoreTemperature::OwnExit(_) => None,
+        StoreTemperature::CarriageEnd(_) => Some(Projection::CarriageEnds),
+        StoreTemperature::SkinThermoreceptor => Some(Projection::SkinThermoreceptor),
+    };
+    let Some(projection) = projection else {
+        let field = LawName {
+            owner,
+            local: TISSUE_TEMPERATURE,
+        };
+        return match law.owner == owner {
+            true => Ok(()),
+            false => Err(CompileDefect::UnwiredRead { law, field }),
+        };
+    };
+    let (arrow, wired) = catalog::projected(projection);
+    let field = LawName {
+        owner: arrow.from,
+        local: wired.name,
+    };
+    let unwired = CompileDefect::UnwiredRead { law, field };
+    if law.owner != arrow.to {
+        return Err(unwired);
+    }
+    match (projection, context) {
+        (Projection::CarriageEnds, Context::Site(bed)) if carried_into(schema, bed).is_some() => Ok(()),
+        (Projection::CarriageEnds, _) => Err(unwired),
+        (Projection::SkinThermoreceptor, Context::Body) => {
+            let landed = place_of(place, context, places.anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
+            match serves_skin(schema, landed) {
+                true => Ok(()),
+                false => Err(unwired),
+            }
+        }
+        (Projection::SkinThermoreceptor, _) => Err(unwired),
+    }
 }
 
 fn check_ends(
@@ -2125,6 +2279,47 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
     }
 }
 
+/// The store a temperature read finds from the reader's place, or none where it has no such store.
+fn store_read(
+    schema: &Schema,
+    read: StoreTemperature,
+    context: Context,
+    landed: Option<SiteId>,
+) -> Option<SiteId> {
+    let bed = match context {
+        Context::Site(site) if site.class() == Class::CapillaryBed => Some(site),
+        _ => None,
+    };
+    match read {
+        StoreTemperature::OwnBed => store_above(schema, bed?),
+        StoreTemperature::OwnExit(route) => {
+            let exit = schema.boundaries.iter().find(|boundary| boundary.name == route)?;
+            let PoolRef { site, space, species } = exit.pool;
+            (space == Space::Thermal && species == Species::Energy && holds_heat(schema, site))
+                .then_some(site)
+        }
+        StoreTemperature::CarriageEnd(end) => {
+            let store = carried_into(schema, bed?)?;
+            match end {
+                End::From => core_store(schema),
+                End::To => Some(store),
+            }
+        }
+        StoreTemperature::SkinThermoreceptor => landed.filter(|&site| serves_skin(schema, site)),
+    }
+}
+/// A store that some skin bed sits in.
+fn serves_skin(schema: &Schema, store: SiteId) -> bool {
+    let anatomy = &schema.anatomy;
+    let skin = |bed: &&SiteId| anatomy.tissue(**bed) == Some(crate::Tissue::Skin);
+    let beds = anatomy.in_set(Sites::Class(Class::CapillaryBed));
+    holds_heat(schema, store)
+        && beds
+            .iter()
+            .filter(skin)
+            .any(|&bed| store_above(schema, bed) == Some(store))
+}
+
 fn addresses(
     law: LawName,
     route: Option<Family>,
@@ -2193,7 +2388,34 @@ fn addresses(
                 }
             }
             Source::Field(field) => {
-                let row = rows.defined(field, at);
+                let row = match field.local {
+                    CORE_TEMPERATURE if store_temperature(field) => rows.exactly(field, Context::Body),
+                    TISSUE_TEMPERATURE if store_temperature(field) => rows.exactly(field, at),
+                    _ => rows.defined(field, at),
+                };
+                checked(field, row.ok_or(CompileDefect::UnemittedField { law, field })?)?
+            }
+            Source::TissueHeat(store) => {
+                let site = match (store, context) {
+                    (StoreHeat::Root, _) => core_store(schema),
+                    (StoreHeat::Here, Context::Site(site)) => {
+                        Some(site).filter(|&site| holds_heat(schema, site))
+                    }
+                    (StoreHeat::Here, _) => None,
+                };
+                let site = site.ok_or(CompileDefect::NoSuchRead { law })?;
+                let pool = PoolRef {
+                    site,
+                    space: Space::Thermal,
+                    species: Species::Energy,
+                };
+                unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
+            }
+            Source::TissueTemperature(read) => {
+                let store =
+                    store_read(schema, read, context, landed).ok_or(CompileDefect::NoSuchRead { law })?;
+                let (field, at) = temperature_at(schema, store);
+                let row = rows.exactly(field, at);
                 checked(field, row.ok_or(CompileDefect::UnemittedField { law, field })?)?
             }
             Source::Flow(family) => {
@@ -2518,6 +2740,7 @@ fn guards(
                     inputs: Vec::new(),
                     resets: reset,
                 };
+                check_granted(law, zero, at, places)?;
                 guards.push((layout, addresses(law, route, program, at, places)?));
                 check_wired(law, zero, at, places)?;
             }

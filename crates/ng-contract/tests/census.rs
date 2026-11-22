@@ -1,13 +1,14 @@
 use ng_contract::Sites;
 use ng_contract::catalog::{
-    ARROWS, Arrow, Carries, Disposition, HeldField, HeldRead, SPECIATION_READERS, SpeciationReader,
-    WiredField, WiredRead,
+    ARROWS, Arrow, Carries, Census, Disposition, HeldField, HeldRead, Projection, SPECIATION_READERS,
+    SpeciationReader, WiredField, WiredRead,
 };
 
 const ATRIAL: WiredField = WiredField {
     name: "atrial_wall_stress",
     unit: "Pressure",
     body_ticket: 17,
+    projected: None,
 };
 
 const fn held(name: &'static str, holder: &'static str) -> HeldField {
@@ -158,6 +159,63 @@ fn the_census_refuses_an_empty_reason() {
         !SLICE_WITHOUT_ONE.every_reason_given(),
         "a slice disposition names no reason"
     );
+}
+
+#[test]
+fn the_whole_body_wires_eighteen_fields_holds_thirty_two_and_mixes_six_arrows() {
+    let fields = |arrow: &Arrow| (arrow.carries.wired().len(), arrow.carries.held().len());
+    let wired: usize = ARROWS.iter().map(|arrow| fields(arrow).0).sum();
+    let held: usize = ARROWS.iter().map(|arrow| fields(arrow).1).sum();
+    let mixed: Vec<u16> = (ARROWS.iter())
+        .filter(|arrow| fields(arrow).0 > 0 && fields(arrow).1 > 0)
+        .map(|arrow| arrow.line)
+        .collect();
+    assert_eq!((ARROWS.len(), wired, held), (38, 18, 32));
+    assert_eq!(mixed, [78, 79, 87, 89, 95, 114]);
+    let whole = Census::WholeBody.count();
+    assert_eq!((whole.live, whole.relation, whole.held), (14, 6, 18));
+    let slice = Census::Slice.count();
+    assert_eq!((slice.mapped(), slice.unmapped()), (27, 11));
+    for line in [90, 91] {
+        let row = Census::Slice.row(&ARROWS[line - 77]);
+        assert_eq!(row.disposition, Disposition::ExternalInput, "line {line}");
+    }
+}
+
+#[test]
+fn arrows_90_and_91_wire_their_projected_temperatures_for_ticket_12_and_keep_every_other_entry() {
+    let wired = |line: usize| -> Vec<(&str, u8, Option<Projection>)> {
+        (ARROWS[line - 77].carries.wired().iter())
+            .map(|field| (field.name, field.body_ticket, field.projected))
+            .collect()
+    };
+    assert_eq!(
+        wired(90),
+        [
+            ("oxygen_debt_per_bed", 9, None),
+            ("temperature", 12, Some(Projection::CarriageEnds))
+        ]
+    );
+    assert_eq!(
+        wired(91),
+        [
+            ("core_temperature", 12, None),
+            ("skin_temperature", 12, Some(Projection::SkinThermoreceptor))
+        ]
+    );
+    assert!(ARROWS[90 - 77].carries.held().is_empty() && ARROWS[91 - 77].carries.held().is_empty());
+    let flow = ARROWS[78 - 77].carries;
+    assert_eq!(wired(78), [("myocardial_work", 9, None)]);
+    let held: Vec<(&str, &str, &str)> = (flow.held().iter())
+        .map(|field| (field.name, field.holder, field.reason))
+        .collect();
+    let reason = "MT's oxygen supply arrives by plasma transport. CV reads its own inflow for carriage.";
+    assert_eq!(held, [("flow_per_bed", "CV", reason)]);
+    let projected = (ARROWS.iter())
+        .flat_map(|arrow| arrow.carries.wired())
+        .filter(|field| field.projected.is_some())
+        .count();
+    assert_eq!(projected, 2);
 }
 
 #[test]
