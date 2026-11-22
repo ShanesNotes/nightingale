@@ -1236,10 +1236,11 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// the widest gap between edges, each rounded up to one significant figure. The onset is pinned at 30 s because the
 /// figures are taken there, inside the admission's own fall of energy, which puts energy's above a settled onset's, so
 /// moving the onset moves them. The salts' excess grows to the run's end, so a longer run leaves their bounds (body
-/// ticket 17). Energy's figures belong to the held feeds and the held heat exit, and are measured again when body
-/// tickets 12 and 13 to 16 land. The payers of the stroke work and of the work of breathing take a hydrogen bound of
-/// their own, since their cells settle as their works do, and each is judged on its own. Oxygen and carbon dioxide as
-/// species keep only held pools that never move, so the slice's bound for an unmoved species holds them.
+/// ticket 17). Energy's figures belong to the held feeds and to the evaporation's forcing, which swings the skin's
+/// evaporative heat (body ticket 12), and are measured again when body tickets 13 to 16 land. The payers of the stroke
+/// work and of the work of breathing take a hydrogen bound of their own, since their cells settle as their works do,
+/// and each is judged on its own. Oxygen and carbon dioxide as species keep only held pools that never move, so the
+/// slice's bound for an unmoved species holds them.
 const ELEMENT_BOUNDS: [(Element, f64, f64, f64); 3] = [
     (Element::Carbon, 7e2, 3e1, 1e1),
     (Element::Hydrogen, 2e-4, 2e-5, 2e-6),
@@ -1248,12 +1249,12 @@ const ELEMENT_BOUNDS: [(Element, f64, f64, f64); 3] = [
 const PAYER_HYDROGEN: (f64, f64, f64) = (0.4, 4e-2, 2e-2);
 const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
 const SPECIES_BOUNDS: [(Species, f64, f64, f64); 7] = [
-    (Species::Energy, 1e4, 1e3, 3e2),
-    (Species::Water, 5e-2, 4e-3, 3e-3),
-    (Species::Sodium, 5e-3, 5e-4, 9e-6),
+    (Species::Energy, 2e6, 2e5, 1e5),
+    (Species::Water, 2e-1, 8e-3, 4e-3),
+    (Species::Sodium, 6e-3, 6e-4, 9e-6),
     (Species::Chloride, 6e-3, 6e-4, 1e-5),
     (Species::Potassium, 3e-4, 3e-5, 5e-7),
-    (Species::Vasopressin, 6e-2, 2e-3, 5e-4),
+    (Species::Vasopressin, 6e-2, 5e-3, 3e-4),
     (Species::NitrogenGas, 2e4, 2e1, 8.0),
 ];
 const SETTLING_TIME: u64 = 20 * SECOND;

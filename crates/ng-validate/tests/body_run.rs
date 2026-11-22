@@ -12,8 +12,8 @@ use ng_validate::*;
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
 const LONGEST_STEP: u64 = 10 * MILLISECOND;
-const PACKET: &str = "ef1d696a56be52c6c401490bee51e0022b08ecd367e209aa3812974c75acf9d5";
-const ADMITTED_SEAL: &str = "9ea8b11046b80fcea2b1fcd221607a2cf360a64272b6b04c513d1ff86061556c";
+const PACKET: &str = "cbf140b541e4d974de98f85dd9a52e7b728d18a5f384c006446410087e90f55b";
+const ADMITTED_SEAL: &str = "f5c3b95d522fca28af8605af97fec1b82a3d702f1ee7010eef712c706e7dee6a";
 
 struct Counted {
     core: ng_solver::Core,
@@ -316,7 +316,7 @@ fn the_body_admits_at_06_55(start: &Start) {
     assert_eq!(hex(start.identity.packet().digest()), PACKET);
     assert_eq!(hex(start.session().record().seal().digest()), ADMITTED_SEAL);
     expect![[r#"
-        aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
+        aortic valve shuts 0.285420563 s into the beat, leg veins 0.284260864 s
     "#]]
     .assert_eq(&closings(&start.provenance));
     let force = value(start, &start.session(), field("MS", "pump_force", Context::Body));
@@ -935,14 +935,13 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11672, quantities 398, held routes 88
+        steps 11661, quantities 396, held routes 84
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
         GI gut potassium moved
         GI gut sodium moved
         GI gut water moved
-        MS skin water moved
         MT bone bed cell water out moved
         MT bone bed fatty acid feed moved
         MT bone bed glucose feed moved
@@ -992,7 +991,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
 type Figure = (f64, f64);
 
 const RULE: [(Book, bool, [Figure; 3]); 11] = [
-    (Book::Energy, false, [(9e3, 1e4), (9e2, 1e3), (2e2, 3e2)]),
+    (Book::Energy, false, [(1e6, 2e6), (1e5, 2e5), (9e4, 1e5)]),
     (
         Book::Element(Element::Carbon),
         false,
@@ -1021,12 +1020,12 @@ const RULE: [(Book, bool, [Figure; 3]); 11] = [
     (
         Book::Of(Species::Water),
         false,
-        [(4e-2, 5e-2), (3e-3, 4e-3), (2e-3, 3e-3)],
+        [(1e-1, 2e-1), (7e-3, 8e-3), (3e-3, 4e-3)],
     ),
     (
         Book::Of(Species::Sodium),
         false,
-        [(4e-3, 5e-3), (4e-4, 5e-4), (8e-6, 9e-6)],
+        [(5e-3, 6e-3), (5e-4, 6e-4), (8e-6, 9e-6)],
     ),
     (
         Book::Of(Species::Chloride),
@@ -1041,7 +1040,7 @@ const RULE: [(Book, bool, [Figure; 3]); 11] = [
     (
         Book::Of(Species::Vasopressin),
         false,
-        [(5e-2, 6e-2), (1e-3, 2e-3), (4e-4, 5e-4)],
+        [(5e-2, 6e-2), (4e-3, 5e-3), (2e-4, 3e-4)],
     ),
 ];
 const WIDEST: Figure = (1e1, 2e1);
@@ -1230,14 +1229,14 @@ fn line(worst: f64, figures: &Figures) -> String {
     )
 }
 
-const MAIN_CLOSINGS: &str = "aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s\n";
+const ADMITTED_CLOSINGS: &str = "aortic valve shuts 0.285420563 s into the beat, leg veins 0.284260864 s\n";
 
-/// No rest law reads the drive scale, so both admissions shut each valve at main's instants, and every row but the
+/// No rest law reads the drive scale, so both admissions shut each valve at the same instants, and every row but the
 /// scale and every parameter admission calibrates, matched by key and binding, admits within admission's tolerance of
 /// the controlled run's.
 fn the_held_body_admits_where_the_controlled_body_does(start: &Start, held: &Start) -> String {
     let [controlled, holding] = [start, held].map(|each| closings(&each.provenance));
-    assert_eq!([controlled.as_str(), holding.as_str()], [MAIN_CLOSINGS; 2]);
+    assert_eq!([controlled.as_str(), holding.as_str()], [ADMITTED_CLOSINGS; 2]);
     let tolerance = *start.provenance.tolerance();
     let scale = Chemoreflex::of(start).scale;
     let (ours, theirs) = (start.session(), held.session());
@@ -1871,7 +1870,7 @@ impl Leak {
             Leak::Oxygen => 6e1,
             Leak::Carbon => 5e1,
             Leak::NitrogenGas => 3e1,
-            Leak::Vasopressin => -3e-3,
+            Leak::Vasopressin => -7e-3,
         }
     }
     /// Each route's rate is sized so its row nets its size over the window it is refused in. The lungs breathe most of
@@ -2358,23 +2357,23 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet ef1d696a56be52c6c401490bee51e0022b08ecd367e209aa3812974c75acf9d5
-        seal f1b5ce9ad23f09a7743c0ae9c6658e3afb06d90d9793adda0d7254dc79d1fde1
+        packet cbf140b541e4d974de98f85dd9a52e7b728d18a5f384c006446410087e90f55b
+        seal 864d670cfbc03922f9a52c839e75bf97f6f59aca1be7e60ebba81a383994868b
         steps 198
-        viscosity over its reference at the start 1.000092324
+        viscosity over its reference at the start 1.001301675
     "#]]
     .assert_eq(&pin);
     expect![[r#"
-         100.404686 ms  arterial pressure 134.595436  right atrial pressure 2.899840  portal vein pressure 6.243627  leg vein pressure 3.563186  heart rate 1.063911  sympathetic traffic 0.786252  filtration 1.670550  urine 0.015786  wall power 24546.868435  aortic flow 0.000000
-         201.522035 ms  arterial pressure 126.975729  right atrial pressure 3.333249  portal vein pressure 6.374804  leg vein pressure 3.722210  heart rate 1.081155  sympathetic traffic 0.085799  filtration 2.108909  urine 0.015786  wall power 15542.091598  aortic flow 39.654816
-         302.706311 ms  arterial pressure 118.697011  right atrial pressure 3.744234  portal vein pressure 6.158132  leg vein pressure 3.905008  heart rate 1.047384  sympathetic traffic 0.016483  filtration 2.342036  urine 0.015786  wall power 38216.958688  aortic flow 0.000000
-         403.022245 ms  arterial pressure 109.417411  right atrial pressure 3.252472  portal vein pressure 5.910991  leg vein pressure 4.252170  heart rate 1.004767  sympathetic traffic 0.012387  filtration 2.405433  urine 0.015786  wall power 14003.537335  aortic flow 0.000000
-         504.258062 ms  arterial pressure 100.951016  right atrial pressure 1.517539  portal vein pressure 5.658407  leg vein pressure 3.951905  heart rate 0.970402  sympathetic traffic 0.023271  filtration 2.343727  urine 0.015786  wall power 11997.275269  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.050650  right atrial pressure 0.922170  portal vein pressure 5.367259  leg vein pressure 3.258192  heart rate 0.947688  sympathetic traffic 0.075204  filtration 2.189162  urine 0.015786  wall power 8625.231797  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.067388  right atrial pressure 0.844078  portal vein pressure 5.145317  leg vein pressure 2.684975  heart rate 0.940766  sympathetic traffic 0.262973  filtration 1.993595  urine 0.015786  wall power 6296.316828  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.633231  right atrial pressure 1.012161  portal vein pressure 5.135693  leg vein pressure 2.440327  heart rate 0.952638  sympathetic traffic 0.642942  filtration 1.781198  urine 0.015786  wall power 4912.436828  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.719259  right atrial pressure 1.262631  portal vein pressure 5.411460  leg vein pressure 2.535063  heart rate 0.982910  sympathetic traffic 0.904773  filtration 1.567548  urine 0.015786  wall power 3946.257739  aortic flow 0.000000
-        1000.440780 ms  arterial pressure 68.693769  right atrial pressure 1.495966  portal vein pressure 5.777212  leg vein pressure 2.727142  heart rate 1.021751  sympathetic traffic 0.977547  filtration 1.378174  urine 0.015786  wall power 3075.429015  aortic flow 0.000000
+         100.369246 ms  arterial pressure 134.742632  right atrial pressure 2.920827  portal vein pressure 6.261375  leg vein pressure 3.582053  heart rate 1.064050  sympathetic traffic 0.786840  filtration 1.663839  urine 0.015385  wall power 24731.530807  aortic flow 0.000000
+         201.235345 ms  arterial pressure 127.083782  right atrial pressure 3.358522  portal vein pressure 6.398028  leg vein pressure 3.744954  heart rate 1.081302  sympathetic traffic 0.085630  filtration 2.116752  urine 0.015385  wall power 15644.705333  aortic flow 39.592731
+         302.676363 ms  arterial pressure 118.742012  right atrial pressure 3.772693  portal vein pressure 6.181014  leg vein pressure 3.933350  heart rate 1.047371  sympathetic traffic 0.016290  filtration 2.356836  urine 0.015385  wall power 38313.118282  aortic flow 0.000000
+         402.872008 ms  arterial pressure 109.435106  right atrial pressure 3.280618  portal vein pressure 5.934310  leg vein pressure 4.282717  heart rate 1.004739  sympathetic traffic 0.012259  filtration 2.419541  urine 0.015385  wall power 14060.777865  aortic flow 0.000000
+         503.865835 ms  arterial pressure 100.960814  right atrial pressure 1.541872  portal vein pressure 5.682206  leg vein pressure 3.982334  heart rate 0.970407  sympathetic traffic 0.023054  filtration 2.353613  urine 0.015385  wall power 12059.336883  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.010277  right atrial pressure 0.940726  portal vein pressure 5.388358  leg vein pressure 3.283222  heart rate 0.947579  sympathetic traffic 0.075156  filtration 2.192140  urine 0.015385  wall power 8655.778214  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.013309  right atrial pressure 0.861496  portal vein pressure 5.163798  leg vein pressure 2.707253  heart rate 0.940684  sympathetic traffic 0.263757  filtration 1.990199  urine 0.015385  wall power 6313.955870  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.568111  right atrial pressure 1.029290  portal vein pressure 5.152021  leg vein pressure 2.460761  heart rate 0.952626  sympathetic traffic 0.644860  filtration 1.771950  urine 0.015385  wall power 4922.760182  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.644861  right atrial pressure 1.279995  portal vein pressure 5.426072  leg vein pressure 2.554185  heart rate 0.982983  sympathetic traffic 0.905820  filtration 1.553231  urine 0.015385  wall power 3952.678266  aortic flow 0.000000
+        1000.437559 ms  arterial pressure 68.611912  right atrial pressure 1.513535  portal vein pressure 5.789701  leg vein pressure 2.744856  heart rate 1.021878  sympathetic traffic 0.977881  filtration 1.359965  urine 0.015385  wall power 3079.359492  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -3527,79 +3526,80 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     the_lining_moves_research_11s_form_over_the_first_minute(&start, &minute);
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
-        over the 11 whole breaths from 5.006 s to 59.431 s: the lung's interstitial water +7.6078e-5 a second, the pulmonary lymph +2.8094e-4 off its admitted 5.567723e-3
-        before the first breath edge: alveolar oxygen 101.294, carbon dioxide 28.355, venous return 77.29
-        breath from 5.006 s: alveolar oxygen 100.752 swinging 3.062, carbon dioxide 28.705 swinging 1.990, venous return's beat means 74.05 to 84.51 around 77.80, tidal volume 11021.5
-        breath from 10.037 s: alveolar oxygen 100.410 swinging 3.057, carbon dioxide 28.845 swinging 1.932, venous return's beat means 73.94 to 84.47 around 77.60, tidal volume 11026.1
-        breath from 15.074 s: alveolar oxygen 100.133 swinging 3.150, carbon dioxide 28.910 swinging 1.944, venous return's beat means 73.96 to 84.41 around 77.76, tidal volume 11016.7
-        breath from 20.091 s: alveolar oxygen 99.917 swinging 3.201, carbon dioxide 28.935 swinging 1.965, venous return's beat means 73.98 to 84.38 around 78.07, tidal volume 11001.9
-        breath from 25.078 s: alveolar oxygen 99.750 swinging 3.214, carbon dioxide 28.940 swinging 1.961, venous return's beat means 74.00 to 84.37 around 78.36, tidal volume 10987.5
-        breath from 30.037 s: alveolar oxygen 99.623 swinging 3.184, carbon dioxide 28.937 swinging 1.937, venous return's beat means 74.10 to 84.38 around 78.37, tidal volume 10974.5
-        breath from 34.971 s: alveolar oxygen 99.521 swinging 3.084, carbon dioxide 28.933 swinging 1.909, venous return's beat means 74.08 to 84.40 around 78.26, tidal volume 10957.5
-        breath from 39.886 s: alveolar oxygen 99.439 swinging 3.017, carbon dioxide 28.929 swinging 1.922, venous return's beat means 74.06 to 84.31 around 78.10, tidal volume 10948.1
-        breath from 44.787 s: alveolar oxygen 99.370 swinging 3.018, carbon dioxide 28.926 swinging 1.972, venous return's beat means 74.05 to 83.86 around 77.58, tidal volume 10941.3
-        breath from 49.677 s: alveolar oxygen 99.313 swinging 3.138, carbon dioxide 28.924 swinging 2.018, venous return's beat means 74.06 to 83.27 around 76.63, tidal volume 10937.2
-        breath from 54.557 s: alveolar oxygen 99.265 swinging 3.242, carbon dioxide 28.922 swinging 2.049, venous return's beat means 74.08 to 83.62 around 75.73, tidal volume 10933.9
-        highest alveolar oxygen 102.524 (4.101 times P50) at 2.024 s: plasma oxygen pressure 100.886 (4.035 times P50), bound 0.971026 of capacity
-        work of breathing: stated 5331.3, over two whole breaths from 49.677 s 5368.5
-        alveolar water over whole breaths from 20.091 s: 1.02159 of the saturated vapour share
-        drive scale at admission 1.007406222041; over the first beat, to 0.998962066 s, 0.999997664372 by the trapezoid and 1.000013704345 from the set points
-        Energy: worst 1.5514e3, from admission 7.0462e0, steady 1.5523e3, inside a breath 7.7087e2
-        Element(Carbon): worst 6.6474e1, from admission 3.8811e1, steady 5.0185e1, inside a breath 2.0100e2
-        Element(Oxygen): worst 1.8721e3, from admission 1.8458e3, steady 1.0406e3, inside a breath 4.4955e3
-        Element(Hydrogen): worst 3.1924e-5, from admission 7.8068e-6, steady 3.1961e-5, inside a breath 1.5675e-5
-        Of(NitrogenGas): worst 3.4950e3, from admission 3.4591e3, steady 2.0733e3, inside a breath 8.6197e3
-        Of(Water): worst 1.9184e-2, from admission 1.9184e-2, steady 1.5598e-2, inside a breath 2.0006e-2
-        Of(Vasopressin): worst 3.5349e-3, from admission 6.7033e-4, steady 3.7328e-3, inside a breath 2.1025e-2
-        controlled admission: aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
-        held admission: aortic valve shuts 0.285464778 s into the beat, leg veins 0.285689472 s
-        largest difference over every row but the drive scale 3.126e-10, 8.959e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "collecting duct", class: VesselSegment }, space: Lumen, species: Chloride }); over the 3 calibrated parameters 2.899e-12, 1.060e-14 of its value and 1.022e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
-        held run: the drive scale is its rest's bits at all 11681 accepted steps
-        held Energy: worst 1.4832e3, from admission 8.4643e0, steady 1.4839e3, inside a breath 7.4333e2
-        held Element(Carbon): worst 4.6074e1, from admission 3.8270e1, steady 4.3039e1, inside a breath 2.0151e2
-        held Element(Oxygen): worst 1.8508e3, from admission 1.8470e3, steady 5.5814e1, inside a breath 4.4964e3
-        held Element(Hydrogen): worst 3.3662e-5, from admission 7.7685e-6, steady 3.3693e-5, inside a breath 1.6915e-5
-        held Of(NitrogenGas): worst 3.4629e3, from admission 3.4605e3, steady 8.1596e1, inside a breath 8.6212e3
-        held Of(Water): worst 1.9155e-2, from admission 1.9154e-2, steady 1.1407e-2, inside a breath 2.0097e-2
-        held Of(Vasopressin): worst 2.8503e-3, from admission 5.1633e-4, steady 2.4156e-3, inside a breath 2.1073e-2
+        over the 11 whole breaths from 5.006 s to 59.430 s: the lung's interstitial water +7.7009e-5 a second, the pulmonary lymph +2.7381e-4 off its admitted 5.239032e-3
+        before the first breath edge: alveolar oxygen 101.292, carbon dioxide 28.358, venous return 77.47
+        breath from 5.006 s: alveolar oxygen 100.749 swinging 3.063, carbon dioxide 28.707 swinging 1.991, venous return's beat means 74.25 to 84.66 around 77.98, tidal volume 11021.5
+        breath from 10.037 s: alveolar oxygen 100.407 swinging 3.058, carbon dioxide 28.847 swinging 1.932, venous return's beat means 74.14 to 84.61 around 77.78, tidal volume 11026.2
+        breath from 15.074 s: alveolar oxygen 100.130 swinging 3.150, carbon dioxide 28.912 swinging 1.945, venous return's beat means 74.16 to 84.55 around 77.94, tidal volume 11016.7
+        breath from 20.091 s: alveolar oxygen 99.914 swinging 3.202, carbon dioxide 28.936 swinging 1.966, venous return's beat means 74.18 to 84.53 around 78.25, tidal volume 11001.8
+        breath from 25.078 s: alveolar oxygen 99.748 swinging 3.214, carbon dioxide 28.941 swinging 1.962, venous return's beat means 74.19 to 84.51 around 78.54, tidal volume 10987.4
+        breath from 30.036 s: alveolar oxygen 99.620 swinging 3.184, carbon dioxide 28.938 swinging 1.938, venous return's beat means 74.31 to 84.52 around 78.55, tidal volume 10974.4
+        breath from 34.970 s: alveolar oxygen 99.519 swinging 3.083, carbon dioxide 28.934 swinging 1.909, venous return's beat means 74.29 to 84.55 around 78.44, tidal volume 10957.4
+        breath from 39.886 s: alveolar oxygen 99.436 swinging 3.017, carbon dioxide 28.931 swinging 1.922, venous return's beat means 74.26 to 84.46 around 78.28, tidal volume 10948.0
+        breath from 44.786 s: alveolar oxygen 99.368 swinging 3.018, carbon dioxide 28.928 swinging 1.973, venous return's beat means 74.25 to 84.00 around 77.75, tidal volume 10941.3
+        breath from 49.676 s: alveolar oxygen 99.311 swinging 3.139, carbon dioxide 28.926 swinging 2.019, venous return's beat means 74.26 to 83.42 around 76.80, tidal volume 10937.2
+        breath from 54.556 s: alveolar oxygen 99.263 swinging 3.243, carbon dioxide 28.924 swinging 2.049, venous return's beat means 74.28 to 83.77 around 75.90, tidal volume 10933.9
+        highest alveolar oxygen 102.522 (4.101 times P50) at 2.024 s: plasma oxygen pressure 100.889 (4.036 times P50), bound 0.971006 of capacity
+        work of breathing: stated 5331.3, over two whole breaths from 49.676 s 5368.6
+        alveolar water over whole breaths from 20.091 s: 1.02158 of the saturated vapour share
+        drive scale at admission 1.007431897440; over the first beat, to 0.998959699 s, 0.999997829298 by the trapezoid and 1.000013941204 from the set points
+        Energy: worst 5.4052e5, from admission 4.3752e5, steady 5.4092e5, inside a breath 2.6503e5
+        Element(Carbon): worst 6.6530e1, from admission 3.8493e1, steady 5.0153e1, inside a breath 2.0101e2
+        Element(Oxygen): worst 1.8723e3, from admission 1.8463e3, steady 1.0409e3, inside a breath 4.4955e3
+        Element(Hydrogen): worst 3.1945e-5, from admission 7.5365e-6, steady 3.1984e-5, inside a breath 1.5689e-5
+        Of(NitrogenGas): worst 3.4953e3, from admission 3.4596e3, steady 2.0741e3, inside a breath 8.6197e3
+        Of(Water): worst 2.9569e-2, from admission 2.3993e-2, steady 2.9724e-2, inside a breath 2.2673e-2
+        Of(Vasopressin): worst 3.6472e-3, from admission 3.4907e-4, steady 2.9450e-3, inside a breath 2.1338e-2
+        controlled admission: aortic valve shuts 0.285420563 s into the beat, leg veins 0.284260864 s
+        held admission: aortic valve shuts 0.285420563 s into the beat, leg veins 0.284260864 s
+        largest difference over every row but the drive scale 5.143e-10, 5.098e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "bladder", class: VesselSegment }, space: Lumen, species: Sodium }); over the 3 calibrated parameters 9.152e-12, 3.342e-14 of its value and 3.224e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
+        held run: the drive scale is its rest's bits at all 11660 accepted steps
+        held Energy: worst 5.4080e5, from admission 4.3731e5, steady 5.4091e5, inside a breath 2.6832e5
+        held Element(Carbon): worst 4.6075e1, from admission 3.8270e1, steady 4.3072e1, inside a breath 2.0152e2
+        held Element(Oxygen): worst 1.8509e3, from admission 1.8470e3, steady 5.5591e1, inside a breath 4.4964e3
+        held Element(Hydrogen): worst 3.3689e-5, from admission 7.5061e-6, steady 3.3719e-5, inside a breath 1.6927e-5
+        held Of(NitrogenGas): worst 3.4629e3, from admission 3.4605e3, steady 8.1429e1, inside a breath 8.6213e3
+        held Of(Water): worst 2.4369e-2, from admission 2.3972e-2, steady 2.4369e-2, inside a breath 2.2855e-2
+        held Of(Vasopressin): worst 3.2570e-3, from admission 2.7632e-4, steady 1.4892e-3, inside a breath 2.1642e-2
         sign walk over whole breaths from 30 s to 60 s: 6 controlled breaths, 5 held
-        under-ventilation to the central sensor: acidity -3.379e-4 from its set point
-        under-ventilation to the peripheral sensor: x_p +1.675e-2 from its set point
-        the sensors to the drive scale: 1.020601, its central arm +2.000e-3 and peripheral arm +1.860e-2
-        the drive scale to the breath: 4.8991 s a breath against the period 5.0000 s, held 5.0000 s
-        the breath to ventilation: 2234.87 a second against held 2201.42
-        ventilation to alveolar carbon dioxide: 28.9286 against held 28.9661; alveolar oxygen 99.4224 against held 99.3677
-        alveolar to arterial carbon dioxide: over the clock from 30 s to 60 s, 29.9987 s and 29.9992 s, 30.0053 against held 30.0144, by -9.084e-3 where the cut breaths reach 2.658e-3; from 25 s by -6.944e-3, from 35 s by -1.181e-2; arterial oxygen pressure 90.1262 against held 90.1090, saturation 0.958936 against held 0.958899
-        asleep from 30 s, branched at 29.990409 s; over whole breaths from 40 s to 60 s, 3 breaths asleep and 3 awake
-        asleep the drive scale 0.874195 and the breath 5.7195 s, awake 1.024333 and 4.8812 s
-        ventilation 1983.07 a second asleep against 2240.74 awake, by -2.577e2 where the cut pieces reach 5.771e0; from 35 s by -2.630e2, from 45 s by -2.538e2
-        arterial carbon dioxide over the clock, 19.9995 s and 19.9987 s, 30.1648 asleep against 30.0191 awake, by +1.457e-1 where the cut breaths reach 1.116e-2; from 35 s by +1.174e-1, from 45 s by +1.776e-1
-        alveolar carbon dioxide 29.3407 asleep against 28.9243 awake
-        asleep Energy: worst 3.5321e3 from 50.001 s to 60.001 s; from 30 s any ten seconds 3.5328e3, inside a breath 2.0710e3
-        asleep Element(Carbon): worst 3.3723e2 from 34.185 s to 44.185 s; from 30 s any ten seconds 3.3727e2, inside a breath 2.1645e2
-        asleep Element(Oxygen): worst 4.2638e3 from 31.802 s to 41.802 s; from 30 s any ten seconds 4.2553e3, inside a breath 4.6606e3
-        asleep Element(Hydrogen): worst 5.3511e-5 from 49.828 s to 59.828 s; from 30 s any ten seconds 5.3541e-5, inside a breath 3.1335e-5
-        asleep Of(NitrogenGas): worst 8.3408e3 from 34.104 s to 44.104 s; from 30 s any ten seconds 8.3382e3, inside a breath 8.9315e3
-        asleep Of(Water): worst 1.9337e-2 from 37.561 s to 47.561 s; from 30 s any ten seconds 1.9293e-2, inside a breath 2.1798e-2
-        asleep Of(Vasopressin): worst 1.4472e-2 from 35.355 s to 45.355 s; from 30 s any ten seconds 1.4590e-2, inside a breath 2.5820e-2
-        awake again from 150 s to 300 s; over whole breaths from 160 s, 29 breaths, the drive scale 1.057348 and the breath 4.7288 s, against 1.024333 and 4.8812 s awake and 0.874195 and 5.7195 s asleep
-        reference run: 59 breath edges from 5.006 s to 298.801 s, 56 windows between edges, the widest gap 5.8269 s to 35.870 s, the widest stretch 5.8269 s to 35.870 s
-        Energy: ten seconds 4.7227e3 from 85.971 s, inside a breath 2.6127e3; between edges 4.6871e2 a second from 81.285 s to 92.419 s, before the settling time 1.3745e2 from 15.074 s to 25.078 s
-        Element(Carbon): ten seconds 3.3723e2 from 34.185 s, inside a breath 2.1645e2; between edges 1.0706e1 a second from 30.043 s to 41.672 s, before the settling time 4.8549e0 from 5.006 s to 15.074 s
-        Element(Oxygen): ten seconds 4.2638e3 from 31.802 s, inside a breath 4.6606e3; between edges 1.8625e1 a second from 147.621 s to 161.666 s, before the settling time 3.4776e0 from 5.006 s to 15.074 s
-        Element(Hydrogen): ten seconds 6.9627e-5 from 60.365 s, inside a breath 3.8717e-5; between edges 6.8203e-6 a second from 64.477 s to 75.700 s, before the settling time 8.4650e-7 from 5.006 s to 15.074 s
-        Element(Hydrogen) at a payer: ten seconds 1.9368e-1 from 158.542 s; between edges 1.5786e-2 a second from 157.112 s to 170.852 s, before the settling time 9.2859e-3 from 5.006 s to 15.074 s
-        Of(NitrogenGas): ten seconds 8.3408e3 from 34.104 s, inside a breath 8.9315e3; between edges 5.9240e0 a second from 35.870 s to 47.434 s, before the settling time 3.6563e0 from 15.074 s to 25.078 s
-        Of(Water): ten seconds 2.0505e-2 from 289.607 s, inside a breath 2.1837e-2; between edges 1.5629e-3 a second from 284.519 s to 298.801 s, before the settling time 1.1559e-3 from 15.074 s to 25.078 s
-        Of(Sodium): ten seconds 2.4485e-3 from 290.002 s; between edges 2.4078e-4 a second from 284.519 s to 298.801 s, before the settling time 4.4383e-6 from 15.074 s to 25.078 s
-        Of(Chloride): ten seconds 2.5710e-3 from 290.002 s; between edges 2.5282e-4 a second from 284.519 s to 298.801 s, before the settling time 4.6602e-6 from 15.074 s to 25.078 s
-        Of(Potassium): ten seconds 1.2243e-4 from 290.002 s; between edges 1.2039e-5 a second from 284.519 s to 298.801 s, before the settling time 2.2192e-7 from 15.074 s to 25.078 s
-        Of(Vasopressin): ten seconds 1.4472e-2 from 35.355 s, inside a breath 2.5820e-2; between edges 9.3198e-4 a second from 142.125 s to 152.574 s, before the settling time 2.1436e-4 from 15.074 s to 25.078 s
-        two breaths from 64.299 s to 74.024 s
-        Oxygen: in 4559.6462, out 3636.7941, across 899.1961, along 921.9834, gained 2.3656e1
-        CarbonDioxide: in 8.6850, out 679.6571, across -667.6895, along -671.3004, gained -3.2826e0
-        NitrogenGas: in 17144.2698, out 17137.9904, across 0.0000, along -0.0545, gained 6.2793e0
-        Water: in 0.0000, out 0.0407, across -0.0410, along -0.0407, gained 3.1212e-4
+        under-ventilation to the central sensor: acidity -3.374e-4 from its set point
+        under-ventilation to the peripheral sensor: x_p +1.677e-2 from its set point
+        the sensors to the drive scale: 1.020625, its central arm +1.997e-3 and peripheral arm +1.863e-2
+        the drive scale to the breath: 4.8989 s a breath against the period 5.0000 s, held 5.0000 s
+        the breath to ventilation: 2234.91 a second against held 2201.41
+        ventilation to alveolar carbon dioxide: 28.9305 against held 28.9680; alveolar oxygen 99.4202 against held 99.3652
+        alveolar to arterial carbon dioxide: over the clock from 30 s to 60 s, 29.9988 s and 29.9984 s, 30.0075 against held 30.0167, by -9.157e-3 where the cut breaths reach 2.663e-3; from 25 s by -7.005e-3, from 35 s by -1.190e-2; arterial oxygen pressure 90.1314 against held 90.1141, saturation 0.958911 against held 0.958874
+        asleep from 30 s, branched at 29.990211 s; over whole breaths from 40 s to 60 s, 3 breaths asleep and 3 awake
+        asleep the drive scale 0.874233 and the breath 5.7193 s, awake 1.024350 and 4.8811 s
+        ventilation 1983.13 a second asleep against 2240.77 awake, by -2.576e2 where the cut pieces reach 5.773e0; from 35 s by -2.629e2, from 45 s by -2.538e2
+        arterial carbon dioxide over the clock, 19.9979 s and 19.9989 s, 30.1672 asleep against 30.0212 awake, by +1.460e-1 where the cut breaths reach 1.111e-2; from 35 s by +1.177e-1, from 45 s by +1.779e-1
+        alveolar carbon dioxide 29.3422 asleep against 28.9263 awake
+        asleep Energy: worst 5.4300e5 from 50.001 s to 60.001 s; from 30 s any ten seconds 5.4346e5, inside a breath 3.0940e5
+        asleep Element(Carbon): worst 3.3725e2 from 34.185 s to 44.185 s; from 30 s any ten seconds 3.3730e2, inside a breath 2.1645e2
+        asleep Element(Oxygen): worst 4.2635e3 from 31.802 s to 41.802 s; from 30 s any ten seconds 4.2551e3, inside a breath 4.6606e3
+        asleep Element(Hydrogen): worst 5.3610e-5 from 49.838 s to 59.838 s; from 30 s any ten seconds 5.3640e-5, inside a breath 3.1400e-5
+        asleep Of(NitrogenGas): worst 8.3405e3 from 34.104 s to 44.104 s; from 30 s any ten seconds 8.3377e3, inside a breath 8.9314e3
+        asleep Of(Water): worst 3.3461e-2 from 48.986 s to 58.986 s; from 30 s any ten seconds 3.3461e-2, inside a breath 2.4753e-2
+        asleep Of(Vasopressin): worst 1.5327e-2 from 44.214 s to 54.214 s; from 30 s any ten seconds 1.5286e-2, inside a breath 2.6347e-2
+        awake again from 150 s to 300 s; over whole breaths from 160 s, 29 breaths, the drive scale 1.057413 and the breath 4.7285 s, against 1.024350 and 4.8811 s awake and 0.874233 and 5.7193 s asleep
+        reference run: 59 breath edges from 5.006 s to 298.787 s, 56 windows between edges, the widest gap 5.8267 s to 35.870 s, the widest stretch 5.8267 s to 35.870 s
+        Energy: ten seconds 6.3827e5 from 157.437 s, inside a breath 3.4912e5; between edges 6.3816e4 a second from 157.107 s to 170.846 s, before the settling time 4.7343e4 from 15.074 s to 25.078 s
+        Element(Carbon): ten seconds 3.3725e2 from 34.185 s, inside a breath 2.1645e2; between edges 1.0707e1 a second from 30.043 s to 41.672 s, before the settling time 4.8558e0 from 5.006 s to 15.074 s
+        Element(Oxygen): ten seconds 4.2635e3 from 31.802 s, inside a breath 4.6606e3; between edges 1.8623e1 a second from 147.615 s to 161.660 s, before the settling time 3.4765e0 from 5.006 s to 15.074 s
+        Element(Hydrogen): ten seconds 6.9686e-5 from 60.359 s, inside a breath 3.8744e-5; between edges 6.8248e-6 a second from 64.476 s to 75.698 s, before the settling time 8.4373e-7 from 5.006 s to 15.074 s
+        Element(Hydrogen) at a payer: ten seconds 1.9372e-1 from 158.536 s; between edges 1.5789e-2 a second from 157.107 s to 170.846 s, before the settling time 9.3029e-3 from 5.006 s to 15.074 s
+        Of(NitrogenGas): ten seconds 8.3405e3 from 34.104 s, inside a breath 8.9314e3; between edges 5.9207e0 a second from 35.870 s to 47.433 s, before the settling time 3.6585e0 from 15.074 s to 25.078 s
+        Of(Water): ten seconds 5.3209e-2 from 150.097 s, inside a breath 2.6847e-2; between edges 3.6018e-3 a second from 152.569 s to 166.237 s, before the settling time 1.9280e-3 from 15.074 s to 25.078 s
+        Of(Sodium): ten seconds 2.6807e-3 from 290.004 s; between edges 2.6319e-4 a second from 284.506 s to 298.787 s, before the settling time 4.4278e-6 from 15.074 s to 25.078 s
+        Of(Chloride): ten seconds 2.8147e-3 from 290.004 s; between edges 2.7635e-4 a second from 284.506 s to 298.787 s, before the settling time 4.6492e-6 from 15.074 s to 25.078 s
+        Of(Potassium): ten seconds 1.3403e-4 from 290.004 s; between edges 1.3159e-5 a second from 284.506 s to 298.787 s, before the settling time 2.2139e-7 from 15.074 s to 25.078 s
+        Of(Vasopressin): ten seconds 2.2681e-2 from 287.816 s, inside a breath 2.6347e-2; between edges 2.3258e-3 a second from 284.506 s to 298.787 s, before the settling time 1.4565e-4 from 15.074 s to 25.078 s
+        heat made less heat lost over whole breaths, as a share of heat made: worst -4.8894e-2 from 157.107 s to 170.846 s over 53 windows
+        two breaths from 64.298 s to 74.022 s
+        Oxygen: in 4559.5928, out 3636.6816, across 899.3288, along 922.0457, gained 2.3582e1
+        CarbonDioxide: in 8.6849, out 679.6923, across -667.7688, along -671.3345, gained -3.2385e0
+        NitrogenGas: in 17144.0688, out 17137.7133, across 0.0000, along 0.0383, gained 6.3555e0
+        Water: in 0.0000, out 0.0407, across -0.0410, along -0.0407, gained 3.1289e-4
     "#]].assert_eq(&report);
     let mut minute = format!(
         "steps {}, solves {}: ordinary {}, landing {}\n",
@@ -3612,10 +3612,10 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
     expect![[r#"
-        steps 11672, solves 14396: ordinary 12349, landing 2047
-        refused 76 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
-        refused 243 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
-        refused 297 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
+        steps 11661, solves 14411: ordinary 12351, landing 2060
+        refused 75 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
+        refused 242 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
+        refused 312 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
         refused 61 IterationLimit
     "#]]
     .assert_eq(&minute);
@@ -3778,15 +3778,14 @@ fn each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_wate
     let start = Start::admitted_with(body, packet, Vec::new());
     let latent = lead(parameter(&start, "mt.latent-heat"));
     let mut report = String::new();
-    let mut session = until(start.session(), SECOND);
+    let mut session = start.session();
+    let windy = AuthorizedInput::from_command_receipt(
+        Digest::of_canonical(b"a windy room"),
+        weather(SECOND + HEAT_WINDOW, &WINDY),
+    );
+    session.enqueue(windy).expect("enqueued");
+    session = until(session, SECOND);
     for (from, room) in [(SECOND, &RESTING), (SECOND + HEAT_WINDOW, &WINDY)] {
-        if from > SECOND {
-            let input = AuthorizedInput::from_command_receipt(
-                Digest::of_canonical(b"a windy room"),
-                weather(from, room),
-            );
-            session.enqueue(input).expect("enqueued");
-        }
         let held = stores(&start, &session);
         let early = HeatForms::at(&start, held, room);
         session = until(session, from + HEAT_WINDOW);
@@ -3822,7 +3821,17 @@ fn each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_wate
             .expect("a string takes it");
         }
     }
-    expect![[r#""#]].assert_eq(&report);
+    expect![[r#"
+        conduction to the skin at 1.000 s: 1.314514e6 a second
+        conduction to the airway at 1.000 s: -1.138503e-1 a second
+        dry heat loss at 1.000 s: 1.085699e6 a second
+        skin evaporative heat at 1.000 s: 2.288150e5 a second
+        conduction to the skin at 1.001 s: 1.314514e6 a second
+        conduction to the airway at 1.001 s: -1.143185e-1 a second
+        dry heat loss at 1.001 s: 5.397972e5 a second
+        skin evaporative heat at 1.001 s: 4.401857e5 a second
+    "#]]
+    .assert_eq(&report);
 }
 
 /// Each tissue heat store's tolerance over admission's cycle: admission's recheck on that store at main before ticket
@@ -3923,7 +3932,7 @@ fn over_admissions_cycle_each_tissue_heat_stores_transfers_net_within_its_tolera
 /// window between breath edges of the reference run that opens from the settling time, within twice the worst
 /// rounded up to one figure (native-contract 85's rule). Heat made is what reaches the core store from the beds and
 /// the circulation, and heat lost is what leaves a tissue heat store for the room.
-const HEAT_SHARE: Figure = (0.0, f64::INFINITY);
+const HEAT_SHARE: Figure = (9e-2, 1e-1);
 
 fn the_reference_run_loses_the_heat_it_makes_over_whole_breaths(
     start: &Start,
@@ -4009,4 +4018,3 @@ fn the_reference_run_loses_the_heat_it_makes_over_whole_breaths(
         shares.len()
     )
 }
-

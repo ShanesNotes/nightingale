@@ -5295,3 +5295,40 @@ path = "crates/ng-validate/src/body/packet.rs"
 old = '''set::<Volume>(packet, "rs.lung-rest-volume", body, 38_250.0)?;'''
 new = '''set::<Volume>(packet, "rs.lung-rest-volume", body, 50_750.0)?;'''
 test = "-p ng-validate --test viscosity the_chest_rests_at_the_pressure_its_beds_lymph_thresholds_are_stated_over"
+
+
+[[mutant]]
+name = "conduction-reads-the-core-capacity-at-its-site"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let here = stores.temperature(&mut k, here, &stores.shell);'''
+new = '''        let here = stores.temperature(&mut k, here, &stores.core);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+
+[[mutant]]
+name = "dry-heat-clothes-radiation-alone"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let value = clothed(&mut k, &clothing, both, bare);'''
+new = '''        let value = clothed(&mut k, &clothing, radiant, bare);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+
+[[mutant]]
+name = "convection-adds-its-exponent"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let power = k.scale(log, exponent);'''
+new = '''        let power = k.add(log, exponent);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+
+[[mutant]]
+name = "evaporation-adds-the-rooms-vapour"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let gradient = k.subtract(at_skin, in_room);'''
+new = '''        let gradient = k.add(at_skin, in_room);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+
+[[mutant]]
+name = "evaporation-posts-twice-its-heat"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let value = k.algebraic(&rate);'''
+new = '''        let once = k.algebraic(&rate);
+        let value = k.add(once, once);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
