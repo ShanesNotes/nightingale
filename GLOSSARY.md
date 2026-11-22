@@ -361,7 +361,7 @@ The temperature that every heat store's amount is measured from. A heat store's 
 The heat stores at tissue sites: the core store, the skin store at the skin heat site and the airway store at the conducting airway. Conduction carries heat from the core store to the other two.
 
 **Carriage**:
-The heat blood carries at a capillary bed from the core store to the nearest tissue heat store above the bed: from the bed's parent toward the root, the first tissue site with a thermal energy pool (record 0011). A bed has a carriage route exactly when that store is not the core store, so two beds in one store have two routes. Its rate is a coefficient of heat per volume per kelvin, times the bed inflow as a volume flow, times the core's temperature less that store's. CV posts it at the bed. It is apart from the bed's own heat, which goes from its bed heat to the core store.
+The heat blood carries at a capillary bed from the core store to the nearest tissue heat store above the bed: from the bed's parent toward the root, the first tissue site with a thermal energy pool (record 0011). A bed has a carriage route exactly when that store is not the core store, so two beds in one non-core store have two routes. Its rate is a coefficient of heat per volume per kelvin, times the bed inflow as a volume flow, times the core's temperature less that store's. CV posts it at the bed. It is apart from the bed's own heat, which goes from its bed heat to the core store.
 
 **Dry heat loss**:
 The skin store's heat to the room by radiation and convection, a rate. It reads the room's radiant and air temperatures, its air speed and clothing.
@@ -532,7 +532,7 @@ A coupling field the coupling catalog names with the body ticket whose laws defi
 A value an arrow of the coupling map names that no law defines or reads at rung 0, so it is no coupling field and no member of its arrow's port. One end of its arrow holds it with a reason, and the catalog keeps its unit, so a later rung can wire it.
 
 **Read grant**:
-A typed object through which a card reads a field, reaching only the field and the place the card is entitled to, so a wrong read is a type error or a compile refusal (record 0011). CV and NS read a store's temperature, and MT the skin junction's acetylcholine effect, only through one. A sweat or loss law receives only the grants it uses. The catalog checks the reader, the field and the place of each read.
+A typed object through which a card reads a field or a store's heat, reaching only that value and the place the card is entitled to, so a wrong read is a type error or compile refuses it (record 0011). CV and NS read a store's temperature, and MT the skin junction's acetylcholine effect, only through one. A sweat or loss law receives only the grants it uses. The catalog checks the reader, the field and the place of each read of a projected field and of MT's acetylcholine effect.
 
 **Projected field**:
 A field read through a read grant at a place, from rows its sender defines, with no row of its own (record 0011). CV reads arrow 90's temperature so as two coordinates, the core and the tissue end of a bed's carriage route, and NS reads arrow 91's skin temperature so at the skin thermoreceptor. An emitted field is an algebraic row, and a projected one never is. The catalog's check refuses a forged projection.
