@@ -10,15 +10,8 @@ constant_routes! {Metabolism;
     Sweat<Chloride> => "mt.sweat-chloride",
 }
 
-pub(super) fn metabolism(body: &mut Assembly<'_>, heat: bool) -> Result<(), AdmissionError> {
+pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let mut supplies = CONSTANT.to_vec();
-    if !heat {
-        supplies.extend([
-            <SkinEvaporation as BoundaryProcess>::NAME,
-            <DryHeatLoss as BoundaryProcess>::NAME,
-            <SkinEvaporativeHeat as BoundaryProcess>::NAME,
-        ]);
-    }
     supplies.extend(GLUCOSE_FEED);
     supplies.extend(FAT_FEED);
     supplies.extend(CELL_WATER_OUT);
@@ -31,11 +24,6 @@ pub(super) fn metabolism(body: &mut Assembly<'_>, heat: bool) -> Result<(), Admi
     let mut held = body.hold(declaration)?;
     let (laws, ports) = held.stand_ins();
     constants(laws, ports)?;
-    if !heat {
-        super::constant::<Metabolism, SkinEvaporation>(laws, ports, "mt.skin-evaporation")?;
-        super::constant::<Metabolism, DryHeatLoss>(laws, ports, "mt.dry-heat-loss")?;
-        super::constant::<Metabolism, SkinEvaporativeHeat>(laws, ports, "mt.skin-evaporative-heat")?;
-    }
     feeds(laws, ports)?;
     let (mut laws, ports) = body.metabolism(Some(held))?.parts();
     let oxygen = GasRoutes::<Oxygen>::request(&mut laws, &ports);
@@ -49,9 +37,7 @@ pub(super) fn metabolism(body: &mut Assembly<'_>, heat: bool) -> Result<(), Admi
     let breathing: WorkOfBreathing<Reads<'_, Metabolism>> = laws.receive();
     burn(&mut laws, &cells, Some(work), Some(breathing))?;
     bed_heat(&mut laws, &ports)?;
-    if heat {
-        tissue_heat(&mut laws, &ports)?;
-    }
+    tissue_heat(&mut laws, &ports)?;
     body.add(laws.finish());
     Ok(())
 }

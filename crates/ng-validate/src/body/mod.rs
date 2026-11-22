@@ -9,7 +9,7 @@ pub use anatomy::body_anatomy;
 pub use keep_back::{FluidRoute, KEEP_BACKS, KeepBack};
 pub use packet::{
     BodyBreath, body_breath, body_certificate, body_lens, body_packet, body_packet_at_viscosity_exponent,
-    body_packet_with_the_drive_scale_held, body_start_guess,
+    body_packet_with_steady_evaporation, body_packet_with_the_drive_scale_held, body_start_guess,
 };
 pub use schema::body_schema;
 pub use table::{HOLD_TABLE, Held, Hold, Release};
@@ -30,7 +30,7 @@ impl CaseAssembly for WholeBody {
         body_lens(body)
     }
     fn anchored(at: SimTime) -> Vec<BoundaryEvent> {
-        vec![body_awake(at)]
+        vec![body_awake(at), body_room(at)]
     }
 }
 pub type BodyCase = AssemblyCase<WholeBody>;
@@ -41,6 +41,27 @@ pub fn body_awake(at: SimTime) -> BoundaryEvent {
     BoundaryEvent::new(id, at, BoundaryInput::Sleep(Sleep::Awake))
 }
 
+/// The skin's losses read the room, so every admission of the body states one: still air at 25 degrees Celsius, half
+/// saturated, and light clothing.
+pub fn body_room(at: SimTime) -> BoundaryEvent {
+    let id = InputId::new(Digest::of_canonical(b"the body's room at the anchor"));
+    let room = Room {
+        air: measure(298.15),
+        radiant: measure(298.15),
+        humidity: measure(0.5),
+        air_speed: measure(1.0),
+        pressure: measure(760.0),
+        oxygen: measure(0.21),
+        carbon_dioxide: measure(0.0004),
+        clothing: measure(0.6),
+    };
+    BoundaryEvent::new(id, at, BoundaryInput::Room(room))
+}
+
+fn measure<U>(value: f64) -> Measure<U> {
+    Measure::new(value).unwrap_or_else(|_| unreachable!("a finite room"))
+}
+
 fn exits(body: &mut Assembly<'_>, leaking: bool) -> Result<(), AdmissionError> {
     let (mut laws, ports) = body.boundary()?.parts();
     let urine = ports.route::<Water>("urine")?.route;
@@ -48,9 +69,6 @@ fn exits(body: &mut Assembly<'_>, leaking: bool) -> Result<(), AdmissionError> {
     let voiding =
         laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("bd.bladder-speed"), Admissible::positive());
     let width = laws.parameter::<Rate<Water>>(ParameterKey::new("bd.bladder-width"), Admissible::positive());
-    let heat = ports.route::<Energy>("heat")?.route;
-    let loss =
-        laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("bd.heat-speed"), Admissible::positive());
     let class = RateClass::new(RateBand::Hours, 3_600_000_000_000)?;
     let rate = laws.kernel(|mut k| {
         let (held, floor, pace) = (
@@ -64,12 +82,6 @@ fn exits(body: &mut Assembly<'_>, leaking: bool) -> Result<(), AdmissionError> {
         k.finish(rate, laws.every_mode(), class)
     });
     laws.transfer(Transfer::new(&urine, rate));
-    let rate = laws.kernel(|mut k| {
-        let (held, zero, pace) = (k.read(&heat.amount::<Energy>()), k.zero(), k.parameter(&loss));
-        let rate = k.relax(held, zero, pace);
-        k.finish(rate, laws.every_mode(), class)
-    });
-    laws.transfer(Transfer::new(&heat, rate));
     if leaking {
         leak::<Oxygen>(&mut laws, &ports, (OXYGEN_LEAK, "bd.oxygen-leak"), class)?;
         leak::<CarbonDioxide>(&mut laws, &ports, (CARBON_LEAK, "bd.carbon-dioxide-leak"), class)?;
@@ -104,7 +116,7 @@ fn leak<'b, Q: Substance>(
 
 /// The composition root of the whole body: the slice's systems, and every other card held.
 pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
-    assembled(body_schema()?, false, false)
+    assembled(body_schema()?, false)
 }
 
 /// The whole body with four steady leaks for its certificate's tests, each into the body at the signed rate its
@@ -114,12 +126,12 @@ pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
 pub fn whole_body_leaking() -> Result<CompiledBody, AdmissionError> {
     let mut schema = body_schema()?;
     schema::leaks(&mut schema)?;
-    assembled(schema, true, false)
+    assembled(schema, true)
 }
 
-fn assembled(schema: Schema, leaking: bool, heat: bool) -> Result<CompiledBody, AdmissionError> {
+fn assembled(schema: Schema, leaking: bool) -> Result<CompiledBody, AdmissionError> {
     assemble(schema, |mut body| {
-        holds::hold_every_card(&mut body, heat)?;
+        holds::hold_every_card(&mut body)?;
         exits(&mut body, leaking)?;
         let fragment = ng_cardiovascular::declare_in_the_whole_body(body.cardiovascular()?)?;
         body.add(fragment);
@@ -143,14 +155,15 @@ mod placement {
     /// temperature of the store it moves, conduction both ends' and the skin's losses the skin store's.
     #[test]
     fn each_heat_law_reads_the_temperature_of_the_store_it_moves() -> Result<(), AdmissionError> {
-        let body = assembled(body_schema()?, false, true)?;
+        let body = whole_body()?;
         let laws = [
             "conduction",
             "dry heat loss",
             "skin evaporation",
             "skin evaporative heat",
         ];
-        let mut placed: Vec<(&str, Vec<(&str, Species, Space, i64)>)> = (body.columns().iter())
+        type Moved = (&'static str, Species, Space, i64);
+        let mut placed: Vec<(&str, Vec<Moved>)> = (body.columns().iter())
             .filter(|column| {
                 column.origin().owner == Metabolism::CARD && laws.contains(&column.origin().local)
             })

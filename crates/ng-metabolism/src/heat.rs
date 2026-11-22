@@ -2,7 +2,6 @@ use ng_contract::*;
 
 type Capacity = Quotient<Energy, Temperature>;
 type HeatConductance = Quotient<Rate<Energy>, Temperature>;
-type Insulation = Quotient<Dimensionless, HeatConductance>;
 type LatentHeat = Quotient<Rate<Energy>, Rate<Water>>;
 type Mt = Metabolism;
 
@@ -39,11 +38,6 @@ impl<'b> Stores<'b> {
         let rise = k.as_dimension(ratio);
         k.add(zero, rise)
     }
-}
-
-fn one<'b, 'k, S>(k: &mut Kernel<'b, 'k, Mt, S>) -> Expr<'b, 'k, Mt, Dimensionless> {
-    let zero = k.zero();
-    k.exp(zero)
 }
 
 /// The tissue heat stores' laws: conduction from the core store to each store it reaches, and the skin's dry heat loss
@@ -87,12 +81,14 @@ fn conduction<'b>(
     laws.transfer_at(&route, rate);
 }
 
-/// Convection's conductance at the room's air speed, `h_c = h_c0 sqrt(v_e / v_0)` with `v_e = smooth_max(v, v_0, w)`, so
-/// air slower than still air reads as still air (research 12, the row 'Dry heat loss').
+/// Convection's conductance at the room's air speed, `h_c = h_c0 exp(n ln(v_e / v_0))` with `v_e = smooth_max(v, v_0,
+/// w)`, so air slower than still air reads as still air, and `n` a half for Stolwijk's square root (research 12, the
+/// row 'Dry heat loss').
 struct Convection<'b> {
     still: Parameter<'b, Mt, HeatConductance>,
     still_speed: Parameter<'b, Mt, Dimensionless>,
     width: Parameter<'b, Mt, Dimensionless>,
+    exponent: Parameter<'b, Mt, Dimensionless>,
 }
 
 impl<'b> Convection<'b> {
@@ -102,6 +98,7 @@ impl<'b> Convection<'b> {
             still: laws.parameter(key("mt.convective-conductance"), Admissible::positive()),
             still_speed: laws.parameter(key("mt.still-air-speed"), Admissible::positive()),
             width: laws.parameter(key("mt.air-speed-width"), Admissible::positive()),
+            exponent: laws.parameter(key("mt.air-speed-exponent"), Admissible::positive()),
         }
     }
 
@@ -114,38 +111,34 @@ impl<'b> Convection<'b> {
         let effective = k.smooth_max(speed, still_speed, width);
         let ratio = k.divide(effective, still_speed);
         let ratio = k.as_dimension::<_, Dimensionless>(ratio);
-        let log = k.ln(ratio);
-        let unit = one(k);
-        let two = k.add(unit, unit);
-        let half = k.divide(unit, two);
-        let half = k.as_dimension::<_, Dimensionless>(half);
-        let halved = k.scale(log, half);
-        let root = k.exp(halved);
+        let (log, exponent) = (k.ln(ratio), k.parameter(&self.exponent));
+        let power = k.scale(log, exponent);
+        let root = k.exp(power);
         let still = k.parameter(&self.still);
         k.scale(still, root)
     }
 }
 
-/// `1 / (1 + R h I_clo)`, clothing's efficiency on a conductance `h`, with `R` the insulation of one clo for the whole
-/// body and `I_clo` the room's clothing.
+/// A bare rate through clothing on a conductance `h`, `J F` with `F = 1 / (1 + h I_clo / K_clo) = K_clo / (K_clo + h
+/// I_clo)`, `K_clo` the conductance of one clo over the body's surface and `I_clo` the room's clothing.
 fn clothed<'b, 'k>(
     k: &mut Kernel<'b, 'k, Mt>,
-    insulation: &Parameter<'b, Mt, Insulation>,
+    clothing: &Parameter<'b, Mt, HeatConductance>,
     conductance: Expr<'b, 'k, Mt, HeatConductance>,
-) -> Expr<'b, 'k, Mt, Dimensionless> {
-    let (insulation, clothing) = (k.parameter(insulation), k.clothing());
-    let product = k.multiply(insulation, conductance);
-    let per_clo = k.as_dimension::<_, Dimensionless>(product);
-    let worn = k.scale(per_clo, clothing);
-    let unit = one(k);
-    let resisted = k.add(unit, worn);
-    let ratio = k.divide(unit, resisted);
-    k.as_dimension(ratio)
+    bare: Expr<'b, 'k, Mt, Rate<Energy>>,
+) -> Expr<'b, 'k, Mt, Rate<Energy>> {
+    let (one_clo, worn) = (k.parameter(clothing), k.clothing());
+    let insulated = k.scale(conductance, worn);
+    let both = k.add(one_clo, insulated);
+    let ratio = k.divide(bare, both);
+    let across: Expr<'_, '_, Mt, Temperature> = k.as_dimension(ratio);
+    let product = k.multiply(one_clo, across);
+    k.as_dimension(product)
 }
 
 /// The skin's radiation and convection to the room, `R + C = (h_r (T_s - T_r) + h_c (T_s - T_a)) F_cl`, which is
 /// `h (T_s - T_o) F_cl` with `h = h_r + h_c` and the operative temperature `T_o = (h_r T_r + h_c T_a) / h`, and
-/// `F_cl = 1 / (1 + R_cl h I_clo)` (research 12, the row 'Dry heat loss', Gagge's Eq 8).
+/// `F_cl = 1 / (1 + 0.155 h I_clo)` per square metre (research 12, the row 'Dry heat loss', Gagge's Eq 8).
 fn dry_heat_loss<'b>(
     laws: &mut FragmentBuilder<'b, Mt>,
     ports: &MetabolismPorts<'b>,
@@ -156,7 +149,7 @@ fn dry_heat_loss<'b>(
     let route = ports.boundary::<DryHeatLoss>()?.route;
     let key = ParameterKey::new;
     let radiant = laws.parameter::<HeatConductance>(key("mt.radiant-conductance"), Admissible::positive());
-    let insulation = laws.parameter::<Insulation>(key("mt.clothing-insulation"), Admissible::nonnegative());
+    let clothing = laws.parameter::<HeatConductance>(key("mt.clothing-conductance"), Admissible::positive());
     let rate = laws.kernel(|mut k| {
         let held = k.read(&route.amount::<Energy>());
         let skin = stores.temperature(&mut k, held, &stores.shell);
@@ -170,8 +163,7 @@ fn dry_heat_loss<'b>(
         let convected = k.as_dimension(product);
         let bare = k.add(radiated, convected);
         let both = k.add(radiant, convective);
-        let efficiency = clothed(&mut k, &insulation, both);
-        let value = k.scale(bare, efficiency);
+        let value = clothed(&mut k, &clothing, both, bare);
         k.finish(value, laws.every_mode(), class)
     });
     laws.transfer(Transfer::new(&route, rate));
@@ -193,7 +185,7 @@ impl<'b> Vapour<'b> {
             reference: laws.parameter(key("mt.vapour-reference"), Admissible::positive()),
             a: laws.parameter(key("mt.vapour-a"), Admissible::finite()),
             b: laws.parameter(key("mt.vapour-b"), Admissible::positive()),
-            c: laws.parameter(key("mt.vapour-c"), Admissible::positive()),
+            c: laws.parameter(key("mt.vapour-c"), Admissible::finite()),
         }
     }
 
@@ -214,7 +206,7 @@ impl<'b> Vapour<'b> {
 }
 
 /// The skin's evaporation at rest, its diffusion term `E = w_d E_max` times the forcing, with the evaporative capacity
-/// `E_max = LR h_c (P_sat(T_s) - phi P_sat(T_a)) F_pcl` and `F_pcl = 1 / (1 + R_pcl h_c I_clo)` (research 12, the row
+/// `E_max = LR h_c (P_sat(T_s) - phi P_sat(T_a)) F_pcl` and `F_pcl = 1 / (1 + 0.143 h_c I_clo)` (research 12, the row
 /// 'Evaporation from skin', and ticket 12's fourth ruling). One rate posts both routes: heat leaves the skin store at
 /// `E` and water leaves the skin bed at `E / lambda`, so the two stand in one fixed proportion.
 fn evaporation<'b>(
@@ -232,8 +224,8 @@ fn evaporation<'b>(
     let vapour = Vapour::declare(laws);
     let lewis =
         laws.parameter::<Quotient<Temperature, Pressure>>(key("mt.lewis-relation"), Admissible::positive());
-    let insulation =
-        laws.parameter::<Insulation>(key("mt.clothing-vapour-insulation"), Admissible::nonnegative());
+    let clothing =
+        laws.parameter::<HeatConductance>(key("mt.clothing-vapour-conductance"), Admissible::positive());
     let wettedness =
         laws.parameter::<Dimensionless>(key("mt.diffusion-wettedness"), Admissible::unit_interval());
     let latent = laws.parameter::<LatentHeat>(key("mt.latent-heat"), Admissible::positive());
@@ -257,8 +249,7 @@ fn evaporation<'b>(
         let convective = convection.at(&mut k);
         let product = k.multiply(convective, per_conductance);
         let open = k.as_dimension(product);
-        let efficiency = clothed(&mut k, &insulation, convective);
-        let capacity: Expr<'_, '_, Mt, Rate<Energy>> = k.scale(open, efficiency);
+        let capacity = clothed(&mut k, &clothing, convective, open);
         let (wettedness, wandering) = (k.parameter(&wettedness), k.forcing(&variability));
         let diffusing = k.scale(capacity, wettedness);
         let value = k.scale(diffusing, wandering);

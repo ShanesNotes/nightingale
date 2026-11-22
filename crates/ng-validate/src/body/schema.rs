@@ -198,10 +198,7 @@ fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     schema.boundary::<Magnesium>("gut magnesium", into, portal, Space::Lumen)?;
     schema.boundary::<Iron>("gut iron", into, portal, Space::Lumen)?;
     let out = BoundaryDirection::OutOfBody;
-    let muscle = site::<CapillaryBed>("muscle bed")?;
-    schema.boundary::<Water>("skin water", out, muscle, Space::Interstitium)?;
     schema.drain("urine", site::<VesselSegment>("bladder")?, Space::Lumen)?;
-    schema.boundary::<Energy>("heat", out, site::<TissueSite>("body")?, Space::Thermal)?;
     for (((bed, glucose), fat), water) in BEDS
         .into_iter()
         .zip(GLUCOSE_FEED)

@@ -17,6 +17,19 @@ const HEMOGLOBIN: f64 = 2.0;
 /// (research 11, Nunn pp. 244 to 245).
 const SHUNT: f64 = 0.09 * 0.98 / 0.02;
 
+/// The tissue heat stores' capacities and each one's reference temperature, so its reference amount is `C (T_ref - T_0)`
+/// above the thermal zero `T_0`, 0 degrees Celsius on the room's absolute scale (ticket 12's second ruling), and a
+/// store's temperature is the thermal zero plus its amount over its capacity. The skin store's capacity serves the
+/// conducting airway's store too, as a model default.
+const THERMAL_ZERO: f64 = 273.15;
+const CORE_CAPACITY: f64 = 4e9;
+const SKIN_CAPACITY: f64 = 1.7e8;
+const CORE_REFERENCE: f64 = 310.15;
+const SKIN_REFERENCE: f64 = 307.15;
+/// The skin's evaporative heat the start guesses, near where the body admits in its room.
+const EVAPORATION_AT_REST: f64 = 2.2e5;
+const EVAPORATION_AMPLITUDE: f64 = 0.5;
+
 /// The viscosity the packet's edge resistances are stated at. It was read once, at 08a's admitted start from an
 /// admission whose vessels did not read it, so 08a moved no pressure at rest. It is not read again when the admitted
 /// hematocrit moves: the resistances then move with viscosity, as a later ticket's change asks.
@@ -256,6 +269,18 @@ fn start_guess(row: RowKind) -> f64 {
                 _ => bound,
             }
         }
+        RowKind::Amount {
+            site,
+            species: Species::Energy,
+            space: Space::Thermal,
+        } if matches!(site.key(), "body" | "skin heat site" | "conducting airway") => {
+            let (capacity, reference) = match site.key() {
+                "body" => (CORE_CAPACITY, CORE_REFERENCE),
+                "skin heat site" => (SKIN_CAPACITY, SKIN_REFERENCE),
+                _ => (SKIN_CAPACITY, CORE_REFERENCE),
+            };
+            capacity * (reference - THERMAL_ZERO)
+        }
         RowKind::Amount { site, species, space } => {
             if let Some(rest) = burn_rest(site.key(), species, space) {
                 return rest;
@@ -314,6 +339,7 @@ fn start_guess(row: RowKind) -> f64 {
                 "chest wall rest volume" => BODY_RHYTHM.wall_rest(),
                 "pump_force" => BODY_RHYTHM.rest_force(),
                 "work_of_breathing" => BODY_RHYTHM.work(),
+                "evaporation" => EVAPORATION_AT_REST,
                 _ => 1.0,
             }
         }
@@ -504,9 +530,6 @@ const ZERO_STAND_INS: &[(&str, Zero)] = &[
     ("hp.albumin-synthesis", zero::<Albumin>),
     ("hp.fixed-acid-made", zero::<FixedAcid>),
     ("hp.insulin-first-pass", zero::<Insulin>),
-    ("mt.dry-heat-loss", zero::<Energy>),
-    ("mt.skin-evaporation", zero::<Water>),
-    ("mt.skin-evaporative-heat", zero::<Energy>),
     ("mt.sweat-chloride", zero::<Chloride>),
     ("mt.sweat-sodium", zero::<Sodium>),
     ("mt.sweat-water", zero::<Water>),
@@ -545,7 +568,27 @@ pub fn body_packet_at_viscosity_exponent(
     body: &CompiledBody,
     exponent: Measure<Dimensionless>,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-    packet_of(body, exponent, [CENTRAL_GAIN, PERIPHERAL_GAIN], BODY_RHYTHM.rate)
+    packet_of(
+        body,
+        exponent,
+        [CENTRAL_GAIN, PERIPHERAL_GAIN],
+        BODY_RHYTHM.rate,
+        EVAPORATION_AMPLITUDE,
+    )
+}
+
+/// The body's packet with the evaporation's forcing at an amplitude of zero, so the skin's evaporation is its form
+/// exactly. Every other value stays the body's.
+pub fn body_packet_with_steady_evaporation(
+    body: &CompiledBody,
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    packet_of(
+        body,
+        Measure::new(-1.0)?,
+        [CENTRAL_GAIN, PERIPHERAL_GAIN],
+        BODY_RHYTHM.rate,
+        0.0,
+    )
 }
 
 /// The body's packet with both chemoreflex gains zero, so the drive scale is its rest exactly while `ns.breath-rate`,
@@ -555,7 +598,7 @@ pub fn body_packet_with_the_drive_scale_held(
     rate: Measure<Rate<Dimensionless>>,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let rate = f64::from_bits(Compensated::of(&rate).bits()[0]);
-    packet_of(body, Measure::new(-1.0)?, [0.0, 0.0], rate)
+    packet_of(body, Measure::new(-1.0)?, [0.0, 0.0], rate, EVAPORATION_AMPLITUDE)
 }
 
 fn packet_of(
@@ -563,6 +606,7 @@ fn packet_of(
     exponent: Measure<Dimensionless>,
     [central, peripheral]: [f64; 2],
     breath_rate: f64,
+    evaporation_amplitude: f64,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let rate = AnchorId::new("heart rate");
     let phase = LawName {
@@ -659,6 +703,7 @@ fn packet_of(
     set::<Dimensionless>(&mut packet, "ns.central-gain", Binding::Body, central)?;
     set::<Dimensionless>(&mut packet, "ns.peripheral-gain", Binding::Body, peripheral)?;
     oxygen_per_lactate(&mut packet, body)?;
+    tissue_heat(&mut packet, evaporation_amplitude)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -717,7 +762,6 @@ fn table(
         ("ns.set-point-speed", 1e-6),
         ("en.avp-clearance", 2e-3),
         ("bd.bladder-speed", 1e-3),
-        ("bd.heat-speed", 1e-3),
         ("ms.stir-rate", 2.0),
         ("gi.transit-exchange", 1e-3),
     ] {
@@ -745,9 +789,6 @@ fn table(
     set::<Rate<Sodium>>(packet, "gi.basal-sodium", body, 1.0)?;
     set::<Rate<Potassium>>(packet, "gi.basal-potassium", body, 0.05)?;
     set::<Rate<Chloride>>(packet, "gi.basal-chloride", body, 1.05)?;
-    set::<Rate<Water>>(packet, "ms.skin-water", body, 0.01)?;
-    set::<Time>(packet, "ms.skin-water-period", body, 300.0)?;
-    set::<Dimensionless>(packet, "ms.skin-water-amplitude", body, 0.5)?;
     set::<Water>(packet, "bd.bladder-rest", body, 0.0)?;
     set::<Rate<Water>>(packet, "bd.bladder-width", body, 1e-3)?;
 
@@ -1059,6 +1100,45 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
         set::<Conducted>(packet, "mt.cell-carbon-dioxide-conductance", at, made)?;
     }
     Ok(())
+}
+
+/// The tissue heat stores' packet, every value synthetic in the body's energy unit. Each key maps to research 16: the
+/// core store's capacity `c_body m_core` (MT-013, MT-015), the skin store's `c_body m_skin` (MT-013, MT-014), the skin's
+/// conductance `K_min A` (MT-020, MT-021), radiation's `h_r A` (MT-021, MT-022), still air's `h_c0 A` (MT-021,
+/// MT-023), still air's speed `v_0` (MT-024) and its width (MT-025), the Lewis relation (MT-026), the skin's
+/// wettedness from diffusion (MT-027), the latent heat (MT-028) and the vapour form's constants (MT-030 to MT-033),
+/// with Kingma's `c` for degrees Celsius moved onto the room's absolute scale. The room's air speed is its ratio to
+/// 0.1 m/s, so still air reads 1.
+/// Model defaults with no row: the thermal zero (ticket 12's second ruling), the airway store's conductance, the air
+/// speed's exponent (Stolwijk's square root), one clo's conductance over the body's surface for dry heat (Gagge's
+/// 0.155 m2 C/W a clo) and for vapour (0.143), and the evaporation's forcing, which keeps the period and amplitude of
+/// the skin water loss it replaces.
+fn tissue_heat(packet: &mut ParameterPacket<SyntheticFixture>, amplitude: f64) -> Result<(), AdmissionError> {
+    type HeatConductance = Quotient<Rate<Energy>, Temperature>;
+    let body = Binding::Body;
+    set::<Temperature>(packet, "mt.thermal-zero", body, THERMAL_ZERO)?;
+    set::<Quotient<Energy, Temperature>>(packet, "mt.core-capacity", body, CORE_CAPACITY)?;
+    set::<Quotient<Energy, Temperature>>(packet, "mt.skin-capacity", body, SKIN_CAPACITY)?;
+    for (store, conductance) in [("skin heat site", 1.4e5), ("conducting airway", 1e5)] {
+        let at = Binding::Site(site::<TissueSite>(store)?);
+        set::<HeatConductance>(packet, "mt.heat-conductance", at, conductance)?;
+    }
+    set::<HeatConductance>(packet, "mt.radiant-conductance", body, 1.4e5)?;
+    set::<HeatConductance>(packet, "mt.convective-conductance", body, 7.6e4)?;
+    set::<Dimensionless>(packet, "mt.still-air-speed", body, 1.0)?;
+    set::<Dimensionless>(packet, "mt.air-speed-width", body, 0.2)?;
+    set::<Dimensionless>(packet, "mt.air-speed-exponent", body, 0.5)?;
+    set::<HeatConductance>(packet, "mt.clothing-conductance", body, 1.7e5)?;
+    set::<HeatConductance>(packet, "mt.clothing-vapour-conductance", body, 1.8e5)?;
+    set::<Quotient<Temperature, Pressure>>(packet, "mt.lewis-relation", body, 2.2)?;
+    set::<Dimensionless>(packet, "mt.diffusion-wettedness", body, 0.06)?;
+    set::<Quotient<Rate<Energy>, Rate<Water>>>(packet, "mt.latent-heat", body, 2.2e7)?;
+    set::<Pressure>(packet, "mt.vapour-reference", body, 7.50062)?;
+    set::<Dimensionless>(packet, "mt.vapour-a", body, 16.6536)?;
+    set::<Temperature>(packet, "mt.vapour-b", body, 4030.183)?;
+    set::<Temperature>(packet, "mt.vapour-c", body, 235.0 - THERMAL_ZERO)?;
+    set::<Time>(packet, "mt.evaporation-period", body, 300.0)?;
+    set::<Dimensionless>(packet, "mt.evaporation-amplitude", body, amplitude)
 }
 
 /// The debt's oxygen to each lactate is the lactate burn's own counts, read from the compiled body.

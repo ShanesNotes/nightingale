@@ -222,7 +222,7 @@ fn step(
 ///
 /// It judges nothing. It stops where it stands at a point outside a law's domain, on a singular update, when no
 /// trial of an update has a value or when a sweep cannot settle a crossing, and `admit` is the one judge of a start.
-fn initialize(system: &InitializationSystem<'_>, body: &CompiledBody) -> AdmissionWorkspace {
+pub fn initialize(system: &InitializationSystem<'_>, body: &CompiledBody) -> AdmissionWorkspace {
     let mut workspace = system.workspace();
     if system.cycles() {
         march(system, &mut workspace, MARCH_BEATS, true);
