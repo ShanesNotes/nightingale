@@ -615,7 +615,13 @@ fn admit_refuses_a_fixture_solve_from_a_body_with_another_guard() -> Result<(), 
         case: &Relaxer,
         shape: Shape,
     ) -> Result<(InitializationSystem<'_>, AdmissionWorkspace), InitializationFailure> {
-        solve_fixture(&case.body, case.packet(16, shape, 1.0), port(1), &case.lens(16), at(0))
+        solve_fixture(
+            &case.body,
+            case.packet(16, shape, 1.0),
+            port(1),
+            &case.lens(16),
+            at(0),
+        )
     }
 
     let valve = Shape {
