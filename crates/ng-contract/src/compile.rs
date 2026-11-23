@@ -52,6 +52,7 @@ pub(crate) fn compile(
     check_crossings(&fragments, &reaches)?;
     let rows = Rows::lay_out(&schema, &fragments, &reaches, &held);
     let chance = ChanceNames::of(&fragments);
+    let fields = explicit_laws(&owed)?;
     let places = Places {
         rows: &rows,
         reaches: &reaches,
@@ -61,13 +62,13 @@ pub(crate) fn compile(
         fragments: &fragments,
         held: &held,
         readers,
+        fields: &fields,
     };
-    let fields = explicit_laws(&owed)?;
-    let placement = place(&owed, &places, &unread, &fields)?;
+    let placement = place(&owed, &places, &unread)?;
     check_holds(&rows, &schema, &held)?;
     check_orphans(&rows, &placement.columns, &schema, &held)?;
     let modes = modes(&fragments, &places);
-    let guards = guards(&fragments, &places, &modes, &fields)?;
+    let guards = guards(&fragments, &places, &modes)?;
     check_samples(&placement, &guards, &modes, &rows, &schema.anatomy)?;
     let forced = forcing_parameters(&fragments);
     let (parameters, instances, guards) = bind(placement.instances, guards, &forced, &declarations);
@@ -1306,6 +1307,7 @@ struct Places<'a> {
     fragments: &'a [FragmentData],
     held: &'a [HeldCard],
     readers: &'a [SpeciationReader],
+    fields: &'a [ExplicitLaw<'a>],
 }
 
 struct ChanceNames {
@@ -1450,17 +1452,13 @@ fn marked(
     Ok(instances)
 }
 
-fn place(
-    owed: &[Owed],
-    places: &Places,
-    unread: &[LawName],
-    fields: &[ExplicitLaw],
-) -> Result<Placement, CompileDefect> {
+fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement, CompileDefect> {
     let Places {
         rows,
         reaches,
         anatomy,
         schema,
+        fields,
         ..
     } = *places;
     let mut placement = Placement {
@@ -1799,7 +1797,8 @@ fn check_rights(law: LawName, kernel: &KernelData, places: &Places) -> Result<()
 }
 
 /// Discarded reads are checked too, and before placement, so a reader or place defect refuses first. With no
-/// context only the reader's right is checked.
+/// context only the reader's right is checked. An explicit field's own reads are checked under its own law where it
+/// lands, because inlining it into the reader loses who reads.
 fn check_granted(
     law: LawName,
     kernel: &KernelData,
@@ -1833,6 +1832,12 @@ fn check_granted(
             Source::TissueTemperature(read) => granted(law, read, place, context, places)?,
             Source::Field(field) if field.owner == crate::Receptor::CARD => {
                 effect_granted(law, field, place, lenient, context, places)?;
+            }
+            Source::Field(name) => {
+                for field in places.fields.iter().filter(|field| field.name == name) {
+                    let landed = context.and_then(|context| place_of(place, context, places.anatomy));
+                    check_granted(field.name, field.kernel, landed.map(Context::Site), places)?;
+                }
             }
             _ => {}
         }
@@ -2343,7 +2348,7 @@ fn store_read(
             let store = carried_into(schema, bed?)?;
             match end {
                 End::From => core_store(schema),
-                End::To => Some(store),
+                End::To => core_store(schema).and(Some(store)),
             }
         }
         StoreTemperature::SkinThermoreceptor => landed.filter(|&site| serves_skin(schema, site)),
@@ -2376,6 +2381,7 @@ fn addresses(
         fragments,
         held,
         readers: _,
+        fields: _,
     } = *places;
     let inputs = kernel
         .code
@@ -2417,7 +2423,12 @@ fn addresses(
                 };
                 match landed {
                     Some(junction) => {
-                        let row = rows.defined(field, at);
+                        let granted =
+                            field.owner == crate::Receptor::CARD && catalog::effect_read(law.owner).is_some();
+                        let row = match granted {
+                            true => rows.exactly(field, at),
+                            false => rows.defined(field, at),
+                        };
                         checked(field, row.ok_or(CompileDefect::NoReceptor { law, junction })?)?
                     }
                     None if !anatomy.unsupplied(site) => return Err(CompileDefect::NoSupply { law, site }),
@@ -2743,13 +2754,13 @@ fn guards(
     fragments: &[FragmentData],
     places: &Places,
     modes: &[ModeLayout],
-    fields: &[ExplicitLaw],
 ) -> Result<Vec<(GuardLayout, Vec<Address>)>, CompileDefect> {
     let Places {
         rows,
         reaches,
         anatomy,
         schema,
+        fields,
         ..
     } = *places;
     let mut guards = Vec::new();

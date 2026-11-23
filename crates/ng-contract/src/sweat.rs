@@ -32,6 +32,7 @@ enum Nerve {
     NoSupply,
     Bare,
     NoReceptor,
+    BodyEffectOnly,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -41,6 +42,7 @@ enum Reads {
     OtherLigand,
     AtTheSite,
     OffSkin,
+    InABodyKernel,
 }
 
 struct Sites {
@@ -72,7 +74,9 @@ fn map(nerve: Nerve) -> Result<(Anatomy, Sites), AdmissionError> {
     map.connect(Network::Vascular, vein.id(), artery.id());
     map.landmark(Landmark::SkinThermoreceptor, skin.id(), root.id());
     match nerve {
-        Nerve::Supplied | Nerve::NoReceptor => map.supply(&junction, &[bed.id(), muscle.id()]),
+        Nerve::Supplied | Nerve::NoReceptor | Nerve::BodyEffectOnly => {
+            map.supply(&junction, &[bed.id(), muscle.id()]);
+        }
         Nerve::NoSupply => map.supply(&junction, &[muscle.id()]),
         Nerve::Bare => {
             map.supply(&junction, &[muscle.id()]);
@@ -146,9 +150,18 @@ fn secrete<'b>(
         });
         mt.define_at(&out, value);
     }
+    if reads == Reads::InABodyKernel {
+        let felt = mt.algebraic::<Dimensionless>("felt by the body", Admissible::finite());
+        let residual = mt.kernel(|mut k| {
+            let (own, read) = (k.algebraic(&felt), k.at_junction(&forged(acetylcholine)));
+            let value = k.subtract(own, read);
+            k.finish(value, mt.every_mode(), class)
+        });
+        mt.residual(&felt, residual);
+    }
     let secreted = mt.site_kernel::<Beds<Skin>, Rate<Water>, _>(|mut k| {
         let felt = match reads {
-            Reads::Granted | Reads::OffSkin => effect.at_skin(&mut k),
+            Reads::Granted | Reads::OffSkin | Reads::InABodyKernel => effect.at_skin(&mut k),
             Reads::Lenient => k.lenient_at_junction(&forged(acetylcholine)),
             Reads::OtherLigand => k.at_junction(&forged(Species::Norepinephrine.names()[4])),
             Reads::AtTheSite => {
@@ -232,7 +245,7 @@ fn compiled(nerve: Nerve, reads: Reads) -> Result<(CompiledBody, Sites), Admissi
     }
     schema.process::<SkinEvaporativeHeat>(sites.skin, Space::Thermal)?;
     schema.process::<DryHeatLoss>(sites.skin, Space::Thermal)?;
-    if nerve != Nerve::NoReceptor {
+    if !matches!(nerve, Nerve::NoReceptor | Nerve::BodyEffectOnly) {
         schema.carry::<Acetylcholine, Junction>(Space::Cleft);
         schema.carry::<Acetylcholine, Junction>(Space::Bound);
     }
@@ -245,8 +258,20 @@ fn compiled(nerve: Nerve, reads: Reads) -> Result<(CompiledBody, Sites), Admissi
         let dry = ports.boundary::<DryHeatLoss>()?;
         lose(&mut mt, &published.at_exit(&dry), &dry);
         body.add(mt.finish());
-        if nerve != Nerve::NoReceptor {
-            bind(&mut body)?;
+        match nerve {
+            Nerve::BodyEffectOnly => {
+                let (mut rc, _) = body.receptor()?.parts();
+                let effect = Species::Acetylcholine.names()[4];
+                rc.owe_defined::<Dimensionless>(effect, law::Over::Body);
+                let value = rc.kernel(|mut k| {
+                    let value = k.zero::<Dimensionless>();
+                    k.finish(value, rc.every_mode(), class())
+                });
+                rc.define(&Output::named(effect), value);
+                body.add(rc.finish());
+            }
+            Nerve::NoReceptor => {}
+            _ => bind(&mut body)?,
         }
         body.compile()
     })?;
@@ -403,6 +428,21 @@ fn the_sweat_grant_refuses_a_bed_no_nerve_supplies_and_a_junction_with_no_recept
     );
 }
 
+/// Ticket 102 (0011, 30): "An absent projected temperature field gives `UnemittedField`, an emitted
+/// temperature with no defining law `OmittedLaw`, and an absent receptor effect at a supplying junction `NoReceptor`."
+#[test]
+fn a_body_effect_does_not_supply_the_skin_junctions_missing_receptor() {
+    let (_, sites) = map(Nerve::BodyEffectOnly).expect("a supplied skin bed");
+    let found = compiled(Nerve::BodyEffectOnly, Reads::Granted).err();
+    assert_eq!(
+        found,
+        refused(CompileDefect::NoReceptor {
+            law: SWEAT,
+            junction: sites.junction,
+        })
+    );
+}
+
 #[test]
 fn the_catalog_refuses_the_lenient_read_another_ligand_a_read_off_the_junction_and_one_off_the_skin() {
     let unwired = |law, local| {
@@ -434,6 +474,14 @@ fn the_catalog_refuses_the_lenient_read_another_ligand_a_read_off_the_junction_a
     assert_eq!(
         compiled(Nerve::Supplied, Reads::OffSkin).map(|_| ()).err(),
         unwired(every_bed, acetylcholine)
+    );
+    let body = LawName {
+        owner: "MT",
+        local: "felt by the body",
+    };
+    assert_eq!(
+        compiled(Nerve::Supplied, Reads::InABodyKernel).map(|_| ()).err(),
+        unwired(body, acetylcholine)
     );
 }
 
@@ -540,4 +588,95 @@ fn the_three_skin_reads_bind_one_reference_slot_and_a_card_that_declares_it_othe
         compared(Declared::Conflicting).map(|_| ()).err(),
         refused(CompileDefect::ParameterConflict { key: skin })
     );
+}
+
+/// Ticket 102 (0011, 4): "Each bed's store is found at compile from the schema's pools and the containment
+/// tree, with nothing in accepted state, and a read of a placed store whose root or destination is missing refuses."
+#[test]
+fn a_placed_carriage_tissue_read_requires_the_core_store() {
+    let law = LawName {
+        owner: "CV",
+        local: "carriage tissue",
+    };
+    let build = |with_core: bool, tissue: bool| -> Result<CompiledBody, AdmissionError> {
+        let (anatomy, sites) = map(Nerve::Supplied)?;
+        let mut schema = Schema::new(anatomy)?;
+        schema.partial_volume(Measure::new(1.0)?)?;
+        for space in [Space::Plasma, Space::Interstitium, Space::Cells, Space::Lumen] {
+            schema.leave_out(space, "a bench of sweat and heat");
+        }
+        if with_core {
+            schema.pool::<Energy>(sites.root, Space::Thermal)?;
+        }
+        schema.pool::<Energy>(sites.skin, Space::Thermal)?;
+        schema.process::<SkinEvaporativeHeat>(sites.skin, Space::Thermal)?;
+        schema.process::<DryHeatLoss>(sites.skin, Space::Thermal)?;
+        schema.carry::<Acetylcholine, Junction>(Space::Cleft);
+        schema.carry::<Acetylcholine, Junction>(Space::Bound);
+        assemble(schema, |mut body| {
+            let (mut mt, ports) = body.metabolism(None)?.parts();
+            let published = publish(&mut mt, &ports);
+            let effect = ports.sweat_effect();
+            let evaporative = ports.boundary::<SkinEvaporativeHeat>()?;
+            secrete(
+                &mut mt,
+                &effect,
+                &published.at_bed(),
+                &evaporative,
+                Reads::Granted,
+            );
+            let dry = ports.boundary::<DryHeatLoss>()?;
+            lose(&mut mt, &published.at_exit(&dry), &dry);
+            body.add(mt.finish());
+            bind(&mut body)?;
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let carriage = ports.heat_carried(&mut cv);
+            let still = cv.site_kernel(|mut k| {
+                let zero = k.zero::<Rate<Energy>>();
+                k.finish(zero, cv.every_mode(), class())
+            });
+            carriage.post(&mut cv, still);
+            let temperatures: PerfusionTemperatures = cv.receive();
+            let (out, _) = cv.site_field::<Beds<Skin>, Temperature>(law.local, Admissible::finite());
+            let value = cv.site_kernel(|mut k| {
+                let value = match tissue {
+                    true => temperatures.tissue(&mut k),
+                    false => temperatures.core(&mut k),
+                };
+                k.finish(value, cv.every_mode(), class())
+            });
+            cv.define_at(&out, value);
+            body.add(cv.finish());
+            body.compile()
+        })
+    };
+    let carriage_columns = |body: CompiledBody| {
+        body.columns()
+            .iter()
+            .filter(|column| {
+                column.origin().owner == "CV" && column.origin().local == "heat carried by blood"
+            })
+            .count()
+    };
+    assert_eq!(build(true, true).map(carriage_columns), Ok(1));
+    let found = build(false, true).map(carriage_columns);
+    let field = LawName {
+        owner: "MT",
+        local: "temperature",
+    };
+    let missing = [
+        CompileDefect::NoSuchRead { law },
+        CompileDefect::UnwiredRead { law, field },
+    ];
+    assert!(
+        missing
+            .into_iter()
+            .any(|why| found == Err(AdmissionError::Compile(why))),
+        "expected a named refusal for {law:?} without the core store, got {found:?} (Ok counts carriage columns)"
+    );
+    for tissue in [true, false] {
+        let found = build(false, tissue).map(carriage_columns);
+        let missing = Err(AdmissionError::Compile(CompileDefect::NoSuchRead { law }));
+        assert_eq!(found, missing, "the tissue end: {tissue}");
+    }
 }
