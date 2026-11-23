@@ -83,6 +83,16 @@ pub struct WiredField {
     pub name: &'static str,
     pub unit: &'static str,
     pub body_ticket: u8,
+    /// Where a projected field is read, through its grant from rows its sender defines. An emitted field has none.
+    pub projected: Option<Projection>,
+}
+/// The place a projected field's grant reads its sender's rows.
+#[derive(Clone, Copy)]
+pub enum Projection {
+    /// The two ends of a bed's carriage route, the core store and the store the bed sits in, in the bed's kernel.
+    CarriageEnds,
+    /// The store the skin thermoreceptor's sampled site holds, in a whole-body kernel.
+    SkinThermoreceptor,
 }
 #[derive(Clone, Copy)]
 pub struct HeldField {
@@ -296,7 +306,7 @@ const LAST_WIRING_TICKET: u8 = 25;
 
 macro_rules! coupling_map {
     ($($line:literal $from:ident => $to:ident, $label:literal, $slice:ident $($why:literal)?,
-        $plan:ident $carried:tt $(held $held:tt)?;)*) => {
+        $plan:ident $carried:tt $(held $held:tt)? $(projected $projected:tt)?;)*) => {
         $(coupling_map!(@payload $plan $carried $line $from $to $label);)*
         pub const ARROWS: [Arrow; MAP_EDGES] = [$(Arrow {
             line: $line,
@@ -305,7 +315,7 @@ macro_rules! coupling_map {
             sender_in_slice: <$from as System>::IN_SLICE,
             receiver_in_slice: <$to as System>::IN_SLICE,
             slice: coupling_map!(@slice $slice $($why)?),
-            carries: coupling_map!(@carries $plan $carried $($held)?),
+            carries: coupling_map!(@carries $plan $carried [$($held)?] [$($projected)?]),
         },)*];
     };
     (@payload wired ($name:ident { $($field:ident: $unit:ty => $ticket:literal),+ $(,)? })
@@ -329,18 +339,25 @@ macro_rules! coupling_map {
     (@slice relation $why:literal) => { Disposition::AnatomyRelation { reason: $why } };
     (@slice outside $why:literal) => { Disposition::OutsideSlice { reason: $why } };
     (@slice unresolved $why:literal) => { Disposition::Unresolved { reason: $why } };
-    (@carries relation $why:literal) => { Carries::Relation { reason: $why } };
-    (@carries wired ($name:ident { $($field:ident: $unit:ty => $ticket:literal),+ $(,)? }) $($held:tt)?) => {
+    (@carries relation $why:literal [] []) => { Carries::Relation { reason: $why } };
+    (@carries wired ($name:ident { $($field:ident: $unit:ty => $ticket:literal),+ $(,)? })
+        [$($held:tt)?] [$(($grant:ident { $projected:ident @ $at:ident: $at_unit:ty => $at_ticket:literal }))?]) => {
         Carries::Fields {
             wired: &[$(WiredField {
                 name: stringify!($field),
                 unit: stringify!($unit),
                 body_ticket: $ticket,
-            }),+],
+                projected: None,
+            },)+ $(WiredField {
+                name: stringify!($projected),
+                unit: stringify!($at_unit),
+                body_ticket: $at_ticket,
+                projected: Some(Projection::$at),
+            })?],
             held: coupling_map!(@held $($held)?),
         }
     };
-    (@carries held $held:tt) => { Carries::Fields { wired: &[], held: coupling_map!(@held $held) } };
+    (@carries held $held:tt [] []) => { Carries::Fields { wired: &[], held: coupling_map!(@held $held) } };
     (@held) => { &[] };
     (@held [$($field:ident: $unit:ty => $holder:ident $reason:literal),+ $(,)?]) => {
         &[$(HeldField {
@@ -358,7 +375,7 @@ coupling_map! {
     78 Cardiovascular => Metabolism, "myocardial work, flow per bed", sink,
         wired (MyocardialWorkAndBedFlow { myocardial_work: Rate<Energy> => 9 })
         held [flow_per_bed: PerSite<CapillaryBed, Rate<Volume>> => Cardiovascular
-            "no law reads a bed's flow at rung 0: a bed's oxygen arrives by the blood's own transport into its plasma"];
+            "MT's oxygen supply arrives by plasma transport. CV reads its own inflow for carriage."];
     79 Cardiovascular => Endocrine, "wall stress", sink,
         wired (WallStress { atrial_wall_stress: Pressure => 17 })
         held [ventricular_wall_stress: Pressure => Cardiovascular "one natriuretic peptide is secreted, on atrial stretch"];
@@ -392,9 +409,10 @@ coupling_map! {
             circadian_phase: Phase => Nervous "the clock is a boundary input every law reads (ticket 05)"];
     90 Metabolism => Cardiovascular, "O2 debt per bed, temperature", input,
         wired (OxygenDebtPerBed { oxygen_debt_per_bed: PerSite<CapillaryBed, Oxygen> => 9 })
-        held [temperature: Temperature => Cardiovascular "CV's laws run at a reference temperature"];
+        projected (PerfusionTemperatures { temperature @ CarriageEnds: Temperature => 12 });
     91 Metabolism => Nervous, "temperature", input,
-        wired (CoreTemperature { core_temperature: Temperature => 12 });
+        wired (CoreTemperature { core_temperature: Temperature => 12 })
+        projected (SkinThermoreceptor { skin_temperature @ SkinThermoreceptor: Temperature => 12 });
     92 Metabolism => Hematology, "temperature", outside "neither end in the arena slice",
         held [temperature: Temperature => Hematology "HC's laws run at a reference temperature (ticket 12)"];
     93 Metabolism => Hepatic, "temperature", outside "neither end in the arena slice",
@@ -464,7 +482,7 @@ const _: () = assert!(SLICE.mapped() == 27 && SLICE.unmapped() == 11);
 const _: () = assert!(SLICE.incident_mapped == 27 && SLICE.incident_unmapped == 1);
 const _: () = assert!(WHOLE_BODY.live == 14 && WHOLE_BODY.relation == 6 && WHOLE_BODY.held == 18);
 const FIELDS: FieldCount = field_count();
-const _: () = assert!(FIELDS.wired == 16 && FIELDS.held == 33 && FIELDS.wire_and_hold == 7);
+const _: () = assert!(FIELDS.wired == 18 && FIELDS.held == 32 && FIELDS.wire_and_hold == 6);
 const _: () = {
     let mut i = 0;
     while i < MAP_EDGES {
@@ -480,7 +498,7 @@ const _: () = {
     }
 };
 const _: () = {
-    let wire_and_hold = [78, 79, 87, 89, 90, 95, 114];
+    let wire_and_hold = [78, 79, 87, 89, 95, 114];
     let mut i = 0;
     while i < wire_and_hold.len() {
         let carries = ARROWS[wire_and_hold[i] - 77].carries;
@@ -524,7 +542,7 @@ const _: () = {
 };
 
 const _: () = {
-    let plan: [(usize, &str, &str); 33] = [
+    let plan: [(usize, &str, &str); 32] = [
         (78, "flow_per_bed", "CV"),
         (79, "ventricular_wall_stress", "CV"),
         (81, "pulmonary_capillary_flow", "CV"),
@@ -534,7 +552,6 @@ const _: () = {
         (87, "sweat_drive", "NS"),
         (89, "crh_drive", "NS"),
         (89, "circadian_phase", "NS"),
-        (90, "temperature", "CV"),
         (92, "temperature", "HC"),
         (93, "temperature", "HP"),
         (94, "temperature", "BC"),
@@ -577,7 +594,7 @@ const _: () = {
     assert!(n == plan.len());
 };
 const _: () = {
-    let plan: [(usize, &str, u8); 16] = [
+    let plan: [(usize, &str, u8); 18] = [
         (77, "carotid_sinus_stretch", 6),
         (77, "aortic_arch_stretch", 6),
         (78, "myocardial_work", 9),
@@ -589,7 +606,9 @@ const _: () = {
         (87, "shiver_drive", 12),
         (89, "vasopressin_drive", 17),
         (90, "oxygen_debt_per_bed", 9),
+        (90, "temperature", 12),
         (91, "core_temperature", 12),
+        (91, "skin_temperature", 12),
         (95, "pump_force", 10),
         (97, "afferent_tone", 6),
         (98, "renin_secretion", 17),

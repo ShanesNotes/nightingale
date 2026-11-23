@@ -93,6 +93,7 @@ struct Shape {
     valve: bool,
     gate: bool,
     seen: bool,
+    seen_stays_set: bool,
     touch: bool,
     levels: Levels,
 }
@@ -236,7 +237,9 @@ fn relaxer(shape: Shape) -> Result<Relaxer, AdmissionError> {
                 let gap = k.subtract(now, level);
                 k.finish(gap, above.only(), class)
             });
-            laws.event(Guard::new(under, Crossing::Falling, above.to(&below)?));
+            if !shape.seen_stays_set {
+                laws.event(Guard::new(under, Crossing::Falling, above.to(&below)?));
+            }
             follow(&mut laws, "u", [&below, &above], &one, &opening, class);
         }
         if shape.touch {
@@ -602,6 +605,47 @@ fn a_guard_a_drive_edge_crosses_fires_on_the_edge() {
     let start = relaxer.admitted(8, shape, 1.0, &[Relaxer::memory("u")]);
     let u = start.unwrap_or_else(|failure| panic!("{failure:?}"))[0];
     assert!((u - exact).abs() < 1e-3, "{u} against {exact}");
+}
+
+/// `InitializationSystem::admit` says "A workspace from another system, of another shape or with a
+/// topology its own values do not give is refused."
+#[test]
+fn admit_refuses_a_fixture_solve_from_a_body_with_another_guard() -> Result<(), InitializationFailure> {
+    fn solve(
+        case: &Relaxer,
+        shape: Shape,
+    ) -> Result<(InitializationSystem<'_>, AdmissionWorkspace), InitializationFailure> {
+        solve_fixture(
+            &case.body,
+            case.packet(16, shape, 1.0),
+            port(1),
+            &case.lens(16),
+            at(0),
+        )
+    }
+
+    let valve = Shape {
+        valve: true,
+        ..Shape::default()
+    };
+    let source = relaxer(valve)?;
+    let (system, solved) = solve(&source, valve)?;
+    system.admit(solved.clone(), history())?;
+
+    let seen = Shape {
+        seen: true,
+        seen_stays_set: true,
+        ..Shape::default()
+    };
+    let receiver = relaxer(seen)?;
+    let (system, own) = solve(&receiver, seen)?;
+    system.admit(own, history())?;
+    let (system, _) = solve(&receiver, seen)?;
+    assert_eq!(
+        system.admit(solved, history()).err(),
+        Some(InitializationFailure::Admission(AdmissionError::ForeignWorkspace))
+    );
+    Ok(())
 }
 
 /// `touch`'s guard is `y`'s distance from the band's middle negated: it reaches zero only where `y` passes the middle,

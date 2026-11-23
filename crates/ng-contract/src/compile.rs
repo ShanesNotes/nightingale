@@ -3,7 +3,7 @@ use crate::body::{
     HazardLayout, Instance, Layout, ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Receipt, Row,
     RowId, RowKind, Slot, Sparsity, StreamLayout, Target, UnknownId,
 };
-use crate::catalog::SpeciationReader;
+use crate::catalog::{self, Projection, SpeciationReader};
 use crate::chance::key_word;
 use crate::conservation::{Balanced, admission_totals, conserved_basis, weight};
 use crate::elimination::Elimination;
@@ -12,10 +12,13 @@ use crate::identity::{Canonical, Seal};
 use crate::law::{
     End, ExplicitLaw, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation,
     Op, Over, ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration,
-    SlotKind, Source, Unwritable, Validity, Where,
+    SlotKind, Source, StoreHeat, StoreTemperature, Unwritable, Validity, Where,
 };
 use crate::scheme::greatest_common_divisor;
-use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, PoolRef, RouteBoundary};
+use crate::scope::{
+    BINARY64_EXACT, CORE_TEMPERATURE, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, PoolRef, RouteBoundary,
+    TISSUE_TEMPERATURE,
+};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
     Compliance, HeatRoute, Lasting, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage,
@@ -49,6 +52,7 @@ pub(crate) fn compile(
     check_crossings(&fragments, &reaches)?;
     let rows = Rows::lay_out(&schema, &fragments, &reaches, &held);
     let chance = ChanceNames::of(&fragments);
+    let fields = explicit_laws(&owed)?;
     let places = Places {
         rows: &rows,
         reaches: &reaches,
@@ -58,13 +62,16 @@ pub(crate) fn compile(
         fragments: &fragments,
         held: &held,
         readers,
+        fields: &fields,
     };
-    let fields = explicit_laws(&owed)?;
-    let placement = place(&owed, &places, &unread, &fields)?;
+    for field in &fields {
+        check_rights(field.name, field.kernel, &places)?;
+    }
+    let placement = place(&owed, &places, &unread)?;
     check_holds(&rows, &schema, &held)?;
     check_orphans(&rows, &placement.columns, &schema, &held)?;
     let modes = modes(&fragments, &places);
-    let guards = guards(&fragments, &places, &modes, &fields)?;
+    let guards = guards(&fragments, &places, &modes)?;
     check_samples(&placement, &guards, &modes, &rows, &schema.anatomy)?;
     let forced = forcing_parameters(&fragments);
     let (parameters, instances, guards) = bind(placement.instances, guards, &forced, &declarations);
@@ -793,7 +800,52 @@ fn places_of(
             .filter(|&site| schema.pools().any(|pool| pool == (site, space, species)))
             .map(Context::Site)
             .collect(),
+        Over::OtherTissueHeatStores => (anatomy.in_set(Sites::Class(Class::TissueSite)).into_iter())
+            .filter(|&site| anatomy.root() != Some(site) && holds_heat(schema, site))
+            .map(Context::Site)
+            .collect(),
     }
+}
+
+fn holds_heat(schema: &Schema, site: SiteId) -> bool {
+    site.class() == Class::TissueSite
+        && schema
+            .pools()
+            .any(|pool| pool == (site, Space::Thermal, Species::Energy))
+}
+fn core_store(schema: &Schema) -> Option<SiteId> {
+    (schema.anatomy.root()).filter(|&root| holds_heat(schema, root))
+}
+fn store_above(schema: &Schema, bed: SiteId) -> Option<SiteId> {
+    let anatomy = &schema.anatomy;
+    core::iter::successors(anatomy.parent(bed), |&site| anatomy.parent(site))
+        .find(|&site| holds_heat(schema, site))
+}
+fn carried_into(schema: &Schema, bed: SiteId) -> Option<SiteId> {
+    let store = store_above(schema, bed)?;
+    (bed.class() == Class::CapillaryBed && Some(store) != schema.anatomy.root()).then_some(store)
+}
+fn temperature_at(schema: &Schema, store: SiteId) -> (LawName, Context) {
+    let owner = crate::Metabolism::CARD;
+    match schema.anatomy.root() == Some(store) {
+        true => (
+            LawName {
+                owner,
+                local: CORE_TEMPERATURE,
+            },
+            Context::Body,
+        ),
+        false => (
+            LawName {
+                owner,
+                local: TISSUE_TEMPERATURE,
+            },
+            Context::Site(store),
+        ),
+    }
+}
+fn store_temperature(field: LawName) -> bool {
+    field.owner == crate::Metabolism::CARD && [CORE_TEMPERATURE, TISSUE_TEMPERATURE].contains(&field.local)
 }
 
 struct Rows {
@@ -896,6 +948,22 @@ impl Rows {
     fn defined(&self, law: LawName, at: Context) -> Option<usize> {
         self.defined.binary_search(&law).ok()?;
         self.slot(law, at)
+    }
+    fn exactly(&self, law: LawName, at: Context) -> Option<usize> {
+        self.defined.binary_search(&law).ok()?;
+        self.here(law, at)
+    }
+    fn inflow_row(&self, flow: Slot, kind: RowKind) -> Option<usize> {
+        let row = self.here(flow.law, flow.at)?;
+        let rate = crate::quantity::dimension::<crate::Rate<crate::Water>>();
+        let found = &self.rows[row];
+        (found.kind == kind && found.dimension == rate).then_some(row)
+    }
+    fn here(&self, law: LawName, at: Context) -> Option<usize> {
+        let found = self
+            .slots
+            .binary_search_by_key(&Slot { law, at }, |entry| entry.0);
+        found.ok().map(|at| self.slots[at].1)
     }
     fn declared(&self, law: LawName, at: Context) -> usize {
         self.slot(law, at)
@@ -1191,7 +1259,7 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
             .collect(),
         Family::Heat(HeatRoute::CarriedByBlood) => beds()
             .filter_map(|bed| {
-                let (core, held) = (store(Space::Thermal)?, heat(anatomy.parent(bed)?));
+                let (core, held) = (store(Space::Thermal)?, heat(store_above(schema, bed)?));
                 (held != core).then(|| at(bed, [core, held]))
             })
             .collect(),
@@ -1242,6 +1310,7 @@ struct Places<'a> {
     fragments: &'a [FragmentData],
     held: &'a [HeldCard],
     readers: &'a [SpeciationReader],
+    fields: &'a [ExplicitLaw<'a>],
 }
 
 struct ChanceNames {
@@ -1386,17 +1455,13 @@ fn marked(
     Ok(instances)
 }
 
-fn place(
-    owed: &[Owed],
-    places: &Places,
-    unread: &[LawName],
-    fields: &[ExplicitLaw],
-) -> Result<Placement, CompileDefect> {
+fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement, CompileDefect> {
     let Places {
         rows,
         reaches,
         anatomy,
         schema,
+        fields,
         ..
     } = *places;
     let mut placement = Placement {
@@ -1464,6 +1529,7 @@ fn place(
             _ => None,
         };
         for &(_, kernel) in &law.laws {
+            check_rights(law.name, kernel, places)?;
             let off_site = |&(context, _): &(Context, Target)| !matches!(context, Context::Site(_));
             if kernel.placing.is_some() && targets.iter().any(off_site) {
                 return Err(CompileDefect::TermOffSite { law: law.name });
@@ -1559,6 +1625,7 @@ fn place(
                         (program, variant)
                     }
                 };
+                check_granted(law.name, reads, Some(context), places)?;
                 placement.instances.push(Placed {
                     program,
                     context,
@@ -1615,9 +1682,15 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
             Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,
             Input::SiteParameter(_) => true,
             Input::Read(
-                Source::Drive(_) | Source::RoutePool(..) | Source::Reacting(..) | Source::Flow(_),
+                Source::Drive(_)
+                | Source::RoutePool(..)
+                | Source::Reacting(..)
+                | Source::Flow(_)
+                | Source::TissueHeat(_)
+                | Source::TissueTemperature(_),
                 _,
             ) => true,
+            Input::BedInflow => true,
             Input::Read(Source::Field(name), _) => explicit.iter().any(|(field, _)| field.name == *name),
             _ => false,
         };
@@ -1718,6 +1791,137 @@ fn check_wired(
         }
     }
     Ok(())
+}
+
+/// Checked on the unplaced kernel, so a term or law that no site realizes still has its grants checked.
+fn check_rights(law: LawName, kernel: &KernelData, places: &Places) -> Result<(), CompileDefect> {
+    let every = kernel.at(|_| true);
+    check_granted(law, every.as_ref().unwrap_or(kernel), None, places)
+}
+
+/// Discarded reads are checked too, and before placement, so a reader or place defect refuses first. With no
+/// context only the reader's right is checked. An explicit field's own reads are checked under its own law where it
+/// lands, because inlining it into the reader loses who reads.
+fn check_granted(
+    law: LawName,
+    kernel: &KernelData,
+    context: Option<Context>,
+    places: &Places,
+) -> Result<(), CompileDefect> {
+    let coded = (kernel.code.iter().enumerate()).filter_map(|(at, op)| match op {
+        Op::Input(input) => Some((input, kernel.accepts_no_nerve.contains(&at))),
+        _ => None,
+    });
+    let discarded = (kernel.unreached.iter()).map(|read| (&read.input, read.accepts_no_nerve));
+    for (input, lenient) in coded.chain(discarded) {
+        let &Input::Read(source, place) = input else {
+            continue;
+        };
+        match source {
+            Source::Field(field) if store_temperature(field) && !catalog::reads_plainly(law.owner, field) => {
+                return Err(CompileDefect::UnwiredRead { law, field });
+            }
+            Source::TissueHeat(store) if law.owner != crate::Metabolism::CARD => {
+                let local = match store {
+                    StoreHeat::Core => "core_heat",
+                    StoreHeat::OwnSite => "tissue_heat",
+                };
+                let field = LawName {
+                    owner: crate::Metabolism::CARD,
+                    local,
+                };
+                return Err(CompileDefect::UnwiredRead { law, field });
+            }
+            Source::TissueTemperature(read) => granted(law, read, place, context, places)?,
+            Source::Field(field) if field.owner == crate::Receptor::CARD => {
+                effect_granted(law, field, place, lenient, context, places)?;
+            }
+            Source::Field(name) => {
+                for field in places.fields.iter().filter(|field| field.name == name) {
+                    let landed = context.and_then(|context| place_of(place, context, places.anatomy));
+                    check_granted(field.name, field.kernel, landed.map(Context::Site), places)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn effect_granted(
+    law: LawName,
+    field: LawName,
+    place: Where,
+    lenient: bool,
+    context: Option<Context>,
+    places: &Places,
+) -> Result<(), CompileDefect> {
+    let Some(row) = catalog::effect_read(law.owner) else {
+        return Ok(());
+    };
+    let unwired = CompileDefect::UnwiredRead { law, field };
+    if field.local != row.quantity || place != Where::Junction || lenient {
+        return Err(unwired);
+    }
+    let site = match context {
+        None => return Ok(()),
+        Some(Context::Site(site)) => site,
+        Some(_) => return Err(unwired),
+    };
+    match places.anatomy.in_set(row.sites).contains(&site) {
+        true => Ok(()),
+        false => Err(unwired),
+    }
+}
+
+fn granted(
+    law: LawName,
+    read: StoreTemperature,
+    place: Where,
+    context: Option<Context>,
+    places: &Places,
+) -> Result<(), CompileDefect> {
+    let schema = places.schema;
+    let owner = crate::Metabolism::CARD;
+    let projection = match read {
+        StoreTemperature::OwnBed | StoreTemperature::OwnExit(_) => None,
+        StoreTemperature::CarriageEnd(_) => Some(Projection::CarriageEnds),
+        StoreTemperature::SkinThermoreceptor => Some(Projection::SkinThermoreceptor),
+    };
+    let Some(projection) = projection else {
+        let field = LawName {
+            owner,
+            local: TISSUE_TEMPERATURE,
+        };
+        return match law.owner == owner {
+            true => Ok(()),
+            false => Err(CompileDefect::UnwiredRead { law, field }),
+        };
+    };
+    let (arrow, wired) = catalog::projected(projection);
+    let field = LawName {
+        owner: arrow.from,
+        local: wired.name,
+    };
+    let unwired = CompileDefect::UnwiredRead { law, field };
+    if law.owner != arrow.to {
+        return Err(unwired);
+    }
+    let Some(context) = context else {
+        return Ok(());
+    };
+    match (projection, context) {
+        (Projection::CarriageEnds, Context::Site(bed)) if carried_into(schema, bed).is_some() => Ok(()),
+        (Projection::CarriageEnds, _) => Err(unwired),
+        (Projection::SkinThermoreceptor, Context::Body) => {
+            let landed = place_of(place, context, places.anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
+            match serves_skin(schema, landed) {
+                true => Ok(()),
+                false => Err(unwired),
+            }
+        }
+        (Projection::SkinThermoreceptor, _) => Err(unwired),
+    }
 }
 
 fn check_ends(
@@ -2125,6 +2329,45 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
     }
 }
 
+fn store_read(
+    schema: &Schema,
+    read: StoreTemperature,
+    context: Context,
+    landed: Option<SiteId>,
+) -> Option<SiteId> {
+    let bed = match context {
+        Context::Site(site) if site.class() == Class::CapillaryBed => Some(site),
+        _ => None,
+    };
+    match read {
+        StoreTemperature::OwnBed => store_above(schema, bed?),
+        StoreTemperature::OwnExit(route) => {
+            let exit = schema.boundaries.iter().find(|boundary| boundary.name == route)?;
+            let PoolRef { site, space, species } = exit.pool;
+            (space == Space::Thermal && species == Species::Energy && holds_heat(schema, site))
+                .then_some(site)
+        }
+        StoreTemperature::CarriageEnd(end) => {
+            let store = carried_into(schema, bed?)?;
+            match end {
+                End::From => core_store(schema),
+                End::To => core_store(schema).and(Some(store)),
+            }
+        }
+        StoreTemperature::SkinThermoreceptor => landed.filter(|&site| serves_skin(schema, site)),
+    }
+}
+fn serves_skin(schema: &Schema, store: SiteId) -> bool {
+    let anatomy = &schema.anatomy;
+    let skin = |bed: &&SiteId| anatomy.tissue(**bed) == Some(crate::Tissue::Skin);
+    let beds = anatomy.in_set(Sites::Class(Class::CapillaryBed));
+    holds_heat(schema, store)
+        && beds
+            .iter()
+            .filter(skin)
+            .any(|&bed| store_above(schema, bed) == Some(store))
+}
+
 fn addresses(
     law: LawName,
     route: Option<Family>,
@@ -2141,6 +2384,7 @@ fn addresses(
         fragments,
         held,
         readers: _,
+        fields: _,
     } = *places;
     let inputs = kernel
         .code
@@ -2155,7 +2399,8 @@ fn addresses(
     let read = |source: Source,
                 place: Where,
                 accepts_no_nerve: bool,
-                expects: Option<&str>|
+                expects: Option<&str>,
+                reader: LawName|
      -> Result<Address, CompileDefect> {
         let checked = |field: LawName, row: usize| match expects {
             Some(expected) if rows.rows[row].dimension != expected => {
@@ -2182,7 +2427,12 @@ fn addresses(
                 };
                 match landed {
                     Some(junction) => {
-                        let row = rows.defined(field, at);
+                        let granted = field.owner == crate::Receptor::CARD
+                            && catalog::effect_read(reader.owner).is_some();
+                        let row = match granted {
+                            true => rows.exactly(field, at),
+                            false => rows.defined(field, at),
+                        };
                         checked(field, row.ok_or(CompileDefect::NoReceptor { law, junction })?)?
                     }
                     None if !anatomy.unsupplied(site) => return Err(CompileDefect::NoSupply { law, site }),
@@ -2193,7 +2443,34 @@ fn addresses(
                 }
             }
             Source::Field(field) => {
-                let row = rows.defined(field, at);
+                let row = match field.local {
+                    CORE_TEMPERATURE if store_temperature(field) => rows.exactly(field, Context::Body),
+                    TISSUE_TEMPERATURE if store_temperature(field) => rows.exactly(field, at),
+                    _ => rows.defined(field, at),
+                };
+                checked(field, row.ok_or(CompileDefect::UnemittedField { law, field })?)?
+            }
+            Source::TissueHeat(store) => {
+                let site = match (store, context) {
+                    (StoreHeat::Core, _) => core_store(schema),
+                    (StoreHeat::OwnSite, Context::Site(site)) => {
+                        Some(site).filter(|&site| holds_heat(schema, site))
+                    }
+                    (StoreHeat::OwnSite, _) => None,
+                };
+                let site = site.ok_or(CompileDefect::NoSuchRead { law })?;
+                let pool = PoolRef {
+                    site,
+                    space: Space::Thermal,
+                    species: Species::Energy,
+                };
+                unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
+            }
+            Source::TissueTemperature(read) => {
+                let store =
+                    store_read(schema, read, context, landed).ok_or(CompileDefect::NoSuchRead { law })?;
+                let (field, at) = temperature_at(schema, store);
+                let row = rows.exactly(field, at);
                 checked(field, row.ok_or(CompileDefect::UnemittedField { law, field })?)?
             }
             Source::Flow(family) => {
@@ -2276,7 +2553,11 @@ fn addresses(
             Source::Lasting(input) => Address::Lasting(input),
         })
     };
-    let resolve = |input: Input, accepts: bool, expects: Option<&str>| -> Result<Address, CompileDefect> {
+    let resolve = |input: Input,
+                   accepts: bool,
+                   expects: Option<&str>,
+                   reader: LawName|
+     -> Result<Address, CompileDefect> {
         Ok(match (input, context) {
             (Input::Memory(local) | Input::Algebraic(local), _) => {
                 let slot = LawName {
@@ -2288,7 +2569,7 @@ fn addresses(
                         .ok_or(CompileDefect::NoSuchRead { law })?,
                 )
             }
-            (Input::Read(source, place), _) => read(source, place, accepts, expects)?,
+            (Input::Read(source, place), _) => read(source, place, accepts, expects, reader)?,
             (Input::Height(place), _) => {
                 let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
                 Address::Height(anatomy.axial(site).to_bits())
@@ -2309,6 +2590,31 @@ fn addresses(
                     rows.slot(flow, context)
                         .ok_or(CompileDefect::NoSuchRead { law })?,
                 )
+            }
+            (Input::BedInflow, Context::Site(bed)) if law.owner == crate::Cardiovascular::CARD => {
+                let into: Vec<(SiteId, SiteId)> = (anatomy.vascular()).filter(|edge| edge.1 == bed).collect();
+                let [(from, to)] = into[..] else {
+                    return Err(CompileDefect::NoSuchRead { law });
+                };
+                if !anatomy.is_valve((from, to)) && sinusoidal(anatomy, (from, to)) {
+                    return Err(CompileDefect::NoSuchRead { law });
+                }
+                let family = match anatomy.is_valve((from, to)) {
+                    true => Family::Valves,
+                    false => Family::Circulation,
+                };
+                let flow = Slot {
+                    law: LawName {
+                        owner: law.owner,
+                        local: family.name(),
+                    },
+                    at: Context::Edge { from, to },
+                };
+                let kind = match family {
+                    Family::Valves => RowKind::Memory(flow),
+                    _ => RowKind::Algebraic(flow),
+                };
+                unknown((rows.inflow_row(flow, kind)).ok_or(CompileDefect::NoSuchRead { law })?)
             }
             (Input::Inflow, Context::Edge { from, .. }) => {
                 let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
@@ -2353,18 +2659,33 @@ fn addresses(
                 | Input::EdgeParameter(_)
                 | Input::EndParameter(..)
                 | Input::Inflow
-                | Input::EdgeFlow,
+                | Input::EdgeFlow
+                | Input::BedInflow,
                 _,
             ) => return Err(CompileDefect::NoSuchRead { law }),
         })
     };
     for read in &kernel.unreached {
-        resolve(read.input, read.accepts_no_nerve, read.expects.as_deref())?;
+        resolve(
+            read.input,
+            read.accepts_no_nerve,
+            read.expects.as_deref(),
+            read.origin.unwrap_or(law),
+        )?;
     }
     let expects =
         |op: usize| (kernel.fields.iter().find(|read| read.at == op)).map(|read| read.expects.as_str());
+    let reader =
+        |op: usize| (kernel.origins.iter().find(|&&(at, _)| at == op)).map_or(law, |&(_, origin)| origin);
     inputs
-        .map(|(op, input)| resolve(input, kernel.accepts_no_nerve.contains(&op), expects(op)))
+        .map(|(op, input)| {
+            resolve(
+                input,
+                kernel.accepts_no_nerve.contains(&op),
+                expects(op),
+                reader(op),
+            )
+        })
         .collect()
 }
 
@@ -2455,13 +2776,13 @@ fn guards(
     fragments: &[FragmentData],
     places: &Places,
     modes: &[ModeLayout],
-    fields: &[ExplicitLaw],
 ) -> Result<Vec<(GuardLayout, Vec<Address>)>, CompileDefect> {
     let Places {
         rows,
         reaches,
         anatomy,
         schema,
+        fields,
         ..
     } = *places;
     let mut guards = Vec::new();
@@ -2499,6 +2820,7 @@ fn guards(
             let written = written(law, zero, fields)?;
             let program = written.as_ref().unwrap_or(zero);
             let contexts = places_of(anatomy, reaches, schema, fragment.owner, mode.over);
+            check_rights(law, zero, places)?;
             check_ends(law, zero, &contexts, anatomy)?;
             for at in contexts {
                 check_landing(law, zero, fields, at, anatomy)?;
@@ -2518,6 +2840,7 @@ fn guards(
                     inputs: Vec::new(),
                     resets: reset,
                 };
+                check_granted(law, zero, Some(at), places)?;
                 guards.push((layout, addresses(law, route, program, at, places)?));
                 check_wired(law, zero, at, places)?;
             }
@@ -3054,7 +3377,8 @@ fn modes(fragments: &[FragmentData], places: &Places) -> Vec<ModeLayout> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Terminal, reaches_of};
+    use super::{Rows, Terminal, reaches_of};
+    use crate::body::{Row, RowKind, Slot, UnknownId};
     use crate::law::Family;
     use crate::*;
 
@@ -3224,6 +3548,55 @@ mod tests {
                 (Stands::Site("airway"), core, ("airway", Space::Thermal)),
                 (Stands::Site("skin"), core, ("skin", Space::Thermal)),
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_bound_inflow_takes_its_familys_row_kind_and_a_water_rate() -> Result<(), AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let vessel = map.site::<VesselSegment>("vessel", at()?);
+        let bed = map.site::<CapillaryBed>("bed", at()?);
+        let at = Context::Edge {
+            from: vessel.id(),
+            to: bed.id(),
+        };
+        let flow = |family: Family| Slot {
+            law: LawName {
+                owner: Cardiovascular::CARD,
+                local: family.name(),
+            },
+            at,
+        };
+        let (circulation, valves) = (flow(Family::Circulation), flow(Family::Valves));
+        let row = |index: usize, kind, dimension: String| Row {
+            unknown: UnknownId::at(index),
+            kind,
+            admissible: AdmissibleSet::Finite,
+            dimension,
+        };
+        let water = crate::quantity::dimension::<Rate<Water>>();
+        let energy = crate::quantity::dimension::<Rate<Energy>>();
+        let mut slots = vec![(circulation, 0), (valves, 1)];
+        slots.sort_unstable();
+        let rows = Rows {
+            rows: vec![
+                row(0, RowKind::Algebraic(circulation), water),
+                row(1, RowKind::Memory(valves), energy),
+            ],
+            amounts: Vec::new(),
+            slots,
+            defined: Vec::new(),
+        };
+        assert_eq!(
+            rows.inflow_row(circulation, RowKind::Algebraic(circulation)),
+            Some(0)
+        );
+        assert_eq!(rows.inflow_row(circulation, RowKind::Memory(circulation)), None);
+        assert_eq!(rows.inflow_row(valves, RowKind::Memory(valves)), None);
+        assert_eq!(
+            rows.inflow_row(flow(Family::Sinusoids), RowKind::Algebraic(circulation)),
+            None
         );
         Ok(())
     }

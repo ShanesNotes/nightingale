@@ -375,7 +375,9 @@ pub enum CompileDefect {
     /// keep rows nothing uses.
     UnreadSample { site: SiteId },
     /// A law that reads a field blood chemistry states where no row of the readers' table wires that quantity to its
-    /// card on a set that holds the site.
+    /// card on a set that holds the site, a store's heat or temperature that no grant of the catalog gives its card
+    /// at that place, or a receptor effect that a listed effect reader reads off its quantity, its strict junction
+    /// read or its sites.
     UnwiredRead { law: LawName, field: LawName },
     /// A read of a field in another dimension than the field's own.
     FieldDimension { law: LawName, field: LawName },

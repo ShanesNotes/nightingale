@@ -1615,6 +1615,8 @@ mod admission;
 mod anatomy;
 mod body;
 mod boundary;
+#[cfg(test)]
+mod carriage;
 pub mod catalog;
 mod chance;
 mod compensated;
@@ -1637,18 +1639,24 @@ mod packet;
 mod pinned;
 mod problem;
 mod provenance;
+#[cfg(test)]
+mod publication;
 mod quadrature;
 mod quantity;
 mod ring;
 mod scheme;
 mod scope;
 mod seam;
+#[cfg(test)]
+mod skin_vessels;
 mod sources;
 #[cfg(test)]
 mod speciated;
 mod species;
 mod split;
 mod state;
+#[cfg(test)]
+mod sweat;
 mod system;
 mod time;
 #[cfg(test)]
