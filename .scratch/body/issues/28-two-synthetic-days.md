@@ -18,4 +18,6 @@ Blocked by: 19, 20, 21, 22, 24, `.scratch/native-contract/issues/95-the-record-t
 
 A note from the check of native-contract 85's second PR: no 48-hour protocol uses the body's policy yet. The milestone protocol (`ArenaProtocol::milestone` in `crates/ng-validate/src/arena.rs`) runs on the slice under `arena_certificate`, whose drift table states no windows between edges, and only the body's tests read `body_certificate`.
 
+A note from the check of body ticket 12's PR 12a, for this ticket's energy check: the heat loop's test bounds heat made less heat lost by `HEAT_SHARE` (`crates/ng-validate/tests/body_run.rs`, line 3931), whose bound of 1e-1 of heat made is set by the synthetic forcing's swing over the reference run's draw. With the forcing at amplitude 0 the check measured the loop alone balancing to 5.47e-4 of heat made. So while the forcing runs, that test does not refuse a loop imbalance under about a tenth of heat made over a breath window.
+
 From [ticket 06](06-whole-body-on-holds.md)'s plan: the hold table this ticket lists gains the cell anion, which body 01's table of the holds rung 0 keeps (01:635-651) leaves out. BC holds it in the cells of every bed, because no rung 0 law moves it, and [ticket 17](17-volume-hormones.md) reads it (01:547).
