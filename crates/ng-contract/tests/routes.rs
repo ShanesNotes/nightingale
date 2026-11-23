@@ -228,7 +228,7 @@ fn blood_carries_heat_from_the_core_store_to_the_store_a_bed_sits_in_at_that_bed
             let zero = k.zero::<Rate<Energy>>();
             k.finish(zero, cv.every_mode(), class)
         });
-        cv.transfer_at(&route, still);
+        route.post(&mut cv, still);
         body.add(cv.finish());
         body.compile()
     })?;
@@ -602,5 +602,127 @@ fn a_named_work_on_a_map_whose_root_is_a_vessel_is_refused() -> Result<(), Admis
         work: Work::Stroke,
     }));
     assert_eq!(compiled.map(|_| ()), refused);
+    Ok(())
+}
+
+fn nearest_store_body(case: &str) -> Result<Anatomy, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let body = map.site::<TissueSite>("body", at()?);
+    let airway = map.site::<TissueSite>("conducting airway", at()?);
+    let skin = map.site::<TissueSite>("skin heat site", at()?);
+    let group = map.site::<TissueSite>("unheated group", at()?);
+    let inner = map.site::<TissueSite>("inner store", at()?);
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let skin_bed = map.site::<CapillaryBed>("skin bed", at()?);
+    let bare = map.site::<CapillaryBed>("bare bed", at()?);
+    for site in [airway.id(), skin.id(), vessel.id()] {
+        map.contain(body.id(), site);
+    }
+    map.contain(skin.id(), group.id());
+    map.contain(skin.id(), inner.id());
+    let (skin_holder, bare_holder) = match case {
+        "two beds in one store" => (skin.id(), skin.id()),
+        "a site with no heat pool between" => (group.id(), skin.id()),
+        "a store inside a store" => (inner.id(), skin.id()),
+        "a bed under a bed" => (bare.id(), skin.id()),
+        _ => (body.id(), body.id()),
+    };
+    map.contain(bare_holder, bare.id());
+    map.contain(skin_holder, skin_bed.id());
+    for bed in [skin_bed.id(), bare.id()] {
+        map.connect(Network::Vascular, vessel.id(), bed);
+        map.connect(Network::Vascular, bed, vessel.id());
+    }
+    map.serves(&skin_bed, Tissue::Skin);
+    map.finish()
+}
+
+type Nearest = (
+    &'static str,
+    &'static [&'static str],
+    &'static [(&'static str, &'static str)],
+);
+
+#[test]
+fn blood_carries_heat_into_the_nearest_tissue_heat_store_above_each_bed() -> Result<(), AdmissionError> {
+    let cases: [Nearest; 5] = [
+        (
+            "two beds in one store",
+            &[],
+            &[("bare bed", "skin heat site"), ("skin bed", "skin heat site")],
+        ),
+        (
+            "a site with no heat pool between",
+            &[],
+            &[("bare bed", "skin heat site"), ("skin bed", "skin heat site")],
+        ),
+        (
+            "a store inside a store",
+            &["inner store"],
+            &[("bare bed", "skin heat site"), ("skin bed", "inner store")],
+        ),
+        (
+            "a bed under a bed",
+            &[],
+            &[("bare bed", "skin heat site"), ("skin bed", "skin heat site")],
+        ),
+        ("each bed's nearest store is the core store", &[], &[]),
+    ];
+    let class = wave()?;
+    for (case, more, carried) in cases {
+        let mut schema = Schema::new(nearest_store_body(case)?)?;
+        watery_spaces_left_out(&mut schema);
+        let stores = ["body", "skin heat site", "conducting airway"];
+        for &store in stores.iter().chain(more) {
+            schema.pool::<Energy>(site::<TissueSite>(store), Space::Thermal)?;
+        }
+        let compiled = assemble(schema, |mut body| {
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let route = ports.heat_carried(&mut cv);
+            let still = cv.site_kernel(|mut k| {
+                let zero = k.zero::<Rate<Energy>>();
+                k.finish(zero, cv.every_mode(), class)
+            });
+            route.post(&mut cv, still);
+            body.add(cv.finish());
+            let (mut mt, ports) = body.metabolism(None)?.parts();
+            let conduction = ports.conduction(&mut mt);
+            let still = mt.site_kernel(|mut k| {
+                let zero = k.zero::<Rate<Energy>>();
+                k.finish(zero, mt.every_mode(), class)
+            });
+            mt.transfer_at(&conduction, still);
+            body.add(mt.finish());
+            body.compile()
+        })?;
+        let ends = |local| -> Vec<(&str, &str)> {
+            let mut ends: Vec<(&str, &str)> = (columns(&compiled, local).into_iter())
+                .map(|(context, _, ends)| {
+                    let Context::Site(at) = context else {
+                        panic!("{case}: a site's column");
+                    };
+                    assert_eq!(
+                        (ends[0].0, ends[0].2),
+                        ("body", -1),
+                        "{case}: the core store is the far end"
+                    );
+                    assert_eq!((ends[1].1, ends[1].2), (Space::Thermal, 1), "{case}");
+                    (at.key(), ends[1].0)
+                })
+                .collect();
+            ends.sort_unstable();
+            ends
+        };
+        assert_eq!(ends("heat carried by blood"), carried, "{case}");
+        let mut conducted: Vec<(&str, &str)> = (stores[1..].iter().chain(more))
+            .map(|&store| (store, store))
+            .collect();
+        conducted.sort_unstable();
+        assert_eq!(
+            ends("conduction"),
+            conducted,
+            "{case}: each store but the core conducts"
+        );
+    }
     Ok(())
 }

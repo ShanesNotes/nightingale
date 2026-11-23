@@ -226,11 +226,66 @@ mutants = [
   "edge-read-end-off-set-passes-a-law-with-no-edge",
   "edge-read-discarded-read-is-not-checked",
   "edge-read-end-off-set-passes-a-guard-off-a-route",
+  "skin-edge-reads-every-downstream-site",
 ]
 doctests = [
-  { path = "crates/ng-contract/src/law.rs", code = "E0277", text = "PerSite<Beds<Muscle>, Dimensionless>" },
+  { path = "crates/ng-contract/src/law.rs", code = "E0277", text = "PerSite<EnclosedSpace, Dimensionless>" },
   { path = "crates/ng-contract/src/law.rs", code = "E0308", text = "Kernel<'b, 'k, Cardiovascular, TubuleEdge>" },
 ]
+
+[[row]]
+core = "Blood carries a bed's heat into a store other than the nearest tissue heat store above the bed, or posts the carriage column with its ends reversed"
+mutants = ["carriage-stops-at-a-parent-with-no-heat", "carriage-column-ends-reversed"]
+
+[[row]]
+core = "A bed inflow read from the first of two feeders, from the bed's outgoing edge, or from a row of another kind or dimension"
+mutants = [
+  "bed-inflow-takes-the-first-of-two-feeders",
+  "bed-inflow-reads-the-outgoing-flow",
+  "bound-inflow-takes-any-kind-and-dimension",
+]
+doctests = [
+  { path = "crates/ng-contract/src/law.rs", code = "E0599", text = "fn wrong<'b, 'k>(k: &mut Kernel<'b, 'k, Metabolism, CapillaryBed>) {" },
+]
+
+[[row]]
+core = "A store temperature read by a card the catalog grants no such read, or at a place its arrow does not allow, kept, discarded, in a guard, in a site term no site realizes or by name in an explicit field"
+mutants = ["projection-read-by-the-wrong-reader", "explicit-field-inputs-unchecked", "unread-explicit-field-unchecked"]
+doctests = [
+  { path = "crates/ng-contract/src/catalog.rs", code = "E0271", text = "fn wrong<'b>(mt: &FragmentBuilder<'b, Metabolism>) -> PerfusionTemperatures<'b> {" },
+  { path = "crates/ng-contract/src/catalog.rs", code = "E0271", text = "fn wrong<'b>(cv: &FragmentBuilder<'b, Cardiovascular>) -> SkinThermoreceptor<'b> {" },
+]
+
+[[row]]
+core = "A skin thermoreceptor read at the landmark's height site, or at a sampled site no skin bed sits in"
+mutants = ["thermoreceptor-reads-at-the-height-site"]
+
+[[row]]
+core = "A store read whose store is missing, bound to the core store's row instead, or a read of either end of blood's carriage at a body with no core store"
+mutants = ["missing-store-reads-the-core-row", "carriage-tissue-end-without-core-store"]
+
+[[row]]
+core = "Two bodies whose only difference is the heat exit a store temperature is read at, under one model hash"
+mutants = ["exit-identity-left-out-of-the-model-hash"]
+
+[[row]]
+core = "MT reads the acetylcholine effect through the lenient junction read, of another ligand, or at a junction that supplies none of the skin's beds"
+mutants = [
+  "sweat-read-takes-the-lenient-junction-read",
+  "sweat-read-of-another-ligand",
+  "sweat-read-off-the-skins-beds",
+]
+doctests = [
+  { path = "crates/ng-contract/src/scope/metabolism.rs", code = "E0599", text = "let _ = k.at_junction_if_supplied(g);" },
+]
+
+[[row]]
+core = "MT reads the acetylcholine effect at a skin junction that holds no receptor effect, bound to a row of that name at the body instead"
+mutants = ["junction-receptor-from-the-body", "written-junction-read-under-the-host", "discarded-written-junction-read-under-the-host"]
+
+[[row]]
+core = "The skin reference declared by two cards with different descriptors"
+mutants = ["parameter-descriptors-never-conflict"]
 
 [[row]]
 core = "A rhythm declared on a phase no guard resets at one of its places, or declared twice"

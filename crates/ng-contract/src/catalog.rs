@@ -2,13 +2,14 @@
 //! `docs/atlas/coupling-map.md` (lines 77-114).
 //!
 //! Mapped means the route has a declared home, not that the outside system is simulated.
-use crate::law::{Brand, Carried, Output, ReadPort};
+use crate::law::{Brand, Carried, End, Expr, Kernel, Output, ReadPort, StoreTemperature};
 use crate::{
-    Acidity, Ammonia, Beds, BloodChemistry, Brain, CapillaryBed, CarbonDioxidePartialPressure,
+    Acidity, Ammonia, Beds, BloodChemistry, Body, Brain, CapillaryBed, CarbonDioxidePartialPressure,
     Cardiovascular, Class, Concentration, Dimensionless, Endocrine, Energy, Fluids, Gastrointestinal,
-    Hematology, Hepatic, Immune, Includes, LawName, Lung, Metabolism, Musculoskeletal, Nervous, Owner,
-    Oxygen, OxygenPartialPressure, OxygenSaturation, PerSite, Phase, Pressure, Rate, Renal, Renin,
-    Respiratory, SiteSet, Sites, Speciated, Speciation, Temperature, Tissue, Tubule, Viscosity, Volume,
+    Hematology, Hepatic, Immune, Includes, Landmark, LawName, Lung, Metabolism, Musculoskeletal, Nervous,
+    Owner, Oxygen, OxygenPartialPressure, OxygenSaturation, PerSite, Phase, Pressure, Rate, Receptor, Renal,
+    Renin, Respiratory, SiteSet, Sites, Skin, Speciated, Speciation, Species, Temperature, Tissue,
+    TissueSite, Tubule, Viscosity, Volume,
 };
 use core::marker::PhantomData;
 
@@ -125,6 +126,16 @@ pub struct WiredField {
     pub name: &'static str,
     pub unit: &'static str,
     pub body_ticket: u8,
+    /// Where a projected field is read, through its grant from rows its sender defines. An emitted field has none.
+    pub projected: Option<Projection>,
+}
+/// The place a projected field's grant reads its sender's rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Projection {
+    /// The two ends of a bed's carriage route, the core store and the store the bed sits in, in the bed's kernel.
+    CarriageEnds,
+    /// The store the skin thermoreceptor's sampled site holds, in a whole-body kernel.
+    SkinThermoreceptor,
 }
 /// A held field is no member of its arrow's payload: EN cannot read the ventricular wall stress arrow 79 holds.
 /// ```compile_fail,E0609
@@ -379,8 +390,9 @@ const LAST_WIRING_TICKET: u8 = 25;
 
 macro_rules! coupling_map {
     ($($line:literal $from:ident => $to:ident, $label:literal, $slice:ident $($why:literal)?,
-        $plan:ident $carried:tt $(held $held:tt)?;)*) => {
+        $plan:ident $carried:tt $(held $held:tt)? $(projected $projected:tt)?;)*) => {
         $(coupling_map!(@payload $plan $carried $line $from $to $label);)*
+        $($(coupling_map!(@grant $projected $line $from $to $label);)?)*
         pub const ARROWS: [Arrow; MAP_EDGES] = [$(Arrow {
             line: $line,
             from: <$from as Owner>::CARD,
@@ -388,8 +400,42 @@ macro_rules! coupling_map {
             sender_in_slice: <$from as Owner>::IN_SLICE,
             receiver_in_slice: <$to as Owner>::IN_SLICE,
             slice: coupling_map!(@slice $slice $($why)?),
-            carries: coupling_map!(@carries $plan $carried $($held)?),
+            carries: coupling_map!(@carries $plan $carried [$($held)?] [$($projected)?]),
         },)*];
+    };
+    (@grant ($name:ident { $field:ident @ CarriageEnds: $unit:ty => $ticket:literal })
+        $line:literal $from:ident $to:ident $label:literal) => {
+        #[doc = concat!("Coupling-map line ", stringify!($line), ", ", stringify!($from), " to ",
+            stringify!($to), ": \"", $label, "\". The read grant of its projected field `", stringify!($field), "`.")]
+        pub struct $name<'b> {
+            ends: [ReadPort<'b, $to, PerSite<CapillaryBed, $unit>>; 2],
+        }
+        impl<'b> Coupling for $name<'b> {
+            type From = $from;
+            type To = $to;
+            type Side = Reads<'b, $to>;
+            fn issue(_: Token) -> (Self, Vec<Field>) {
+                let end = |end| ReadPort::temperature(StoreTemperature::CarriageEnd(end));
+                (Self { ends: [end(End::From), end(End::To)] }, Vec::new())
+            }
+        }
+    };
+    (@grant ($name:ident { $field:ident @ SkinThermoreceptor: $unit:ty => $ticket:literal })
+        $line:literal $from:ident $to:ident $label:literal) => {
+        #[doc = concat!("Coupling-map line ", stringify!($line), ", ", stringify!($from), " to ",
+            stringify!($to), ": \"", $label, "\". The read grant of its projected field `", stringify!($field), "`.")]
+        pub struct $name<'b> {
+            sampled: ReadPort<'b, $to, PerSite<TissueSite, $unit>>,
+        }
+        impl<'b> Coupling for $name<'b> {
+            type From = $from;
+            type To = $to;
+            type Side = Reads<'b, $to>;
+            fn issue(_: Token) -> (Self, Vec<Field>) {
+                let sampled = ReadPort::temperature(StoreTemperature::SkinThermoreceptor);
+                (Self { sampled }, Vec::new())
+            }
+        }
     };
     (@payload wired ($name:ident { $($field:ident: $unit:ty => $ticket:literal),+ $(,)? })
         $line:literal $from:ident $to:ident $label:literal) => {
@@ -418,18 +464,25 @@ macro_rules! coupling_map {
     (@slice relation $why:literal) => { Disposition::AnatomyRelation { reason: $why } };
     (@slice outside $why:literal) => { Disposition::OutsideSlice { reason: $why } };
     (@slice unresolved $why:literal) => { Disposition::Unresolved { reason: $why } };
-    (@carries relation $why:literal) => { Carries::Relation { reason: $why } };
-    (@carries wired ($name:ident { $($field:ident: $unit:ty => $ticket:literal),+ $(,)? }) $($held:tt)?) => {
+    (@carries relation $why:literal [] []) => { Carries::Relation { reason: $why } };
+    (@carries wired ($name:ident { $($field:ident: $unit:ty => $ticket:literal),+ $(,)? })
+        [$($held:tt)?] [$(($grant:ident { $projected:ident @ $at:ident: $at_unit:ty => $at_ticket:literal }))?]) => {
         Carries::Fields {
             wired: &[$(WiredField {
                 name: stringify!($field),
                 unit: carried_unit::<$unit>(stringify!($unit)),
                 body_ticket: $ticket,
-            }),+],
+                projected: None,
+            },)+ $(WiredField {
+                name: stringify!($projected),
+                unit: carried_unit::<$at_unit>(stringify!($at_unit)),
+                body_ticket: $at_ticket,
+                projected: Some(Projection::$at),
+            })?],
             held: coupling_map!(@held $($held)?),
         }
     };
-    (@carries held $held:tt) => { Carries::Fields { wired: &[], held: coupling_map!(@held $held) } };
+    (@carries held $held:tt [] []) => { Carries::Fields { wired: &[], held: coupling_map!(@held $held) } };
     (@held) => { &[] };
     (@held [$($field:ident: $unit:ty => $holder:ident $reason:literal),+ $(,)?]) => {
         &[$(HeldField {
@@ -447,7 +500,7 @@ coupling_map! {
     78 Cardiovascular => Metabolism, "myocardial work, flow per bed", sink,
         wired (MyocardialWorkAndBedFlow { myocardial_work: Rate<Energy> => 9 })
         held [flow_per_bed: PerSite<CapillaryBed, Rate<Volume>> => Cardiovascular
-            "no law reads a bed's flow at rung 0: a bed's oxygen arrives by the blood's own transport into its plasma"];
+            "MT's oxygen supply arrives by plasma transport. CV reads its own inflow for carriage."];
     79 Cardiovascular => Endocrine, "wall stress", sink,
         wired (WallStress { atrial_wall_stress: Pressure => 17 })
         held [ventricular_wall_stress: Pressure => Cardiovascular "one natriuretic peptide is secreted, on atrial stretch"];
@@ -481,9 +534,10 @@ coupling_map! {
             circadian_phase: Phase => Nervous "the clock is a boundary input every law reads (ticket 05)"];
     90 Metabolism => Cardiovascular, "O2 debt per bed, temperature", input,
         wired (OxygenDebtPerBed { oxygen_debt_per_bed: PerSite<CapillaryBed, Oxygen> => 9 })
-        held [temperature: Temperature => Cardiovascular "CV's laws run at a reference temperature"];
+        projected (PerfusionTemperatures { temperature @ CarriageEnds: Temperature => 12 });
     91 Metabolism => Nervous, "temperature", input,
-        wired (CoreTemperature { core_temperature: Temperature => 12 });
+        wired (CoreTemperature { core_temperature: Temperature => 12 })
+        projected (SkinThermoreceptor { skin_temperature @ SkinThermoreceptor: Temperature => 12 });
     92 Metabolism => Hematology, "temperature", outside "neither end in the arena slice",
         held [temperature: Temperature => Hematology "HC's laws run at a reference temperature (ticket 12)"];
     93 Metabolism => Hepatic, "temperature", outside "neither end in the arena slice",
@@ -546,6 +600,167 @@ coupling_map! {
             thrombosis: Dimensionless => Hematology "zero flux (ticket 21)"];
 }
 
+/// Only CV receives the carriage temperatures.
+/// ```compile_fail,E0271
+/// use ng_contract::{catalog::*, *};
+/// fn wrong<'b>(mt: &FragmentBuilder<'b, Metabolism>) -> PerfusionTemperatures<'b> {
+///     mt.receive()
+/// }
+/// ```
+/// ```
+/// use ng_contract::{catalog::*, *};
+/// fn received<'b>(cv: &FragmentBuilder<'b, Cardiovascular>) -> PerfusionTemperatures<'b> {
+///     cv.receive()
+/// }
+/// ```
+/// The grant reads rows MT defines, so no card emits it.
+/// ```compile_fail,E0271
+/// use ng_contract::{catalog::*, *};
+/// fn second<'b>(mt: &mut FragmentBuilder<'b, Metabolism>) -> PerfusionTemperatures<'b> {
+///     mt.emit()
+/// }
+/// ```
+/// ```
+/// use ng_contract::{catalog::*, *};
+/// fn emitted<'b>(mt: &mut FragmentBuilder<'b, Metabolism>) -> CoreTemperature<Defines<'b, Metabolism>> {
+///     mt.emit()
+/// }
+/// ```
+impl<'b> PerfusionTemperatures<'b> {
+    /// The core store's temperature at a bed whose carriage route runs into another store. A kernel off the
+    /// capillary beds does not build, and compile refuses a bed whose nearest store is the core store.
+    /// ```compile_fail,E0277
+    /// use ng_contract::{catalog::*, *};
+    /// fn wrong<'b, 'k>(t: &PerfusionTemperatures<'b>, k: &mut Kernel<'b, 'k, Cardiovascular, VesselSegment>) {
+    ///     let _ = t.core(k);
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::{catalog::*, *};
+    /// fn read<'b, 'k>(t: &PerfusionTemperatures<'b>, k: &mut Kernel<'b, 'k, Cardiovascular, Beds<Skin>>) {
+    ///     let _ = t.core(k);
+    /// }
+    /// ```
+    pub fn core<'k, C: SiteSet>(
+        &self,
+        k: &mut Kernel<'b, 'k, Cardiovascular, C>,
+    ) -> Expr<'b, 'k, Cardiovascular, Temperature>
+    where
+        CapillaryBed: Includes<C>,
+    {
+        k.at_site_in(&self.ends[0])
+    }
+    /// The temperature of the store the bed sits in.
+    pub fn tissue<'k, C: SiteSet>(
+        &self,
+        k: &mut Kernel<'b, 'k, Cardiovascular, C>,
+    ) -> Expr<'b, 'k, Cardiovascular, Temperature>
+    where
+        CapillaryBed: Includes<C>,
+    {
+        k.at_site_in(&self.ends[1])
+    }
+}
+/// Only NS receives the skin thermoreceptor's grant.
+/// ```compile_fail,E0271
+/// use ng_contract::{catalog::*, *};
+/// fn wrong<'b>(cv: &FragmentBuilder<'b, Cardiovascular>) -> SkinThermoreceptor<'b> {
+///     cv.receive()
+/// }
+/// ```
+/// ```
+/// use ng_contract::{catalog::*, *};
+/// fn received<'b>(ns: &FragmentBuilder<'b, Nervous>) -> SkinThermoreceptor<'b> {
+///     ns.receive()
+/// }
+/// ```
+/// The skin temperature is no member of arrow 91's emitted scalar.
+/// ```compile_fail,E0609
+/// use ng_contract::{catalog::*, *};
+/// fn wrong<'b>(t: &CoreTemperature<Reads<'b, Nervous>>) {
+///     let _ = &t.skin_temperature;
+/// }
+/// ```
+/// ```
+/// use ng_contract::{catalog::*, *};
+/// fn read<'b>(t: &CoreTemperature<Reads<'b, Nervous>>) {
+///     let _ = &t.core_temperature;
+/// }
+/// ```
+impl<'b> SkinThermoreceptor<'b> {
+    /// The temperature of the store at the landmark's sampled site, never its height site. Compile refuses a sampled
+    /// site that is no tissue heat store a skin bed sits in.
+    /// ```compile_fail,E0308
+    /// use ng_contract::{catalog::*, *};
+    /// fn wrong<'b, 'k>(s: &SkinThermoreceptor<'b>, k: &mut Kernel<'b, 'k, Nervous, Junction>) {
+    ///     let _ = s.temperature(k);
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::{catalog::*, *};
+    /// fn read<'b, 'k>(s: &SkinThermoreceptor<'b>, k: &mut Kernel<'b, 'k, Nervous>) {
+    ///     let _ = s.temperature(k);
+    /// }
+    /// ```
+    pub fn temperature<'k>(
+        &self,
+        k: &mut Kernel<'b, 'k, Nervous, Body>,
+    ) -> Expr<'b, 'k, Nervous, Temperature> {
+        k.at_landmark(Landmark::SkinThermoreceptor, &self.sampled)
+    }
+}
+
+pub(crate) fn projected(projection: Projection) -> (&'static Arrow, &'static WiredField) {
+    let fields = ARROWS
+        .iter()
+        .flat_map(|arrow| arrow.carries.wired().iter().map(move |field| (arrow, field)));
+    let mut found = fields.filter(|(_, field)| field.projected == Some(projection));
+    found
+        .next()
+        .expect("the catalog projects each grant at one field")
+}
+pub(crate) fn reads_plainly(reader: &'static str, field: LawName) -> bool {
+    let emits = |arrow: &Arrow| {
+        let wired = arrow.carries.wired().iter();
+        same(arrow.from, field.owner)
+            && same(arrow.to, reader)
+            && wired
+                .filter(|wired| wired.projected.is_none())
+                .any(|wired| same(wired.name, field.local))
+    };
+    same(reader, field.owner) || ARROWS.iter().any(emits)
+}
+const _: () = {
+    let projections = [Projection::CarriageEnds, Projection::SkinThermoreceptor];
+    let mut p = 0;
+    while p < projections.len() {
+        let (mut i, mut n) = (0, 0);
+        while i < MAP_EDGES {
+            let wired = ARROWS[i].carries.wired();
+            let mut j = 0;
+            while j < wired.len() {
+                if let Some(at) = wired[j].projected
+                    && at as usize == projections[p] as usize
+                {
+                    assert!(
+                        same(ARROWS[i].from, <Metabolism as Owner>::CARD)
+                            && same(wired[j].unit, "Temperature")
+                    );
+                    n += 1;
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        assert!(n == 1, "a projection is declared at other than one field");
+        p += 1;
+    }
+    assert!(same(
+        ARROWS[91 - 77].carries.wired()[0].name,
+        crate::scope::CORE_TEMPERATURE
+    ));
+};
+
 const SLICE: Count = Census::Slice.count();
 const WHOLE_BODY: Count = Census::WholeBody.count();
 const _: () = assert!(SLICE.mapped() + SLICE.unmapped() == MAP_EDGES);
@@ -553,7 +768,7 @@ const _: () = assert!(SLICE.mapped() == 27 && SLICE.unmapped() == 11);
 const _: () = assert!(SLICE.incident_mapped == 27 && SLICE.incident_unmapped == 1);
 const _: () = assert!(WHOLE_BODY.live == 14 && WHOLE_BODY.relation == 6 && WHOLE_BODY.held == 18);
 const FIELDS: FieldCount = field_count();
-const _: () = assert!(FIELDS.wired == 16 && FIELDS.held == 33 && FIELDS.wire_and_hold == 7);
+const _: () = assert!(FIELDS.wired == 18 && FIELDS.held == 32 && FIELDS.wire_and_hold == 6);
 const _: () = {
     let mut i = 0;
     while i < MAP_EDGES {
@@ -578,7 +793,7 @@ const _: () = {
     }
 };
 const _: () = {
-    let wire_and_hold = [78, 79, 87, 89, 90, 95, 114];
+    let wire_and_hold = [78, 79, 87, 89, 95, 114];
     let mut i = 0;
     while i < wire_and_hold.len() {
         let carries = ARROWS[wire_and_hold[i] - 77].carries;
@@ -640,7 +855,7 @@ const _: () = {
 };
 
 const _: () = {
-    let plan: [(usize, &str, &str); 33] = [
+    let plan: [(usize, &str, &str); 32] = [
         (78, "flow_per_bed", "CV"),
         (79, "ventricular_wall_stress", "CV"),
         (81, "pulmonary_capillary_flow", "CV"),
@@ -650,7 +865,6 @@ const _: () = {
         (87, "sweat_drive", "NS"),
         (89, "crh_drive", "NS"),
         (89, "circadian_phase", "NS"),
-        (90, "temperature", "CV"),
         (92, "temperature", "HC"),
         (93, "temperature", "HP"),
         (94, "temperature", "BC"),
@@ -693,7 +907,7 @@ const _: () = {
     assert!(n == plan.len());
 };
 const _: () = {
-    let plan: [(usize, &str, u8); 16] = [
+    let plan: [(usize, &str, u8); 18] = [
         (77, "carotid_sinus_stretch", 6),
         (77, "aortic_arch_stretch", 6),
         (78, "myocardial_work", 9),
@@ -705,7 +919,9 @@ const _: () = {
         (87, "shiver_drive", 12),
         (89, "vasopressin_drive", 17),
         (90, "oxygen_debt_per_bed", 9),
+        (90, "temperature", 12),
         (91, "core_temperature", 12),
+        (91, "skin_temperature", 12),
         (95, "pump_force", 10),
         (97, "afferent_tone", 6),
         (98, "renin_secretion", 17),
@@ -1003,6 +1219,75 @@ speciation_readers! {
         });
     Renal at Beds<Tubule>, "the peritubular bed's acidity, for the kidney's acid feedback",
         held [Acidity "ticket 18's text names the strong ion difference as what the kidney's feedback reads"];
+}
+
+/// What a card reads of S10, the autonomic efferents the receptor layer issues at a junction: one row for each
+/// reader whose read the catalog grants, beside the 38 arrows and beside the speciation readers, with the
+/// quantity it reads, the sites its kernel stands at and the body ticket that builds the reading law. A card
+/// with no row reads an effect at the junction of whatever site it stands at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EffectReader {
+    pub reader: &'static str,
+    pub sites: Sites,
+    pub quantity: &'static str,
+    pub body_ticket: u8,
+}
+pub const EFFECT_READERS: [EffectReader; 1] = [EffectReader {
+    reader: <Metabolism as Owner>::CARD,
+    sites: <Beds<Skin> as SiteSet>::SET,
+    quantity: Species::Acetylcholine.names()[4],
+    body_ticket: 12,
+}];
+pub(crate) fn effect_read(reader: &'static str) -> Option<&'static EffectReader> {
+    EFFECT_READERS.iter().find(|row| row.reader == reader)
+}
+const _: () = {
+    let mut i = 0;
+    while i < EFFECT_READERS.len() {
+        let row = &EFFECT_READERS[i];
+        assert!(
+            !same(row.reader, <Receptor as Owner>::CARD),
+            "the receptor layer is no reader of its own effects"
+        );
+        assert!(
+            row.body_ticket >= FIRST_WIRING_TICKET && row.body_ticket <= LAST_WIRING_TICKET,
+            "a read names no body ticket from 06 to 25"
+        );
+        assert!(at_beds(row.sites), "a reader's sites are a set of capillary beds");
+        let mut j = i + 1;
+        while j < EFFECT_READERS.len() {
+            assert!(
+                !same(row.reader, EFFECT_READERS[j].reader),
+                "a reader has two rows"
+            );
+            j += 1;
+        }
+        i += 1;
+    }
+};
+const _: () = {
+    let plan: [(&str, Sites, &str, u8); 1] =
+        [("MT", Sites::Tissue(Tissue::Skin), "effect acetylcholine", 12)];
+    let mut i = 0;
+    while i < EFFECT_READERS.len() {
+        let row = &EFFECT_READERS[i];
+        let (reader, sites, quantity, ticket) = plan[i];
+        assert!(
+            same(row.reader, reader)
+                && same_sites(row.sites, sites)
+                && same(row.quantity, quantity)
+                && row.body_ticket == ticket,
+            "an effect read is not the plan's"
+        );
+        i += 1;
+    }
+    assert!(EFFECT_READERS.len() == plan.len());
+};
+const fn at_beds(sites: Sites) -> bool {
+    matches!(
+        sites,
+        Sites::Class(Class::CapillaryBed) | Sites::Tissue(_) | Sites::Besides(_)
+    )
 }
 
 #[derive(Clone, Copy)]

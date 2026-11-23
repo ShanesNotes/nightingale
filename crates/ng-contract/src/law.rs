@@ -342,6 +342,7 @@ pub(crate) enum Input {
     Height(Where),
     Inflow,
     EdgeFlow,
+    BedInflow,
 }
 /// Where a read lands, from the kernel's own place. The compiler resolves it against the map, so a law says what it
 /// reads and never where that is.
@@ -484,6 +485,7 @@ impl Seal for Input {
             }
             Input::Inflow => out.number(13),
             Input::EdgeFlow => out.number(14),
+            Input::BedInflow => out.number(15),
         }
     }
 }
@@ -550,6 +552,25 @@ impl Seal for Source {
                 out.number(8);
                 input.seal(out);
             }
+            Source::TissueHeat(store) => {
+                out.number(9);
+                out.number(store as u64);
+            }
+            Source::TissueTemperature(read) => {
+                out.number(10);
+                match read {
+                    StoreTemperature::OwnBed => out.number(0),
+                    StoreTemperature::OwnExit(route) => {
+                        out.number(1);
+                        out.text(route);
+                    }
+                    StoreTemperature::CarriageEnd(end) => {
+                        out.number(2);
+                        out.number(end as u64);
+                    }
+                    StoreTemperature::SkinThermoreceptor => out.number(3),
+                }
+            }
         }
     }
 }
@@ -583,6 +604,7 @@ fn reachable_placed(
                 input: *input,
                 accepts_no_nerve: accepting.contains(&at),
                 expects: expects(at),
+                origin: None,
             }),
             _ => None,
         })
@@ -765,6 +787,7 @@ pub(crate) struct UnreachedRead {
     pub(crate) input: Input,
     pub(crate) accepts_no_nerve: bool,
     pub(crate) expects: Option<String>,
+    pub(crate) origin: Option<LawName>,
 }
 
 /// One kernel's graph while it is built. `'k` is fresh for every kernel, so an expression belongs to
@@ -941,6 +964,7 @@ impl KernelData {
                 let input = moved(read.input)?;
                 moved_unreached.push(UnreachedRead {
                     input,
+                    origin: Some(field.name),
                     ..read.clone()
                 });
             }
@@ -1032,7 +1056,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
     fn read_at<U: Dimension>(&mut self, source: Source, place: Where) -> Expr<'b, 'k, O, U> {
         let read = self.input(Input::Read(source, place));
-        if let Source::Field(_) = source {
+        if let Source::Field(_) | Source::TissueTemperature(_) = source {
             self.fields.push(FieldRead {
                 at: read.at,
                 expects: dimension::<U>(),
@@ -1279,6 +1303,19 @@ impl<'b, 'k, S> Kernel<'b, 'k, crate::Cardiovascular, S> {
         read
     }
 }
+#[cfg(test)]
+impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
+    /// `at_junction_if_supplied` for any card, so a synthetic test assembly can ask for the lenient read on a port the
+    /// catalog grants at the strict one alone, and show that the catalog refuses it.
+    pub(crate) fn lenient_at_junction<U: Dimension>(
+        &mut self,
+        port: &ReadPort<'b, O, PerSite<crate::Junction, U>>,
+    ) -> Expr<'b, 'k, O, U> {
+        let read = self.at_junction(port);
+        self.accepts_no_nerve.push(read.at);
+        read
+    }
+}
 impl<'b, 'k, O> Kernel<'b, 'k, O> {
     /// A per-site value at a landmark. Compile refuses a landmark the map does not place, or one placed off the port.
     pub fn at_landmark<C: SiteSet, U: Dimension>(
@@ -1293,6 +1330,48 @@ impl<'b, 'k, O> Kernel<'b, 'k, O> {
         let sensor = self.input(Input::Height(Where::Sensor(landmark)));
         let site = self.input(Input::Height(Where::Mark(landmark)));
         self.subtract(sensor, site)
+    }
+}
+impl<'b, 'k> Kernel<'b, 'k, crate::Cardiovascular, CapillaryBed> {
+    /// The signed flow of the one vascular edge into this bed, in the network's direction: the circulation edge's row
+    /// or the valve's flow memory. Compile refuses a bed with two feeders, a sinusoid the hepatic card holds, and an
+    /// edge with no flow row.
+    /// ```
+    /// use ng_contract::*;
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, CapillaryBed>) -> Expr<'b, 'k, Cardiovascular, Rate<Volume>> {
+    ///     let water = k.bed_inflow();
+    ///     k.volume_flow(water)
+    /// }
+    /// ```
+    /// The read is CV's.
+    /// ```compile_fail,E0599
+    /// use ng_contract::*;
+    /// fn wrong<'b, 'k>(k: &mut Kernel<'b, 'k, Metabolism, CapillaryBed>) {
+    ///     let _ = k.bed_inflow();
+    /// }
+    /// ```
+    /// The flow is water until `volume_flow` converts it.
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn wrong<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, CapillaryBed>) -> Expr<'b, 'k, Cardiovascular, Rate<Volume>> {
+    ///     k.bed_inflow()
+    /// }
+    /// ```
+    /// A body or an edge has no bed inflow.
+    /// ```compile_fail,E0599
+    /// use ng_contract::*;
+    /// fn wrong<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Body>) {
+    ///     let _ = k.bed_inflow();
+    /// }
+    /// ```
+    /// ```compile_fail,E0599
+    /// use ng_contract::*;
+    /// fn wrong<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>) {
+    ///     let _ = k.bed_inflow();
+    /// }
+    /// ```
+    pub fn bed_inflow(&mut self) -> Expr<'b, 'k, crate::Cardiovascular, Rate<Water>> {
+        self.input(Input::BedInflow)
     }
 }
 impl<'b, 'k, O> Kernel<'b, 'k, O, CapillaryBed> {
@@ -1369,11 +1448,11 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     ///     let _ = k.downstream_if_in(&debt.oxygen_debt_per_bed);
     /// }
     /// ```
-    /// An end whose set cannot hold the port's sites does not compile: a blood end reading one tissue's beds,
+    /// An end whose set cannot hold the port's sites does not compile: a blood end reading an enclosure,
     /// ```compile_fail,E0277
     /// use ng_contract::*;
-    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, tone: ReadPort<'b, Cardiovascular, PerSite<Beds<Muscle>, Dimensionless>>) {
-    ///     let _ = k.downstream_if_in(&tone);
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, held: ReadPort<'b, Cardiovascular, PerSite<EnclosedSpace, Dimensionless>>) {
+    ///     let _ = k.downstream_if_in(&held);
     /// }
     /// ```
     /// and a tubule's end reading every bed:
@@ -1387,6 +1466,14 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     /// use ng_contract::{catalog::*, *};
     /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, debt: OxygenDebtPerBed<Reads<'b, Cardiovascular>>) {
     ///     let _ = k.downstream_if_in(&debt.oxygen_debt_per_bed);
+    /// }
+    /// ```
+    /// A blood end reads one tissue's beds, since blood includes them:
+    /// ```
+    /// use ng_contract::*;
+    /// fn read<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>, skin: ReadPort<'b, Cardiovascular, PerSite<Beds<Skin>, Dimensionless>>)
+    ///     -> Expr<'b, 'k, Cardiovascular, Dimensionless> {
+    ///     k.downstream_if_in(&skin)
     /// }
     /// ```
     pub fn downstream_if_in<D: SiteSet, U: Dimension>(
@@ -1451,6 +1538,20 @@ pub(crate) enum Source {
     Extravascular,
     Reacting(&'static str, Species),
     Lasting(Lasting),
+    TissueHeat(StoreHeat),
+    TissueTemperature(StoreTemperature),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StoreHeat {
+    Core,
+    OwnSite,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StoreTemperature {
+    OwnBed,
+    OwnExit(&'static str),
+    CarriageEnd(End),
+    SkinThermoreceptor,
 }
 impl<'b, O, U> ReadPort<'b, O, U> {
     fn of(source: Source) -> Self {
@@ -1465,6 +1566,12 @@ impl<'b, O, U> ReadPort<'b, O, U> {
     }
     pub(crate) fn pool(species: Species) -> Self {
         Self::of(Source::Pool(species))
+    }
+    pub(crate) fn heat(store: StoreHeat) -> Self {
+        Self::of(Source::TissueHeat(store))
+    }
+    pub(crate) fn temperature(read: StoreTemperature) -> Self {
+        Self::of(Source::TissueTemperature(read))
     }
 }
 impl<'b, O, C: SiteSet> ReadPort<'b, O, PerSite<C, Pressure>> {
@@ -1496,6 +1603,7 @@ pub(crate) enum Over {
     HeldEnclosures,
     Route(Family),
     WherePool(Sites, Space, Species),
+    OtherTissueHeatStores,
 }
 pub(crate) trait Carried {
     fn over() -> Over;
@@ -1899,6 +2007,9 @@ impl<'b, Q, O> BoundaryRoute<'b, Q, O> {
             route: Pair::serving(Obligation::Boundary(boundary)),
             drive: ReadPort::of(Source::Drive(boundary)),
         }
+    }
+    pub(crate) fn name(&self) -> &'static str {
+        self.route.serves.local()
     }
 }
 

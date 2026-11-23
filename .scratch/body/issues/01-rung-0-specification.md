@@ -658,7 +658,7 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | Line | Arrow | Fields at rung 0 |
 |---|---|---|
 | 77 | CV to NS, baroreceptor afferents | `carotid_sinus_stretch`: wired by 06, live in the slice; `aortic_arch_stretch`: wired by 06, live in the slice |
-| 78 | CV to MT, myocardial work, flow per bed | `myocardial_work`: wired by 09, the heart's work paid by fuel burned at the coronary bed, a memory of the stroke work because the instant work holds by the rhythm's modes; `flow_per_bed`: held by CV, because no law reads a bed's flow at rung 0 and a bed's oxygen arrives by the blood's own transport into its plasma |
+| 78 | CV to MT, myocardial work, flow per bed | `myocardial_work`: wired by 09, the heart's work paid by fuel burned at the coronary bed, a memory of the stroke work because the instant work holds by the rhythm's modes; `flow_per_bed`: held by CV, because MT's oxygen supply arrives by plasma transport, and CV reads its own inflow for carriage |
 | 79 | CV to EN, wall stress | `atrial_wall_stress`: wired by 17, the natriuretic peptide's secretion; `ventricular_wall_stress`: held at rung 0, one peptide is secreted, on atrial stretch |
 | 80 | CV to FL, capillary and venous pressure | `capillary_pressure`: wired by 06, live in the slice; `venous_pressure`: wired by 06, live in the slice |
 | 81 | CV to RS, pulmonary capillary flow | `pulmonary_capillary_flow`: held at rung 0, the exchange reads the plasma's own partial pressures, which the blood's own transport into its plasma sets |
@@ -670,8 +670,8 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | 87 | NS to MT, thermostat, shiver and sweat | `thermostat_set_point`: held at rung 0, the set point is NS memory and no MT law reads it; `shiver_drive`: wired by 12, read by the muscle bed's heat, since shivering is a somatic motor command; `sweat_drive`: held at rung 0, sweat answers release at the skin junction (S10) |
 | 88 | NS to MS, motor drive | `motor drive`: anatomy relation, release at the respiratory pump's junction (11) |
 | 89 | NS to EN, CRH, vasopressin, circadian phase | `crh_drive`: held at rung 0, cortisol's profile follows the clock input directly (ticket 20); `vasopressin_drive`: wired by 17; `circadian_phase`: held at rung 0, the clock is a boundary input every law reads (ticket 05) |
-| 90 | MT to CV, O2 debt per bed, temperature | `oxygen_debt_per_bed`: wired by 09; `temperature`: held at rung 0, CV's laws run at a reference temperature |
-| 91 | MT to NS, temperature | `core_temperature`: wired by 12 |
+| 90 | MT to CV, O2 debt per bed, temperature | `oxygen_debt_per_bed`: wired by 09; `temperature`: wired by 12, a projected field CV reads at the two ends of a bed's carriage route from MT's store temperatures, with no row of its own |
+| 91 | MT to NS, temperature | `core_temperature`: wired by 12; `skin_temperature`: wired by 12, a projected field NS reads at the skin thermoreceptor from MT's store temperatures, with no row of its own |
 | 92 | MT to HC, temperature | `temperature`: held at rung 0, HC's laws run at a reference temperature (ticket 12) |
 | 93 | MT to HP, temperature | `temperature`: held at rung 0, HP's laws run at a reference temperature (ticket 12) |
 | 94 | MT to BC, temperature | `temperature`: held at rung 0, BC's speciation runs at a reference temperature (ticket 12) |

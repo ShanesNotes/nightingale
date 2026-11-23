@@ -1,6 +1,7 @@
 """Compare the crate's coupling catalog with the "Direct couplings" graph of
 docs/atlas/coupling-map.md, row by row, and hold the sketch's copy of the table to the crate's,
-byte for byte. Compare the crate's speciation readers with the map's "Speciation's readers" table, row by row.
+byte for byte. Compare the crate's speciation readers with the map's "Speciation's readers" table, row by row, and
+the crate's projected fields and effect readers with the map's "Read grants" table, row by row.
 
 Run from solver-contract-sketch/:  python3 -I evidence/census-check.py
 tools/verify (verify.d/20-sketch.sh) runs this as a gate. A change to the crate's catalog or owner
@@ -19,8 +20,8 @@ SLICE_KINDS = {"live", "input", "sink"}
 SLICE_REASONED = {"relation", "outside", "unresolved"}
 BODY_TICKETS = range(6, 26)
 SLICE_COUNTS = {"rows": 38, "mapped": 27, "listed unmapped": 11, "incident mapped": 27, "incident unmapped": 1}
-BODY_COUNTS = {"rows": 38, "wire a field": 14, "relations": 6, "hold every field": 18, "wire and hold": 7,
-               "wired fields": 16, "held fields": 33}
+BODY_COUNTS = {"rows": 38, "wire a field": 14, "relations": 6, "hold every field": 18, "wire and hold": 6,
+               "wired fields": 18, "held fields": 32}
 SLICE_LINES = {
     "live": [77, 80, 97],
     "input": [83, 90, 91, 99, 100, 102, 105, 106, 108, 114],
@@ -32,7 +33,8 @@ SLICE_LINES = {
 BODY_LIVE = [77, 78, 79, 80, 84, 86, 87, 89, 90, 91, 95, 97, 98, 114]
 BODY_HELD = [81, 83, 85, 92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
 RELATIONS = [82, 88, 96, 99, 101, 104]
-WIRE_AND_HOLD = [78, 79, 87, 89, 90, 95, 114]
+WIRE_AND_HOLD = [78, 79, 87, 89, 95, 114]
+PROJECTED = [(90, "temperature", "CarriageEnds"), (91, "skin_temperature", "SkinThermoreceptor")]
 HELD_BY = [
     (78, "flow_per_bed", "CV"),
     (79, "ventricular_wall_stress", "CV"),
@@ -43,7 +45,6 @@ HELD_BY = [
     (87, "sweat_drive", "NS"),
     (89, "crh_drive", "NS"),
     (89, "circadian_phase", "NS"),
-    (90, "temperature", "CV"),
     (92, "temperature", "HC"),
     (93, "temperature", "HP"),
     (94, "temperature", "BC"),
@@ -80,7 +81,9 @@ WIRED_BY = [
     (87, "shiver_drive", 12),
     (89, "vasopressin_drive", 17),
     (90, "oxygen_debt_per_bed", 9),
+    (90, "temperature", 12),
     (91, "core_temperature", 12),
+    (91, "skin_temperature", 12),
     (95, "pump_force", 10),
     (97, "afferent_tone", 6),
     (98, "renin_secretion", 17),
@@ -109,7 +112,7 @@ def table(path):
     return source[start:source.index("\n}\n", start) + 3]
 
 
-TOKEN = re.compile(r'\s+|//[^\n]*|/\*.*?\*/|(?P<tok>"(?:[^"\\]|\\.)*"|\d+|[A-Za-z_]\w*|=>|[,;:(){}\[\]<>])', re.S)
+TOKEN = re.compile(r'\s+|//[^\n]*|/\*.*?\*/|(?P<tok>"(?:[^"\\]|\\.)*"|\d+|[A-Za-z_]\w*|=>|[,;:(){}\[\]<>@])', re.S)
 
 
 class Unparsed(Exception):
@@ -189,6 +192,16 @@ def wired_field(tokens):
     return name, kind, number(tokens)
 
 
+def projected_field(tokens):
+    name = ident(tokens)
+    tokens.take("@")
+    place = ident(tokens)
+    tokens.take(":")
+    kind = unit(tokens)
+    tokens.take("=>")
+    return name, kind, number(tokens), place
+
+
 def held_field(tokens):
     name = ident(tokens)
     tokens.take(":")
@@ -222,7 +235,7 @@ def row(tokens):
         raise Unparsed(f"line {line}: no slice disposition {kind}")
     tokens.take(",")
     plan = ident(tokens)
-    payload, wired, held, relation = None, [], [], None
+    payload, wired, held, relation, projected = None, [], [], None, []
     if plan == "relation":
         relation = string(tokens)
     elif plan == "wired":
@@ -234,6 +247,14 @@ def row(tokens):
         if tokens.peek() == "held":
             tokens.take("held")
             held = held_list(tokens)
+        if tokens.peek() == "projected":
+            tokens.take("projected")
+            tokens.take("(")
+            ident(tokens)
+            tokens.take("{")
+            projected = listed(tokens, "}", projected_field)
+            tokens.take(")")
+            wired += [(name, kind, ticket) for name, kind, ticket, _ in projected]
     elif plan == "held":
         held = held_list(tokens)
     else:
@@ -242,7 +263,8 @@ def row(tokens):
     if src not in CARD or dst not in CARD:
         raise Unparsed(f"line {line}: an end is no owner")
     return {"line": line, "from": CARD[src], "to": CARD[dst], "label": label, "slice": kind,
-            "slice_reason": slice_reason, "payload": payload, "wired": wired, "held": held, "relation": relation}
+            "slice_reason": slice_reason, "payload": payload, "wired": wired, "held": held, "relation": relation,
+            "projected": [(name, place) for name, _, _, place in projected]}
 
 
 body = table(CATALOG)
@@ -277,6 +299,9 @@ for r in rows:
         failures.append(f"line {r['line']}: a wired field names no body ticket from 06 to 25")
 
 held_by = [(r["line"], name, holder) for r in rows for name, _, holder, _ in r["held"]]
+projected_at = [(r["line"], name, place) for r in rows for name, place in r["projected"]]
+if projected_at != PROJECTED:
+    failures.append(f"a projected field's place is not the plan's: {projected_at}")
 wired_by = [(r["line"], name, ticket) for r in rows for name, _, ticket in r["wired"]]
 for name, got, want in (("holder", held_by, HELD_BY), ("body ticket", wired_by, WIRED_BY)):
     if got != want:
@@ -351,6 +376,33 @@ for reader, sites, wired, held in crate_readers:
     if any(ticket not in BODY_TICKETS for _, ticket in wired):
         failures.append(f"reader {reader} at {sites}: a wired read names no body ticket from 06 to 25")
 
+EFFECT_ROW = re.compile(r"EffectReader \{\s*reader: <(\w+) as Owner>::CARD,\s*sites: <(.+?) as SiteSet>::SET,\s*"
+                        r"quantity: Species::(\w+)\.names\(\)\[4\],\s*body_ticket: (\d+),\s*\}")
+effect_rows = EFFECT_ROW.findall(readers_source)
+crate_grants = [(r["to"], f"line {r['line']} from {r['from']}", name, place,
+                 next(ticket for wired, _, ticket in r["wired"] if wired == name))
+                for r in rows for name, place in r["projected"]]
+crate_grants += [(CARD.get(reader, reader), "S10 from RC", species, sites, int(ticket))
+                 for reader, sites, species, ticket in effect_rows]
+declared = re.search(r"EFFECT_READERS: \[EffectReader; (\d+)\]", readers_source)
+if not declared or int(declared.group(1)) != len(effect_rows):
+    failures.append("the effect readers' table does not parse")
+map_grants = []
+in_grants = False
+for text in open(MAP, encoding="utf-8").read().splitlines():
+    if text.startswith("## Read grants"):
+        in_grants = True
+    elif in_grants and text.startswith("## "):
+        break
+    cells = [cell.strip().strip("`") for cell in text.strip().strip("|").split("|")]
+    if in_grants and text.startswith("| ") and len(cells) == 5 and cells[0] not in ("Reader", "---"):
+        map_grants.append((*cells[:4], int(cells[4])))
+if not map_grants or map_grants != crate_grants:
+    failures.append(f"the read grants differ: map {map_grants}, catalog {crate_grants}")
+for reader, source, field, place, ticket in crate_grants:
+    if ticket not in BODY_TICKETS:
+        failures.append(f"read grant {reader} of {field}: names no body ticket from 06 to 25")
+
 print(f"map source: {MAP} (Direct couplings, lines {arrows[0][0]}-{arrows[-1][0]})")
 print(f"map edges = {len(arrows)}; catalog rows = {len(rows)}")
 print("slice census: " + "; ".join(f"{k} = {v}" for k, v in slice_census.items()))
@@ -358,8 +410,9 @@ for kind in SLICE_LINES:
     print(f"  {kind:<10} {[r['line'] for r in rows if r['slice'] == kind]}")
 print("whole body census: " + "; ".join(f"{k} = {v}" for k, v in body_census.items()))
 print(f"speciation's readers: map rows = {len(map_readers)}; catalog rows = {len(crate_readers)}")
-print("parse, line, endpoints and label equality, order, uniqueness, reasons, holders, tickets, both censuses and "
-      "speciation's readers:",
+print(f"read grants: map rows = {len(map_grants)}; catalog rows = {len(crate_grants)}")
+print("parse, line, endpoints and label equality, order, uniqueness, reasons, holders, tickets, both censuses, "
+      "speciation's readers and the read grants:",
       "PASS" if not failures else "FAIL")
 for failure in failures:
     print("  " + failure)
