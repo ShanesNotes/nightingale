@@ -499,8 +499,9 @@ fn the_sweat_grant_refuses_a_bed_no_nerve_supplies_and_a_junction_with_no_recept
     );
 }
 
-/// Ticket 102 (0011, 30): "An absent projected temperature field gives `UnemittedField`, an emitted
-/// temperature with no defining law `OmittedLaw`, and an absent receptor effect at a supplying junction `NoReceptor`."
+/// docs/architecture/solver-contract.md section 7: "MT reads the acetylcholine effect at a skin junction that
+/// holds no receptor effect, bound to a row of that name at the body instead": "`Assembly::compile` refuses
+/// it (`NoReceptor`), naming the law of the program the read is resolved in."
 #[test]
 fn a_body_effect_does_not_supply_the_skin_junctions_missing_receptor() {
     let (_, sites) = map(Nerve::BodyEffectOnly).expect("a supplied skin bed");
@@ -514,10 +515,8 @@ fn a_body_effect_does_not_supply_the_skin_junctions_missing_receptor() {
     );
 }
 
-/// Item 5: "The round does not judge the field's own reads as if the consumer made them".
-/// Item 2: "A row of the same owner and name at the body does not supply a missing one: the read is
-/// refused as `NoReceptor`." Item 3: "Every read at a junction that is not the new grant's binds
-/// the row it bound before the round."
+/// docs/architecture/solver-contract.md section 7: "A read in an explicit field, kept or discarded, is looked
+/// up as the field's own law's read, whichever card reads the field".
 #[test]
 fn a_junction_read_in_an_explicit_field_binds_under_the_fields_own_grant() {
     let (_, sites) = map(Nerve::BodyEffectOnly).expect("a supplied skin bed");
@@ -565,8 +564,8 @@ fn a_junction_read_in_an_explicit_field_binds_under_the_fields_own_grant() {
     );
 }
 
-/// Record 0011, consequence 30: "each read through a new grant, kept or discarded". A junction read the field's
-/// own kernel discards is looked up under the field's law, as a kept one is.
+/// docs/architecture/solver-contract.md section 7: "A read in an explicit field, kept or discarded, is looked
+/// up as the field's own law's read, whichever card reads the field".
 #[test]
 fn a_discarded_junction_read_in_an_explicit_field_is_looked_up_under_the_fields_own_grant() {
     let (_, sites) = map(Nerve::BodyEffectOnly).expect("a supplied skin bed");
@@ -733,9 +732,9 @@ fn the_three_skin_reads_bind_one_reference_slot_and_a_card_that_declares_it_othe
     );
 }
 
-/// Ticket 102 (0011, 4): "Each bed's store is found at compile from the schema's pools and the containment
-/// tree, with nothing in accepted state, and a read of a placed store whose root or destination is missing refuses."
-/// With the skin's store gone the skin bed has no route off the core, so the place check refuses each end first.
+/// docs/architecture/solver-contract.md section 7: "A store read whose store is missing, bound to the core
+/// store's row instead, or a read of either end of blood's carriage at a body with no core store":
+/// "`Assembly::compile` refuses it (`NoSuchRead`) and names the law".
 #[test]
 fn a_placed_carriage_tissue_read_requires_the_core_store() {
     let law = LawName {
@@ -836,9 +835,6 @@ fn a_placed_carriage_tissue_read_requires_the_core_store() {
     }
 }
 
-/// Record 0011, consequence 31: an explicit field's own reads are checked "under the field's own law, at the
-/// site the field is written into". MT may read the effect strictly at a junction with no context, so only the
-/// check at the bed that reads the field refuses it.
 #[test]
 fn a_junction_read_in_an_explicit_field_is_refused_where_a_bed_off_the_skin_reads_it() {
     let law = LawName {

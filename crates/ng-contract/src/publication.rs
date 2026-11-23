@@ -678,8 +678,9 @@ fn the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_sit
     compiled(Mark::SampledAtSkin, Reads::TermAtSkin).unwrap_or_else(|refused| panic!("{refused:?}"));
 }
 
-/// Ticket 102 (0011, 31): "In the contract's own tests it refuses two reads by a reader and place the
-/// catalog does not authorize: a forged projected read, and a plain `Source::Field` read of a protected name."
+/// Ticket 102 (.scratch/native-contract/issues/102-the-skins-reads-a-design-round.md): "In the contract's own
+/// tests it refuses two reads by a reader and place the catalog does not authorize: a forged projected read,
+/// and a plain `Source::Field` read of a protected name."
 #[test]
 fn a_plain_core_temperature_read_inlined_at_a_muscle_bed_is_refused() {
     let found = compiled(Mark::SampledAtSkin, Reads::PlainCoreInExplicit).err();
@@ -692,9 +693,9 @@ fn a_plain_core_temperature_read_inlined_at_a_muscle_bed_is_refused() {
     );
 }
 
-/// Section 7: "A store temperature read by a card the catalog grants no such read, or at a place its arrow
-/// does not allow, kept, discarded, in a guard, in a site term no site realizes or in an explicit field".
-/// "`Assembly::compile` refuses it before placing it (`UnwiredRead`) and names the law and the field."
+/// docs/architecture/solver-contract.md section 7: "In an explicit field it is a plain read of the name by a
+/// card the catalog grants no plain read, refused under the field's law whether or not anything reads the
+/// field."
 #[test]
 fn an_unread_explicit_field_must_have_the_right_to_read_the_core_temperature() {
     let build = |reads| compiled(Mark::SampledAtSkin, reads).map(|_| ());
@@ -837,10 +838,9 @@ fn the_core_scalar_and_the_debt_each_emit_alone_and_the_core_twice_is_named_twic
     assert_eq!(twice, refused(CompileDefect::NamedTwice { law }));
 }
 
-/// Item 4: "An explicit field's own reads, kept and discarded, are checked for reader, field and place
-/// under the field's own law, at the site the field is written into, before compile writes them into
-/// the law or the guard that reads the field."
-/// Section 7: "`Assembly::compile` refuses it before placing it (`UnwiredRead`) and names the law and the field."
+/// docs/architecture/solver-contract.md section 7: "In an explicit field it is a plain read of the name by a
+/// card the catalog grants no plain read, refused under the field's law whether or not anything reads the
+/// field."
 #[test]
 fn a_receptor_fields_core_temperature_read_is_checked_when_only_a_guard_uses_it() {
     let law = named(Receptor::CARD, "guard temperature");
