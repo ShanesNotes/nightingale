@@ -6,9 +6,9 @@ Blocked by: none
 
 **Question:** Beyond the first experiment (`C4a` on the slice, and [ticket 14](14-first-experiment-on-the-whole-body.md)'s meal on the whole body), what architecture guides learned models around the engine? Where does each model meet the engine, what may it claim, and in what order are they built? Which building blocks from working references carry over, which guardrails stay hard, and what does the line need from the engine's process?
 
-This ticket proposes and decides nothing. It began as a capture of a multi-model exploration. A review pass then read each claim against the repo and the reference sources and rewrote it, and Comments say what that pass changed. It is written to become the line's engineering specification once local passes settle its forks, in the shape [ticket 01](01-concept-brief.md)'s section 7.5 asks for.
+This ticket captures the architecture foundations beyond the first experiment. It began as a multi-model exploration (`2333f26`), was fact-checked and rewritten against the engine code and reference repos (`9b6813b`), and then folded in acute-arrival, covariate-scaling and speed-sensitivity refinements after review. The four-seam framing (section 2) and draft rules `L1` to `L14` (section 3) are adopted as the working base for this line's upcoming `pstack` passes; individual forks (section 8) and human gates (section 10) stay open until those passes settle them.
 
-**Read set** ([governance section 5](../../../docs/governance.md#5-what-an-architecture-pass-reads)), at `2333f26`, which is main `b74fad1` plus this ticket:
+**Read set** ([governance section 5](../../../docs/governance.md#5-what-an-architecture-pass-reads)), at `2333f26`, which is main `b74fad1` plus this ticket (re-checked after merging main `9f5ba6c`):
 
 1. `docs/srs.md`.
 2. Records 0002 (a split is earned), 0003 (a model's output is never a source or a target), 0004 (the first milestone), 0005 (a result names the run and the set it read) and 0008 (a run keeps a verifiable chain and a checkpoint each simulated minute).
@@ -20,8 +20,9 @@ It also read this line's map and tickets 01 to 15, the engine tickets cited belo
 
 ## Acceptance
 
-- [ ] An architecture pass takes section 2's seams and section 3's rules to a decision: each adopted, changed or dropped, with its reason
-- [ ] Each question in section 7 is filed where it belongs: [native-contract 86](../../native-contract/issues/86-admission-reaches-a-moved-rest.md) (what a replay holds of a proposed start), [foundation 07](../../foundation/issues/07-contract.md) item C16 (a scripted shift), [ticket 15](15-learned-emulator-for-parameters.md) (a value calibrated to a response), the [body map](../../body/map.md) (the ECG's home) and the developer reviewer (the gate's path rule)
+- [ ] A `pstack` architecture pass takes section 2's seams and section 3's rules (`L1` to `L14`) from working base to bound specification: each rule kept, changed or dropped, with its test
+- [x] Each engine-process question in section 7 is filed where it belongs: [native-contract 86](../../native-contract/issues/86-admission-reaches-a-moved-rest.md) (what a replay holds of a proposed start), [foundation 07](../../foundation/issues/07-contract.md) item C16 (a scripted shift), [ticket 15](15-learned-emulator-for-parameters.md) (ranking first and provenance of a value calibrated to a response), and the [body map](../../body/map.md) (the ECG's accounting)
+- [ ] The developer reviewer settles the gate's path rule for `tools/generative-physiology/**` ([ticket 03](03-teacher-driver.md), section 7)
 - [ ] Section 4's figures are read again once [body 30](../../body/issues/30-step-plans-on-the-whole-body.md) resolves, and each build's budget is restated from them
 - [ ] [Ticket 14](14-first-experiment-on-the-whole-body.md) takes or refuses each arm section 5.4 proposes, and ticket 15 takes or refuses section 5.3's ranking use
 - [ ] The map's Decisions so far gains what those passes settle
@@ -119,14 +120,15 @@ By arithmetic on those figures, all estimates:
 
 - A six-hour run takes 2.4 to 4.9 wall hours on one worker. It writes about 276 GB of compacted links unless its store trims them, and ticket 03's driver keeps every link until its run completes.
 - A study of 500 six-hour runs is 3,000 simulated hours: 1,200 to 2,450 worker-hours. That cost returns each time the body's model hash moves, and until body 28 it moves often.
-- Ten thousand six-hour runs, the scale an amortized estimator over courses usually asks for, is 24,000 to 49,000 worker-hours. That is out of reach.
+- Ten thousand six-hour runs, the scale an amortized estimator over courses usually asks for, is 24,000 to 49,000 worker-hours. That is out of reach at today's speed.
 - Ten thousand admissions is 490 to 670 worker-hours from the packet's guess, and about 160 if a solved neighbour gives what that one variant got. That is in reach.
+- Every course-scale figure above scales linearly with the engine's speed. Closing the gap toward SRS section 6's 100 times real-time aim (re-measured at [body 30](../../body/issues/30-step-plans-on-the-whole-body.md)) drops a six-hour run from hours to minutes and brings much larger teacher sets within reach, so these budgets are restated once body 30 settles.
 
 Six consequences shape section 5.
 
 1. **Variety is scarce, not beats.** One six-hour run holds tens of thousands of beats but one packet and one day. A design is judged by the start states, traits and inputs it covers for each simulated hour.
 2. **A paired branch should not pay for its prefix twice.** Ticket 02 chose fresh runs of one prefix when the prefix was a third of a 15-minute run. On hour-scale runs that choice is reopened (section 8, fork 2).
-3. **Anything that needs many courses draws them from the generative physiology model,** with the engine running a sample of them as the check. That is why chart inference over a course comes after it.
+3. **Anything that needs many courses draws them from the generative physiology model,** with the engine running a sample of them as the check. That is why chart inference over a course comes after it (unless engine speed rises sharply after body 30).
 4. **Anything that needs many patients at rest can use the engine itself,** because one draw is one admission. That is where a start proposal pays.
 5. **Runs are spent in rounds.** Each round goes where the last one left the model unsure, as history matching does in waves (section 5.3).
 6. **Models stay small and cheap to refit,** because the teacher keeps moving.
@@ -140,7 +142,7 @@ What the engine's process must give first. None of it is this line's work, and e
 | The whole body lives two synthetic days | The line is parked on it | [body 28](../../body/issues/28-two-synthetic-days.md) |
 | A teacher whose step hides no oscillation, at a measured speed | A longer step damps one with no refusal, and the step plans are unmeasured on the body | [native-contract 91](../../native-contract/issues/91-the-accuracy-gate-holds-no-oscillation.md), [body 30](../../body/issues/30-step-plans-on-the-whole-body.md) |
 | A history a teacher run can afford | Section 4's 276 GB a run | native-contract 95, and ticket 14's need 3 |
-| Varied packets | Every model that conditions on traits needs them. `sampled` draws each key alone and uniformly (`packet.rs:311`, implemented), the body's value table is private, and a second value for a bound key is refused | tickets 13 and 15 |
+| Varied packets, with sourced covariate scaling | Every model that conditions on traits needs them. `sampled` draws each key alone and uniformly (`packet.rs:311`, implemented), the body's value table is private, and a second value for a bound key is refused. Independent draws across dozens of traits risk anatomically incompatible combinations that waste admission runs; clinical population sampling needs sourced allometric and covariate links (GLOSSARY: Population record, "the parameters it varies with"), never unreviewed empirical patient fits | tickets 13 and 15 |
 | What a replay holds of a proposed start | Section 7 | native-contract 86, second box |
 | What replay promises across revisions of the engine | A learned artifact names its teacher by commit and model hash (L10) | [native-contract 81](../../native-contract/issues/81-a-runs-identity-names-no-revision-of-the-engines-numerics.md) |
 | The parameter-shift payload | Until it exists no teacher run carries a disease | foundation 07, item C16 |
@@ -252,9 +254,9 @@ From observations and chart entries it returns a distribution over packets whose
 
 **Its only way into the engine is the proposal seam.** A draw is a packet. The engine admits it, an observer reads it, and the reading is compared with the chart within the chart's own stated error. No patient starts from an inferred state.
 
-**At admission first.** One engine draw is one admission, so ten thousand are in reach (section 4). The ladder: keep the population draws whose readings match the chart within its stated error, which is exact to that error and slow; then the nearest patients in the library; then an amortized estimator, only if matching is too slow at the tolerance a use needs.
+**At admission first (healthy and chronic steady states).** One engine draw is one admission, so ten thousand are in reach (section 4), including chronic conditions whose traits sit in the packet and admit directly at rest. The ladder: keep the population draws whose readings match the chart within its stated error, which is exact to that error and slow; then the nearest patients in the library; then an amortized estimator, only if matching is too slow at the tolerance a use needs.
 
-**Over a course second.** The generative physiology model makes the courses, or the emulator does where the chart's readings are among its summaries. The engine runs a sample of the posterior's draws as the check.
+**Over a course and acute non-equilibrium arrivals second.** The generative physiology model makes the courses, or the emulator does where the chart's readings are among its summaries. The engine runs a sample of the posterior's draws as the check. For a patient arriving hours into an acute evolving state (such as hemorrhage or worsening sepsis), the body is no longer on a returning periodic cycle (`NetBoundaryFlow`), and simulating many hours from rest per proposal costs 5 to 10 wall hours at today's speed. Fork 9 weighs searching a pre-run engine checkpoint library over acute trajectories against asking scope stage 2 for a non-periodic admission judge.
 
 **Gate.** On engine-made charts whose packets are known, simulation-based calibration and the TARP coverage test hold at stated levels. Posterior draws pass the check through the engine at a stated rate. A chart from another revision of the body, or one authored to be impossible, is flagged.
 
@@ -306,7 +308,7 @@ Each source was read at the commit named, from a clone or a release, and nothing
 | A provenance tier for a value fitted through an emulator | Value provenance has six kinds, and "fitted to a response" is none of them (ticket 15) | Ticket 15's decision record. This pass's input is rule 1 of section 2: the engine runs every proposal, so the emulator is no part of what the value rests on. It rests on the engine's run against a sourced response, stated with its method and window as an anchor is (rule 17), and on the rule that picked it among the values not ruled out |
 | Provenance tiers for a distilled model and a learned observer | Rule 12 binds values in a packet or a healthy-range set. A model beside the engine holds none | No SRS change. L10 and section 2's rule 2 cover it. A fitted law inside the engine is still the map's open question |
 | Events for disease that progresses in a run | Rule 14, I15 and the Event entry already put disease in the event log as parameter shifts or timed events | The contract "binds parameters once per run and has no parameter-shift payload" (foundation 07, C16). The capture's idea is an input to C16 and to scope stage 2: a scripted shift stands for a mechanism the body lacks, says so, and retires when a law lands. It needs no learned model |
-| A judged entry away from rest | A checkpoint of a run that reached the condition is already a legal start, and a branch continues from it (GLOSSARY: Branch). A run keeps one each simulated minute (record 0008) | Nothing by default. A patient who matches a chart is found through the proposal seam: a packet and the events before the encounter are proposed, the engine runs them, and the result is compared with the chart. The alternative imposes a state. That needs an SRS change (Admission: "never imposed again"; I18) and a judge that does not exist, because on a paced body admission judges a cycle that returns (`InitializationFailure::NetBoundaryFlow`, "no state returns") |
+| A judged entry away from rest | A checkpoint of a run that reached the condition is already a legal start, and a branch continues from it (GLOSSARY: Branch). A run keeps one each simulated minute (record 0008). Chronic resting conditions admit directly from chronic packet traits | Acute non-equilibrium arrivals (such as hours into hemorrhage or sepsis) are not periodic (`InitializationFailure::NetBoundaryFlow`, "no state returns") and cost hours to forward-run from rest per proposal at today's speed. Fork 9 weighs a pre-run checkpoint library (no SRS change) against raising a non-periodic admission judge in scope stage 2 |
 | Reduced-precision weights beside an exact ledger | Any rates balance by construction (ticket 08) | Nothing. Such weights could not break balance, and they could break L5. At ticket 08's model size they buy nothing |
 | A lighter gate for this line's tooling | `tools/**` matches the first rule, which runs everything (`tools/gate/paths.toml:10-16`). This line's tests run inside `10-rust` (`tools/verify.d/10-rust.sh:50-65`) | The developer reviewer's question, open since ticket 03. A lighter rule would sit ahead of `tools/**` and name `10-rust`. This ticket does not make it |
 
@@ -324,6 +326,7 @@ Two citations in the first capture pointed at the wrong invariant. I4 says a ref
 | 6 | Who holds the record beside a learned model | Preview, shadow or learned only (section 5.7) | Body 30's speed, the statechart, and section 10's third call |
 | 7 | The runtime of a deployed model | Pinned Python, which repeats only inside its environment (ticket 08); or Rust under the contract's arithmetic profile, which is a second forward pass of the kind ticket 02 refused for the first build | Asked only if fork 6 leaves preview. Then a parity gate between the two passes, and its cost |
 | 8 | One model for each conditional, or one model of the joint | Section 1's five small models, or one model that answers any conditional | Two separate models sharing a failure that a joint model would fix |
+| 9 | How an acute non-equilibrium chart enters the engine | Search a pre-run checkpoint library of acute trajectories (`(packet, event_history, checkpoint_time)`), keeping every start a legal engine checkpoint; or propose a non-periodic admission judge in scope stage 2 | Engine speed after body 30, library coverage over acute scenarios, and whether scope stage 2 needs non-periodic admission |
 
 ## 9. Parked
 
@@ -373,3 +376,11 @@ The review pass read the first capture at `2333f26` and changed the things below
 - **Moved.** The site-class graph model left the parked list. It is section 5.4's kernels shared by law and site class, which ticket 08 already half holds.
 - **Kept.** The cheapest baseline first. `admit` as the only judge of a start. An emulator that proposes while the engine verifies. Refused runs kept and labelled. Observer models before chart inference. An exact ledger. A statechart for the handover.
 - **Not checked.** No paper was read in full. Section 4's worker-hours are arithmetic on figures measured on two machines at two commits. No claim about the whole body was rerun.
+
+Follow-up pass (after merging main `9f5ba6c`):
+
+- **Framing adopted as working base.** Section 2's four-seam framing and section 3's draft rules (`L1` to `L14`) are adopted for upcoming `pstack` passes, recorded in [the map](../map.md).
+- **Acute vs. chronic entry separated (fork 9).** Chronic resting conditions admit directly from chronic packet traits, while acute non-equilibrium arrivals (such as hours into hemorrhage or sepsis) are neither periodic nor cheap to simulate from rest per proposal at 2.5x real time; fork 9 weighs a pre-run checkpoint library against a future non-periodic admission judge.
+- **Sourced covariate scaling noted (section 5).** Independent uniform draws across dozens of traits risk anatomically incompatible combinations; clinical population sampling needs sourced allometric and covariate links (GLOSSARY: Population record).
+- **Speed sensitivity noted (section 4).** Course-scale budgets scale linearly with engine speed, so engine speed work after body 30 can directly expand feasible teacher datasets.
+- **Engine-process questions filed.** Cross-references added to `native-contract 86`, `foundation 07` (C16), `ticket 15`, and `body/map.md` (ECG accounting); the developer-reviewer `paths.toml` item stays open as its own Acceptance box.
