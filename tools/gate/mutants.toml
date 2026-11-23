@@ -1205,6 +1205,24 @@ new = '''let last = if policy.windows.coverage_ns == 0 {'''
 test = "-p ng-validate --test transaction a_coverage_of_one_window_is_the_window_from_admission_however_far_the_history_runs"
 
 [[mutant]]
+name = "admission-identity-before-derive"
+path = "crates/ng-contract/src/admission.rs"
+old = '''
+        let foreign = workspace.system != self.identity
+            || workspace.unknowns.len()
+                != workspace.legs.len() * self.width() + self.parameters.owed.fits.len()
+            || self.derive(&workspace.topology).as_ref() != Some(&workspace.legs);
+'''
+new = '''
+        let legs = self.derive(&workspace.topology);
+        let foreign = workspace.system != self.identity
+            || workspace.unknowns.len()
+                != workspace.legs.len() * self.width() + self.parameters.owed.fits.len()
+            || legs.as_ref() != Some(&workspace.legs);
+'''
+test = "-p ng-validate --test admission_crossings admit_refuses_a_fixture_solve_from_a_body_with_another_guard"
+
+[[mutant]]
 name = "admission-radau-interior-sign"
 path = "crates/ng-contract/src/admission.rs"
 old = '''[[5.0 / 12.0, -1.0 / 12.0],'''
