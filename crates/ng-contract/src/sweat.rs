@@ -35,6 +35,15 @@ enum Nerve {
     BodyEffectOnly,
 }
 
+const MT_SKIN_EFFECT: LawName = LawName {
+    owner: Metabolism::CARD,
+    local: "skin effect",
+};
+const CV_SKIN_EFFECT: LawName = LawName {
+    owner: Cardiovascular::CARD,
+    local: "skin effect",
+};
+
 #[derive(Clone, Copy, PartialEq)]
 enum Reads {
     Granted,
@@ -42,7 +51,12 @@ enum Reads {
     OtherLigand,
     AtTheSite,
     OffSkin,
+    FieldOffSkin,
     InABodyKernel,
+    MtFieldReadByCv,
+    CvFieldReadByMt,
+    MtFieldDiscardsForCv,
+    CvFieldDiscardsForMt,
 }
 
 struct Sites {
@@ -150,6 +164,20 @@ fn secrete<'b>(
         });
         mt.define_at(&out, value);
     }
+    if reads == Reads::FieldOffSkin {
+        let (field, read) = mt.explicit_field::<CapillaryBed, Dimensionless>("felt in a field");
+        mt.express_at(&field, |mut k| {
+            let felt = k.at_junction(&forged(acetylcholine));
+            k.finish_term(felt)
+        });
+        let (out, _) =
+            mt.site_field::<CapillaryBed, Dimensionless>("felt at every bed", Admissible::finite());
+        let value = mt.site_kernel(|mut k| {
+            let felt = k.at_site(&read);
+            k.finish(felt, mt.every_mode(), class)
+        });
+        mt.define_at(&out, value);
+    }
     if reads == Reads::InABodyKernel {
         let felt = mt.algebraic::<Dimensionless>("felt by the body", Admissible::finite());
         let residual = mt.kernel(|mut k| {
@@ -161,7 +189,17 @@ fn secrete<'b>(
     }
     let secreted = mt.site_kernel::<Beds<Skin>, Rate<Water>, _>(|mut k| {
         let felt = match reads {
-            Reads::Granted | Reads::OffSkin | Reads::InABodyKernel => effect.at_skin(&mut k),
+            Reads::Granted | Reads::OffSkin | Reads::FieldOffSkin | Reads::InABodyKernel => {
+                effect.at_skin(&mut k)
+            }
+            Reads::MtFieldReadByCv
+            | Reads::CvFieldReadByMt
+            | Reads::MtFieldDiscardsForCv
+            | Reads::CvFieldDiscardsForMt => {
+                let output =
+                    ReadPort::<Metabolism, PerSite<Beds<Skin>, Dimensionless>>::field(CV_SKIN_EFFECT);
+                k.at_site(&output)
+            }
             Reads::Lenient => k.lenient_at_junction(&forged(acetylcholine)),
             Reads::OtherLigand => k.at_junction(&forged(Species::Norepinephrine.names()[4])),
             Reads::AtTheSite => {
@@ -257,7 +295,40 @@ fn compiled(nerve: Nerve, reads: Reads) -> Result<(CompiledBody, Sites), Admissi
         secrete(&mut mt, &effect, &published.at_bed(), &evaporative, reads);
         let dry = ports.boundary::<DryHeatLoss>()?;
         lose(&mut mt, &published.at_exit(&dry), &dry);
+        let mt_field = matches!(reads, Reads::MtFieldReadByCv | Reads::MtFieldDiscardsForCv);
+        let discards = matches!(reads, Reads::MtFieldDiscardsForCv | Reads::CvFieldDiscardsForMt);
+        if mt_field {
+            let (field, _) = mt.explicit_field::<Beds<Skin>, Dimensionless>(MT_SKIN_EFFECT.local);
+            mt.express_at(&field, |mut k| {
+                let value = effect.at_skin(&mut k);
+                let value = if discards { k.zero() } else { value };
+                k.finish_term(value)
+            });
+        }
         body.add(mt.finish());
+        if mt_field || matches!(reads, Reads::CvFieldReadByMt | Reads::CvFieldDiscardsForMt) {
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            if mt_field {
+                let input =
+                    ReadPort::<Cardiovascular, PerSite<Beds<Skin>, Dimensionless>>::field(MT_SKIN_EFFECT);
+                let (out, _) =
+                    cv.site_field::<Beds<Skin>, Dimensionless>(CV_SKIN_EFFECT.local, Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    let value = k.at_site(&input);
+                    k.finish(value, cv.every_mode(), class())
+                });
+                cv.define_at(&out, value);
+            } else {
+                let input = ports.effect::<Acetylcholine>();
+                let (field, _) = cv.explicit_field::<Beds<Skin>, Dimensionless>(CV_SKIN_EFFECT.local);
+                cv.express_at(&field, |mut k| {
+                    let value = k.at_junction(&input);
+                    let value = if discards { k.zero() } else { value };
+                    k.finish_term(value)
+                });
+            }
+            body.add(cv.finish());
+        }
         match nerve {
             Nerve::BodyEffectOnly => {
                 let (mut rc, _) = body.receptor()?.parts();
@@ -443,6 +514,78 @@ fn a_body_effect_does_not_supply_the_skin_junctions_missing_receptor() {
     );
 }
 
+/// Item 5: "The round does not judge the field's own reads as if the consumer made them".
+/// Item 2: "A row of the same owner and name at the body does not supply a missing one: the read is
+/// refused as `NoReceptor`." Item 3: "Every read at a junction that is not the new grant's binds
+/// the row it bound before the round."
+#[test]
+fn a_junction_read_in_an_explicit_field_binds_under_the_fields_own_grant() {
+    let (_, sites) = map(Nerve::BodyEffectOnly).expect("a supplied skin bed");
+    let binding = |nerve: Nerve, reads: Reads| {
+        let (body, sites) = match compiled(nerve, reads) {
+            Ok(built) => built,
+            Err(AdmissionError::Compile(defect)) => return Err(defect),
+            Err(other) => panic!("{other:?}"),
+        };
+        let host = match reads {
+            Reads::MtFieldReadByCv => CV_SKIN_EFFECT,
+            _ => SWEAT,
+        };
+        let instance = body
+            .instances()
+            .iter()
+            .find(|instance| {
+                instance.context() == Context::Site(sites.bed)
+                    && body.programs()[instance.program().index()].law == host
+            })
+            .expect("the law at the skin bed");
+        let effect = LawName {
+            owner: Receptor::CARD,
+            local: Species::Acetylcholine.names()[4],
+        };
+        let row = instance
+            .inputs
+            .iter()
+            .filter_map(|input| input.unknown())
+            .find_map(|row| match body.rows()[row.index()].kind() {
+                RowKind::Algebraic(slot) if slot.law == effect => Some(slot.at),
+                _ => None,
+            });
+        Ok(row.expect("the bound acetylcholine effect"))
+    };
+    for reads in [Reads::MtFieldReadByCv, Reads::CvFieldReadByMt] {
+        assert_eq!(binding(Nerve::Supplied, reads), Ok(Context::Site(sites.junction)));
+    }
+    let mt = binding(Nerve::BodyEffectOnly, Reads::MtFieldReadByCv);
+    let cv = binding(Nerve::BodyEffectOnly, Reads::CvFieldReadByMt);
+    assert!(
+        matches!(mt, Err(CompileDefect::NoReceptor { junction, .. }) if junction == sites.junction)
+            && cv == Ok(Context::Body),
+        "MT field in CV bound {mt:?}, CV field in MT bound {cv:?}"
+    );
+}
+
+/// Record 0011, consequence 30: "each read through a new grant, kept or discarded". A junction read the field's
+/// own kernel discards is looked up under the field's law, as a kept one is.
+#[test]
+fn a_discarded_junction_read_in_an_explicit_field_is_looked_up_under_the_fields_own_grant() {
+    let (_, sites) = map(Nerve::BodyEffectOnly).expect("a supplied skin bed");
+    let defect = |nerve: Nerve, reads: Reads| match compiled(nerve, reads) {
+        Ok(_) => None,
+        Err(AdmissionError::Compile(defect)) => Some(defect),
+        Err(other) => panic!("{other:?}"),
+    };
+    for reads in [Reads::MtFieldDiscardsForCv, Reads::CvFieldDiscardsForMt] {
+        assert_eq!(defect(Nerve::Supplied, reads), None);
+    }
+    let mt = defect(Nerve::BodyEffectOnly, Reads::MtFieldDiscardsForCv);
+    assert!(
+        matches!(mt, Some(CompileDefect::NoReceptor { junction, .. }) if junction == sites.junction),
+        "MT field in CV gave {mt:?}"
+    );
+    assert_eq!(defect(Nerve::BodyEffectOnly, Reads::CvFieldDiscardsForMt), None);
+}
+
 #[test]
 fn the_catalog_refuses_the_lenient_read_another_ligand_a_read_off_the_junction_and_one_off_the_skin() {
     let unwired = |law, local| {
@@ -592,13 +735,14 @@ fn the_three_skin_reads_bind_one_reference_slot_and_a_card_that_declares_it_othe
 
 /// Ticket 102 (0011, 4): "Each bed's store is found at compile from the schema's pools and the containment
 /// tree, with nothing in accepted state, and a read of a placed store whose root or destination is missing refuses."
+/// With the skin's store gone the skin bed has no route off the core, so the place check refuses each end first.
 #[test]
 fn a_placed_carriage_tissue_read_requires_the_core_store() {
     let law = LawName {
         owner: "CV",
         local: "carriage tissue",
     };
-    let build = |with_core: bool, tissue: bool| -> Result<CompiledBody, AdmissionError> {
+    let build = |with_core: bool, with_skin: bool, tissue: bool| -> Result<CompiledBody, AdmissionError> {
         let (anatomy, sites) = map(Nerve::Supplied)?;
         let mut schema = Schema::new(anatomy)?;
         schema.partial_volume(Measure::new(1.0)?)?;
@@ -608,9 +752,15 @@ fn a_placed_carriage_tissue_read_requires_the_core_store() {
         if with_core {
             schema.pool::<Energy>(sites.root, Space::Thermal)?;
         }
-        schema.pool::<Energy>(sites.skin, Space::Thermal)?;
-        schema.process::<SkinEvaporativeHeat>(sites.skin, Space::Thermal)?;
-        schema.process::<DryHeatLoss>(sites.skin, Space::Thermal)?;
+        let exits = match with_skin {
+            true => sites.skin,
+            false => sites.root,
+        };
+        if with_skin {
+            schema.pool::<Energy>(sites.skin, Space::Thermal)?;
+        }
+        schema.process::<SkinEvaporativeHeat>(exits, Space::Thermal)?;
+        schema.process::<DryHeatLoss>(exits, Space::Thermal)?;
         schema.carry::<Acetylcholine, Junction>(Space::Cleft);
         schema.carry::<Acetylcholine, Junction>(Space::Bound);
         assemble(schema, |mut body| {
@@ -658,8 +808,8 @@ fn a_placed_carriage_tissue_read_requires_the_core_store() {
             })
             .count()
     };
-    assert_eq!(build(true, true).map(carriage_columns), Ok(1));
-    let found = build(false, true).map(carriage_columns);
+    assert_eq!(build(true, true, true).map(carriage_columns), Ok(1));
+    let found = build(false, true, true).map(carriage_columns);
     let field = LawName {
         owner: "MT",
         local: "temperature",
@@ -675,8 +825,32 @@ fn a_placed_carriage_tissue_read_requires_the_core_store() {
         "expected a named refusal for {law:?} without the core store, got {found:?} (Ok counts carriage columns)"
     );
     for tissue in [true, false] {
-        let found = build(false, tissue).map(carriage_columns);
+        let found = build(false, true, tissue).map(carriage_columns);
         let missing = Err(AdmissionError::Compile(CompileDefect::NoSuchRead { law }));
         assert_eq!(found, missing, "the tissue end: {tissue}");
     }
+    for tissue in [true, false] {
+        let found = build(true, false, tissue).map(carriage_columns);
+        let unwired = Err(AdmissionError::Compile(CompileDefect::UnwiredRead { law, field }));
+        assert_eq!(found, unwired, "the tissue end with no skin store: {tissue}");
+    }
+}
+
+/// Record 0011, consequence 31: an explicit field's own reads are checked "under the field's own law, at the
+/// site the field is written into". MT may read the effect strictly at a junction with no context, so only the
+/// check at the bed that reads the field refuses it.
+#[test]
+fn a_junction_read_in_an_explicit_field_is_refused_where_a_bed_off_the_skin_reads_it() {
+    let law = LawName {
+        owner: "MT",
+        local: "felt in a field",
+    };
+    let field = LawName {
+        owner: Receptor::CARD,
+        local: Species::Acetylcholine.names()[4],
+    };
+    assert_eq!(
+        compiled(Nerve::Supplied, Reads::FieldOffSkin).map(|_| ()).err(),
+        Some(AdmissionError::Compile(CompileDefect::UnwiredRead { law, field }))
+    );
 }

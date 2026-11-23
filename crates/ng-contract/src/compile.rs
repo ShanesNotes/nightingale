@@ -2399,7 +2399,8 @@ fn addresses(
     let read = |source: Source,
                 place: Where,
                 accepts_no_nerve: bool,
-                expects: Option<&str>|
+                expects: Option<&str>,
+                reader: LawName|
      -> Result<Address, CompileDefect> {
         let checked = |field: LawName, row: usize| match expects {
             Some(expected) if rows.rows[row].dimension != expected => {
@@ -2426,8 +2427,8 @@ fn addresses(
                 };
                 match landed {
                     Some(junction) => {
-                        let granted =
-                            field.owner == crate::Receptor::CARD && catalog::effect_read(law.owner).is_some();
+                        let granted = field.owner == crate::Receptor::CARD
+                            && catalog::effect_read(reader.owner).is_some();
                         let row = match granted {
                             true => rows.exactly(field, at),
                             false => rows.defined(field, at),
@@ -2552,7 +2553,11 @@ fn addresses(
             Source::Lasting(input) => Address::Lasting(input),
         })
     };
-    let resolve = |input: Input, accepts: bool, expects: Option<&str>| -> Result<Address, CompileDefect> {
+    let resolve = |input: Input,
+                   accepts: bool,
+                   expects: Option<&str>,
+                   reader: LawName|
+     -> Result<Address, CompileDefect> {
         Ok(match (input, context) {
             (Input::Memory(local) | Input::Algebraic(local), _) => {
                 let slot = LawName {
@@ -2564,7 +2569,7 @@ fn addresses(
                         .ok_or(CompileDefect::NoSuchRead { law })?,
                 )
             }
-            (Input::Read(source, place), _) => read(source, place, accepts, expects)?,
+            (Input::Read(source, place), _) => read(source, place, accepts, expects, reader)?,
             (Input::Height(place), _) => {
                 let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
                 Address::Height(anatomy.axial(site).to_bits())
@@ -2661,12 +2666,26 @@ fn addresses(
         })
     };
     for read in &kernel.unreached {
-        resolve(read.input, read.accepts_no_nerve, read.expects.as_deref())?;
+        resolve(
+            read.input,
+            read.accepts_no_nerve,
+            read.expects.as_deref(),
+            read.origin.unwrap_or(law),
+        )?;
     }
     let expects =
         |op: usize| (kernel.fields.iter().find(|read| read.at == op)).map(|read| read.expects.as_str());
+    let reader =
+        |op: usize| (kernel.origins.iter().find(|&&(at, _)| at == op)).map_or(law, |&(_, origin)| origin);
     inputs
-        .map(|(op, input)| resolve(input, kernel.accepts_no_nerve.contains(&op), expects(op)))
+        .map(|(op, input)| {
+            resolve(
+                input,
+                kernel.accepts_no_nerve.contains(&op),
+                expects(op),
+                reader(op),
+            )
+        })
         .collect()
 }
 

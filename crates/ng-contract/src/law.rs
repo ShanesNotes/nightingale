@@ -604,6 +604,7 @@ fn reachable_placed(
                 input: *input,
                 accepts_no_nerve: accepting.contains(&at),
                 expects: expects(at),
+                origin: None,
             }),
             _ => None,
         })
@@ -786,6 +787,7 @@ pub(crate) struct UnreachedRead {
     pub(crate) input: Input,
     pub(crate) accepts_no_nerve: bool,
     pub(crate) expects: Option<String>,
+    pub(crate) origin: Option<LawName>,
 }
 
 /// One kernel's graph while it is built. `'k` is fresh for every kernel, so an expression belongs to
@@ -962,6 +964,7 @@ impl KernelData {
                 let input = moved(read.input)?;
                 moved_unreached.push(UnreachedRead {
                     input,
+                    origin: Some(field.name),
                     ..read.clone()
                 });
             }
