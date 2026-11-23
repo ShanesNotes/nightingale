@@ -581,11 +581,10 @@ impl InitializationSystem<'_> {
         start..start + rows
     }
     fn check(&self, workspace: &AdmissionWorkspace) -> Result<(), InitializationFailure> {
-        let legs = self.derive(&workspace.topology);
         let foreign = workspace.system != self.identity
             || workspace.unknowns.len()
                 != workspace.legs.len() * self.width() + self.parameters.owed.fits.len()
-            || legs.as_ref() != Some(&workspace.legs);
+            || self.derive(&workspace.topology).as_ref() != Some(&workspace.legs);
         if foreign {
             return Err(AdmissionError::ForeignWorkspace.into());
         }
