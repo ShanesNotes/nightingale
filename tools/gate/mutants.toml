@@ -4540,6 +4540,83 @@ new = '''self.read_at(port.source, Where::Down)'''
 test = "-p ng-contract --lib skin_vessels::the_skin_edge_scales_its_resistance_by_the_exponential_of_the_field_and_every_other_edge_is_unmoved"
 
 [[mutant]]
+name = "guard-place-unchecked"
+path = "crates/ng-contract/src/compile.rs"
+old = '''check_granted(law, zero, Some(at), places)?;'''
+new = '''let _ = at;'''
+test = "-p ng-contract --lib publication::the_thermoreceptor_reads_its_sampled_store_and_refuses_one_no_skin_bed_sits_in"
+
+[[mutant]]
+name = "guard-right-unchecked"
+path = "crates/ng-contract/src/compile.rs"
+old = '''check_rights(law, zero, places)?;'''
+new = '''let _ = zero;'''
+test = "-p ng-contract --lib publication::the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_site_realizes"
+
+[[mutant]]
+name = "store-heat-reader-unchecked"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Source::TissueHeat(store) if law.owner != crate::Metabolism::CARD => {'''
+new = '''Source::TissueHeat(store) if false && law.owner != crate::Metabolism::CARD => {'''
+test = "-p ng-contract --lib publication::the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_site_realizes"
+
+[[mutant]]
+name = "own-store-read-any-reader"
+path = "crates/ng-contract/src/compile.rs"
+old = '''return match law.owner == owner {'''
+new = '''return match law.owner == owner || true {'''
+test = "-p ng-contract --lib publication::the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_site_realizes"
+
+[[mutant]]
+name = "thermoreceptor-read-any-context"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(Projection::SkinThermoreceptor, _) => Err(unwired),'''
+new = '''(Projection::SkinThermoreceptor, _) => Ok(()),'''
+test = "-p ng-contract --lib publication::the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_site_realizes"
+
+[[mutant]]
+name = "effect-read-in-a-body-kernel"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Some(_) => return Err(unwired),'''
+new = '''Some(_) => return Ok(()),'''
+test = "-p ng-contract --lib sweat::the_catalog_refuses_the_lenient_read_another_ligand_a_read_off_the_junction_and_one_off_the_skin"
+
+[[mutant]]
+name = "plain-core-read-body-first"
+path = "crates/ng-contract/src/compile.rs"
+old = '''CORE_TEMPERATURE if store_temperature(field) => rows.exactly(field, Context::Body),'''
+new = '''CORE_TEMPERATURE if store_temperature(field) => rows.defined(field, at),'''
+test = "-p ng-contract --lib publication::the_core_read_finds_only_the_bodys_row_and_a_store_read_only_its_stores_row"
+
+[[mutant]]
+name = "store-temperature-read-body-first"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let row = rows.exactly(field, at);'''
+new = '''let row = rows.defined(field, at);'''
+test = "-p ng-contract --lib publication::the_core_read_finds_only_the_bodys_row_and_a_store_read_only_its_stores_row"
+
+[[mutant]]
+name = "carriage-tissue-end-without-core-store"
+path = "crates/ng-contract/src/compile.rs"
+old = '''End::To => core_store(schema).and(Some(store)),'''
+new = '''End::To => Some(store),'''
+test = "-p ng-contract --lib sweat::a_placed_carriage_tissue_read_requires_the_core_store"
+
+[[mutant]]
+name = "junction-receptor-from-the-body"
+path = "crates/ng-contract/src/compile.rs"
+old = '''field.owner == crate::Receptor::CARD && catalog::effect_read(law.owner).is_some();'''
+new = '''false;'''
+test = "-p ng-contract --lib sweat::a_body_effect_does_not_supply_the_skin_junctions_missing_receptor"
+
+[[mutant]]
+name = "explicit-field-inputs-unchecked"
+path = "crates/ng-contract/src/compile.rs"
+old = '''check_granted(field.name, field.kernel, landed.map(Context::Site), places)?;'''
+new = '''let _ = (field, landed);'''
+test = "-p ng-contract --lib publication::a_plain_core_temperature_read_inlined_at_a_muscle_bed_is_refused"
+
+[[mutant]]
 name = "edge-read-at-the-upstream-end"
 path = "crates/ng-contract/src/compile.rs"
 old = '''Where::Down | Where::DownIn(_) => ends.map(|end| end.1),'''
