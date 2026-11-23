@@ -249,8 +249,8 @@ doctests = [
 ]
 
 [[row]]
-core = "A store temperature read by a card the catalog grants no such read, or at a place its arrow does not allow, kept, discarded, in a guard or in a site term no site realizes"
-mutants = ["projection-read-by-the-wrong-reader"]
+core = "A store temperature read by a card the catalog grants no such read, or at a place its arrow does not allow, kept, discarded, in a guard, in a site term no site realizes or in an explicit field"
+mutants = ["projection-read-by-the-wrong-reader", "explicit-field-inputs-unchecked"]
 doctests = [
   { path = "crates/ng-contract/src/catalog.rs", code = "E0271", text = "fn wrong<'b>(mt: &FragmentBuilder<'b, Metabolism>) -> PerfusionTemperatures<'b> {" },
   { path = "crates/ng-contract/src/catalog.rs", code = "E0271", text = "fn wrong<'b>(cv: &FragmentBuilder<'b, Cardiovascular>) -> SkinThermoreceptor<'b> {" },
@@ -261,8 +261,8 @@ core = "A skin thermoreceptor read at the landmark's height site, or at a sample
 mutants = ["thermoreceptor-reads-at-the-height-site"]
 
 [[row]]
-core = "A store read whose store is missing, bound to the core store's row instead"
-mutants = ["missing-store-reads-the-core-row"]
+core = "A store read whose store is missing, bound to the core store's row instead, or a read of either end of blood's carriage at a body with no core store"
+mutants = ["missing-store-reads-the-core-row", "carriage-tissue-end-without-core-store"]
 
 [[row]]
 core = "Two bodies whose only difference is the heat exit a store temperature is read at, under one model hash"
@@ -278,6 +278,10 @@ mutants = [
 doctests = [
   { path = "crates/ng-contract/src/scope/metabolism.rs", code = "E0599", text = "let _ = k.at_junction_if_supplied(g);" },
 ]
+
+[[row]]
+core = "MT reads the acetylcholine effect at a skin junction that holds no receptor effect, bound to a row of that name at the body instead"
+mutants = ["junction-receptor-from-the-body"]
 
 [[row]]
 core = "The skin reference declared by two cards with different descriptors"
