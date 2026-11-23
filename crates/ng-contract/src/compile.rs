@@ -64,6 +64,9 @@ pub(crate) fn compile(
         readers,
         fields: &fields,
     };
+    for field in &fields {
+        check_rights(field.name, field.kernel, &places)?;
+    }
     let placement = place(&owed, &places, &unread)?;
     check_holds(&rows, &schema, &held)?;
     check_orphans(&rows, &placement.columns, &schema, &held)?;

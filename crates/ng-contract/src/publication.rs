@@ -46,6 +46,7 @@ enum Reads {
     SensedInAGuard,
     SensedAtASite,
     PlainCoreInExplicit,
+    UnreadExplicitCore,
     TermAtSkin,
     TermAtMuscle,
     TermUnrealized,
@@ -261,13 +262,16 @@ fn read_at_the_carriage<'b>(
                 open.to(&shut).expect("two values"),
             ));
         }
-        Reads::PlainCoreInExplicit => {
+        Reads::PlainCoreInExplicit | Reads::UnreadExplicitCore => {
             let core = ReadPort::<Cardiovascular, Temperature>::field(named("MT", CORE_TEMPERATURE));
             let (explicit, read) = cv.explicit_field::<Beds<Muscle>, Temperature>("explicit core");
             cv.express_at(&explicit, |mut k| {
                 let value = k.read(&core);
                 k.finish_term(value)
             });
+            if reads == Reads::UnreadExplicitCore {
+                return;
+            }
             let (out, _) =
                 cv.site_field::<Beds<Muscle>, Temperature>("muscle temperature", Admissible::finite());
             let value = cv.site_kernel(|mut k| {
@@ -685,6 +689,21 @@ fn a_plain_core_temperature_read_inlined_at_a_muscle_bed_is_refused() {
         laws.into_iter()
             .any(|law| found == refused(CompileDefect::UnwiredRead { law, field })),
         "expected UnwiredRead for {field:?} in the CV muscle read, got {found:?}"
+    );
+}
+
+/// Section 7: "A store temperature read by a card the catalog grants no such read, or at a place its arrow
+/// does not allow, kept, discarded, in a guard, in a site term no site realizes or in an explicit field".
+/// "`Assembly::compile` refuses it before placing it (`UnwiredRead`) and names the law and the field."
+#[test]
+fn an_unread_explicit_field_must_have_the_right_to_read_the_core_temperature() {
+    let build = |reads| compiled(Mark::SampledAtSkin, reads).map(|_| ());
+    assert_eq!(build(Reads::Granted), Ok(()));
+    let law = named("CV", "explicit core");
+    let field = named("MT", CORE_TEMPERATURE);
+    assert_eq!(
+        build(Reads::UnreadExplicitCore),
+        Err(AdmissionError::Compile(CompileDefect::UnwiredRead { law, field }))
     );
 }
 
