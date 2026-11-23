@@ -412,6 +412,17 @@ fn the_skin_edge_scales_its_resistance_by_the_exponential_of_the_field_and_every
             away(&unread.residuals(cv("circulation"))),
             "every other edge answers pressure to the bit"
         );
+        let pressures = |bench: &Bench| {
+            let sites = [bench.sites.artery, bench.sites.vein, bench.sites.bed, bench.sites.liver];
+            sites.map(|site| bench.algebraic("CV", crate::scope::BLOOD_PRESSURE, Context::Site(site)))
+        };
+        let mut compared = 0;
+        for (row, twin) in pressures(&read).into_iter().zip(pressures(&unread)) {
+            let found = away(&read.slopes(row));
+            assert_eq!(found, away(&unread.slopes(twin)), "every other edge's slope in pressure, to the bit");
+            compared += found.len();
+        }
+        assert_eq!(compared, 4, "the two other edges, each with a slope at both its ends");
     }
 }
 
