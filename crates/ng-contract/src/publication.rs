@@ -837,6 +837,54 @@ fn the_core_scalar_and_the_debt_each_emit_alone_and_the_core_twice_is_named_twic
     assert_eq!(twice, refused(CompileDefect::NamedTwice { law }));
 }
 
+/// Item 4: "An explicit field's own reads, kept and discarded, are checked for reader, field and place
+/// under the field's own law, at the site the field is written into, before compile writes them into
+/// the law or the guard that reads the field."
+/// Section 7: "`Assembly::compile` refuses it before placing it (`UnwiredRead`) and names the law and the field."
+#[test]
+fn a_receptor_fields_core_temperature_read_is_checked_when_only_a_guard_uses_it() {
+    let law = named(Receptor::CARD, "guard temperature");
+    let field = named("MT", CORE_TEMPERATURE);
+    let build = |read_core: bool| {
+        assemble(bare()?, |mut body| {
+            let (mut mt, _) = body.metabolism(None)?.parts();
+            let core: catalog::CoreTemperature<catalog::Defines<'_, Metabolism>> = mt.emit();
+            let value = mt.kernel(|mut k| {
+                let value = k.zero::<Temperature>();
+                k.finish(value, mt.every_mode(), class())
+            });
+            mt.define(&core.core_temperature, value);
+            body.add(mt.finish());
+
+            let (mut rc, _) = body.receptor()?.parts();
+            let (explicit, _) = rc.explicit_field::<TissueSite, Temperature>(law.local);
+            let core = ReadPort::<Receptor, Temperature>::field(field);
+            rc.express_at(&explicit, |mut k| {
+                let value = if read_core { k.read(&core) } else { k.zero() };
+                k.finish_term(value)
+            });
+            body.add(rc.finish());
+
+            let (mut ns, _) = body.nervous()?.parts();
+            let sensed = ReadPort::<Nervous, PerSite<TissueSite, Temperature>>::field(law);
+            let [on, off] = ns.modes("shiver", ["on", "off"]);
+            let gap = ns.kernel(|mut k| {
+                let value = k.at_landmark(Landmark::SkinThermoreceptor, &sensed);
+                k.finish(value, on.only(), class())
+            });
+            ns.event(Guard::new(gap, Crossing::Rising, on.to(&off)?));
+            body.add(ns.finish());
+            body.compile()
+        })
+        .map(|_| ())
+    };
+    assert_eq!(build(false), Ok(()));
+    assert_eq!(
+        build(true),
+        Err(AdmissionError::Compile(CompileDefect::UnwiredRead { law, field }))
+    );
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Lookup {
     BodyFieldOfTheName,

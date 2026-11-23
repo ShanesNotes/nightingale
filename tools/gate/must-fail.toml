@@ -249,8 +249,8 @@ doctests = [
 ]
 
 [[row]]
-core = "A store temperature read by a card the catalog grants no such read, or at a place its arrow does not allow, kept, discarded, in a guard, in a site term no site realizes or in an explicit field"
-mutants = ["projection-read-by-the-wrong-reader", "explicit-field-inputs-unchecked"]
+core = "A store temperature read by a card the catalog grants no such read, or at a place its arrow does not allow, kept, discarded, in a guard, in a site term no site realizes or by name in an explicit field"
+mutants = ["projection-read-by-the-wrong-reader", "explicit-field-inputs-unchecked", "unread-explicit-field-unchecked"]
 doctests = [
   { path = "crates/ng-contract/src/catalog.rs", code = "E0271", text = "fn wrong<'b>(mt: &FragmentBuilder<'b, Metabolism>) -> PerfusionTemperatures<'b> {" },
   { path = "crates/ng-contract/src/catalog.rs", code = "E0271", text = "fn wrong<'b>(cv: &FragmentBuilder<'b, Cardiovascular>) -> SkinThermoreceptor<'b> {" },
@@ -281,7 +281,7 @@ doctests = [
 
 [[row]]
 core = "MT reads the acetylcholine effect at a skin junction that holds no receptor effect, bound to a row of that name at the body instead"
-mutants = ["junction-receptor-from-the-body"]
+mutants = ["junction-receptor-from-the-body", "written-junction-read-under-the-host", "discarded-written-junction-read-under-the-host"]
 
 [[row]]
 core = "The skin reference declared by two cards with different descriptors"
