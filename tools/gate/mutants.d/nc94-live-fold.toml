@@ -1,0 +1,128 @@
+[[mutant]]
+name = "held-support-larger-flow-replaces-held"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''if !flow.at_most(held.0) {'''
+new = '''if false && !flow.at_most(held.0) {'''
+test = "-p ng-validate --test slice_certificate a_short_slice_window_passes_closure_and_drift_and_states_its_coverage_and_held_support"
+
+[[mutant]]
+name = "certificate-pair-earliest-drift-before-basis"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let drifted = drifted[0].or(drifted[1]);'''
+new = '''let drifted = drifted[1].or(drifted[0]);'''
+test = "-p ng-validate --test rhythm_certificate fixed_windows_report_the_admission_drift_when_another_quantity_drifts_one_step_later"
+
+[[mutant]]
+name = "certificate-pair-later-closure-outranks-earlier-drift"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''    if let Some(failure) = opened {
+        return Err(failure);
+    }'''
+new = '''    if let Some(failure) = opened && drifted[0].is_none() {
+        return Err(failure);
+    }'''
+test = "-p ng-validate --test certificate_shapes among_windows_judged_together_a_later_closure_outranks_an_earlier_drift_and_an_earlier_closure_wins"
+
+[[mutant]]
+name = "certificate-pair-earliest-closure-before-basis"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''                Outcome::Open if index == 0 => {'''
+new = '''                Outcome::Open if false && index == 0 => {'''
+test = "-p ng-validate --test certificate_shapes among_windows_judged_together_a_later_closure_outranks_an_earlier_drift_and_an_earlier_closure_wins"
+
+[[mutant]]
+name = "fold-rhythm-snapshot-drops-last-close"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''            last_close: self.last_close,'''
+new = '''            last_close: None,'''
+test = "-p ng-validate --test certificate_fold the_fold_matches_certify_at_every_intermediate_head_including_rhythm_tail_rollback"
+
+[[mutant]]
+name = "fold-rhythm-snapshot-drops-widest"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''            widest: self.widest,'''
+new = '''            widest: None,'''
+test = "-p ng-validate --test certificate_fold the_fold_matches_certify_at_every_intermediate_head_including_rhythm_tail_rollback"
+
+[[mutant]]
+name = "fold-feed-accepts-other-run"
+path = "crates/ng-record/src/history.rs"
+old = '''        if record.identity().digest() != self.run
+            || record.branch().id() != self.branch
+            || history.origin().seal != self.origin
+            || history.format() != self.format'''
+new = '''        if record.branch().id() != self.branch'''
+test = "-p ng-validate --test certificate_fold the_fold_refuses_a_foreign_run_a_foreign_branch_a_skipped_step_and_a_repeated_step"
+
+[[mutant]]
+name = "fold-feed-accepts-other-branch"
+path = "crates/ng-record/src/history.rs"
+old = '''            || record.branch().id() != self.branch'''
+new = '''            || false && record.branch().id() != self.branch'''
+test = "-p ng-validate --test certificate_fold the_fold_refuses_a_foreign_run_a_foreign_branch_a_skipped_step_and_a_repeated_step"
+
+[[mutant]]
+name = "fold-feed-accepts-gap"
+path = "crates/ng-record/src/history.rs"
+old = '''        if found != Some(expected) || history.revision() != self.last_revision + 1 {'''
+new = '''        if false && (found != Some(expected) || history.revision() != self.last_revision + 1) {'''
+test = "-p ng-validate --test certificate_fold the_fold_refuses_a_foreign_run_a_foreign_branch_a_skipped_step_and_a_repeated_step"
+
+[[mutant]]
+name = "fold-open-skips-prefix-replay"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''            feed_step(&mut windows, &mut trailing, &mut history_error, step);'''
+new = '''            let _ = step;'''
+test = "-p ng-validate --test certificate_fold resume_rewind_and_recover_rebuild_the_fold_from_the_verified_prefix_and_isolate_child_branches"
+
+[[mutant]]
+name = "fold-lost-link-outranks-coverage"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''        if span.length_ns() < self.windows.policy.windows.coverage_ns {
+            return Err(coverage);
+        }
+        if let Some(error) = self.history_error {'''
+new = '''        if let Some(error) = self.history_error {
+            return Err(of_history(CertificateCheck::History(error)));
+        }
+        if span.length_ns() < self.windows.policy.windows.coverage_ns {
+            return Err(coverage);
+        }
+        if let Some(error) = None::<CheckpointError> {'''
+test = "-p ng-validate --test certificate_fold the_fold_reproduces_coverage_before_a_lost_link_and_lost_link_during_run_rules"
+
+[[mutant]]
+name = "fold-keeps-trailing-after-done"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''        if self.windows.done || self.history_error.is_some() {
+            self.feed.release_trailing();'''
+new = '''        if false && (self.windows.done || self.history_error.is_some()) {
+            self.feed.release_trailing();'''
+test = "-p ng-validate --test certificate_fold the_fold_holds_bounded_memory_over_48_hours_and_does_not_grow_after_one_window"
+
+[[mutant]]
+name = "fold-one-window-slides-past-admission"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''        let last = match policy.windows.coverage_ns == length {
+            true => first,'''
+new = '''        let last = match false && policy.windows.coverage_ns == length {
+            true => first,'''
+test = "-p ng-validate --test certificate_fold a_window_at_24h_lag_is_judged_on_the_step_that_holds_its_end"
+
+[[mutant]]
+name = "fold-open-accepts-other-basis"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''        if policy.basis != feed.basis().digest() {'''
+new = '''        if false && policy.basis != feed.basis().digest() {'''
+test = "-p ng-validate --test certificate_fold the_fold_checks_basis_and_undeclared_rhythm_before_any_step"
+
+[[mutant]]
+name = "fold-open-accepts-undeclared-rhythm"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''                    declared
+                        .ok_or_else(|| of_history(CertificateCheck::UndeclaredRhythm))?
+                        .0,'''
+new = '''                    declared
+                        .ok_or_else(|| of_history(CertificateCheck::Coverage))?
+                        .0,'''
+test = "-p ng-validate --test certificate_fold the_fold_checks_basis_and_undeclared_rhythm_before_any_step"

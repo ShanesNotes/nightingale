@@ -4,7 +4,7 @@ Spec: [solver contract](../../../docs/architecture/solver-contract.md), section 
 
 Type: task
 
-Status: open
+Status: resolved
 
 Blocked by: none
 
@@ -18,14 +18,14 @@ Ruled at design. The fold gets its own ticket, and its evaluator, the first of t
 
 What main does not have: the fold, a view the record mints at admission, the witness, a trimmed `restore` that takes the opening time from the record's opening, the rolling day of links and the flight recorder. This ticket builds the fold and the view it reads. The rest of the record waits for [native-contract 95](95-the-record-trims-its-history.md), which trims the history.
 
-- [ ] One evaluator, in the order the steps were accepted, sits behind `certify` and the fold. `certify` feeds it the complete history from admission and then finishes it, so the two share every line that judges a window
+- [x] One evaluator, in the order the steps were accepted, sits behind `certify` and the fold. `certify` feeds it the complete history from admission and then finishes it, so the two share every line that judges a window
 - [x] Every policy with sliding windows gives the certificate it gives on main, bit for bit. The slice's model hash and pins, the arena's scores and the milestone protocol's certificate stay, and the PR moves no pin
 - [x] The independent oracle gains the closure's row-rounding allowance first. Today a policy that admits row rounding passes `certify` and fails the oracle's forward walk with a closure failure, so agreement with the oracle cannot show parity for such a policy. The test below is red at main `446e29f9`, with `left: Err(Closure)` and `right: Ok(())`, and is green once the oracle has the allowance
 - [x] Before the old walk goes, the evaluator matches it and the independent oracle (`crates/ng-validate/tests/certificate_oracle/`) on every window shape, on passing runs and failing ones: shifted starts, endpoint rounding, which failure comes first, and the earliest window on a tie
-- [ ] The fold reads one session through the view the record mints at admission, so no host can feed it two runs. `resume`, `rewind` and `recover` rebuild it from the verified prefix, and a child branch gets its parent's prefix and none of its parent's later windows
-- [ ] A window whose start lies 24 h before its end is judged when the step that holds its end is accepted, shown by a test at that lag
-- [ ] What the fold holds in memory over 48 h, as a bound in bytes that a run shows, and the slice's cost for each accepted step beside main's on [body 26](../../body/issues/26-cost-budget.md)'s cost protocol
-- [ ] A mutant row for each rule above
+- [x] The fold reads one session through the view the record mints at admission, so no host can feed it two runs. `resume`, `rewind` and `recover` rebuild it from the verified prefix, and a child branch gets its parent's prefix and none of its parent's later windows
+- [x] A window whose start lies 24 h before its end is judged when the step that holds its end is accepted, shown by a test at that lag
+- [x] What the fold holds in memory over 48 h, as a bound in bytes that a run shows, and the slice's cost for each accepted step beside main's on [body 26](../../body/issues/26-cost-budget.md)'s cost protocol
+- [x] A mutant row for each rule above
 
 The oracle's test, in `crates/ng-validate/tests/certificate_oracle/mod.rs`:
 
@@ -126,3 +126,16 @@ index 53db2cb77061aa49932fe12d7cbfc74e5c186ba6..53cf51bacff906bec608d9279b8f3a44
      let body = breathing(true).expect("compiled");
      running(
 ```
+
+## What the second PR built
+
+- **Earliest window before basis order.** `pair` in `crates/ng-validate/src/certificate.rs` and `in_time_order` in `crates/ng-validate/tests/certificate_oracle/mod.rs` now rank fixed windows judged together by earliest start first and then basis order, while keeping a later closure failure above an earlier drift failure. Covered by `fixed_windows_report_the_admission_drift_when_another_quantity_drifts_one_step_later` in `crates/ng-validate/tests/rhythm_certificate.rs` and `among_windows_judged_together_a_later_closure_outranks_an_earlier_drift_and_an_earlier_closure_wins` in `crates/ng-validate/tests/certificate_shapes.rs`.
+- **Non-consuming snapshots.** `Rhythm::snapshot` and `Windows::snapshot` in `crates/ng-validate/src/certificate.rs` evaluate the rhythm tail and certificate without consuming or mutating `open`, `since`, `last_close`, `widest`, `worst`, `judged`, `stopped` or `drifted`. `Windows::finish` delegates to `Windows::snapshot`, and `CertificateFold::certificate` reads the certificate at any accepted head while the run keeps going.
+- **Session-bound live view and fold.** `Session::conservation_feed` in `crates/ng-record/src/session.rs` mints a `ConservationFeed` bound to `(run, branch, origin, format)` and strict sequential `(previous, revision)` transitions, refusing foreign runs, foreign branches (even with a shared caller `BranchId`), skipped revisions and repeated revisions via `ConservationRefusal::{OtherRun, Gap}` without mutating state. `Head` holds `HistorySegment` directly so live leading steps borrow with zero clones. `CertificateFold` in `crates/ng-validate/src/certificate.rs` opens on a session (rebuilding from the verified prefix after `resume`, `rewind` or `recover` while isolating child branches), folds each accepted step through the same `Windows` evaluator as `certify`, releases trailing marks once fixed windows settle, and matches `certify` and the independent oracle bit for bit across window shapes (`crates/ng-validate/tests/certificate_fold.rs`). Compile-fail doctests in `crates/ng-record/src/lib.rs` and `crates/ng-validate/src/lib.rs` hold that no caller can push a raw segment into either type.
+- **Lost links during a walk and coverage precedence.** `HistoryStore` and `TimeOrder::from` specify the mid-walk lost-link contract: a link lost after the initial check fails only if a cursor later reaches its page, and when links across several pages are lost mid-walk the oldest damaged page reached reports its newest lost link. Held by the three `GivesOnce` tests in `crates/ng-validate/tests/transaction.rs` and the live-fold coverage-before-lost-link and mid-run lost-link tests in `crates/ng-validate/tests/certificate_fold.rs`.
+- **24 h lag, memory bound and step cost.** `a_window_at_24h_lag_is_judged_on_the_step_that_holds_its_end` tests both one-window and sliding 24 h lag. `CertificateFold::memory_bytes` holds at most `65 * segment_bytes + ceil(steps_in_window / 64) * 48 B + windows_state_bytes` (`O(1)` in total run duration once `span > window_ns`; one-window releases trailing to under 4 KiB). Measured on `TwoReservoirs` over 48 h (24 h window, 60 s steps): peak under 64 KiB, plateauing at 24 h. Measured on the slice (`arena_body`, 1 s window over 3 s): exact peak 2,304,888 B (2.20 MiB) with a strict plateau (`peak_3 <= peak_2`). Projected over 48 h with a 24 h sliding window: about 14.9 MB (`<= 27.5 MB` `VecDeque` cap) on the slice and about 21.2 MB (`<= 33.8 MB` cap) on the whole body, against about 4.4 TB of raw links. Pre-sizing `History::linked`, `compact` and `expand` buffers via `LedgerChunk::byte_len` leaves step cost unchanged or slightly lower on [body 26](../../body/issues/26-cost-budget.md)'s cost protocol: on `beelink` beside main `9f5ba6ce`, `cost slice` moved from `800.2 M` to `799.5 M` user instructions a simulated second (`-0.1%`, `-0.7 M`, `steps=11614`, `solves=14749`, bit-identical seal `29070aac7d8f758e`). No body or slice pin moved.
+- **Mutant rows.** Fifteen new rows live in `tools/gate/mutants.d/nc94-live-fold.toml`, covering the held-support replacement rule, earliest-drift and closure-over-drift ordering in `pair`, non-consuming rhythm snapshots, foreign-run/foreign-branch/gap refusals, prefix replay on `open`, coverage-before-lost-link precedence, trailing release, one-window boundary clamping, and basis/undeclared-rhythm checks.
+
+## Answer
+
+`CertificateFold` in `crates/ng-validate/src/certificate.rs` folds a run's certificate step by step through the same `Windows` evaluator that `certify` uses, reading each accepted step from a `ConservationFeed` minted by `Session::conservation_feed` in `crates/ng-record`. It matches `certify` and the independent oracle bit for bit at every intermediate head without consuming its state, rebuilds cleanly from the verified prefix on `resume`, `rewind` and `recover` while isolating child branches, judges windows at 24 h lag on the step holding their end, holds `O(1)` memory in run duration (exact measured slice peak 2.20 MiB for a 1 s window; projected ~21.2 MB on a 48 h whole-body run under a 24 h window), and moves no pin or step cost (`-0.1%` on `cost slice`). [Native-contract 95](95-the-record-trims-its-history.md) is unblocked to trim the rolling history store.
