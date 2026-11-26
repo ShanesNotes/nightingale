@@ -1,8 +1,8 @@
 use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, ArithmeticProfile, CoupledProblem, CoupledSolver, DeclaredResolution, Digest,
-    EngineFaultKind, ErrorScales, Factors, Increment, Jacobian, Measure, MethodHistory, NumericalRefusal,
-    Ratio, RowKind, SolveWorkspace, SparseView, StageEvaluation, StageScheme, StageSet, StageTime,
+    EngineFaultKind, ErrorScales, Factors, Increment, Measure, MethodHistory, NumericalRefusal, Ratio,
+    RowKind, SolveWorkspace, SparseView, StageEvaluation, StageJacobian, StageScheme, StageSet, StageTime,
     StepProposal, StepTicket, TrialFailure, eliminate,
 };
 
@@ -159,7 +159,7 @@ impl CoupledSolver for Core {
 
 struct Linear<'b> {
     per_second: f64,
-    jacobian: Jacobian,
+    jacobian: StageJacobian<'b>,
     factors: Option<Factors<'b>>,
 }
 impl Linear<'_> {
@@ -461,8 +461,8 @@ impl<'a, 'p> Stages<'a, 'p> {
     ) -> Result<Linear<'p>, TrialFailure> {
         let jacobian = self
             .problem
-            .linearize(&workspace.point(time), self.ticket.shift(span_ns)?)?;
-        let factors = self.problem.body().factor(&jacobian).ok();
+            .linearize_stage(&workspace.point(time), self.ticket.shift(span_ns)?)?;
+        let factors = jacobian.factor().ok();
         Ok(Linear {
             per_second: NANOSECONDS_PER_SECOND / span_ns as f64,
             jacobian,

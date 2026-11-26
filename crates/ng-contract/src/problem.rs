@@ -6,7 +6,8 @@ use crate::identity::{Canonical, Seal};
 use crate::quadrature::{StageEvaluation, VerifiedStep};
 use crate::{
     AcceptedStateView, BoundParameters, Candidate, CompiledBody, Digest, EngineFault, EngineFaultKind,
-    InputId, Interval, NumericalRefusal, Ratio, Refused, RhythmId, RowId, RunIdentity, SimTime, TrialFailure,
+    Factors, InputId, Interval, NumericalRefusal, Ratio, Refused, RhythmId, RowId, RunIdentity, SimTime,
+    TrialFailure,
 };
 use core::num::NonZeroU64;
 
@@ -51,6 +52,7 @@ impl<'r> CoupledProblem<'r> {
         self.body
     }
     /// The natural size of the row at a workspace slot, for a Newton stop that reads each row in its own unit.
+    #[inline]
     pub fn row_size(&self, slot: usize) -> f64 {
         self.parameters.sizes[slot]
     }
@@ -111,8 +113,7 @@ impl<'r> CoupledProblem<'r> {
             residuals,
         })
     }
-    /// `dF/dy + shift * dF/dy'` by fixed-order forward differentiation over the compiled sparsity.
-    pub fn linearize(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Jacobian, TrialFailure> {
+    fn linearize_values(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Vec<f64>, TrialFailure> {
         self.check(point)?;
         let ticket = point.time.ticket;
         let factors = self.factors(point);
@@ -124,13 +125,28 @@ impl<'r> CoupledProblem<'r> {
             draws: self.chance.draws(),
             factors: &factors,
         };
-        let values = (self.body.jacobian(&inputs, shift.per_second))
-            .map_err(|undefined| self.undefined(ticket, undefined))?;
+        (self.body.jacobian(&inputs, shift.per_second)).map_err(|undefined| self.undefined(ticket, undefined))
+    }
+    /// `dF/dy + shift * dF/dy'` by fixed-order forward differentiation over the compiled sparsity.
+    pub fn linearize(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Jacobian, TrialFailure> {
+        let values = self.linearize_values(point, shift)?;
         let sparsity = self.body.sparsity();
         Ok(Jacobian {
             row_offsets: sparsity.row_offsets().to_vec(),
             columns: sparsity.unknowns().to_vec(),
             values,
+        })
+    }
+    /// `dF/dy + shift * dF/dy'` borrowing the compiled body's sparsity without copying it.
+    pub fn linearize_stage(
+        &self,
+        point: &StagePoint<'_, '_>,
+        shift: Shift,
+    ) -> Result<StageJacobian<'r>, TrialFailure> {
+        let values = self.linearize_values(point, shift)?;
+        Ok(StageJacobian {
+            body: self.body,
+            jacobian: Jacobian::of_parts(Vec::new(), Vec::new(), values),
         })
     }
     fn guard_inputs<'a>(
@@ -497,6 +513,23 @@ impl Jacobian {
             columns: &self.columns,
             values: &self.values,
         }
+    }
+}
+pub struct StageJacobian<'r> {
+    body: &'r CompiledBody,
+    jacobian: Jacobian,
+}
+impl<'r> StageJacobian<'r> {
+    pub fn view(&self) -> SparseView<'_> {
+        let sparsity = self.body.sparsity();
+        SparseView {
+            row_offsets: sparsity.row_offsets(),
+            columns: sparsity.unknowns(),
+            values: &self.jacobian.values,
+        }
+    }
+    pub fn factor(&self) -> Result<Factors<'r>, usize> {
+        self.body.factor(&self.jacobian)
     }
 }
 /// Compressed rows on the compiled sparsity. View row `r` is `residuals()[r]`, its entries are
