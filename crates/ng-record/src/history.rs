@@ -308,6 +308,9 @@ impl LedgerChunk {
     fn shape(&self) -> Shape {
         (self.quantities.len(), self.columns.len(), self.edges.len())
     }
+    fn byte_len(&self) -> usize {
+        2 * INSTANT + (self.quantities.len() * 6 + self.columns.len() * 4 + self.edges.len() * 2) * VALUE
+    }
     fn write(&self, bytes: &mut Vec<u8>) {
         let Self {
             interval,
@@ -445,11 +448,13 @@ pub fn compact(previous: Option<CompactLink<'_>>, link: &[u8]) -> Vec<u8> {
         })
     });
     let (Some(pairs), true) = (pairs, follows) else {
-        let mut whole = vec![WHOLE];
+        let mut whole = Vec::with_capacity(1 + link.len());
+        whole.push(WHOLE);
         whole.extend_from_slice(link);
         return whole;
     };
-    let mut kept = vec![ENDS];
+    let mut kept = Vec::with_capacity(1 + size_of::<Digest>() + INSTANT + (pairs.len() / 2) * VALUE);
+    kept.push(ENDS);
     kept.extend_from_slice(&link[size_of::<Digest>()..LINK_HEAD]);
     kept.extend_from_slice(&link[LINK_HEAD + INSTANT..LINK_VALUES]);
     for end in pairs.iter().skip(1).step_by(2) {
@@ -472,7 +477,8 @@ pub fn expand(previous: Option<CompactLink<'_>>, compact: &[u8]) -> Option<Vec<u
     let (image, rest) = rest.split_at_checked(size_of::<Digest>())?;
     let (end, held) = rest.split_at_checked(INSTANT)?;
     let mut values = values(held)?.iter();
-    let mut link = previous.seal.as_bytes().to_vec();
+    let mut link = Vec::with_capacity(LINK_VALUES + starts.len() * 2 * VALUE);
+    link.extend_from_slice(previous.seal.as_bytes());
     for part in [image, start, end] {
         link.extend_from_slice(part);
     }
@@ -621,9 +627,11 @@ impl History {
     }
     pub(crate) fn linked(&self, chunk: LedgerChunk, image: Digest) -> Link {
         let previous = self.seal();
-        let mut stored = previous.as_bytes().to_vec();
+        let mut stored = Vec::with_capacity(LINK_HEAD + chunk.byte_len());
+        stored.extend_from_slice(previous.as_bytes());
         stored.extend_from_slice(image.as_bytes());
         chunk.write(&mut stored);
+        debug_assert_eq!(stored.len(), LINK_HEAD + chunk.byte_len());
         let revision = self.revision() + 1;
         let seal = linked(
             self.format.hash(),
