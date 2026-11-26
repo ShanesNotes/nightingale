@@ -7,8 +7,8 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct HeadDigest {
-    parameters: Digest,
-    image: Digest,
+    pub(crate) parameters: Digest,
+    pub(crate) image: Digest,
     from_admission: bool,
 }
 
@@ -98,7 +98,7 @@ impl AcceptedHead {
                 last_refusal: None,
             }));
         }
-        let problem = CoupledProblem::new(body, parameters, identity, self.view(), base);
+        let problem = CoupledProblem::for_head(body, parameters, identity, self.view(), base, self.digest);
         let (step, accepted) = parts.pending.attempt(&problem, attempt, |ticket| {
             let proposal = solve(&problem, ticket).map_err(|failure| match failure {
                 TrialFailure::Refused(refused) if refused.ticket() != ticket.digest() => {

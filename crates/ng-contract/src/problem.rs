@@ -2,20 +2,30 @@ use crate::body::{RowKind, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::chance::{Chance, Trigger, period_ns};
 use crate::evaluate::{Inputs, Undefined};
+use crate::head::HeadDigest;
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::{StageEvaluation, VerifiedStep};
 use crate::{
     AcceptedStateView, BoundParameters, Candidate, CompiledBody, Digest, EngineFault, EngineFaultKind,
-    Factors, InputId, Interval, NumericalRefusal, Ratio, Refused, RhythmId, RowId, RunIdentity, SimTime,
-    TrialFailure,
+    Factors, InputId, Interval, ModelHash, NumericalRefusal, Ratio, Refused, RhythmId, RowId, RunIdentity,
+    SimTime, TrialFailure,
 };
 use core::num::NonZeroU64;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
-/// What a solver core sees of one attempt. The record builds one per attempt from its own fields. Building
-/// one on other values is allowed and reaches nothing, because `StepProposal::verify` re-evaluates on the
-/// record's.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProblemSeal {
+    model: ModelHash,
+    parameters: Digest,
+    image: Digest,
+    identity: Digest,
+    base: Digest,
+}
+
+/// What a solver core sees of one attempt. The record builds one per attempt from its own fields, attested to
+/// that head. Building one on other values is allowed and reaches nothing, because `StepProposal::verify`
+/// re-evaluates any unattested stage on the record's.
 pub struct CoupledProblem<'r> {
     pub(crate) body: &'r CompiledBody,
     pub(crate) parameters: &'r BoundParameters,
@@ -26,6 +36,7 @@ pub struct CoupledProblem<'r> {
     pub(crate) coordinates: Vec<f64>,
     pub(crate) first_memory: usize,
     pub(crate) first_algebraic: usize,
+    pub(crate) provenance: Option<ProblemSeal>,
 }
 impl<'r> CoupledProblem<'r> {
     pub fn new(
@@ -50,7 +61,26 @@ impl<'r> CoupledProblem<'r> {
             coordinates,
             first_memory,
             first_algebraic,
+            provenance: None,
         }
+    }
+    pub(crate) fn for_head(
+        body: &'r CompiledBody,
+        parameters: &'r BoundParameters,
+        identity: &'r RunIdentity,
+        accepted: AcceptedStateView<'r>,
+        base: Digest,
+        head: HeadDigest,
+    ) -> Self {
+        let mut problem = Self::new(body, parameters, identity, accepted, base);
+        problem.provenance = Some(ProblemSeal {
+            model: body.model_hash(),
+            parameters: head.parameters,
+            image: head.image,
+            identity: identity.digest(),
+            base,
+        });
+        problem
     }
     pub fn accepted(&self) -> AcceptedStateView<'r> {
         self.accepted
@@ -128,6 +158,7 @@ impl<'r> CoupledProblem<'r> {
             layout: point.layout,
             ticket: point.time.ticket.digest,
             offset_ns: point.time.offset_ns,
+            provenance: self.provenance,
             unknowns: point.unknowns.to_vec(),
             derivative: point.derivative.to_vec(),
             columns,
@@ -150,6 +181,7 @@ impl<'r> CoupledProblem<'r> {
         evaluation.layout = point.layout;
         evaluation.ticket = point.time.ticket.digest;
         evaluation.offset_ns = point.time.offset_ns;
+        evaluation.provenance = self.provenance;
         evaluation.unknowns.clear();
         evaluation.unknowns.extend_from_slice(point.unknowns);
         evaluation.derivative.clear();
