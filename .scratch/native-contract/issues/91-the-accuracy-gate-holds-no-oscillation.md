@@ -4,7 +4,7 @@ Spec: [solver contract](../../../docs/architecture/solver-contract.md), section 
 
 Type: task
 
-Status: open
+Status: resolved
 
 Blocked by: none
 
@@ -25,9 +25,22 @@ At the body's 10 ms cap the form gives 0.001 a second at 0.1 Hz, 0.1 at 1 Hz and
 
 **What to build.** One manufactured case in the accuracy gate, judged against its closed form as the two-reservoir case is, with the core built to fail it.
 
-- [ ] A manufactured case holds a self-sustained oscillation whose amplitude has a closed form, and the gate compares the amplitude a core reaches with it under a declared tolerance
-- [ ] The core built to fail it is honest: the halved step or the reference scheme at a cap past four times the growth rate over `w^2`. Every step passes `verify` and every ledger closes, as in the table above, and this case alone refuses it. Its row joins section 7's must-fail table and `tools/gate/must-fail.toml`
-- [ ] The tolerance, and the step at which the reference itself passes, are stated with the damping they allow, so the case says how long a step a core may declare for an oscillation of a given period
-- [ ] Whether any gate reads an exchange one way. `net_at` compares an exchange's forward less its reverse, and [native-contract 15](15-manufactured-accuracy-cases.md)'s comment says the two-reservoir case's gross inflow cannot fail. A solver exploration measured a gross exchange 50% high over one accepted 1 s step on a ramped drive (`~/lanes/logs/ng-solver-exploration-5fe4e63/`, read and not rerun). The Answer names each reader of a forward or a reverse exchange by itself, or says there is none
+- [x] A manufactured case holds a self-sustained oscillation whose amplitude has a closed form, and the gate compares the amplitude a core reaches with it under a declared tolerance
+- [x] The core built to fail it is honest: the halved step or the reference scheme at a cap past four times the growth rate over `w^2`. Every step passes `verify` and every ledger closes, as in the table above, and this case alone refuses it. Its row joins section 7's must-fail table and `tools/gate/must-fail.toml`
+- [x] The tolerance, and the step at which the reference itself passes, are stated with the damping they allow, so the case says how long a step a core may declare for an oscillation of a given period
+- [x] Whether any gate reads an exchange one way. `net_at` compares an exchange's forward less its reverse, and [native-contract 15](15-manufactured-accuracy-cases.md)'s comment says the two-reservoir case's gross inflow cannot fail. A solver exploration measured a gross exchange 50% high over one accepted 1 s step on a ramped drive (`~/lanes/logs/ng-solver-exploration-5fe4e63/`, read and not rerun). The Answer names each reader of a forward or a reverse exchange by itself, or says there is none
 
 **Non-goals:** a new step plan, the cap's value, and any change to what step acceptance reads. [Body ticket 30](../../body/issues/30-step-plans-on-the-whole-body.md) measures the plans on the body.
+
+## Answer
+
+- **Manufactured case (`AccuracyCase::SelfSustainedOscillation`).** `Oscillation::self_sustained()` (`crates/ng-validate/src/oscillation.rs`) joins `AccuracyCase::manufactured()` and `AccuracyPolicy::arena()`. Two dimensionless memory rows `x` and `y` obey the Stuart-Landau limit cycle `x' = (g - p (x^2 + y^2)) x + w y`, `y' = (g - p (x^2 + y^2)) y - w x` (`T = 60 s`, `w = 2 pi / 60`, `g = p = 0.01 / s`, start `(0.5, 0)`, end `1200 s`) while driving a closed two-vessel water transfer `q = c x` (`c = 1 / s`, `a(0) = b(0) = 500000`) so the body holds a conserved water ledger. The exact amplitude `r(t) = sqrt(g / (p + (g / r_0^2 - p) exp(-2 g t)))` grows monotonically from `0.5` toward limit-cycle amplitude `1`. At every compared instant `accuracy` compares `sqrt(x^2 + y^2)` against `r(t)` under the declared tolerance `0.1`, reported on `AccuracyEvidence::amplitude_tolerance()` and sealed into `AccuracyPolicy::digest()`.
+- **Must-fail core.** Both `ng_solver::Core::new(6 s)` and `ReferenceIntegrator::new(6 s)` (cap `6 s`, past `4 g / w^2 = 3.648 s`) run the full `1200 s` with `0` refusals on `verify` and `0` closure error on the water ledger under `certify`, yet decay the amplitude to `1.82e-4` against exact `1`. Both pass all five two-reservoir manufactured cases and are refused by `SelfSustainedOscillation` alone (`AccuracyFailure::Exceeded`). Its row joins section 7's must-fail table and `tools/gate/must-fail.toml`, backed by mutant rows `oscillation-cap-below-damping-bound` and `oscillation-amplitude-unchecked` in `tools/gate/mutants.d/nc91-oscillation.toml`.
+- **Tolerance, passing reference step, and allowed damping.** Holding steady amplitude within tolerance `tau = 0.1` of `1` (`r >= 0.9`) permits numerical damping up to `(2 tau - tau^2) g = 0.19 g = 0.0019 / s`. For halved/doubled backward Euler (damping roughly `w^2 h / 4` per second), that bounds the declared step to `h <= 4 * 0.19 g / w^2 = 0.76 g / w^2` (19% of the decay cutoff `4 g / w^2`, or about `0.693 s` at period `60 s`; half that for one-stage backward Euler). `ReferenceIntegrator` passes at `0.5 s` (damping `0.00137 / s`, steady amplitude `0.9289`, worst amplitude error `0.0799 <= 0.1`), and both `ReferenceIntegrator` and `ng_solver::Core` pass all six manufactured cases at first order across `0.5 s`, `0.25 s`, and `0.125 s` (oscillation worst errors `0.0799`, `0.0395`, `0.0196`; ratios `2.02` and `2.01`, inside `[1.9, 2.1]`).
+- **One-way exchange readers across the codebase.** No gate judges or rejects a core on a column's `forward` or `reverse` exchange by itself.
+  - Every accuracy, split, and day gate reads only net (`forward - reverse`): `crates/ng-validate/src/accuracy.rs` (`net_at`), `crates/ng-validate/src/window.rs` (via `net_at`), `crates/ng-contract/src/split.rs` (`TraceDraw::advance`), and `crates/ng-validate/src/day/trace.rs` (`sodium_excreted_per_second`).
+  - Three library paths read `forward` and `reverse` separately, and none checks a step's quadrature accuracy against the continuous solution:
+    - `crates/ng-contract/src/quadrature.rs` (`StepProposal::verify`): compares booked `extents.forward` and `extents.reverse` bit-for-bit against the core's own replayed stage evaluations to enforce `MethodMismatch`.
+    - `crates/ng-record/src/history.rs` (`LedgerChunk::after`) into `crates/ng-validate/src/certificate.rs` (`pair`, `balance`): sums boundary `forward` and `reverse` into cumulative gross `inflow` and `outflow` per conserved quantity; `balance` uses `inflow - outflow` for closure and `inflow + outflow` only to widen the relative closure allowance (`absolute + gross * relative`).
+    - `crates/ng-validate/src/certificate.rs` (`pair`): reads held-route `forward` and `reverse` separately into `HeldSupport` (`Certificate::support()`) for reporting only, with no failure bound.
+  - Single-direction assertions in `crates/ng-validate/tests/{arena_body,burning,replay,transaction}.rs` are fixture and ledger unit tests, not gates.
