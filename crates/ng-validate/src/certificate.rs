@@ -756,7 +756,8 @@ fn pair(
     };
     let window =
         |start: u64| Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length)).ok_or(coverage);
-    let mut drifted = None;
+    let mut opened = None;
+    let mut drifted = [None; 2];
     let mut windows = Vec::with_capacity(2 * policy.quantities.len());
     for (at, limits) in policy.quantities.iter().enumerate() {
         let quantity = limits.quantity;
@@ -780,11 +781,16 @@ fn pair(
                 allowance: None,
             };
             match balance.outcome {
-                Outcome::Open => return Err(failure(CertificateCheck::Closure, balance.closure)),
-                Outcome::Drifts if drifted.is_none() => {
-                    drifted = Some(failure(CertificateCheck::Drift, balance.drift));
+                Outcome::Open if index == 0 => {
+                    return Err(failure(CertificateCheck::Closure, balance.closure));
                 }
-                Outcome::Drifts | Outcome::Holds => {}
+                Outcome::Open => {
+                    opened.get_or_insert_with(|| failure(CertificateCheck::Closure, balance.closure));
+                }
+                Outcome::Drifts => {
+                    drifted[index].get_or_insert_with(|| failure(CertificateCheck::Drift, balance.drift));
+                }
+                Outcome::Holds => {}
             }
             windows.push(Window {
                 quantity: at,
@@ -796,6 +802,10 @@ fn pair(
             });
         }
     }
+    if let Some(failure) = opened {
+        return Err(failure);
+    }
+    let drifted = drifted[0].or(drifted[1]);
     let mut carried = Vec::with_capacity(2 * routes.len());
     for (at, route) in routes.iter().enumerate() {
         let ((forward, reverse), (forward_before, reverse_before)) = (

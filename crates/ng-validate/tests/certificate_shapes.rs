@@ -258,3 +258,178 @@ fn the_worst_closure_reports_the_place_of_its_own_windows_closing_total() {
         "the place of {total} at {end} ns"
     );
 }
+
+fn two_pool_body() -> (CompiledBody, [SiteId; 2]) {
+    let origin = || Position::new(measure(0.0), measure(0.0), measure(0.0));
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let first = map.site::<VesselSegment>("first", origin());
+    let second = map.site::<VesselSegment>("second", origin());
+    map.contain(root.id(), first.id());
+    map.contain(root.id(), second.id());
+    let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    schema
+        .boundary::<Water>("first-in", BoundaryDirection::IntoBody, first.id(), Space::Lumen)
+        .expect("a boundary");
+    schema
+        .boundary::<Water>(
+            "second-in",
+            BoundaryDirection::IntoBody,
+            second.id(),
+            Space::Lumen,
+        )
+        .expect("a boundary");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.boundary()?.parts();
+        let class = RateClass::new(RateBand::Wave, 3_600 * SECOND)?;
+        for name in ["first-in", "second-in"] {
+            let BoundaryRoute { route, drive } = ports.route::<Water>(name)?;
+            let rate = laws.kernel(|mut k| {
+                let value = k.read(&drive);
+                k.finish(value, laws.every_mode(), class)
+            });
+            laws.transfer(Transfer::new(&route, rate));
+        }
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    (body, [first.id(), second.id()])
+}
+
+fn water_event(boundary: &'static str, id: &[u8], from: u64, to: u64, amount: f64) -> BoundaryEvent {
+    BoundaryEvent::new(
+        InputId::new(Digest::of_canonical(id)),
+        SimTime::from_ns(from),
+        BoundaryInput::Water(WaterDelivery {
+            boundary,
+            amount: measure(amount),
+            ends: SimTime::from_ns(to),
+        }),
+    )
+}
+
+#[test]
+fn among_windows_judged_together_a_later_closure_outranks_an_earlier_drift_and_an_earlier_closure_wins() {
+    let (body, [first, second]) = two_pool_body();
+    let held = 1e18;
+    let tiny = held * PAIR_PRECISION / 4.0;
+    let step = 60 * SECOND;
+    let span = 2 * HOUR;
+    let at = SimTime::from_ns;
+    let window = |from, to| Some(Interval::new(at(from), at(to)).expect("a window"));
+    let lumen = |site| RowKind::Amount {
+        site,
+        space: Space::Lumen,
+        species: Species::Water,
+    };
+    let quantity_of = |site: SiteId| {
+        let wanted = lumen(site);
+        body.conserved_basis()
+            .combinations()
+            .iter()
+            .find(|combination| {
+                combination
+                    .terms()
+                    .iter()
+                    .any(|&(row, _)| body.rows()[row.index()].kind() == wanted)
+            })
+            .expect("in basis")
+            .id()
+    };
+    let (first_qty, second_qty) = (quantity_of(first), quantity_of(second));
+    assert!(
+        first_qty.index() < second_qty.index(),
+        "basis order is first then second"
+    );
+
+    for first_opens in [true, false] {
+        let mut packet = ParameterPacket::new();
+        let (first_start, second_start) = if first_opens {
+            (held, 1_000.0)
+        } else {
+            (1_000.0, held)
+        };
+        packet
+            .start(lumen(first), measure::<Water>(first_start), "synthetic")
+            .expect("once");
+        packet
+            .start(lumen(second), measure::<Water>(second_start), "synthetic")
+            .expect("once");
+        let (open_in, drift_in, open_qty, drift_qty) = if first_opens {
+            ("first-in", "second-in", first_qty, second_qty)
+        } else {
+            ("second-in", "first-in", second_qty, first_qty)
+        };
+        let events = vec![
+            water_event(open_in, b"fill", 0, step, 10.0),
+            water_event(open_in, b"tiny", HOUR, span, tiny),
+            water_event(drift_in, b"drift", 0, HOUR, 600.0),
+        ];
+        let (core, store) = (ReferenceIntegrator::new(step), MemoryStore::default());
+        let port = BoundaryPort::new(events).expect("a port");
+        let session = to(
+            admit_fixture(&body, packet, port, &core, &store).expect("admitted"),
+            at(span),
+        );
+        let view = session.conservation();
+        let drifted = certified(
+            &view,
+            &Ledger::sliding(view.basis(), HOUR, span, 1e300, 1e-9, 100.0),
+        )
+        .expect_err("drifts at admission");
+        assert_eq!(
+            (drifted.check(), drifted.quantity(), drifted.window()),
+            (CertificateCheck::Drift, Some(drift_qty), window(0, HOUR)),
+            "first_opens={first_opens}: the admission window drifts when closure holds"
+        );
+        let opened = certified(
+            &view,
+            &Ledger::sliding(view.basis(), HOUR, span, 1e-24, 1e-9, 100.0),
+        )
+        .expect_err("closure fails one step later");
+        assert_eq!(
+            (opened.check(), opened.quantity(), opened.window()),
+            (
+                CertificateCheck::Closure,
+                Some(open_qty),
+                window(step, HOUR + step)
+            ),
+            "first_opens={first_opens}: later closure in the same pair outranks earlier drift"
+        );
+    }
+
+    let mut packet = ParameterPacket::new();
+    packet
+        .start(lumen(first), measure::<Water>(held), "synthetic")
+        .expect("once");
+    packet
+        .start(lumen(second), measure::<Water>(held), "synthetic")
+        .expect("once");
+    let events = vec![
+        water_event("first-in", b"f-fill", 0, step, 10.0),
+        water_event("first-in", b"f-tiny", HOUR, span, tiny),
+        water_event("second-in", b"s-fill", 0, step, 10.0),
+        water_event("second-in", b"s-tiny", step, HOUR, tiny),
+    ];
+    let (core, store) = (ReferenceIntegrator::new(step), MemoryStore::default());
+    let session = to(
+        admit_fixture(
+            &body,
+            packet,
+            BoundaryPort::new(events).expect("a port"),
+            &core,
+            &store,
+        )
+        .expect("admitted"),
+        at(span),
+    );
+    let view = session.conservation();
+    let opened = certified(&view, &Ledger::sliding(view.basis(), HOUR, span, 1e-24, 0.0, 1e9))
+        .expect_err("both open in the first pair");
+    assert_eq!(
+        (opened.check(), opened.quantity(), opened.window()),
+        (CertificateCheck::Closure, Some(second_qty), window(0, HOUR)),
+        "earliest closure wins over a later closure on an earlier quantity"
+    );
+}

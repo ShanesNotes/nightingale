@@ -987,6 +987,28 @@ fn a_leak_before_the_first_edge_is_the_fixed_windows_to_see_and_one_after_the_la
 }
 
 #[test]
+fn fixed_windows_report_the_admission_drift_when_another_quantity_drifts_one_step_later() {
+    let body = breathing(true).expect("compiled");
+    let course = Course {
+        period: 4 * SECOND,
+        leak: Some((Leak::Oxygen, 30.0)),
+        leaking: vec![(0, LENGTH)],
+        held: vec![(0, 30 * SECOND)],
+        end: 30 * SECOND,
+    };
+    running(&body, &course, |view| {
+        let judged = |coverage| {
+            let ledger = Ledger::sliding(view.basis(), LENGTH, coverage, 1e-6, 1e-9, 4.0);
+            let failure = certified(view, &ledger).expect_err("the admission window drifts");
+            (failure.check(), failure.window())
+        };
+        let first = (CertificateCheck::Drift, Some(interval(0, LENGTH)));
+        assert_eq!(judged(LENGTH), first, "the admission window judged alone");
+        assert_eq!(judged(view.span().expect("a span").length_ns()), first);
+    });
+}
+
+#[test]
 fn a_fixed_drift_outranks_a_stopped_rhythm_which_outranks_an_earlier_drift_between_edges() {
     let body = breathing(true).expect("compiled");
     running(
