@@ -328,7 +328,6 @@ fn mix(work: &mut [u64; 16], [a, b, c, d]: [usize; 4], x: u64, y: u64) {
 /// `Seal` of its type writes into a `Canonical`.
 pub(crate) mod stream {
     use super::{Blake2b, Digest, RecordHash, Sha256};
-    use crate::{Compensated, SimTime};
 
     pub(crate) trait Sink {
         fn number(&mut self, number: u64);
@@ -401,18 +400,6 @@ pub(crate) mod stream {
     impl Seal for f64 {
         fn seal<S: Sink>(&self, out: &mut S) {
             out.number(self.to_bits());
-        }
-    }
-    impl Seal for Compensated {
-        fn seal<S: Sink>(&self, out: &mut S) {
-            let [hi, lo] = self.bits();
-            out.number(hi);
-            out.number(lo);
-        }
-    }
-    impl Seal for SimTime {
-        fn seal<S: Sink>(&self, out: &mut S) {
-            out.number(self.nanoseconds());
         }
     }
     impl Seal for Digest {

@@ -9,7 +9,7 @@ use crate::{
 pub(crate) struct HeadDigest {
     pub(crate) parameters: Digest,
     pub(crate) image: Digest,
-    from_admission: bool,
+    pub(crate) from_admission: bool,
 }
 
 /// Only `install` moves its parts, so its digest stays theirs.
@@ -173,7 +173,9 @@ impl AcceptedHead {
             rhythm_edges: _,
             extents,
         } = next;
-        let from_admission = digest.from_admission && known == self.parts.pending.known();
+        let from_admission = digest.from_admission
+            && digest.parameters == self.digest.parameters
+            && known == self.parts.pending.known();
         let parts = &mut self.parts;
         parts.time = time;
         parts.state = state;
@@ -181,8 +183,9 @@ impl AcceptedHead {
         parts.dense = dense;
         parts.pending.advance(applied);
         self.digest = HeadDigest {
+            parameters: self.digest.parameters,
+            image: digest.image,
             from_admission,
-            ..digest
         };
         self.admission = false;
         extents

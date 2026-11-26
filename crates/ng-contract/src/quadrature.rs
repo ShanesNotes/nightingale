@@ -962,4 +962,87 @@ mod tests {
             other => panic!("expected MethodMismatch, got {:?}", other.err()),
         }
     }
+
+    #[test]
+    fn cross_head_install_keeps_receiving_heads_parameter_digest() {
+        let body = one_row();
+        let (mut head, identity) = admitted_one_row(&body, 2.0, 1.0, StageScheme::forward_euler());
+        let (mut other_head, other_identity) =
+            admitted_one_row(&body, 5.0, 1.0, StageScheme::forward_euler());
+        let base = Digest::of_canonical(b"base");
+        let span_ns = 10_000_000;
+        let step_other = |h: &AcceptedHead| {
+            h.attempt(
+                &body,
+                &other_identity,
+                base,
+                Attempt::First { span_ns },
+                |problem, ticket| {
+                    let time = ticket.at(0)?;
+                    let mut ws = problem.workspace();
+                    ws.unknowns_mut()[0] = 1.0;
+                    ws.derivative_mut()[0] = 5.0;
+                    let eval = problem.evaluate(&ws.point(time))?;
+                    let mut q = problem.quadrature(ticket);
+                    q.add_owned(eval, Ratio::ONE)?;
+                    let inc = q.finish()?;
+                    let history = MethodHistory::new(
+                        problem.accepted().method_history().schema(),
+                        SimTime::from_ns(0),
+                        Vec::new(),
+                    );
+                    Ok(problem.propose(ticket, inc, &ws, history))
+                },
+                |_| Ok(()),
+            )
+            .expect("other step passes")
+            .0
+        };
+        let next_for_head = step_other(&other_head);
+        let next_for_other = step_other(&other_head);
+        let _ = head.install(next_for_head);
+        let _ = other_head.install(next_for_other);
+        assert_eq!(head.digest().parameters, head.parts().parameters().digest());
+        assert_ne!(head.digest().parameters, other_head.parts().parameters().digest());
+        assert!(!head.digest().from_admission);
+        assert_eq!(head.image_digest(), other_head.image_digest());
+        let outcome = head.attempt(
+            &body,
+            &identity,
+            base,
+            Attempt::First { span_ns },
+            |problem, ticket| {
+                let time = ticket.at(0)?;
+                let other_problem = CoupledProblem::for_head(
+                    &body,
+                    other_head.parts().parameters(),
+                    &identity,
+                    other_head.view(),
+                    base,
+                    other_head.digest(),
+                );
+                let mut ws = problem.workspace();
+                ws.unknowns_mut()[0] = problem.accepted().state().memory[0];
+                ws.derivative_mut()[0] = 5.0;
+                let forged = other_problem.evaluate(&ws.point(time))?;
+                let mut q = problem.quadrature(ticket);
+                q.add_owned(forged, Ratio::ONE)?;
+                let inc = q.finish()?;
+                assert!(inc.witness.provenance.is_none());
+                let history = MethodHistory::new(
+                    problem.accepted().method_history().schema(),
+                    SimTime::from_ns(0),
+                    Vec::new(),
+                );
+                Ok(problem.propose(ticket, inc, &ws, history))
+            },
+            |_| Ok(()),
+        );
+        match outcome {
+            Err(TrialFailure::EngineFault(fault)) => {
+                assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch)
+            }
+            other => panic!("expected MethodMismatch, got {:?}", other.err()),
+        }
+    }
 }

@@ -172,7 +172,7 @@ fn smooth(a: Jet, b: Jet, width: Jet, sign: f64) -> Option<Jet> {
 }
 
 fn step(instr: Instr, jets: &[Jet], partial_volume: f64) -> Option<Jet> {
-    let at = |slot: u16| jets[usize::from(slot)];
+    let at = |slot: u32| jets[slot as usize];
     Some(match instr {
         Instr::Zero => Jet::exact(0.0),
         Instr::Add([a, b]) => Jet {
@@ -240,7 +240,7 @@ fn step(instr: Instr, jets: &[Jet], partial_volume: f64) -> Option<Jet> {
         }
         Instr::Volume([amount]) => product(Jet::exact(partial_volume), at(amount))?,
         Instr::Upwind([flow, from, from_water, to, to_water]) => {
-            let carried = |amount: u16, water: u16| product(at(flow), quotient(at(amount), at(water))?);
+            let carried = |amount: u32, water: u32| product(at(flow), quotient(at(amount), at(water))?);
             let flowing = at(flow).value;
             if flowing.lo > 0.0 {
                 carried(from, from_water)?
@@ -264,20 +264,20 @@ pub(crate) fn enclose(
     unknown: &dyn Fn(usize) -> Jet,
     partial_volume: f64,
 ) -> Option<Jet> {
-    let mut jets = vec![Jet::exact(0.0); usize::from(arithmetic.length)];
+    let mut jets = vec![Jet::exact(0.0); arithmetic.length as usize];
     for &(slot, index) in reads.parameters {
-        jets[usize::from(slot)] = Jet::exact(*inputs.parameters.get(index as usize)?);
+        jets[slot as usize] = Jet::exact(*inputs.parameters.get(index as usize)?);
     }
     for &(slot, index) in reads.unknowns {
-        jets[usize::from(slot)] = unknown(index as usize);
+        jets[slot as usize] = unknown(index as usize);
     }
     for &(slot, bound) in reads.others {
-        jets[usize::from(slot)] = Jet::exact(read(&bound, inputs)?);
+        jets[slot as usize] = Jet::exact(read(&bound, inputs)?);
     }
     for &(at, instr) in arithmetic.steps {
-        jets[usize::from(at)] = step(instr, &jets, partial_volume)?;
+        jets[at as usize] = step(instr, &jets, partial_volume)?;
     }
-    Some(jets[usize::from(arithmetic.length) - 1])
+    Some(jets[arithmetic.length as usize - 1])
 }
 
 #[cfg(test)]
