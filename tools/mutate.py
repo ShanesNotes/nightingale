@@ -92,7 +92,7 @@ def table_files(path):
     p = pathlib.Path(path)
     if p.is_dir():
         entries = sorted(p.iterdir(), key=lambda child: child.name)
-        bad = [child.name for child in entries if not child.is_file() or child.suffix != ".toml"]
+        bad = [child.name for child in entries if child.is_symlink() or not child.is_file() or child.suffix != ".toml"]
         if bad:
             refuse(f"{path} holds non-TOML entries: {bad[:3]}")
         if not entries:

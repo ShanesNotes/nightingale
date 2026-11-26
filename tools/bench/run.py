@@ -44,6 +44,7 @@ import pathlib
 import statistics
 import subprocess
 import sys
+import tomllib
 
 RUNS = 5
 INTERVALS_MS = {"reference": (5, 1), "ng-solver": (10, 5)}
@@ -56,7 +57,6 @@ REPO = HERE.parents[1]
 SAFE_BUILD_ENV = frozenset(
     {
         "CARGO_HOME",
-        "CARGO_TARGET_DIR",
         "CARGO_TERM_COLOR",
         "CARGO_TERM_VERBOSE",
         "CARGO_TERM_QUIET",
@@ -68,9 +68,21 @@ SAFE_BUILD_ENV = frozenset(
         "RUST_LOG",
     }
 )
+ALLOWED_IGNORED = frozenset(
+    {
+        "target/",
+        "tools/bench/target/",
+        "tools/generative-physiology/driver/target/",
+        "docs/architecture/solver-contract-sketch/target/",
+        "tools/__pycache__/",
+        "tools/bench/__pycache__/",
+        "tools/gate/__pycache__/",
+        "tools/generative-physiology/__pycache__/",
+    }
+)
 
 
-def check_clean_build_env(env, start=HERE):
+def check_clean_build_env(env, start=HERE, repo=REPO):
     bad_vars = sorted(k for k in env if k.startswith(("CARGO", "RUST")) and k not in SAFE_BUILD_ENV)
     if bad_vars:
         refuse(f"build environment sets {', '.join(bad_vars)}; unset before running cost")
@@ -87,16 +99,24 @@ def check_clean_build_env(env, start=HERE):
             configs.append(str(candidate))
     if configs:
         refuse(f"Cargo config outside the tree's control: {', '.join(configs)}")
+    with open(repo / "rust-toolchain.toml", "rb") as file:
+        want = tomllib.load(file)["toolchain"]["channel"]
+    for tool in ("rustc", "cargo"):
+        got = subprocess.run([tool, "--version"], cwd=start, env=env, stdout=subprocess.PIPE, text=True, check=True)
+        parts = got.stdout.split()
+        version = parts[1] if len(parts) > 1 else ""
+        if version != want:
+            refuse(f"{tool} is {version or 'unknown'}, rust-toolchain.toml pins {want}")
 
 
 def tree_is_dirty(cwd=REPO):
     status = subprocess.run(
-        ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
+        ["git", "status", "--porcelain", "-z", "--ignored=matching", "--untracked-files=all"],
         cwd=cwd,
         stdout=subprocess.PIPE,
         check=True,
     ).stdout
-    if status:
+    if any(e for e in status.decode().split("\0") if e and (e[:3] != "!! " or e[3:] not in ALLOWED_IGNORED)):
         return True
     listed = subprocess.run(["git", "ls-files", "-z", "-v"], cwd=cwd, stdout=subprocess.PIPE, check=True).stdout
     return any(entry and not entry.startswith("H ") for entry in listed.decode().split("\0"))

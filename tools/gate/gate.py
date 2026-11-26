@@ -1389,8 +1389,8 @@ def mutant_tests(root: pathlib.Path) -> dict[str, str]:
     if not folder.is_dir():
         raise GateError(f"{folder}: expected a directory of *.toml mutant tables")
     entries = sorted(folder.iterdir(), key=lambda child: child.name)
-    if bad := [child.name for child in entries if not child.is_file() or child.suffix != ".toml"]:
-        raise GateError(f"{folder}: non-TOML entries: {bad[:3]}")
+    if bad := [child.name for child in entries if child.is_symlink() or not child.is_file() or child.suffix != ".toml"]:
+        raise GateError(f"{folder}: non-regular or non-TOML entries: {bad[:3]}")
     if not entries:
         raise GateError(f"{folder}: has no .toml file")
     out: dict[str, str] = {}
@@ -3391,6 +3391,7 @@ def _fixture(tmp: pathlib.Path) -> pathlib.Path:
     (root / "tools").mkdir(parents=True)
     shutil.copyfile(ROOT / MUTATE, root / MUTATE)
     shutil.copyfile(ROOT / ".gitignore", root / ".gitignore")
+    shutil.copyfile(ROOT / "rust-toolchain.toml", root / "rust-toolchain.toml")
     (root / "Cargo.toml").write_text('[workspace]\nmembers = ["crates/ng-a", "crates/ng-b"]\nresolver = "3"\n', encoding="utf-8")
     (root / "Cargo.lock").write_text(FIXTURE_LOCK, encoding="utf-8")
     for crate, test_name in (("ng-a", "alpha"), ("ng-b", "beta")):
@@ -3580,6 +3581,9 @@ def disabled_target_case() -> list[Violation]:
         _git_z(root, *COMMIT, "disabled targets")
         env = dict(os.environ)
         env.pop("UPDATE_EXPECT", None)
+        target = str(pathlib.Path(tmp) / "target")
+        env["CARGO_TARGET_DIR"] = target
+        env["CARGO_BUILD_BUILD_DIR"] = target
         r = subprocess.run(["cargo", "test", "--locked", "-p", "ng-a", "-p", "ng-b"], cwd=root, capture_output=True, text=True, env=env)
         if r.returncode != 0:
             return [Violation("baseline", "f16 fixture", f"default cargo test failed ({r.returncode}): {r.stderr[-300:]}")]
@@ -3844,6 +3848,20 @@ def mutants_dir_case() -> list[Violation]:
             mutate.load_rows(junk, [])
             out.append(Violation("sweep", "mutants.d non-TOML", "accepted non-.toml entry in directory"))
         except SystemExit:
+            pass
+        link_root = pathlib.Path(tmp) / "link_repo"
+        link_dir = link_root / MUTANTS
+        link_dir.mkdir(parents=True)
+        (link_dir / "link.toml").symlink_to(folder / "00-base.toml")
+        try:
+            mutate.load_rows(link_dir, [])
+            out.append(Violation("sweep", "mutants.d symlink", "load_rows accepted a symlinked .toml entry"))
+        except SystemExit:
+            pass
+        try:
+            mutant_tests(link_root)
+            out.append(Violation("sweep", "mutants.d symlink", "mutant_tests accepted a symlinked .toml entry"))
+        except GateError:
             pass
         empty = pathlib.Path(tmp) / "empty"
         empty.mkdir()
