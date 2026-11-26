@@ -5,7 +5,7 @@ use crate::pinned;
 use crate::{
     Compensated, CompiledBody, Context, Crossing, ExcursionSide, LawName, SimTime, ValidityExcursion,
 };
-use core::ops::Range;
+use core::ops::{Deref, DerefMut, Index, IndexMut, Range};
 
 mod enclosure;
 #[cfg(test)]
@@ -42,23 +42,141 @@ fn smooth(a: f64, b: f64, width: f64, sign: f64) -> (f64, f64, f64) {
     (0.5 * (a + b + sign * root), along, across)
 }
 
+const STACK_SLOTS: usize = 256;
+
+struct Slots<'a>(&'a [f64]);
+impl Index<u16> for Slots<'_> {
+    type Output = f64;
+    #[inline(always)]
+    fn index(&self, slot: u16) -> &f64 {
+        &self.0[usize::from(slot)]
+    }
+}
+struct SlotsMut<'a>(&'a mut [f64]);
+impl Index<u16> for SlotsMut<'_> {
+    type Output = f64;
+    #[inline(always)]
+    fn index(&self, slot: u16) -> &f64 {
+        &self.0[usize::from(slot)]
+    }
+}
+impl IndexMut<u16> for SlotsMut<'_> {
+    #[inline(always)]
+    fn index_mut(&mut self, slot: u16) -> &mut f64 {
+        &mut self.0[usize::from(slot)]
+    }
+}
+struct Scratch(Vec<f64>);
+impl Scratch {
+    fn zeros(length: usize) -> Self {
+        Self(vec![0.0; length])
+    }
+}
+impl Index<u16> for Scratch {
+    type Output = f64;
+    #[inline(always)]
+    fn index(&self, slot: u16) -> &f64 {
+        &self.0[usize::from(slot)]
+    }
+}
+impl Deref for Scratch {
+    type Target = [f64];
+    fn deref(&self) -> &[f64] {
+        &self.0
+    }
+}
+impl DerefMut for Scratch {
+    fn deref_mut(&mut self) -> &mut [f64] {
+        &mut self.0
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Instr {
     Zero,
-    Add([usize; 2]),
-    Subtract([usize; 2]),
-    Multiply([usize; 2]),
-    Divide([usize; 2]),
-    Copy([usize; 1]),
-    SmoothMax([usize; 3]),
-    SmoothMin([usize; 3]),
-    Exp([usize; 1]),
-    Logistic([usize; 1]),
-    Ln([usize; 1]),
-    Relax([usize; 3]),
-    Volume([usize; 1]),
-    Upwind([usize; 5]),
-    Expm1([usize; 1]),
+    Add([u16; 2]),
+    Subtract([u16; 2]),
+    Multiply([u16; 2]),
+    Divide([u16; 2]),
+    Copy([u16; 1]),
+    SmoothMax([u16; 3]),
+    SmoothMin([u16; 3]),
+    Exp([u16; 1]),
+    Logistic([u16; 1]),
+    Ln([u16; 1]),
+    Relax([u16; 3]),
+    Volume([u16; 1]),
+    Upwind([u16; 5]),
+    Expm1([u16; 1]),
+}
+
+#[derive(Clone, Copy)]
+enum FastInstr {
+    Zero,
+    Add([u8; 2]),
+    Subtract([u8; 2]),
+    Multiply([u8; 2]),
+    Divide([u8; 2]),
+    SmoothMax([u8; 3]),
+    SmoothMin([u8; 3]),
+    Exp([u8; 1]),
+    Logistic([u8; 1]),
+    Ln([u8; 1]),
+    Relax([u8; 3]),
+    Volume([u8; 1]),
+    Upwind([u8; 5]),
+    Expm1([u8; 1]),
+}
+
+#[derive(Clone, Copy)]
+struct FastGeneral {
+    steps_start: u32,
+    steps_end: u32,
+    param_start: u32,
+    param_end: u32,
+    unknown_start: u32,
+    unknown_end: u32,
+    other_start: u32,
+    other_end: u32,
+    output: u8,
+}
+
+#[derive(Clone, Copy)]
+enum FastKind {
+    Upwind5([u16; 5]),
+    ReadUnknown(u16),
+    ReadParameter(u16),
+    General(u32),
+}
+
+#[derive(Clone, Copy)]
+struct FastInstance {
+    kind: FastKind,
+    mode_var: u16,
+    mode_val: u16,
+}
+impl FastInstance {
+    #[inline(always)]
+    fn holds(&self, modes: &[usize]) -> bool {
+        self.mode_var == u16::MAX || modes[usize::from(self.mode_var)] == usize::from(self.mode_val)
+    }
+}
+
+struct FastTape {
+    instances: Vec<FastInstance>,
+    generals: Vec<FastGeneral>,
+    steps: Vec<(u8, FastInstr)>,
+    parameters: Vec<(u8, u16)>,
+    unknowns: Vec<(u8, u16)>,
+    judged_ops: Vec<u8>,
+    judged_ranges: Vec<Range<u32>>,
+}
+
+#[derive(Clone, Copy)]
+struct ColumnTerm {
+    column: u32,
+    row: u32,
+    coefficient: f64,
 }
 
 /// A read is split by where its value comes from, so a parameter or unknown is copied from the caller's slice with no
@@ -67,38 +185,69 @@ pub(crate) struct Tape {
     programs: Vec<Kernel>,
     instances: Vec<ReadRanges>,
     guards: Vec<(Kernel, ReadRanges)>,
-    steps: Vec<(usize, Instr)>,
-    parameters: Vec<(usize, usize)>,
-    unknowns: Vec<(usize, usize)>,
-    others: Vec<(usize, Bound)>,
-    entries: Vec<usize>,
-    entry_ranges: Vec<Range<usize>>,
-    diagonals: Vec<usize>,
+    steps: Vec<(u16, Instr)>,
+    parameters: Vec<(u16, u32)>,
+    unknowns: Vec<(u16, u32)>,
+    others: Vec<(u16, Bound)>,
+    entries: Vec<u32>,
+    entry_ranges: Vec<Range<u32>>,
+    diagonals: Vec<u32>,
     longest: usize,
+    parameters_needed: usize,
+    unknowns_needed: usize,
+    draws_needed: usize,
+    factors_needed: usize,
+    judged_total: usize,
+    amounts_end: usize,
+    memory_end: usize,
+    contiguous_rows: bool,
+    column_terms: Vec<ColumnTerm>,
+    fast: Option<FastTape>,
 }
 struct Kernel {
-    length: usize,
-    steps: Range<usize>,
+    length: u16,
+    steps: Range<u32>,
 }
 struct ReadRanges {
-    parameters: Range<usize>,
-    unknowns: Range<usize>,
-    others: Range<usize>,
+    parameters: Range<u32>,
+    unknowns: Range<u32>,
+    others: Range<u32>,
+}
+fn slot16(index: usize) -> u16 {
+    u16::try_from(index).expect("a kernel fits in u16 slots")
+}
+fn range_u32(range: Range<usize>) -> Range<u32> {
+    let start = u32::try_from(range.start).expect("tape offsets fit in u32");
+    let end = u32::try_from(range.end).expect("tape offsets fit in u32");
+    start..end
+}
+fn slice_range(range: &Range<u32>) -> Range<usize> {
+    range.start as usize..range.end as usize
 }
 impl Tape {
     pub(crate) fn of(layout: &Layout) -> Self {
         let mut tape = Self {
-            programs: Vec::new(),
-            instances: Vec::new(),
-            guards: Vec::new(),
+            programs: Vec::with_capacity(layout.programs.len()),
+            instances: Vec::with_capacity(layout.instances.len()),
+            guards: Vec::with_capacity(layout.guards.len()),
             steps: Vec::new(),
             parameters: Vec::new(),
             unknowns: Vec::new(),
             others: Vec::new(),
             entries: Vec::new(),
-            entry_ranges: Vec::new(),
+            entry_ranges: Vec::with_capacity(layout.instances.len()),
             diagonals: Vec::new(),
             longest: 0,
+            parameters_needed: 0,
+            unknowns_needed: 0,
+            draws_needed: 0,
+            factors_needed: 0,
+            judged_total: 0,
+            amounts_end: 0,
+            memory_end: 0,
+            contiguous_rows: false,
+            column_terms: Vec::new(),
+            fast: None,
         };
         for program in &layout.programs {
             let kernel = tape.lower(&program.code.ops);
@@ -108,7 +257,9 @@ impl Tape {
         let entry = |row: usize, unknown: UnknownId| {
             let range = sparsity.offsets[row]..sparsity.offsets[row + 1];
             let found = sparsity.unknowns[range.clone()].binary_search(&unknown);
-            range.start + found.expect("the compiled sparsity holds every unknown a row's laws read")
+            let at =
+                range.start + found.expect("the compiled sparsity holds every unknown a row's laws read");
+            u32::try_from(at).expect("sparsity entries fit in u32")
         };
         for instance in &layout.instances {
             let start = tape.entries.len();
@@ -122,9 +273,10 @@ impl Tape {
                     Target::Row(row) => tape.entries.push(entry(row.index(), unknown)),
                 }
             }
-            tape.entry_ranges.push(start..tape.entries.len());
-            let ops = &layout.programs[instance.program.index()].code.ops;
-            let reads = tape.bind(ops, &instance.inputs);
+            tape.entry_ranges.push(range_u32(start..tape.entries.len()));
+            let program = &layout.programs[instance.program.index()];
+            tape.judged_total += program.code.judged.len();
+            let reads = tape.bind(&program.code.ops, &instance.inputs);
             tape.instances.push(reads);
         }
         for guard in &layout.guards {
@@ -136,66 +288,292 @@ impl Tape {
             .filter(|(_, row)| !matches!(row.kind, RowKind::Algebraic(_)))
             .map(|(at, row)| entry(at, row.unknown))
             .collect();
+        tape.amounts_end = layout
+            .rows
+            .iter()
+            .take_while(|row| matches!(row.kind, RowKind::Amount { .. }))
+            .count();
+        tape.memory_end = tape.amounts_end
+            + layout.rows[tape.amounts_end..]
+                .iter()
+                .take_while(|row| matches!(row.kind, RowKind::Memory(_)))
+                .count();
+        tape.contiguous_rows = layout.rows[tape.memory_end..]
+            .iter()
+            .all(|row| matches!(row.kind, RowKind::Algebraic(_)));
+        for (column, col) in layout.columns.iter().enumerate() {
+            let column = u32::try_from(column).expect("columns fit in u32");
+            for &(row, coefficient) in &col.terms {
+                tape.column_terms.push(ColumnTerm {
+                    column,
+                    row: u32::try_from(row.index()).expect("rows fit in u32"),
+                    coefficient: coefficient as f64,
+                });
+            }
+        }
+        tape.fast = tape.build_fast(layout);
         tape
+    }
+    fn build_fast(&self, layout: &Layout) -> Option<FastTape> {
+        if self.longest > STACK_SLOTS
+            || self.parameters_needed > usize::from(u16::MAX) + 1
+            || self.unknowns_needed > usize::from(u16::MAX) + 1
+        {
+            return None;
+        }
+        let mut steps = Vec::new();
+        let mut program_fast = Vec::with_capacity(layout.programs.len());
+        let mut program_alias = Vec::with_capacity(layout.programs.len());
+        for program in &layout.programs {
+            let ops = &program.code.ops;
+            let mut alias = Vec::with_capacity(ops.len());
+            let start = steps.len();
+            for (at, op) in ops.iter().enumerate() {
+                let at_u8 = at as u8;
+                match *op {
+                    Op::Input(_) => alias.push(at_u8),
+                    Op::AsDimension([x]) => alias.push(alias[x]),
+                    _ => {
+                        alias.push(at_u8);
+                        let instr = match *op {
+                            Op::Zero(_) => FastInstr::Zero,
+                            Op::Add([a, b]) => FastInstr::Add([alias[a], alias[b]]),
+                            Op::Subtract([a, b]) | Op::Deviation([a, b]) => {
+                                FastInstr::Subtract([alias[a], alias[b]])
+                            }
+                            Op::Multiply([a, b]) | Op::Scale([a, b]) | Op::ConductanceFlow([a, b]) => {
+                                FastInstr::Multiply([alias[a], alias[b]])
+                            }
+                            Op::Divide([a, b]) => FastInstr::Divide([alias[a], alias[b]]),
+                            Op::SmoothMax([a, b, w]) => FastInstr::SmoothMax([alias[a], alias[b], alias[w]]),
+                            Op::SmoothMin([a, b, w]) => FastInstr::SmoothMin([alias[a], alias[b], alias[w]]),
+                            Op::Exp([x]) => FastInstr::Exp([alias[x]]),
+                            Op::Logistic([x]) => FastInstr::Logistic([alias[x]]),
+                            Op::Ln([x]) => FastInstr::Ln([alias[x]]),
+                            Op::Relax([a, b, c]) => FastInstr::Relax([alias[a], alias[b], alias[c]]),
+                            Op::Volume([x]) => FastInstr::Volume([alias[x]]),
+                            Op::Upwind([a, b, c, d, e]) => {
+                                FastInstr::Upwind([alias[a], alias[b], alias[c], alias[d], alias[e]])
+                            }
+                            Op::Expm1([x]) => FastInstr::Expm1([alias[x]]),
+                            Op::Input(_) | Op::AsDimension(_) => unreachable!(),
+                        };
+                        steps.push((at_u8, instr));
+                    }
+                }
+            }
+            let output = *alias.last().expect("a program has an output");
+            program_fast.push((start as u32, steps.len() as u32, output));
+            program_alias.push(alias);
+        }
+        let mut instances = Vec::with_capacity(layout.instances.len());
+        let mut generals = Vec::new();
+        let mut parameters = Vec::new();
+        let mut unknowns = Vec::new();
+        let mut judged_ops = Vec::with_capacity(self.judged_total);
+        let mut judged_ranges = if self.judged_total > 0 {
+            Vec::with_capacity(layout.instances.len())
+        } else {
+            Vec::new()
+        };
+        for (at, instance) in layout.instances.iter().enumerate() {
+            let (mode_var, mode_val) = match instance.mode {
+                None => (u16::MAX, 0),
+                Some((var, val)) => (u16::try_from(var).ok()?, u16::try_from(val).ok()?),
+            };
+            if mode_var == u16::MAX && instance.mode.is_some() {
+                return None;
+            }
+            let pid = instance.program.index();
+            let (steps_start, steps_end, output) = program_fast[pid];
+            let alias = &program_alias[pid];
+            let judged_start = judged_ops.len() as u32;
+            for &(op, ..) in &layout.programs[pid].code.judged {
+                judged_ops.push(alias[op]);
+            }
+            let judged_end = judged_ops.len() as u32;
+            if self.judged_total > 0 {
+                judged_ranges.push(judged_start..judged_end);
+            }
+            let reads = self.instance(at);
+            let p_steps = &steps[steps_start as usize..steps_end as usize];
+            let kind = if judged_start == judged_end
+                && reads.parameters.is_empty()
+                && reads.others.is_empty()
+                && reads.unknowns.len() == 5
+                && matches!(p_steps, [(_, FastInstr::Upwind([0, 1, 2, 3, 4]))])
+                && reads
+                    .unknowns
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &(slot, _))| usize::from(slot) == i)
+                && output == p_steps[0].0
+            {
+                FastKind::Upwind5([
+                    reads.unknowns[0].1 as u16,
+                    reads.unknowns[1].1 as u16,
+                    reads.unknowns[2].1 as u16,
+                    reads.unknowns[3].1 as u16,
+                    reads.unknowns[4].1 as u16,
+                ])
+            } else if judged_start == judged_end
+                && p_steps.is_empty()
+                && reads.others.is_empty()
+                && reads.parameters.is_empty()
+                && reads.unknowns.len() == 1
+                && reads.unknowns[0].0 == u16::from(output)
+            {
+                FastKind::ReadUnknown(reads.unknowns[0].1 as u16)
+            } else if judged_start == judged_end
+                && p_steps.is_empty()
+                && reads.others.is_empty()
+                && reads.unknowns.is_empty()
+                && reads.parameters.len() == 1
+                && reads.parameters[0].0 == u16::from(output)
+            {
+                FastKind::ReadParameter(reads.parameters[0].1 as u16)
+            } else {
+                let param_start = parameters.len() as u32;
+                for &(slot, index) in reads.parameters {
+                    parameters.push((slot as u8, index as u16));
+                }
+                let param_end = parameters.len() as u32;
+                let unknown_start = unknowns.len() as u32;
+                for &(slot, index) in reads.unknowns {
+                    unknowns.push((slot as u8, index as u16));
+                }
+                let unknown_end = unknowns.len() as u32;
+                let other_range = &self.instances[at].others;
+                let general_at = generals.len() as u32;
+                generals.push(FastGeneral {
+                    steps_start,
+                    steps_end,
+                    param_start,
+                    param_end,
+                    unknown_start,
+                    unknown_end,
+                    other_start: other_range.start,
+                    other_end: other_range.end,
+                    output,
+                });
+                FastKind::General(general_at)
+            };
+            instances.push(FastInstance {
+                kind,
+                mode_var,
+                mode_val,
+            });
+        }
+        Some(FastTape {
+            instances,
+            generals,
+            steps,
+            parameters,
+            unknowns,
+            judged_ops,
+            judged_ranges,
+        })
+    }
+    fn clean_inputs(&self, inputs: &Inputs<'_>) -> bool {
+        inputs.parameters.len() >= self.parameters_needed
+            && inputs.unknowns.len() >= self.unknowns_needed
+            && inputs.draws.len() >= self.draws_needed
+            && inputs.factors.len() >= self.factors_needed
+            && inputs
+                .parameters
+                .iter()
+                .fold(true, |clean, value| clean & value.is_finite())
+            && inputs
+                .unknowns
+                .iter()
+                .fold(true, |clean, value| clean & value.is_finite())
+            && inputs
+                .draws
+                .iter()
+                .fold(true, |clean, value| clean & value.is_finite())
+            && inputs
+                .factors
+                .iter()
+                .fold(true, |clean, value| clean & value.is_finite())
     }
     fn lower(&mut self, ops: &[Op]) -> Kernel {
         let start = self.steps.len();
         for (at, op) in ops.iter().enumerate() {
-            let instr = match op {
+            let instr = match *op {
                 Op::Input(_) => continue,
                 Op::Zero(_) => Instr::Zero,
-                Op::Add(operands) => Instr::Add(*operands),
-                Op::Subtract(operands) | Op::Deviation(operands) => Instr::Subtract(*operands),
-                Op::Multiply(operands) | Op::Scale(operands) | Op::ConductanceFlow(operands) => {
-                    Instr::Multiply(*operands)
+                Op::Add([a, b]) => Instr::Add([slot16(a), slot16(b)]),
+                Op::Subtract([a, b]) | Op::Deviation([a, b]) => Instr::Subtract([slot16(a), slot16(b)]),
+                Op::Multiply([a, b]) | Op::Scale([a, b]) | Op::ConductanceFlow([a, b]) => {
+                    Instr::Multiply([slot16(a), slot16(b)])
                 }
-                Op::Divide(operands) => Instr::Divide(*operands),
-                Op::AsDimension(operand) => Instr::Copy(*operand),
-                Op::SmoothMax(operands) => Instr::SmoothMax(*operands),
-                Op::SmoothMin(operands) => Instr::SmoothMin(*operands),
-                Op::Exp(operand) => Instr::Exp(*operand),
-                Op::Logistic(operand) => Instr::Logistic(*operand),
-                Op::Ln(operand) => Instr::Ln(*operand),
-                Op::Relax(operands) => Instr::Relax(*operands),
-                Op::Volume(operand) => Instr::Volume(*operand),
-                Op::Upwind(operands) => Instr::Upwind(*operands),
-                Op::Expm1(operand) => Instr::Expm1(*operand),
+                Op::Divide([a, b]) => Instr::Divide([slot16(a), slot16(b)]),
+                Op::AsDimension([x]) => Instr::Copy([slot16(x)]),
+                Op::SmoothMax([a, b, w]) => Instr::SmoothMax([slot16(a), slot16(b), slot16(w)]),
+                Op::SmoothMin([a, b, w]) => Instr::SmoothMin([slot16(a), slot16(b), slot16(w)]),
+                Op::Exp([x]) => Instr::Exp([slot16(x)]),
+                Op::Logistic([x]) => Instr::Logistic([slot16(x)]),
+                Op::Ln([x]) => Instr::Ln([slot16(x)]),
+                Op::Relax([a, b, c]) => Instr::Relax([slot16(a), slot16(b), slot16(c)]),
+                Op::Volume([x]) => Instr::Volume([slot16(x)]),
+                Op::Upwind([a, b, c, d, e]) => {
+                    Instr::Upwind([slot16(a), slot16(b), slot16(c), slot16(d), slot16(e)])
+                }
+                Op::Expm1([x]) => Instr::Expm1([slot16(x)]),
             };
-            self.steps.push((at, instr));
+            self.steps.push((slot16(at), instr));
         }
         self.longest = self.longest.max(ops.len());
         Kernel {
-            length: ops.len(),
-            steps: start..self.steps.len(),
+            length: slot16(ops.len()),
+            steps: range_u32(start..self.steps.len()),
         }
     }
     fn bind(&mut self, ops: &[Op], inputs: &[Bound]) -> ReadRanges {
         let (parameters, unknowns, others) = (self.parameters.len(), self.unknowns.len(), self.others.len());
         let mut bounds = inputs.iter();
         for (at, _) in (ops.iter().enumerate()).filter(|(_, op)| matches!(op, Op::Input(_))) {
+            let at = slot16(at);
             match *bounds.next().expect("one bound per input") {
-                Bound::Parameter(parameter) => self.parameters.push((at, parameter.index())),
-                Bound::Unknown(unknown) => self.unknowns.push((at, unknown.index())),
-                other => self.others.push((at, other)),
+                Bound::Parameter(parameter) => {
+                    let index = parameter.index();
+                    self.parameters_needed = self.parameters_needed.max(index + 1);
+                    self.parameters
+                        .push((at, u32::try_from(index).expect("parameter index fits in u32")));
+                }
+                Bound::Unknown(unknown) => {
+                    let index = unknown.index();
+                    self.unknowns_needed = self.unknowns_needed.max(index + 1);
+                    self.unknowns
+                        .push((at, u32::try_from(index).expect("unknown index fits in u32")));
+                }
+                other => {
+                    match other {
+                        Bound::Draw(stream) => self.draws_needed = self.draws_needed.max(stream + 1),
+                        Bound::Forcing(forcing) => self.factors_needed = self.factors_needed.max(forcing + 1),
+                        _ => {}
+                    }
+                    self.others.push((at, other));
+                }
             }
         }
         ReadRanges {
-            parameters: parameters..self.parameters.len(),
-            unknowns: unknowns..self.unknowns.len(),
-            others: others..self.others.len(),
+            parameters: range_u32(parameters..self.parameters.len()),
+            unknowns: range_u32(unknowns..self.unknowns.len()),
+            others: range_u32(others..self.others.len()),
         }
     }
     fn arithmetic(&self, kernel: &Kernel) -> Arithmetic<'_> {
         Arithmetic {
             length: kernel.length,
-            steps: &self.steps[kernel.steps.clone()],
+            steps: &self.steps[slice_range(&kernel.steps)],
         }
     }
     fn reads(&self, ranges: &ReadRanges) -> Reads<'_> {
         Reads {
-            parameters: &self.parameters[ranges.parameters.clone()],
-            unknowns: &self.unknowns[ranges.unknowns.clone()],
-            others: &self.others[ranges.others.clone()],
+            parameters: &self.parameters[slice_range(&ranges.parameters)],
+            unknowns: &self.unknowns[slice_range(&ranges.unknowns)],
+            others: &self.others[slice_range(&ranges.others)],
         }
     }
     fn program(&self, program: ProgramId) -> Arithmetic<'_> {
@@ -204,8 +582,8 @@ impl Tape {
     fn instance(&self, at: usize) -> Reads<'_> {
         self.reads(&self.instances[at])
     }
-    fn entries(&self, at: usize) -> &[usize] {
-        &self.entries[self.entry_ranges[at].clone()]
+    fn entries(&self, at: usize) -> &[u32] {
+        &self.entries[slice_range(&self.entry_ranges[at])]
     }
     fn guard(&self, guard: usize) -> (Arithmetic<'_>, Reads<'_>) {
         let (kernel, reads) = &self.guards[guard];
@@ -215,21 +593,22 @@ impl Tape {
 
 #[derive(Clone, Copy)]
 struct Arithmetic<'t> {
-    length: usize,
-    steps: &'t [(usize, Instr)],
+    length: u16,
+    steps: &'t [(u16, Instr)],
 }
 
 #[derive(Clone, Copy)]
 struct Reads<'t> {
-    parameters: &'t [(usize, usize)],
-    unknowns: &'t [(usize, usize)],
-    others: &'t [(usize, Bound)],
+    parameters: &'t [(u16, u32)],
+    unknowns: &'t [(u16, u32)],
+    others: &'t [(u16, Bound)],
 }
 impl Reads<'_> {
-    fn fill(&self, inputs: &Inputs<'_>, values: &mut [f64]) -> Option<(usize, Failure)> {
+    fn fill(&self, inputs: &Inputs<'_>, values: &mut [f64]) -> Option<(u16, Failure)> {
+        let mut values = SlotsMut(values);
         let mut clean = true;
         for &(slot, index) in self.parameters {
-            match inputs.parameters.get(index) {
+            match inputs.parameters.get(index as usize) {
                 Some(&value) => {
                     values[slot] = value;
                     clean &= value.is_finite();
@@ -238,7 +617,7 @@ impl Reads<'_> {
             }
         }
         for &(slot, index) in self.unknowns {
-            match inputs.unknowns.get(index) {
+            match inputs.unknowns.get(index as usize) {
                 Some(&value) => {
                     values[slot] = value;
                     clean &= value.is_finite();
@@ -257,19 +636,27 @@ impl Reads<'_> {
         }
         (!clean).then(|| self.first_failure(inputs))
     }
-    fn first_failure(&self, inputs: &Inputs<'_>) -> (usize, Failure) {
+    #[cold]
+    #[inline(never)]
+    fn first_failure(&self, inputs: &Inputs<'_>) -> (u16, Failure) {
         let failure = |value: Option<f64>, bound: Bound| match value {
             None => Some(Failure::PastItsSlice(bound)),
             Some(value) if !value.is_finite() => Some(Failure::NotFinite),
             Some(_) => None,
         };
         let parameters = (self.parameters.iter()).find_map(|&(slot, index)| {
-            let bound = Bound::Parameter(ParameterId::at(index));
-            Some((slot, failure(inputs.parameters.get(index).copied(), bound)?))
+            let bound = Bound::Parameter(ParameterId::at(index as usize));
+            Some((
+                slot,
+                failure(inputs.parameters.get(index as usize).copied(), bound)?,
+            ))
         });
         let unknowns = (self.unknowns.iter()).find_map(|&(slot, index)| {
-            let bound = Bound::Unknown(UnknownId::at(index));
-            Some((slot, failure(inputs.unknowns.get(index).copied(), bound)?))
+            let bound = Bound::Unknown(UnknownId::at(index as usize));
+            Some((
+                slot,
+                failure(inputs.unknowns.get(index as usize).copied(), bound)?,
+            ))
         });
         let others = (self.others.iter())
             .find_map(|&(slot, bound)| Some((slot, failure(read(&bound, inputs), bound)?)));
@@ -297,8 +684,9 @@ fn read(bound: &Bound, inputs: &Inputs<'_>) -> Option<f64> {
     }
 }
 
+#[inline(always)]
 fn apply(instr: Instr, values: &[f64], partial_volume: f64) -> Result<f64, OperatorDomain> {
-    let at = |slot: usize| values[slot];
+    let at = |slot: u16| values[usize::from(slot)];
     let result = match instr {
         Instr::Zero => 0.0,
         Instr::Add([a, b]) => at(a) + at(b),
@@ -340,6 +728,67 @@ fn apply(instr: Instr, values: &[f64], partial_volume: f64) -> Result<f64, Opera
     Ok(result)
 }
 
+#[inline(always)]
+fn apply_fast(
+    instr: FastInstr,
+    values: &[f64; STACK_SLOTS],
+    partial_volume: f64,
+) -> Result<f64, OperatorDomain> {
+    let at = |slot: u8| values[usize::from(slot)];
+    let result = match instr {
+        FastInstr::Zero => return Ok(0.0),
+        FastInstr::Add([a, b]) => at(a) + at(b),
+        FastInstr::Subtract([a, b]) => at(a) - at(b),
+        FastInstr::Multiply([a, b]) => at(a) * at(b),
+        FastInstr::Divide([a, b]) => {
+            let divisor = at(b);
+            if divisor <= 0.0 {
+                return Err(OperatorDomain::Divisor);
+            }
+            at(a) / divisor
+        }
+        FastInstr::SmoothMax([a, b, width]) => smooth(at(a), at(b), at(width), 1.0).0,
+        FastInstr::SmoothMin([a, b, width]) => smooth(at(a), at(b), at(width), -1.0).0,
+        FastInstr::Exp([x]) => pinned::exp(at(x)),
+        FastInstr::Expm1([x]) => pinned::expm1(at(x)),
+        FastInstr::Logistic([x]) => 1.0 / (1.0 + pinned::exp(-at(x))),
+        FastInstr::Ln([x]) => pinned::ln(at(x)).ok_or(OperatorDomain::LogarithmArgument)?,
+        FastInstr::Relax([target, current, speed]) => at(speed) * (at(target) - at(current)),
+        FastInstr::Volume([amount]) => at(amount) * partial_volume,
+        FastInstr::Upwind([flow, from, from_water, to, to_water]) => {
+            let flow = at(flow);
+            let (amount, water) = if flow > 0.0 {
+                (at(from), at(from_water))
+            } else if flow < 0.0 {
+                (at(to), at(to_water))
+            } else {
+                return Ok(0.0);
+            };
+            if water <= 0.0 {
+                return Err(OperatorDomain::Divisor);
+            }
+            flow * (amount / water)
+        }
+    };
+    if !result.is_finite() {
+        return Err(OperatorDomain::NonFinite);
+    }
+    Ok(result)
+}
+
+#[inline(always)]
+fn forward_fast(
+    steps: &[(u8, FastInstr)],
+    partial_volume: f64,
+    values: &mut [f64; STACK_SLOTS],
+) -> Result<(), OperatorDomain> {
+    for &(at, instr) in steps {
+        let value = apply_fast(instr, values, partial_volume)?;
+        values[usize::from(at)] = value;
+    }
+    Ok(())
+}
+
 fn forward(
     arithmetic: Arithmetic<'_>,
     reads: Reads<'_>,
@@ -353,10 +802,10 @@ fn forward(
     });
     for &(at, instr) in steps {
         let value = apply(instr, values, partial_volume)?;
-        values[at] = value;
+        values[usize::from(at)] = value;
     }
     match failed {
-        None => Ok(values[arithmetic.length - 1]),
+        None => Ok(values[usize::from(arithmetic.length) - 1]),
         Some((_, Failure::NotFinite)) => Err(OperatorDomain::NonFinite),
         Some((_, Failure::PastItsSlice(bound))) => {
             CompiledBody::bound(&bound, inputs);
@@ -368,13 +817,8 @@ fn forward(
 /// Reruns `forward` on prefixes rather than call `apply` itself: a second caller of `apply` stopped its inlining into
 /// `forward` and cost every step 12.6% more instructions.
 #[cold]
-fn refused_at(
-    arithmetic: Arithmetic<'_>,
-    reads: Reads<'_>,
-    inputs: &Inputs<'_>,
-    partial_volume: f64,
-) -> usize {
-    let mut values = vec![0.0; arithmetic.length];
+fn refused_at(arithmetic: Arithmetic<'_>, reads: Reads<'_>, inputs: &Inputs<'_>, partial_volume: f64) -> u16 {
+    let mut values = Scratch::zeros(usize::from(arithmetic.length));
     let none = Arithmetic {
         length: arithmetic.length,
         steps: &[],
@@ -425,8 +869,11 @@ fn refused_at(
 }
 
 fn backward(arithmetic: Arithmetic<'_>, values: &[f64], partial_volume: f64, slopes: &mut [f64]) {
-    slopes[..arithmetic.length].fill(0.0);
-    slopes[arithmetic.length - 1] = 1.0;
+    let length = usize::from(arithmetic.length);
+    slopes[..length].fill(0.0);
+    slopes[length - 1] = 1.0;
+    let values = Slots(values);
+    let mut slopes = SlotsMut(slopes);
     for &(at, instr) in arithmetic.steps.iter().rev() {
         let slope = slopes[at];
         if slope == 0.0 {
@@ -553,20 +1000,29 @@ impl CompiledBody {
     pub(crate) fn guard_gap(&self, guard: usize, inputs: &Inputs<'_>) -> Result<f64, Undefined> {
         let layout = &self.layout.guards[guard];
         let (arithmetic, reads) = self.tape.guard(guard);
-        let mut values = vec![0.0; arithmetic.length];
-        let value = forward(arithmetic, reads, inputs, self.partial_volume(), &mut values)
+        let length = usize::from(arithmetic.length);
+        let mut stack = [0.0; STACK_SLOTS];
+        let mut heap = Vec::new();
+        let values: &mut [f64] = if length <= STACK_SLOTS {
+            &mut stack[..length]
+        } else {
+            heap.resize(length, 0.0);
+            &mut heap
+        };
+        let value = forward(arithmetic, reads, inputs, self.partial_volume(), values)
             .map_err(|domain| self.guard_undefined(guard, inputs, domain))?;
         Ok(match layout.crossing {
             Crossing::Rising => value,
             Crossing::Falling => -value,
         })
     }
+    #[cold]
     fn guard_undefined(&self, guard: usize, inputs: &Inputs<'_>, domain: OperatorDomain) -> Undefined {
         let layout = &self.layout.guards[guard];
         let mut law = self.layout.modes[layout.variable].variable.law;
         if !layout.code.origins.is_empty() {
             let (arithmetic, reads) = self.tape.guard(guard);
-            let op = refused_at(arithmetic, reads, inputs, self.partial_volume());
+            let op = usize::from(refused_at(arithmetic, reads, inputs, self.partial_volume()));
             law = layout.code.origin(op).unwrap_or(law);
         }
         Undefined { law, domain }
@@ -580,15 +1036,25 @@ impl CompiledBody {
     pub(crate) fn guard_slopes(&self, guard: usize, inputs: &Inputs<'_>) -> Result<GuardSlopes, Undefined> {
         let layout = &self.layout.guards[guard];
         let (arithmetic, reads) = self.tape.guard(guard);
-        let (mut values, mut slopes) = (vec![0.0; arithmetic.length], vec![0.0; arithmetic.length]);
+        let length = usize::from(arithmetic.length);
+        let (mut values_stack, mut slopes_stack) = ([0.0; STACK_SLOTS], [0.0; STACK_SLOTS]);
+        let (mut values_heap, mut slopes_heap) = (Vec::new(), Vec::new());
+        let (values, slopes): (&mut [f64], &mut [f64]) = if length <= STACK_SLOTS {
+            (&mut values_stack[..length], &mut slopes_stack[..length])
+        } else {
+            values_heap.resize(length, 0.0);
+            slopes_heap.resize(length, 0.0);
+            (&mut values_heap, &mut slopes_heap)
+        };
         let partial_volume = self.partial_volume();
-        forward(arithmetic, reads, inputs, partial_volume, &mut values)
+        forward(arithmetic, reads, inputs, partial_volume, values)
             .map_err(|domain| self.guard_undefined(guard, inputs, domain))?;
-        backward(arithmetic, &values, partial_volume, &mut slopes);
+        backward(arithmetic, values, partial_volume, slopes);
         let sign = self.guard_sign(guard);
-        let finite = |&(slot, index): &(usize, usize)| {
+        let finite = |&(slot, index): &(u16, u32)| {
+            let slot = usize::from(slot);
             if slopes[slot].is_finite() {
-                Ok((index, sign * slopes[slot]))
+                Ok((index as usize, sign * slopes[slot]))
             } else {
                 let law = self.layout.modes[layout.variable].variable.law;
                 let law = layout.code.origin(slot).unwrap_or(law);
@@ -629,6 +1095,7 @@ impl CompiledBody {
             Bound::Lasting(input) => inputs.frame.lasting(input),
         }
     }
+    #[cold]
     fn undefined(&self, at: usize, inputs: &Inputs<'_>, domain: OperatorDomain) -> Undefined {
         let instance = &self.layout.instances[at];
         let program = &self.layout.programs[instance.program.index()];
@@ -639,19 +1106,25 @@ impl CompiledBody {
             };
         }
         let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.instance(at));
-        let op = refused_at(arithmetic, reads, inputs, self.partial_volume());
+        let op = usize::from(refused_at(arithmetic, reads, inputs, self.partial_volume()));
         self.undefined_at(instance, op, domain)
     }
+    #[cold]
     fn undefined_at(&self, instance: &Instance, op: usize, domain: OperatorDomain) -> Undefined {
         let program = &self.layout.programs[instance.program.index()];
         let law = program.code.origin(op).unwrap_or(program.law);
         Undefined { law, domain }
     }
     pub(crate) fn instance_values(&self, inputs: &Inputs<'_>) -> Result<Vec<Option<f64>>, Undefined> {
-        let mut values = vec![0.0; self.tape.longest];
         let partial_volume = self.partial_volume();
-        let mut out = Vec::with_capacity(self.layout.instances.len());
-        let mut judged = Vec::new();
+        if let Some(fast) = &self.tape.fast
+            && self.tape.clean_inputs(inputs)
+        {
+            return self.instance_values_fast(fast, inputs, partial_volume);
+        }
+        let mut values = vec![0.0; self.tape.longest];
+        let mut out = Vec::with_capacity(self.layout.instances.len() + self.tape.judged_total);
+        let mut judged = Vec::with_capacity(self.tape.judged_total);
         for (at, instance) in self.layout.instances.iter().enumerate() {
             let program = &self.layout.programs[instance.program.index()];
             if !instance.holds(inputs.modes) {
@@ -667,13 +1140,112 @@ impl CompiledBody {
         out.extend(judged);
         Ok(out)
     }
+    fn instance_values_fast(
+        &self,
+        fast: &FastTape,
+        inputs: &Inputs<'_>,
+        partial_volume: f64,
+    ) -> Result<Vec<Option<f64>>, Undefined> {
+        let mut values = [0.0; STACK_SLOTS];
+        let mut out = Vec::with_capacity(fast.instances.len() + self.tape.judged_total);
+        let has_judged = self.tape.judged_total > 0;
+        let mut judged = Vec::with_capacity(self.tape.judged_total);
+        let parameters = inputs.parameters;
+        let unknowns = inputs.unknowns;
+        for (at, inst) in fast.instances.iter().enumerate() {
+            if !inst.holds(inputs.modes) {
+                out.push(None);
+                if has_judged {
+                    let range = &fast.judged_ranges[at];
+                    judged.resize(judged.len() + (range.end - range.start) as usize, None);
+                }
+                continue;
+            }
+            let value = match inst.kind {
+                FastKind::Upwind5(u) => {
+                    let flow = unknowns[usize::from(u[0])];
+                    let value = if flow > 0.0 {
+                        let water = unknowns[usize::from(u[2])];
+                        if water <= 0.0 {
+                            return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+                        }
+                        flow * (unknowns[usize::from(u[1])] / water)
+                    } else if flow < 0.0 {
+                        let water = unknowns[usize::from(u[4])];
+                        if water <= 0.0 {
+                            return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+                        }
+                        flow * (unknowns[usize::from(u[3])] / water)
+                    } else {
+                        0.0
+                    };
+                    if !value.is_finite() {
+                        return Err(self.undefined(at, inputs, OperatorDomain::NonFinite));
+                    }
+                    value
+                }
+                FastKind::ReadUnknown(u) => unknowns[usize::from(u)],
+                FastKind::ReadParameter(p) => parameters[usize::from(p)],
+                FastKind::General(general_at) => {
+                    let g = fast.generals[general_at as usize];
+                    for &(slot, index) in &fast.parameters[g.param_start as usize..g.param_end as usize] {
+                        values[usize::from(slot)] = parameters[usize::from(index)];
+                    }
+                    for &(slot, index) in &fast.unknowns[g.unknown_start as usize..g.unknown_end as usize] {
+                        values[usize::from(slot)] = unknowns[usize::from(index)];
+                    }
+                    let mut clean = true;
+                    if g.other_start != g.other_end {
+                        for &(slot, bound) in &self.tape.others[g.other_start as usize..g.other_end as usize]
+                        {
+                            match read(&bound, inputs) {
+                                Some(value) if value.is_finite() => values[usize::from(slot)] = value,
+                                _ => clean = false,
+                            }
+                        }
+                    }
+                    if clean {
+                        forward_fast(
+                            &fast.steps[g.steps_start as usize..g.steps_end as usize],
+                            partial_volume,
+                            &mut values,
+                        )
+                        .map_err(|domain| self.undefined(at, inputs, domain))?;
+                        values[usize::from(g.output)]
+                    } else {
+                        let instance = &self.layout.instances[at];
+                        let (arithmetic, reads) =
+                            (self.tape.program(instance.program), self.tape.instance(at));
+                        forward(arithmetic, reads, inputs, partial_volume, &mut values)
+                            .map_err(|domain| self.undefined(at, inputs, domain))?
+                    }
+                }
+            };
+            out.push(Some(value));
+            if has_judged {
+                let range = &fast.judged_ranges[at];
+                for &op in &fast.judged_ops[slice_range(range)] {
+                    judged.push(Some(values[usize::from(op)]));
+                }
+            }
+        }
+        if has_judged {
+            out.extend(judged);
+        }
+        Ok(out)
+    }
     fn slopes(
         &self,
         inputs: &Inputs<'_>,
         mut each: impl FnMut(&Swept<'_>) -> Result<(), Undefined>,
     ) -> Result<(), Undefined> {
-        let (mut values, mut slopes) = (vec![0.0; self.tape.longest], vec![0.0; self.tape.longest]);
         let partial_volume = self.partial_volume();
+        if let Some(fast) = &self.tape.fast
+            && self.tape.clean_inputs(inputs)
+        {
+            return self.slopes_fast(fast, inputs, partial_volume, each);
+        }
+        let (mut values, mut slopes) = (vec![0.0; self.tape.longest], vec![0.0; self.tape.longest]);
         for (at, instance) in self.layout.instances.iter().enumerate() {
             if !instance.holds(inputs.modes) {
                 continue;
@@ -693,29 +1265,167 @@ impl CompiledBody {
         }
         Ok(())
     }
+    fn slopes_fast(
+        &self,
+        fast: &FastTape,
+        inputs: &Inputs<'_>,
+        partial_volume: f64,
+        mut each: impl FnMut(&Swept<'_>) -> Result<(), Undefined>,
+    ) -> Result<(), Undefined> {
+        let (mut values, mut slopes) = ([0.0; STACK_SLOTS], [0.0; STACK_SLOTS]);
+        let (parameters, unknowns) = (inputs.parameters, inputs.unknowns);
+        for (at, (inst, instance)) in fast.instances.iter().zip(&self.layout.instances).enumerate() {
+            if !inst.holds(inputs.modes) {
+                continue;
+            }
+            let reads = self.tape.instance(at);
+            match inst.kind {
+                FastKind::Upwind5(u) => {
+                    let flow = unknowns[usize::from(u[0])];
+                    let mut upwind_slopes = [0.0; 5];
+                    let value = if flow >= 0.0 {
+                        let (amount, water) = (unknowns[usize::from(u[1])], unknowns[usize::from(u[2])]);
+                        let value = if flow == 0.0 {
+                            0.0
+                        } else if water <= 0.0 {
+                            return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+                        } else {
+                            flow * (amount / water)
+                        };
+                        if !value.is_finite() {
+                            return Err(self.undefined(at, inputs, OperatorDomain::NonFinite));
+                        }
+                        if water > 0.0 {
+                            let share = amount / water;
+                            upwind_slopes[0] += share;
+                            upwind_slopes[1] += flow / water;
+                            upwind_slopes[2] -= flow * share / water;
+                        }
+                        value
+                    } else {
+                        let (amount, water) = (unknowns[usize::from(u[3])], unknowns[usize::from(u[4])]);
+                        if water <= 0.0 {
+                            return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+                        }
+                        let value = flow * (amount / water);
+                        if !value.is_finite() {
+                            return Err(self.undefined(at, inputs, OperatorDomain::NonFinite));
+                        }
+                        let share = amount / water;
+                        upwind_slopes[0] += share;
+                        upwind_slopes[3] += flow / water;
+                        upwind_slopes[4] -= flow * share / water;
+                        value
+                    };
+                    let flat = instance.rectified && value <= 0.0;
+                    each(&Swept {
+                        at,
+                        instance,
+                        reads,
+                        slopes: &upwind_slopes,
+                        flat,
+                    })?;
+                }
+                FastKind::ReadUnknown(u) => {
+                    let value = unknowns[usize::from(u)];
+                    let flat = instance.rectified && value <= 0.0;
+                    let slot = usize::from(reads.unknowns[0].0);
+                    slopes[slot] = 1.0;
+                    each(&Swept {
+                        at,
+                        instance,
+                        reads,
+                        slopes: &slopes,
+                        flat,
+                    })?;
+                }
+                FastKind::ReadParameter(p) => {
+                    let value = parameters[usize::from(p)];
+                    let flat = instance.rectified && value <= 0.0;
+                    let slot = usize::from(reads.parameters[0].0);
+                    slopes[slot] = 1.0;
+                    each(&Swept {
+                        at,
+                        instance,
+                        reads,
+                        slopes: &slopes,
+                        flat,
+                    })?;
+                }
+                FastKind::General(general_at) => {
+                    let g = fast.generals[general_at as usize];
+                    let arithmetic = self.tape.program(instance.program);
+                    for &(slot, index) in &fast.parameters[g.param_start as usize..g.param_end as usize] {
+                        values[usize::from(slot)] = parameters[usize::from(index)];
+                    }
+                    for &(slot, index) in &fast.unknowns[g.unknown_start as usize..g.unknown_end as usize] {
+                        values[usize::from(slot)] = unknowns[usize::from(index)];
+                    }
+                    let mut clean = true;
+                    if g.other_start != g.other_end {
+                        for &(slot, bound) in &self.tape.others[g.other_start as usize..g.other_end as usize]
+                        {
+                            match read(&bound, inputs) {
+                                Some(value) if value.is_finite() => values[usize::from(slot)] = value,
+                                _ => clean = false,
+                            }
+                        }
+                    }
+                    let value = if clean {
+                        for &(slot, instr) in arithmetic.steps {
+                            let val = apply(instr, &values, partial_volume)
+                                .map_err(|domain| self.undefined(at, inputs, domain))?;
+                            values[usize::from(slot)] = val;
+                        }
+                        values[usize::from(arithmetic.length) - 1]
+                    } else {
+                        forward(arithmetic, reads, inputs, partial_volume, &mut values)
+                            .map_err(|domain| self.undefined(at, inputs, domain))?
+                    };
+                    backward(arithmetic, &values, partial_volume, &mut slopes);
+                    let flat = instance.rectified && value <= 0.0;
+                    each(&Swept {
+                        at,
+                        instance,
+                        reads,
+                        slopes: &slopes,
+                        flat,
+                    })?;
+                }
+            }
+        }
+        Ok(())
+    }
     pub(crate) fn jacobian(&self, inputs: &Inputs<'_>, shift: f64) -> Result<Vec<f64>, Undefined> {
+        enum TargetKind<'a> {
+            Column(&'a crate::body::Column),
+            Row(f64),
+        }
         let mut values = vec![0.0; self.layout.sparsity.unknowns.len()];
         self.slopes(inputs, |swept| {
             let mut entries = self.tape.entries(swept.at).iter();
-            let mut next = || *entries.next().expect("an entry per unknown read and term");
+            let mut next = || *entries.next().expect("an entry per unknown read and term") as usize;
+            let target = match swept.instance.target {
+                Target::Column(column) => TargetKind::Column(&self.layout.columns[column.index()]),
+                Target::Row(row) => TargetKind::Row(match self.layout.rows[row.index()].kind {
+                    RowKind::Algebraic(_) => 1.0,
+                    RowKind::Amount { .. } | RowKind::Memory(_) => -1.0,
+                }),
+            };
             for &(slot, _) in swept.reads.unknowns {
+                let slot = usize::from(slot);
                 let slope = swept.slope(slot);
                 if !slope.is_finite() {
                     return Err(self.undefined_at(swept.instance, slot, OperatorDomain::NonFinite));
                 }
-                match swept.instance.target {
-                    Target::Column(column) => {
-                        let column = &self.layout.columns[column.index()];
+                match target {
+                    TargetKind::Column(column) => {
                         let slope = column.turnovers(slope);
                         for &(_, coefficient) in &column.terms {
                             values[next()] -= coefficient as f64 * slope;
                         }
                     }
-                    Target::Row(row) => {
-                        let sign = match self.layout.rows[row.index()].kind {
-                            RowKind::Algebraic(_) => 1.0,
-                            RowKind::Amount { .. } | RowKind::Memory(_) => -1.0,
-                        };
+                    TargetKind::Row(sign) => {
                         values[next()] += sign * slope;
                     }
                 }
@@ -723,7 +1433,7 @@ impl CompiledBody {
             Ok(())
         })?;
         for &entry in &self.tape.diagonals {
-            values[entry] += shift;
+            values[entry as usize] += shift;
         }
         Ok(values)
     }
@@ -736,8 +1446,8 @@ impl CompiledBody {
         let mut slopes = vec![0.0; self.layout.rows.len()];
         self.slopes(inputs, |swept| {
             let fitted = (swept.reads.parameters.iter())
-                .filter(|&&(_, parameter)| slots.contains(&ParameterId::at(parameter)));
-            let slope: f64 = fitted.map(|&(slot, _)| swept.slope(slot)).sum();
+                .filter(|&&(_, parameter)| slots.contains(&ParameterId::at(parameter as usize)));
+            let slope: f64 = fitted.map(|&(slot, _)| swept.slope(usize::from(slot))).sum();
             match swept.instance.target {
                 Target::Column(column) => {
                     let column = &self.layout.columns[column.index()];
@@ -774,16 +1484,39 @@ impl CompiledBody {
     }
     pub(crate) fn residuals(&self, columns: &[f64], rows: &[f64], derivative: &[f64]) -> Vec<f64> {
         let mut residuals = Vec::with_capacity(rows.len());
-        for (row, (&value, &tangent)) in self.layout.rows.iter().zip(rows.iter().zip(derivative)) {
-            residuals.push(match row.kind {
-                RowKind::Amount { .. } => tangent,
-                RowKind::Memory(_) => tangent - value,
-                RowKind::Algebraic(_) => value,
-            });
+        if self.tape.contiguous_rows && rows.len() == self.layout.rows.len() && derivative.len() == rows.len()
+        {
+            residuals.extend_from_slice(&derivative[..self.tape.amounts_end]);
+            for (&value, &tangent) in rows[self.tape.amounts_end..self.tape.memory_end]
+                .iter()
+                .zip(&derivative[self.tape.amounts_end..self.tape.memory_end])
+            {
+                residuals.push(tangent - value);
+            }
+            residuals.extend_from_slice(&rows[self.tape.memory_end..]);
+        } else {
+            for (row, (&value, &tangent)) in self.layout.rows.iter().zip(rows.iter().zip(derivative)) {
+                residuals.push(match row.kind {
+                    RowKind::Amount { .. } => tangent,
+                    RowKind::Memory(_) => tangent - value,
+                    RowKind::Algebraic(_) => value,
+                });
+            }
         }
-        for (column, &rate) in self.layout.columns.iter().zip(columns) {
-            for &(row, coefficient) in &column.terms {
-                residuals[row.index()] -= coefficient as f64 * rate;
+        if columns.len() == self.layout.columns.len() {
+            for &ColumnTerm {
+                column,
+                row,
+                coefficient,
+            } in &self.tape.column_terms
+            {
+                residuals[row as usize] -= coefficient * columns[column as usize];
+            }
+        } else {
+            for (column, &rate) in self.layout.columns.iter().zip(columns) {
+                for &(row, coefficient) in &column.terms {
+                    residuals[row.index()] -= coefficient as f64 * rate;
+                }
             }
         }
         residuals
@@ -1185,22 +1918,23 @@ mod tests {
     }
 
     fn named(instr: Instr) -> (&'static str, Vec<usize>) {
+        let list = |slots: &[u16]| slots.iter().map(|&slot| usize::from(slot)).collect();
         match instr {
             Instr::Zero => ("zero", Vec::new()),
-            Instr::Add(operands) => ("add", operands.to_vec()),
-            Instr::Subtract(operands) => ("subtract", operands.to_vec()),
-            Instr::Multiply(operands) => ("multiply", operands.to_vec()),
-            Instr::Divide(operands) => ("divide", operands.to_vec()),
-            Instr::Copy(operand) => ("copy", operand.to_vec()),
-            Instr::SmoothMax(operands) => ("smooth max", operands.to_vec()),
-            Instr::SmoothMin(operands) => ("smooth min", operands.to_vec()),
-            Instr::Exp(operand) => ("exp", operand.to_vec()),
-            Instr::Logistic(operand) => ("logistic", operand.to_vec()),
-            Instr::Ln(operand) => ("ln", operand.to_vec()),
-            Instr::Relax(operands) => ("relax", operands.to_vec()),
-            Instr::Volume(operand) => ("volume", operand.to_vec()),
-            Instr::Upwind(operands) => ("upwind", operands.to_vec()),
-            Instr::Expm1(operand) => ("expm1", operand.to_vec()),
+            Instr::Add(operands) => ("add", list(&operands)),
+            Instr::Subtract(operands) => ("subtract", list(&operands)),
+            Instr::Multiply(operands) => ("multiply", list(&operands)),
+            Instr::Divide(operands) => ("divide", list(&operands)),
+            Instr::Copy(operand) => ("copy", list(&operand)),
+            Instr::SmoothMax(operands) => ("smooth max", list(&operands)),
+            Instr::SmoothMin(operands) => ("smooth min", list(&operands)),
+            Instr::Exp(operand) => ("exp", list(&operand)),
+            Instr::Logistic(operand) => ("logistic", list(&operand)),
+            Instr::Ln(operand) => ("ln", list(&operand)),
+            Instr::Relax(operands) => ("relax", list(&operands)),
+            Instr::Volume(operand) => ("volume", list(&operand)),
+            Instr::Upwind(operands) => ("upwind", list(&operands)),
+            Instr::Expm1(operand) => ("expm1", list(&operand)),
         }
     }
 
@@ -1214,14 +1948,14 @@ mod tests {
             (layout.guards.iter().map(|guard| &guard.code)).zip(tape.guards.iter().map(|(kernel, _)| kernel));
         for (code, kernel) in programs.chain(guards) {
             let kernel = tape.arithmetic(kernel);
-            assert_eq!(kernel.length, code.ops.len());
+            assert_eq!(usize::from(kernel.length), code.ops.len());
             let expected: Vec<_> = (code.ops.iter().enumerate())
                 .filter_map(|(slot, op)| Some((slot, lowered(op)?)))
                 .collect();
             let found: Vec<_> = kernel
                 .steps
                 .iter()
-                .map(|&(slot, instr)| (slot, named(instr)))
+                .map(|&(slot, instr)| (usize::from(slot), named(instr)))
                 .collect();
             assert_eq!(found, expected);
         }
@@ -1237,13 +1971,22 @@ mod tests {
             .zip(tape.guards.iter().map(|(_, reads)| reads));
         for ((ops, inputs), ranges) in instances.chain(guards) {
             let reads = tape.reads(ranges);
-            let parameters = (reads.parameters.iter())
-                .map(|&(slot, index)| (slot, Bound::Parameter(ParameterId::at(index))));
-            let unknowns =
-                (reads.unknowns.iter()).map(|&(slot, index)| (slot, Bound::Unknown(UnknownId::at(index))));
+            let parameters = (reads.parameters.iter()).map(|&(slot, index)| {
+                (
+                    usize::from(slot),
+                    Bound::Parameter(ParameterId::at(index as usize)),
+                )
+            });
+            let unknowns = (reads.unknowns.iter())
+                .map(|&(slot, index)| (usize::from(slot), Bound::Unknown(UnknownId::at(index as usize))));
             let mut found: Vec<(usize, Bound)> = parameters
                 .chain(unknowns)
-                .chain(reads.others.iter().copied())
+                .chain(
+                    reads
+                        .others
+                        .iter()
+                        .map(|&(slot, bound)| (usize::from(slot), bound)),
+                )
                 .collect();
             found.sort_by_key(|&(slot, _)| slot);
             let slots = (ops.iter().enumerate()).filter(|(_, op)| matches!(op, Op::Input(_)));
@@ -1271,7 +2014,7 @@ mod tests {
             assert_eq!(entries.len(), expected.len());
             for (&entry, &(row, unknown)) in entries.iter().zip(&expected) {
                 assert!(
-                    holds(entry, row, unknown),
+                    holds(entry as usize, row, unknown),
                     "instance {at}: entry {entry} is not row {row}'s {unknown:?}"
                 );
             }
@@ -1282,7 +2025,7 @@ mod tests {
         assert_eq!(tape.diagonals.len(), expected.len());
         for (&entry, &(row, unknown)) in tape.diagonals.iter().zip(&expected) {
             assert!(
-                holds(entry, row, unknown),
+                holds(entry as usize, row, unknown),
                 "diagonal {entry} is not row {row}'s own entry"
             );
         }
@@ -1465,5 +2208,148 @@ mod tests {
             "glycogen is made at the speed per glucose held, not {}",
             -entry(glycogen)
         );
+    }
+
+    #[test]
+    fn fast_tape_matches_general_evaluation_bit_for_bit() {
+        let mut map = AnatomyBuilder::new();
+        let origin = || Position::new(measure(0.0), measure(0.0), measure(0.0));
+        let root = map.site::<TissueSite>("body", origin()).id();
+        let a = map.site::<VesselSegment>("a", origin()).id();
+        let b = map.site::<VesselSegment>("b", origin()).id();
+        map.contain(root, a);
+        map.contain(root, b);
+        map.connect(Network::Vascular, a, b);
+        let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+        for space in [Space::Plasma, Space::Interstitium, Space::Cells] {
+            schema.leave_out(space, "vascular lumen only");
+        }
+        schema.carry::<Sodium, VesselSegment>(Space::Lumen);
+        schema
+            .partial_volume(Measure::new(1.0).expect("finite"))
+            .expect("partial volume");
+        let body = assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Wave, 1_000_000_000)?;
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let route = ports.circulation(&mut cv);
+            let e = cv.edge_parameter::<_, Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
+            let k = cv.edge_parameter::<_, Conductance<Water>>(
+                ParameterKey::new("cv.g"),
+                Admissible::nonnegative(),
+            );
+            let flow = cv.edge_kernel(|mut f| {
+                let u = f.at_edge(&route.from_amount());
+                let d = f.at_edge(&route.to_amount());
+                let u = f.volume(u);
+                let d = f.volume(d);
+                let diff = f.subtract(u, d);
+                let elastance = f.edge_parameter(&e);
+                let pressure = f.multiply(elastance, diff);
+                let head = f.as_dimension::<_, Pressure>(pressure);
+                let conductance = f.edge_parameter(&k);
+                let q = f.conductance_flow(conductance, head);
+                f.finish(q, cv.every_mode(), class)
+            });
+            cv.transfer_along(&route, flow);
+            body.add(cv.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let fast = body.tape.fast.as_ref().expect("fast tape");
+        assert!(
+            fast.instances
+                .iter()
+                .any(|inst| matches!(inst.kind, super::FastKind::Upwind5(_)))
+        );
+        let mut packet: ParameterPacket<SyntheticFixture> = ParameterPacket::new();
+        packet
+            .synthetic(
+                ParameterKey::new("cv.e"),
+                Binding::Network(Network::Vascular),
+                measure::<Elastance>(1.0),
+                "synthetic",
+            )
+            .expect("once");
+        packet
+            .synthetic(
+                ParameterKey::new("cv.g"),
+                Binding::Network(Network::Vascular),
+                measure::<Conductance<Water>>(0.5),
+                "synthetic",
+            )
+            .expect("once");
+        packet.start_rest(&body, |_| 10.0, "synthetic").expect("starts");
+        let bound = body.bind(packet).expect("bound");
+        let frame = DriveFrame::default();
+        let mut slow_params = bound.values.clone();
+        slow_params.push(f64::NAN);
+        let cases: &[[f64; 4]] = &[
+            [10.0, 4.0, 2.0, 1.0],
+            [4.0, 10.0, 2.0, 1.0],
+            [5.0, 5.0, 2.0, 1.0],
+            [5.0, 5.0, -0.0, -0.0],
+            [0.0, 0.0, 2.0, 1.0],
+            [10.0, 0.0, 2.0, 1.0],
+            [0.0, 10.0, 2.0, 1.0],
+        ];
+        let derivative = vec![0.25; body.rows().len()];
+        for case in cases {
+            let mut unknowns = vec![0.0; body.rows().len()];
+            for (dst, &src) in unknowns.iter_mut().zip(case) {
+                *dst = src;
+            }
+            let fast_in = Inputs {
+                parameters: &bound.values,
+                frame: &frame,
+                unknowns: &unknowns,
+                modes: &bound.modes,
+                draws: &[],
+                factors: &[],
+            };
+            let slow_in = Inputs {
+                parameters: &slow_params,
+                ..fast_in
+            };
+            let fv = body.instance_values(&fast_in);
+            let sv = body.instance_values(&slow_in);
+            match (&fv, &sv) {
+                (Ok(a), Ok(b)) => {
+                    let bits =
+                        |xs: &[Option<f64>]| xs.iter().map(|v| v.map(f64::to_bits)).collect::<Vec<_>>();
+                    assert_eq!(bits(a), bits(b), "values differ on {case:?}");
+                    let (fc, fr) = body.targets(a);
+                    let fres: Vec<u64> = body
+                        .residuals(&fc, &fr, &derivative)
+                        .into_iter()
+                        .map(f64::to_bits)
+                        .collect();
+                    let (sc, sr) = body.targets(b);
+                    let sres: Vec<u64> = body
+                        .residuals(&sc, &sr, &derivative)
+                        .into_iter()
+                        .map(f64::to_bits)
+                        .collect();
+                    assert_eq!(fres, sres, "residuals differ on {case:?}");
+                }
+                (Err(a), Err(b)) => assert_eq!(
+                    (a.law, format!("{:?}", a.domain)),
+                    (b.law, format!("{:?}", b.domain))
+                ),
+                _ => panic!("mismatch on {case:?}: {fv:?} vs {sv:?}"),
+            }
+            let fj = body.jacobian(&fast_in, 1.5);
+            let sj = body.jacobian(&slow_in, 1.5);
+            match (&fj, &sj) {
+                (Ok(a), Ok(b)) => {
+                    let bits = |xs: &[f64]| xs.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+                    assert_eq!(bits(a), bits(b), "jacobian differ on {case:?}");
+                }
+                (Err(a), Err(b)) => assert_eq!(
+                    (a.law, format!("{:?}", a.domain)),
+                    (b.law, format!("{:?}", b.domain))
+                ),
+                _ => panic!("jacobian mismatch on {case:?}: {fj:?} vs {sj:?}"),
+            }
+        }
     }
 }

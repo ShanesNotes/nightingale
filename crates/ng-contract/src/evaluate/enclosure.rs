@@ -172,7 +172,7 @@ fn smooth(a: Jet, b: Jet, width: Jet, sign: f64) -> Option<Jet> {
 }
 
 fn step(instr: Instr, jets: &[Jet], partial_volume: f64) -> Option<Jet> {
-    let at = |slot: usize| jets[slot];
+    let at = |slot: u16| jets[usize::from(slot)];
     Some(match instr {
         Instr::Zero => Jet::exact(0.0),
         Instr::Add([a, b]) => Jet {
@@ -240,7 +240,7 @@ fn step(instr: Instr, jets: &[Jet], partial_volume: f64) -> Option<Jet> {
         }
         Instr::Volume([amount]) => product(Jet::exact(partial_volume), at(amount))?,
         Instr::Upwind([flow, from, from_water, to, to_water]) => {
-            let carried = |amount: usize, water: usize| product(at(flow), quotient(at(amount), at(water))?);
+            let carried = |amount: u16, water: u16| product(at(flow), quotient(at(amount), at(water))?);
             let flowing = at(flow).value;
             if flowing.lo > 0.0 {
                 carried(from, from_water)?
@@ -264,20 +264,20 @@ pub(crate) fn enclose(
     unknown: &dyn Fn(usize) -> Jet,
     partial_volume: f64,
 ) -> Option<Jet> {
-    let mut jets = vec![Jet::exact(0.0); arithmetic.length];
+    let mut jets = vec![Jet::exact(0.0); usize::from(arithmetic.length)];
     for &(slot, index) in reads.parameters {
-        jets[slot] = Jet::exact(*inputs.parameters.get(index)?);
+        jets[usize::from(slot)] = Jet::exact(*inputs.parameters.get(index as usize)?);
     }
     for &(slot, index) in reads.unknowns {
-        jets[slot] = unknown(index);
+        jets[usize::from(slot)] = unknown(index as usize);
     }
     for &(slot, bound) in reads.others {
-        jets[slot] = Jet::exact(read(&bound, inputs)?);
+        jets[usize::from(slot)] = Jet::exact(read(&bound, inputs)?);
     }
     for &(at, instr) in arithmetic.steps {
-        jets[at] = step(instr, &jets, partial_volume)?;
+        jets[usize::from(at)] = step(instr, &jets, partial_volume)?;
     }
-    Some(jets[arithmetic.length - 1])
+    Some(jets[usize::from(arithmetic.length) - 1])
 }
 
 #[cfg(test)]
