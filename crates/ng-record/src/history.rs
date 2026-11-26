@@ -1,4 +1,7 @@
 use crate::checkpoint::{CheckpointError, HistoryStore, RecordFormat};
+use crate::record::PatientRecord;
+use crate::session::Session;
+use alloc::collections::VecDeque;
 use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, AdmissibleSet, ByteReader, ColumnId, Compensated, CompiledBody, ConservedBasis,
@@ -222,7 +225,7 @@ struct ColumnStep {
 }
 impl LedgerChunk {
     pub(crate) fn after(history: &History, body: &CompiledBody, step: &VerifiedStep) -> Self {
-        let previous = history.chain.head().map(|head| &head.chunk);
+        let previous = history.chain.head().map(|head| &head.segment.chunk);
         let gross: Vec<(Compensated, Compensated)> = step.gross().collect();
         let columns: Vec<ColumnStep> = (gross.iter().enumerate())
             .map(|(column, &(forward, reverse))| {
@@ -310,6 +313,11 @@ impl LedgerChunk {
     }
     fn byte_len(&self) -> usize {
         2 * INSTANT + (self.quantities.len() * 6 + self.columns.len() * 4 + self.edges.len() * 2) * VALUE
+    }
+    fn heap_bytes(&self) -> usize {
+        self.quantities.capacity() * size_of::<QuantityStep>()
+            + self.columns.capacity() * size_of::<ColumnStep>()
+            + self.edges.capacity() * size_of::<[u64; 2]>()
     }
     fn write(&self, bytes: &mut Vec<u8>) {
         let Self {
@@ -526,7 +534,7 @@ impl Chain {
 }
 
 struct Head {
-    chunk: LedgerChunk,
+    segment: HistorySegment,
     image: Digest,
     seal: Digest,
     previous: Digest,
@@ -622,6 +630,9 @@ impl History {
     pub(crate) fn head_image(&self) -> Digest {
         self.chain.head().map_or(self.origin.image, |head| head.image)
     }
+    pub(crate) fn head_segment(&self) -> Option<&HistorySegment> {
+        self.chain.head().map(|head| &head.segment)
+    }
     pub(crate) fn oldest_unkept(&self) -> Option<Digest> {
         self.unkept.first().map(|(seal, _)| *seal)
     }
@@ -661,7 +672,7 @@ impl History {
         };
         let previous = self.seal();
         let head = Head {
-            chunk,
+            segment: HistorySegment { chunk },
             image,
             seal,
             previous,
@@ -687,7 +698,7 @@ impl History {
         Some(Walk {
             store,
             format: self.format,
-            shape: head.chunk.shape(),
+            shape: head.segment.chunk.shape(),
             origin: self.origin.seal,
             at: head.previous,
             revision: revision.get() - 1,
@@ -756,7 +767,7 @@ impl History {
                 previous,
             } = newest;
             let head = Head {
-                chunk,
+                segment: HistorySegment { chunk },
                 image,
                 seal,
                 previous,
@@ -785,7 +796,7 @@ impl History {
         }
         push_every_column(&mut bytes, incidence, *columns);
         if let Some(head) = chain.head() {
-            head.chunk.write(&mut bytes);
+            head.segment.chunk.write(&mut bytes);
         }
         Digest::of_canonical(&bytes)
     }
@@ -892,12 +903,11 @@ impl<'r> ConservationView<'r> {
         let Chain::Grown { opened, head, .. } = &self.history.chain else {
             return None;
         };
-        Interval::new(*opened, head.chunk.interval.end())
+        Interval::new(*opened, head.segment.chunk.interval.end())
     }
     /// The last accepted segment; `None` before the first accepted step.
     pub fn head(&self) -> Option<HistorySegment> {
-        let chunk = self.history.chain.head()?.chunk.clone();
-        Some(HistorySegment { chunk })
+        self.history.chain.head().map(|head| head.segment.clone())
     }
     /// Every accepted segment, newest first, each starting where the one before it in time ends.
     pub fn newest_first(&self) -> NewestFirst<'r> {
@@ -909,43 +919,385 @@ impl<'r> ConservationView<'r> {
     /// Walks and checks every link once, newest first, and keeps a mark for each page of links so a cursor reads a
     /// page again only when it reaches it. Fails with the first error a walk newest first meets.
     pub fn in_time_order(&self) -> Result<TimeOrder<'r>, CheckpointError> {
-        let history = self.history;
-        let mut order = TimeOrder {
-            store: self.store,
-            format: history.format,
-            shape: (0, 0, 0),
-            origin: history.origin.seal,
-            marks: Vec::new(),
-            head: None,
-        };
-        let Chain::Grown { revision, head, .. } = &history.chain else {
-            return Ok(order);
-        };
-        order.shape = head.chunk.shape();
-        let mut page: Option<Mark> = None;
-        for (count, walked) in (0..).zip(history.before_head(self.store).into_iter().flatten()) {
-            let walked = walked?;
-            let start = walked.chunk.interval.start();
-            match &mut page {
-                Some(mark) if mark.links < PAGE => {
-                    mark.links += 1;
-                    mark.oldest_start = start;
+        build_time_order(self.history, self.store)
+    }
+}
+
+fn build_time_order<'s>(
+    history: &History,
+    store: &'s dyn HistoryStore,
+) -> Result<TimeOrder<'s>, CheckpointError> {
+    let mut order = TimeOrder {
+        store,
+        format: history.format,
+        shape: (0, 0, 0),
+        origin: history.origin.seal,
+        marks: Vec::new(),
+        head: None,
+    };
+    let Chain::Grown { revision, head, .. } = &history.chain else {
+        return Ok(order);
+    };
+    order.shape = head.segment.chunk.shape();
+    let mut page: Option<Mark> = None;
+    for (count, walked) in (0..).zip(history.before_head(store).into_iter().flatten()) {
+        let walked = walked?;
+        let start = walked.chunk.interval.start();
+        match &mut page {
+            Some(mark) if mark.links < PAGE => {
+                mark.links += 1;
+                mark.oldest_start = start;
+            }
+            _ => {
+                order.marks.extend(page.take());
+                page = Some(Mark {
+                    newest: walked.seal,
+                    revision: revision.get() - 1 - count,
+                    links: 1,
+                    oldest_start: start,
+                });
+            }
+        }
+    }
+    order.marks.extend(page);
+    order.marks.reverse();
+    order.head = Some((revision.get(), head.segment.clone()));
+    Ok(order)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConservationRefusal {
+    /// A session of another run, another branch, or another origin.
+    OtherRun,
+    /// A session whose accepted head does not follow the last revision read: skipped, repeated, or earlier.
+    Gap { expected: Digest, found: Option<Digest> },
+}
+
+struct PageMark {
+    newest: Digest,
+    revision: u64,
+    links: u64,
+}
+
+struct PartialPage {
+    newest: Digest,
+    previous: Digest,
+    revision: u64,
+    links: u64,
+}
+
+enum Prefix<'m> {
+    Empty,
+    Ready(Box<TimeOrder<'m>>),
+    Failed(CheckpointError),
+    Done,
+}
+
+/// A live conservation view minted by one `Session`, bound to its run, branch and origin. Advances one accepted
+/// step at a time and serves trailing segments in time order from the session's store while holding at most one
+/// page of decoded segments and one mark per page across the open window.
+pub struct ConservationFeed<'m> {
+    store: &'m dyn HistoryStore,
+    body: &'m CompiledBody,
+    format: RecordFormat,
+    shape: Shape,
+    origin: Digest,
+    run: Digest,
+    branch: Digest,
+    admission: SimTime,
+    last_revision: u64,
+    last_seal: Digest,
+    head_end: Option<SimTime>,
+    pages: VecDeque<PageMark>,
+    partial: Option<PartialPage>,
+    trailing: Vec<(u64, HistorySegment)>,
+    tracking_trailing: bool,
+    prefix: Prefix<'m>,
+}
+impl<'m> ConservationFeed<'m> {
+    pub(crate) fn from_record(record: &PatientRecord<'m>, store: &'m dyn HistoryStore) -> Self {
+        let body = record.body();
+        let history = record.history();
+        let format = history.format();
+        let shape = (
+            body.conserved_basis().combinations().len(),
+            body.columns().len(),
+            body.rhythms().len(),
+        );
+        let origin = history.origin().seal;
+        let run = record.identity().digest();
+        let branch = record.branch().id();
+        let last_revision = history.revision();
+        let last_seal = history.seal();
+        let (admission, head_end, pages, partial, prefix) = match &history.chain {
+            Chain::Opening => (
+                record.accepted().time(),
+                None,
+                VecDeque::new(),
+                None,
+                Prefix::Empty,
+            ),
+            Chain::Grown {
+                revision,
+                opened,
+                head,
+            } => {
+                let end = Some(head.segment.interval().end());
+                match build_time_order(history, store) {
+                    Ok(order) => {
+                        let pages = (order.marks.iter())
+                            .map(|mark| PageMark {
+                                newest: mark.newest,
+                                revision: mark.revision,
+                                links: mark.links,
+                            })
+                            .collect();
+                        let partial = Some(PartialPage {
+                            newest: head.seal,
+                            previous: head.previous,
+                            revision: revision.get(),
+                            links: 1,
+                        });
+                        (*opened, end, pages, partial, Prefix::Ready(Box::new(order)))
+                    }
+                    Err(error) => (*opened, end, VecDeque::new(), None, Prefix::Failed(error)),
                 }
-                _ => {
-                    order.marks.extend(page.take());
-                    page = Some(Mark {
-                        newest: walked.seal,
-                        revision: revision.get() - 1 - count,
+            }
+        };
+        Self {
+            store,
+            body,
+            format,
+            shape,
+            origin,
+            run,
+            branch,
+            admission,
+            last_revision,
+            last_seal,
+            head_end,
+            pages,
+            partial,
+            trailing: Vec::new(),
+            tracking_trailing: true,
+            prefix,
+        }
+    }
+    pub fn seal(&self) -> HistorySeal {
+        HistorySeal {
+            run: self.run,
+            branch: self.branch,
+            base: self.last_seal,
+        }
+    }
+    pub fn basis(&self) -> &'m ConservedBasis {
+        self.body.conserved_basis()
+    }
+    pub fn rhythms(&self) -> impl ExactSizeIterator<Item = (RhythmId, Slot)> + 'm {
+        self.body.rhythms()
+    }
+    pub fn admission(&self) -> SimTime {
+        self.admission
+    }
+    pub fn span(&self) -> Option<Interval> {
+        Interval::new(self.admission, self.head_end?)
+    }
+    pub fn revision(&self) -> u64 {
+        self.last_revision
+    }
+    /// Advances by one accepted step of the same run and branch. Refuses another run, another branch, or any
+    /// skipped or repeated revision without changing this view.
+    pub fn advance<'s, S>(
+        &mut self,
+        session: &'s Session<'m, S>,
+    ) -> Result<AcceptedStep<'_, 'm, 's>, ConservationRefusal> {
+        let record = session.record();
+        let history = record.history();
+        if record.identity().digest() != self.run
+            || record.branch().id() != self.branch
+            || history.origin().seal != self.origin
+            || history.format() != self.format
+        {
+            return Err(ConservationRefusal::OtherRun);
+        }
+        let expected = self.last_seal;
+        let found = history.previous();
+        if found != Some(expected) || history.revision() != self.last_revision + 1 {
+            return Err(ConservationRefusal::Gap { expected, found });
+        }
+        let revision = history.revision();
+        let seal = history.seal();
+        let segment = history.head_segment().expect("a revision above zero has a head");
+        self.last_revision = revision;
+        self.last_seal = seal;
+        self.head_end = Some(segment.interval().end());
+        if self.tracking_trailing {
+            match &mut self.partial {
+                Some(page) if page.links < PAGE => {
+                    page.newest = seal;
+                    page.previous = expected;
+                    page.revision = revision;
+                    page.links += 1;
+                }
+                slot => {
+                    if let Some(full) = slot.take() {
+                        self.pages.push_back(PageMark {
+                            newest: full.newest,
+                            revision: full.revision,
+                            links: full.links,
+                        });
+                    }
+                    *slot = Some(PartialPage {
+                        newest: seal,
+                        previous: expected,
+                        revision,
                         links: 1,
-                        oldest_start: start,
                     });
                 }
             }
         }
-        order.marks.extend(page);
-        order.marks.reverse();
-        order.head = self.head().map(|segment| (revision.get(), segment));
-        Ok(order)
+        Ok(AcceptedStep {
+            feed: self,
+            revision,
+            segment,
+        })
+    }
+    /// Replays the verified prefix once, oldest first from `from`, handing each accepted step to `visit`.
+    /// Does nothing at admission or on a second call.
+    pub fn take_prefix(
+        &mut self,
+        from: SimTime,
+        mut visit: impl FnMut(&mut AcceptedStep<'_, 'm, '_>) -> bool,
+    ) -> Result<(), CheckpointError> {
+        match core::mem::replace(&mut self.prefix, Prefix::Done) {
+            Prefix::Empty | Prefix::Done => Ok(()),
+            Prefix::Failed(error) => Err(error),
+            Prefix::Ready(order) => {
+                for item in order.from(from) {
+                    let (revision, segment) = item?;
+                    let mut step = AcceptedStep {
+                        feed: self,
+                        revision,
+                        segment: &segment,
+                    };
+                    if !visit(&mut step) {
+                        break;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+    /// Drops all trailing page marks and buffered segments once fixed windows are permanently finished.
+    pub fn release_trailing(&mut self) {
+        self.tracking_trailing = false;
+        self.pages.clear();
+        self.pages.shrink_to_fit();
+        self.partial = None;
+        self.trailing.clear();
+        self.trailing.shrink_to_fit();
+    }
+    /// Heap and inline bytes currently held by this view.
+    pub fn memory_bytes(&self) -> usize {
+        let trailing_heap: usize = self
+            .trailing
+            .iter()
+            .map(|(_, segment)| segment.chunk.heap_bytes())
+            .sum();
+        let prefix_bytes = match &self.prefix {
+            Prefix::Ready(order) => {
+                size_of::<TimeOrder<'m>>()
+                    + order.marks.capacity() * size_of::<Mark>()
+                    + order
+                        .head
+                        .as_ref()
+                        .map_or(0, |(_, segment)| segment.chunk.heap_bytes())
+            }
+            Prefix::Empty | Prefix::Failed(_) | Prefix::Done => 0,
+        };
+        size_of::<Self>()
+            + self.pages.capacity() * size_of::<PageMark>()
+            + self.trailing.capacity() * size_of::<(u64, HistorySegment)>()
+            + trailing_heap
+            + prefix_bytes
+    }
+    fn load_page(&mut self, newest: Digest, mut revision: u64, links: u64) -> Result<(), CheckpointError> {
+        let walk = Walk {
+            store: self.store,
+            format: self.format,
+            shape: self.shape,
+            origin: self.origin,
+            at: newest,
+            revision,
+            done: false,
+        };
+        self.trailing.clear();
+        let take = usize::try_from(links).unwrap_or(usize::MAX);
+        self.trailing.reserve(take);
+        for walked in walk.take(take) {
+            match walked {
+                Ok(walked) => {
+                    self.trailing
+                        .push((revision, HistorySegment { chunk: walked.chunk }));
+                }
+                Err(error) => {
+                    self.trailing.clear();
+                    return Err(error);
+                }
+            }
+            revision -= 1;
+        }
+        Ok(())
+    }
+    fn next_trailing_with_head(
+        &mut self,
+        head_revision: u64,
+        head_segment: &HistorySegment,
+    ) -> Result<Option<(u64, HistorySegment)>, CheckpointError> {
+        if !self.tracking_trailing {
+            return Ok(None);
+        }
+        if let Some(held) = self.trailing.pop() {
+            return Ok(Some(held));
+        }
+        if let Some(mark) = self.pages.pop_front() {
+            self.load_page(mark.newest, mark.revision, mark.links)?;
+            return Ok(self.trailing.pop());
+        }
+        let Some(page) = self.partial.as_ref() else {
+            return Ok(None);
+        };
+        if page.links == 1 {
+            debug_assert_eq!(page.revision, head_revision);
+            let revision = page.revision;
+            self.partial = None;
+            return Ok(Some((revision, head_segment.clone())));
+        }
+        let count = page.links - 1;
+        let (start_seal, start_revision) = (page.previous, page.revision - 1);
+        self.load_page(start_seal, start_revision, count)?;
+        if let Some(page) = &mut self.partial {
+            page.links = 1;
+        }
+        Ok(self.trailing.pop())
+    }
+}
+
+/// One accepted step lent by `ConservationFeed`, paired with that feed's trailing cursor.
+pub struct AcceptedStep<'f, 'm, 's> {
+    feed: &'f mut ConservationFeed<'m>,
+    revision: u64,
+    segment: &'s HistorySegment,
+}
+impl<'m, 's> AcceptedStep<'_, 'm, 's> {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub fn segment(&self) -> &'s HistorySegment {
+        self.segment
+    }
+    pub fn next_trailing(&mut self) -> Result<Option<(u64, HistorySegment)>, CheckpointError> {
+        self.feed.next_trailing_with_head(self.revision, self.segment)
     }
 }
 
@@ -1072,6 +1424,9 @@ impl HistorySegment {
     }
     pub fn ends_on_edge(&self, rhythm: RhythmId) -> bool {
         (self.chunk.edges.get(rhythm.index())).is_some_and(|&[start, end]| end > start)
+    }
+    pub fn heap_bytes(&self) -> usize {
+        self.chunk.heap_bytes()
     }
     fn curve<'s>(&self, coefficients: &'s [Compensated; 2]) -> Curve<'s> {
         Curve {

@@ -1,5 +1,5 @@
 use crate::checkpoint::{BranchId, Checkpoint, CheckpointError, Continuing, HistoryStore, restore};
-use crate::history::ConservationView;
+use crate::history::{ConservationFeed, ConservationView};
 use crate::record::{AuthorizedInput, InputReceipt, NextImage, PatientRecord, StepReceipt};
 use ng_contract::{
     AdmissionError, Attempt, CompiledBody, CoupledSolver, EngineFault, InitialRevision, Refused, RunIdentity,
@@ -74,6 +74,12 @@ impl<'m, S> Session<'m, S> {
     }
     pub fn conservation(&self) -> ConservationView<'_> {
         self.record.conservation(self.store)
+    }
+    /// Mints a live conservation view bound to this session's run and branch. At admission its prefix is empty;
+    /// after `resume`, `rewind` or `recover` its prefix holds the verified history up to this head so a fold can
+    /// rebuild from it.
+    pub fn conservation_feed(&self) -> ConservationFeed<'m> {
+        self.record.conservation_feed(self.store)
     }
     fn fork(
         &self,
