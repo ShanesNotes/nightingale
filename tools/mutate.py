@@ -3,9 +3,10 @@
     python3 -I tools/mutate.py TABLE [--rev REV] [--only NAME ...] [--since REV] [--budget SECONDS] [--check]
                                      [--tested RECORD]
 
-Python 3.11 stdlib only. TABLE is TOML with one [[mutant]] per rule, aimed at the test that holds it. `old` must match
-exactly once. `test` is what follows `cargo test`, and a row's own `test` replaces the table's. It may not pass
---manifest-path, --target-dir or --config.
+Python 3.11 stdlib only. TABLE is either a TOML file or a directory of `*.toml` files read in sorted filename order,
+with one [[mutant]] per rule, aimed at the test that holds it. `old` must match exactly once. `test` is what follows
+`cargo test`, and a row's own `test` replaces its file's top-level `test`. It may not pass --manifest-path,
+--target-dir or --config.
 
     test = "--release -p ng-contract --test map_reads"
 
@@ -87,18 +88,34 @@ def refuse(why):
     sys.exit(f"mutate: {why}; no sweep")
 
 
+def table_files(path):
+    p = pathlib.Path(path)
+    if p.is_dir():
+        entries = sorted(p.iterdir(), key=lambda child: child.name)
+        bad = [child.name for child in entries if not child.is_file() or child.suffix != ".toml"]
+        if bad:
+            refuse(f"{path} holds non-TOML entries: {bad[:3]}")
+        if not entries:
+            refuse(f"{path} has no .toml file")
+        return entries
+    return [p]
+
+
 def load_rows(path, only):
-    with open(path, "rb") as file:
-        table = tomllib.load(file)
-    rows = table.get("mutant", [])
-    if not rows:
-        refuse(f"{path} has no [[mutant]] row")
-    for row in rows:
-        row.setdefault("test", table.get("test"))
-        if set(row) != ROW_KEYS or not row["test"]:
-            refuse(f"row {row.get('name')} needs exactly {sorted(ROW_KEYS)}")
-        if moved := MOVES & {arg.split("=")[0] for arg in shlex.split(row["test"])}:
-            refuse(f"row {row['name']} passes {sorted(moved)}, which can point cargo outside the sweep's tree")
+    rows = []
+    for file_path in table_files(path):
+        with open(file_path, "rb") as file:
+            table = tomllib.load(file)
+        part = table.get("mutant", [])
+        if not part:
+            refuse(f"{file_path} has no [[mutant]] row")
+        for row in part:
+            row.setdefault("test", table.get("test"))
+            if set(row) != ROW_KEYS or not row["test"]:
+                refuse(f"row {row.get('name')} needs exactly {sorted(ROW_KEYS)}")
+            if moved := MOVES & {arg.split("=")[0] for arg in shlex.split(row["test"])}:
+                refuse(f"row {row['name']} passes {sorted(moved)}, which can point cargo outside the sweep's tree")
+        rows.extend(part)
     names = [row["name"] for row in rows]
     if len(set(names)) != len(names):
         refuse("two rows share a name")
