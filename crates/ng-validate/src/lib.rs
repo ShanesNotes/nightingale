@@ -395,6 +395,7 @@ mod day;
 mod fixture;
 mod healthy;
 mod initialize;
+mod oscillation;
 mod reference;
 mod replay;
 mod run;
@@ -429,6 +430,7 @@ pub use healthy::{
     ReadingCheckError, ReadingChecks, ReturnGap, ReturnReport,
 };
 pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved, solve_fixture};
+pub use oscillation::Oscillation;
 pub use reference::ReferenceIntegrator;
 pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, MemoryStore, ReplayCase, ReplayEvidence,

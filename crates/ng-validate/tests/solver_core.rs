@@ -61,7 +61,11 @@ fn the_stepped_inflow_meets_its_closed_form_at_first_order_over_three_caps() {
 fn the_core_meets_every_manufactured_case_at_first_order() {
     let policy = AccuracyPolicy::manufactured().expect("the model default");
     let error = |cap| accuracy(&Core::new(cap), &policy).expect("within the policy");
-    let (coarse, medium, fine) = (error(16 * SECOND), error(8 * SECOND), error(4 * SECOND));
+    let (coarse, medium, fine) = (
+        error(500 * MILLISECOND),
+        error(250 * MILLISECOND),
+        error(125 * MILLISECOND),
+    );
     observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
 }
 
