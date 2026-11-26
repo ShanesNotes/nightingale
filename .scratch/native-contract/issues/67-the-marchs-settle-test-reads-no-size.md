@@ -36,7 +36,7 @@ Main already runs 247 legs to the limit, on rows of the circulation, the liver's
 
 ## Answer
 
-**What changed.** In `crates/ng-validate/src/initialize.rs::solve_leg`, the `settled` test now reads each slot's natural size beside the unknown: `change.abs() <= NEWTON_STOP * (system.size(workspace, slot) + unknown.abs())`, matching `moved` and the ring's `initialize` loop and failing closed on `NaN`.
+**What changed.** In `crates/ng-validate/src/initialize.rs::solve_leg`, the `settled` test now reads each slot's natural size beside the unknown, scaling each term before summing so finite values cannot overflow: `change.abs() <= NEWTON_STOP * system.size(workspace, slot) + NEWTON_STOP * unknown.abs()`, matching `moved` and the ring's `initialize` loop and failing closed on `NaN`.
 
 **Cancellation fixture.** `initialize::tests::march_settles_a_cancellation_row_against_its_natural_size` solves `(1 + x)^2 - (1 + 1001 * f64::EPSILON) = 0` on a periodic leg where the exact root sits strictly between representable squares at `x ~ 500.5 * eps`. Without the slot's natural size, the rounding floor `0.5 * eps` stays above `NEWTON_STOP * |x|` and `solve_leg` fails to settle (`settled = false`); with `system.size(workspace, slot)`, it settles cleanly within 4 updates.
 

@@ -58,6 +58,7 @@ const TINY_PIVOT: f64 = 1e-12;
 fn scales_of(pattern: &Pattern, values: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let Pattern {
         starts,
+        intra_starts,
         columns,
         places,
         ..
@@ -69,7 +70,7 @@ fn scales_of(pattern: &Pattern, values: &[f64]) -> (Vec<f64>, Vec<f64>) {
     }
     let (mut row_max, mut col_max) = (vec![0.0; size], vec![0.0; size]);
     for at in 0..size {
-        let range = index(starts[at])..index(starts[at + 1]);
+        let range = index(intra_starts[at])..index(starts[at + 1]);
         let mut rmax = 0.0;
         for (&cell, &column) in raw[range.clone()].iter().zip(&columns[range]) {
             let abs = cell.abs();
@@ -188,6 +189,7 @@ fn order_block(members: &[u32], adj: &[Vec<u32>], local_of: &mut [u32], out: &mu
     }
     let mut row_out: Vec<Vec<u32>> = vec![Vec::new(); k];
     let mut col_in: Vec<Vec<u32>> = vec![Vec::new(); k];
+    let mut directed_edges = 0_usize;
     for (lu, &u) in members.iter().enumerate() {
         let lu_u = lu as u32;
         for &v in &adj[index(u)] {
@@ -195,8 +197,16 @@ fn order_block(members: &[u32], adj: &[Vec<u32>], local_of: &mut [u32], out: &mu
             if lv != u32::MAX && lv != lu_u {
                 row_out[lu].push(lv);
                 col_in[index(lv)].push(lu_u);
+                directed_edges += 1;
             }
         }
+    }
+    if directed_edges == k * (k - 1) {
+        out.extend_from_slice(members);
+        for &node in members {
+            local_of[index(node)] = u32::MAX;
+        }
+        return;
     }
     let mut mark = vec![0_u32; k];
     let mut tag = 0_u32;
@@ -239,6 +249,7 @@ fn order_block(members: &[u32], adj: &[Vec<u32>], local_of: &mut [u32], out: &mu
         heap.push(Reverse((sc.0, sc.1, members[lu], lu as u32)));
     }
     let mut eliminated = vec![false; k];
+    let mut remaining = k;
     let mut touched_mark = vec![0_u32; k];
     let mut touched_tag = 0_u32;
     let mut touched: Vec<u32> = Vec::new();
@@ -249,6 +260,7 @@ fn order_block(members: &[u32], adj: &[Vec<u32>], local_of: &mut [u32], out: &mu
             continue;
         }
         eliminated[p] = true;
+        remaining -= 1;
         out.push(members[p]);
         let ins = core::mem::take(&mut col_in[p]);
         let outs = core::mem::take(&mut row_out[p]);
@@ -299,6 +311,15 @@ fn order_block(members: &[u32], adj: &[Vec<u32>], local_of: &mut [u32], out: &mu
                     added.push((r, col));
                 }
             }
+        }
+        directed_edges = directed_edges - ins.len() - outs.len() + added.len();
+        if remaining > 0 && directed_edges == remaining * (remaining - 1) {
+            for (lu, &node) in members.iter().enumerate() {
+                if !eliminated[lu] {
+                    out.push(node);
+                }
+            }
+            break;
         }
         for &(r, col) in &added {
             let ro = &row_out[index(r)];
@@ -588,16 +609,11 @@ impl Elimination {
             let (lo, hi) = (index(block[0]), index(block[1]));
             if lo + 1 == hi {
                 let (start, end) = (index(starts[lo]), index(starts[lo + 1]));
-                let mut row_max = 0.0;
                 for &cell in &lu[start..end] {
                     finite &= cell.is_finite();
-                    let abs = cell.abs();
-                    if abs > row_max {
-                        row_max = abs;
-                    }
                 }
                 let diagonal = lu[index(diagonals[lo])];
-                if bad_pivot(diagonal, lo, row_max, pattern, values, &mut scales) {
+                if diagonal == 0.0 || !diagonal.is_finite() {
                     return Eliminated {
                         found: Err(lo),
                         finite,
@@ -612,14 +628,10 @@ impl Elimination {
                     index(diagonals[at]),
                     index(starts[at + 1]),
                 );
-                let mut row_max = 0.0;
                 for &cell in &lu[start..intra] {
                     finite &= cell.is_finite();
-                    let abs = cell.abs();
-                    if abs > row_max {
-                        row_max = abs;
-                    }
                 }
+                let mut row_max = 0.0;
                 let (done, rest) = lu.split_at_mut(intra);
                 let line = &mut rest[..end - intra];
                 let diagonal = if intra == diag {
@@ -1815,5 +1827,38 @@ mod tests {
         for (one, other) in found.iter().zip(dense_solve(a, side)) {
             assert!((one - other).abs() < 1e-11, "{one} against {other}");
         }
+    }
+
+    #[test]
+    fn a_singleton_block_keeps_its_pivot_despite_larger_cross_block_reads() {
+        let a = vec![vec![1.0, 0.0, 0.0], vec![1.0, 1e-16, 0.0], vec![0.0, 1.0, 1.0]];
+        let matching = [RowId::at(0), RowId::at(1), RowId::at(2)];
+        let (plan, values) = planned(&a, &matching);
+        assert_eq!(plan.blocks.len() - 1, 3);
+        let mut side = [0.0, 1e-16, 1.0];
+        plan.factor(&values)
+            .expect("singleton pivot is unaffected by cross-block scale")
+            .solve(&mut side);
+        assert_eq!(side, [0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn a_fully_connected_block_plans_in_canonical_order() {
+        let size = 128;
+        let mut offsets = Vec::with_capacity(size + 1);
+        let mut unknowns = Vec::with_capacity(size * size);
+        offsets.push(0);
+        for _ in 0..size {
+            for col in 0..size {
+                unknowns.push(UnknownId::at(col));
+            }
+            offsets.push(unknowns.len());
+        }
+        let matching: Vec<RowId> = (0..size).map(RowId::at).collect();
+        let plan = Elimination::plan(&offsets, &unknowns, &matching);
+        assert_eq!(plan.blocks, vec![0, size as u32]);
+        let expected: Vec<u32> = (0..size as u32).collect();
+        assert_eq!(plan.unknowns, expected);
+        assert_eq!(plan.rows, expected);
     }
 }

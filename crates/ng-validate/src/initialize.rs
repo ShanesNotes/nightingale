@@ -122,7 +122,7 @@ fn solve_leg(
         taken += 1;
         held.extend_from_slice(&now);
         let settled = (update.iter().zip(&now).zip(slots.clone())).all(|((change, unknown), slot)| {
-            change.abs() <= NEWTON_STOP * (system.size(workspace, slot) + unknown.abs())
+            change.abs() <= NEWTON_STOP * system.size(workspace, slot) + NEWTON_STOP * unknown.abs()
         });
         let unknowns = &mut workspace.unknowns_mut()[slots.clone()];
         for (unknown, change) in unknowns.iter_mut().zip(update) {
@@ -506,6 +506,84 @@ mod tests {
         assert!(
             outcome.settled && outcome.updates <= 4,
             "expected cancellation row to settle within 4 updates against its natural size, got settled={} updates={}",
+            outcome.settled,
+            outcome.updates
+        );
+    }
+
+    #[test]
+    fn march_does_not_overflow_stop_scale_at_large_values() {
+        fn measure<U>(value: f64) -> Measure<U> {
+            Measure::new(value).expect("finite")
+        }
+        let origin = Position::new(measure(0.0), measure(0.0), measure(0.0));
+        let mut map = AnatomyBuilder::new();
+        map.site::<TissueSite>("body", origin);
+        let schema = Schema::new(map.finish().expect("anatomy")).expect("schema");
+        let scale_key = ParameterKey::new("fixture.scale");
+        let target_key = ParameterKey::new("fixture.target");
+        let body = assemble(schema, |mut body| {
+            let (mut laws, _) = body.cardiovascular()?.parts();
+            let scale = laws.parameter::<Dimensionless>(scale_key, Admissible::positive());
+            let target = laws.parameter::<Dimensionless>(target_key, Admissible::positive());
+            let unknown = laws.algebraic::<Dimensionless>("large", Admissible::finite());
+            let beat = RateClass::new(RateBand::Beat, 100_000_000)?;
+            let residual = laws.kernel(|mut k| {
+                let x = k.algebraic(&unknown);
+                let s = k.parameter(&scale);
+                let t = k.parameter(&target);
+                let sx = k.scale(s, x);
+                let sq = k.scale(sx, sx);
+                let diff = k.subtract(sq, t);
+                k.finish(diff, laws.every_mode(), beat)
+            });
+            laws.residual(&unknown, residual);
+            body.add(laws.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let period = NonZeroU64::new(1_000_000_000).expect("non-zero");
+        let cycle = Cycle::new(period, NonZeroU32::new(4).expect("non-zero")).expect("cycle");
+        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+        packet.within(admission_tolerance());
+        packet
+            .synthetic(
+                scale_key,
+                Binding::Body,
+                measure::<Dimensionless>(1e-308),
+                "synthetic",
+            )
+            .expect("once");
+        packet
+            .synthetic(
+                target_key,
+                Binding::Body,
+                measure::<Dimensionless>(0.25),
+                "synthetic",
+            )
+            .expect("once");
+        let row = body.rows()[0].kind();
+        packet
+            .start(row, measure::<Dimensionless>(1e308), "synthetic")
+            .expect("once");
+        packet
+            .row_scale(row, measure::<Dimensionless>(1e308))
+            .expect("once");
+        let lens = body.lens(Vec::new(), period).expect("lens");
+        let port = BoundaryPort::new(Vec::new()).expect("port");
+        let system = system(&body, packet, port, &lens, SimTime::from_ns(0)).expect("system");
+        let mut workspace = system.workspace();
+        let leg = workspace.legs_of(1)[0];
+        system.seed(&mut workspace, leg);
+        let outcome = solve_leg(&system, &mut workspace, leg).expect("solved");
+        let residuals = system.stage_residuals(&workspace, leg).expect("residuals");
+        let worst = residuals
+            .iter()
+            .map(|r| r.abs())
+            .fold(0.0, |a, b| if b > a { b } else { a });
+        assert!(
+            outcome.settled && outcome.updates > 1 && worst < 1e-12,
+            "expected large-scale row to converge past one update without stop overflow, got settled={} updates={} worst={worst:e}",
             outcome.settled,
             outcome.updates
         );
