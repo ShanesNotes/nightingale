@@ -72,6 +72,9 @@ impl<'m, S> Session<'m, S> {
     pub fn record(&self) -> &PatientRecord<'m> {
         &self.record
     }
+    pub(crate) fn store(&self) -> &'m dyn HistoryStore {
+        self.store
+    }
     pub fn conservation(&self) -> ConservationView<'_> {
         self.record.conservation(self.store)
     }

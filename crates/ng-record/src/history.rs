@@ -1,4 +1,4 @@
-use crate::checkpoint::{CheckpointError, HistoryStore, RecordFormat};
+use crate::checkpoint::{BranchFork, CheckpointError, HistoryStore, RecordFormat};
 use crate::record::PatientRecord;
 use crate::session::Session;
 use alloc::collections::VecDeque;
@@ -636,6 +636,15 @@ impl History {
     pub(crate) fn oldest_unkept(&self) -> Option<Digest> {
         self.unkept.first().map(|(seal, _)| *seal)
     }
+    pub(crate) fn unkept(&self) -> &[(Digest, Vec<u8>)] {
+        &self.unkept
+    }
+    pub(crate) fn newest_unkept_before_head(&self) -> Option<Digest> {
+        let head = self.seal();
+        (self.unkept.iter().rev())
+            .find(|(seal, _)| *seal != head)
+            .map(|(seal, _)| *seal)
+    }
     pub(crate) fn linked(&self, chunk: LedgerChunk, image: Digest) -> Link {
         let previous = self.seal();
         let mut stored = Vec::with_capacity(LINK_HEAD + chunk.byte_len());
@@ -919,16 +928,34 @@ impl<'r> ConservationView<'r> {
     /// Walks and checks every link once, newest first, and keeps a mark for each page of links so a cursor reads a
     /// page again only when it reaches it. Fails with the first error a walk newest first meets.
     pub fn in_time_order(&self) -> Result<TimeOrder<'r>, CheckpointError> {
-        build_time_order(self.history, self.store)
+        build_time_order(self.history, self.store, self.store)
+    }
+}
+
+struct StoreOrUnkept<'a> {
+    store: &'a dyn HistoryStore,
+    unkept: &'a [(Digest, Vec<u8>)],
+}
+impl HistoryStore for StoreOrUnkept<'_> {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        self.store.resolve(seal).or_else(|| {
+            (self.unkept.iter().rev())
+                .find(|(held, _)| held == seal)
+                .map(|(_, bytes)| bytes.clone())
+        })
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        self.store.keep(seal, link)
     }
 }
 
 fn build_time_order<'s>(
     history: &History,
-    store: &'s dyn HistoryStore,
+    walk_store: &dyn HistoryStore,
+    order_store: &'s dyn HistoryStore,
 ) -> Result<TimeOrder<'s>, CheckpointError> {
     let mut order = TimeOrder {
-        store,
+        store: order_store,
         format: history.format,
         shape: (0, 0, 0),
         origin: history.origin.seal,
@@ -940,7 +967,7 @@ fn build_time_order<'s>(
     };
     order.shape = head.segment.chunk.shape();
     let mut page: Option<Mark> = None;
-    for (count, walked) in (0..).zip(history.before_head(store).into_iter().flatten()) {
+    for (count, walked) in (0..).zip(history.before_head(walk_store).into_iter().flatten()) {
         let walked = walked?;
         let start = walked.chunk.interval.start();
         match &mut page {
@@ -988,14 +1015,14 @@ struct PartialPage {
 
 enum Prefix<'m> {
     Empty,
-    Ready(Box<TimeOrder<'m>>),
+    Ready(Box<TimeOrder<'m>>, Vec<(Digest, Vec<u8>)>),
     Failed(CheckpointError),
     Done,
 }
 
-/// A live conservation view minted by one `Session`, bound to its run, branch and origin. Advances one accepted
-/// step at a time and serves trailing segments in time order from the session's store while holding at most one
-/// page of decoded segments and one mark per page across the open window.
+/// A live conservation view minted by one `Session`, bound to its run, branch, fork ancestry and origin. Advances
+/// one accepted step at a time and serves trailing segments in time order from the session's store while holding
+/// at most one page of decoded segments and one mark per page across the open window.
 pub struct ConservationFeed<'m> {
     store: &'m dyn HistoryStore,
     body: &'m CompiledBody,
@@ -1004,10 +1031,12 @@ pub struct ConservationFeed<'m> {
     origin: Digest,
     run: Digest,
     branch: Digest,
+    ancestry: Vec<BranchFork>,
     admission: SimTime,
     last_revision: u64,
     last_seal: Digest,
     head_end: Option<SimTime>,
+    pending_before_head: Option<Digest>,
     pages: VecDeque<PageMark>,
     partial: Option<PartialPage>,
     trailing: Vec<(u64, HistorySegment)>,
@@ -1027,8 +1056,10 @@ impl<'m> ConservationFeed<'m> {
         let origin = history.origin().seal;
         let run = record.identity().digest();
         let branch = record.branch().id();
+        let ancestry = record.branch().forks().to_vec();
         let last_revision = history.revision();
         let last_seal = history.seal();
+        let pending_before_head = history.newest_unkept_before_head();
         let (admission, head_end, pages, partial, prefix) = match &history.chain {
             Chain::Opening => (
                 record.accepted().time(),
@@ -1043,7 +1074,11 @@ impl<'m> ConservationFeed<'m> {
                 head,
             } => {
                 let end = Some(head.segment.interval().end());
-                match build_time_order(history, store) {
+                let backing = StoreOrUnkept {
+                    store,
+                    unkept: history.unkept(),
+                };
+                match build_time_order(history, &backing, store) {
                     Ok(order) => {
                         let pages = (order.marks.iter())
                             .map(|mark| PageMark {
@@ -1058,7 +1093,13 @@ impl<'m> ConservationFeed<'m> {
                             revision: revision.get(),
                             links: 1,
                         });
-                        (*opened, end, pages, partial, Prefix::Ready(Box::new(order)))
+                        (
+                            *opened,
+                            end,
+                            pages,
+                            partial,
+                            Prefix::Ready(Box::new(order), history.unkept().to_vec()),
+                        )
                     }
                     Err(error) => (*opened, end, VecDeque::new(), None, Prefix::Failed(error)),
                 }
@@ -1072,10 +1113,12 @@ impl<'m> ConservationFeed<'m> {
             origin,
             run,
             branch,
+            ancestry,
             admission,
             last_revision,
             last_seal,
             head_end,
+            pending_before_head,
             pages,
             partial,
             trailing: Vec::new(),
@@ -1105,8 +1148,12 @@ impl<'m> ConservationFeed<'m> {
     pub fn revision(&self) -> u64 {
         self.last_revision
     }
-    /// Advances by one accepted step of the same run and branch. Refuses another run, another branch, or any
-    /// skipped or repeated revision without changing this view.
+    /// The newest pre-head link still waiting for the history store to accept it, if any.
+    pub fn pending_before_head(&self) -> Option<Digest> {
+        self.pending_before_head
+    }
+    /// Advances by one accepted step of the same run, branch and fork ancestry. Refuses another run, another
+    /// branch or ancestry, or any skipped or repeated revision without changing this view.
     pub fn advance<'s, S>(
         &mut self,
         session: &'s Session<'m, S>,
@@ -1115,6 +1162,7 @@ impl<'m> ConservationFeed<'m> {
         let history = record.history();
         if record.identity().digest() != self.run
             || record.branch().id() != self.branch
+            || record.branch().forks() != self.ancestry.as_slice()
             || history.origin().seal != self.origin
             || history.format() != self.format
         {
@@ -1128,9 +1176,11 @@ impl<'m> ConservationFeed<'m> {
         let revision = history.revision();
         let seal = history.seal();
         let segment = history.head_segment().expect("a revision above zero has a head");
+        self.store = session.store();
         self.last_revision = revision;
         self.last_seal = seal;
         self.head_end = Some(segment.interval().end());
+        self.pending_before_head = history.newest_unkept_before_head();
         if self.tracking_trailing {
             match &mut self.partial {
                 Some(page) if page.links < PAGE => {
@@ -1160,6 +1210,7 @@ impl<'m> ConservationFeed<'m> {
             feed: self,
             revision,
             segment,
+            unkept: history.unkept(),
         })
     }
     /// Replays the verified prefix once, oldest first from `from`, handing each accepted step to `visit`.
@@ -1172,19 +1223,46 @@ impl<'m> ConservationFeed<'m> {
         match core::mem::replace(&mut self.prefix, Prefix::Done) {
             Prefix::Empty | Prefix::Done => Ok(()),
             Prefix::Failed(error) => Err(error),
-            Prefix::Ready(order) => {
-                for item in order.from(from) {
-                    let (revision, segment) = item?;
-                    let mut step = AcceptedStep {
-                        feed: self,
-                        revision,
-                        segment: &segment,
+            Prefix::Ready(order, unkept) => {
+                if from > self.admission && self.head_end.is_some_and(|end| end >= from) {
+                    let backing = StoreOrUnkept {
+                        store: self.store,
+                        unkept: &unkept,
                     };
-                    if !visit(&mut step) {
-                        break;
+                    if let Err(error) = self.prime_trailing(&backing) {
+                        self.pages.shrink_to_fit();
+                        return Err(error);
                     }
                 }
-                Ok(())
+                let backing = StoreOrUnkept {
+                    store: self.store,
+                    unkept: &unkept,
+                };
+                let mut result = Ok(());
+                for item in order.cursor(from, &backing) {
+                    match item {
+                        Ok((revision, segment)) => {
+                            let mut step = AcceptedStep {
+                                feed: self,
+                                revision,
+                                segment: &segment,
+                                unkept: &unkept,
+                            };
+                            if !visit(&mut step) {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            result = Err(error);
+                            break;
+                        }
+                    }
+                }
+                self.pages.shrink_to_fit();
+                if self.trailing.is_empty() {
+                    self.trailing.shrink_to_fit();
+                }
+                result
             }
         }
     }
@@ -1205,25 +1283,34 @@ impl<'m> ConservationFeed<'m> {
             .map(|(_, segment)| segment.chunk.heap_bytes())
             .sum();
         let prefix_bytes = match &self.prefix {
-            Prefix::Ready(order) => {
+            Prefix::Ready(order, unkept) => {
                 size_of::<TimeOrder<'m>>()
                     + order.marks.capacity() * size_of::<Mark>()
                     + order
                         .head
                         .as_ref()
                         .map_or(0, |(_, segment)| segment.chunk.heap_bytes())
+                    + unkept.capacity() * size_of::<(Digest, Vec<u8>)>()
+                    + unkept.iter().map(|(_, bytes)| bytes.capacity()).sum::<usize>()
             }
             Prefix::Empty | Prefix::Failed(_) | Prefix::Done => 0,
         };
         size_of::<Self>()
+            + self.ancestry.capacity() * size_of::<BranchFork>()
             + self.pages.capacity() * size_of::<PageMark>()
             + self.trailing.capacity() * size_of::<(u64, HistorySegment)>()
             + trailing_heap
             + prefix_bytes
     }
-    fn load_page(&mut self, newest: Digest, mut revision: u64, links: u64) -> Result<(), CheckpointError> {
+    fn load_page_from(
+        &mut self,
+        store: &dyn HistoryStore,
+        newest: Digest,
+        mut revision: u64,
+        links: u64,
+    ) -> Result<(), CheckpointError> {
         let walk = Walk {
-            store: self.store,
+            store,
             format: self.format,
             shape: self.shape,
             origin: self.origin,
@@ -1249,24 +1336,64 @@ impl<'m> ConservationFeed<'m> {
         }
         Ok(())
     }
+    fn prime_trailing(&mut self, store: &dyn HistoryStore) -> Result<(), CheckpointError> {
+        if !self.tracking_trailing || !self.trailing.is_empty() {
+            return Ok(());
+        }
+        if let Some(mark) = self.pages.pop_front() {
+            return self.load_page_from(store, mark.newest, mark.revision, mark.links);
+        }
+        let Some(page) = self.partial.as_ref() else {
+            return Ok(());
+        };
+        if page.links > 1 {
+            let count = page.links - 1;
+            let (start_seal, start_revision) = (page.previous, page.revision - 1);
+            self.load_page_from(store, start_seal, start_revision, count)?;
+            if let Some(page) = &mut self.partial {
+                page.links = 1;
+            }
+        }
+        Ok(())
+    }
     fn next_trailing_with_head(
         &mut self,
         head_revision: u64,
         head_segment: &HistorySegment,
+        unkept: &[(Digest, Vec<u8>)],
     ) -> Result<Option<(u64, HistorySegment)>, CheckpointError> {
         if !self.tracking_trailing {
             return Ok(None);
         }
-        if let Some(held) = self.trailing.pop() {
-            return Ok(Some(held));
-        }
-        if let Some(mark) = self.pages.pop_front() {
-            self.load_page(mark.newest, mark.revision, mark.links)?;
+        if (self.trailing.last()).is_some_and(|(revision, _)| *revision <= head_revision) {
             return Ok(self.trailing.pop());
+        }
+        if !self.trailing.is_empty() {
+            return Ok(None);
+        }
+        if let Some(mark) = self.pages.front() {
+            let oldest = mark.revision - mark.links + 1;
+            if oldest > head_revision {
+                return Ok(None);
+            }
+            let mark = self.pages.pop_front().expect("checked front");
+            let backing = StoreOrUnkept {
+                store: self.store,
+                unkept,
+            };
+            self.load_page_from(&backing, mark.newest, mark.revision, mark.links)?;
+            return Ok((self.trailing.last())
+                .is_some_and(|(revision, _)| *revision <= head_revision)
+                .then(|| self.trailing.pop())
+                .flatten());
         }
         let Some(page) = self.partial.as_ref() else {
             return Ok(None);
         };
+        let oldest = page.revision - page.links + 1;
+        if oldest > head_revision {
+            return Ok(None);
+        }
         if page.links == 1 {
             debug_assert_eq!(page.revision, head_revision);
             let revision = page.revision;
@@ -1275,11 +1402,18 @@ impl<'m> ConservationFeed<'m> {
         }
         let count = page.links - 1;
         let (start_seal, start_revision) = (page.previous, page.revision - 1);
-        self.load_page(start_seal, start_revision, count)?;
+        let backing = StoreOrUnkept {
+            store: self.store,
+            unkept,
+        };
+        self.load_page_from(&backing, start_seal, start_revision, count)?;
         if let Some(page) = &mut self.partial {
             page.links = 1;
         }
-        Ok(self.trailing.pop())
+        Ok((self.trailing.last())
+            .is_some_and(|(revision, _)| *revision <= head_revision)
+            .then(|| self.trailing.pop())
+            .flatten())
     }
 }
 
@@ -1288,6 +1422,7 @@ pub struct AcceptedStep<'f, 'm, 's> {
     feed: &'f mut ConservationFeed<'m>,
     revision: u64,
     segment: &'s HistorySegment,
+    unkept: &'s [(Digest, Vec<u8>)],
 }
 impl<'m, 's> AcceptedStep<'_, 'm, 's> {
     pub fn revision(&self) -> u64 {
@@ -1297,7 +1432,8 @@ impl<'m, 's> AcceptedStep<'_, 'm, 's> {
         self.segment
     }
     pub fn next_trailing(&mut self) -> Result<Option<(u64, HistorySegment)>, CheckpointError> {
-        self.feed.next_trailing_with_head(self.revision, self.segment)
+        self.feed
+            .next_trailing_with_head(self.revision, self.segment, self.unkept)
     }
 }
 
@@ -1327,6 +1463,9 @@ impl TimeOrder<'_> {
     /// lost after `in_time_order` fails here only if this cursor reaches its page; if several pages lose links
     /// mid-walk, the oldest damaged page reached reports its newest lost link.
     pub fn from(&self, instant: SimTime) -> OldestFirst<'_> {
+        self.cursor(instant, self.store)
+    }
+    fn cursor<'a>(&'a self, instant: SimTime, store: &'a dyn HistoryStore) -> OldestFirst<'a> {
         let before = |start: SimTime| start < instant;
         let page = match &self.head {
             Some((_, head)) if before(head.interval().start()) => self.marks.len(),
@@ -1334,6 +1473,7 @@ impl TimeOrder<'_> {
         };
         OldestFirst {
             order: self,
+            store,
             page,
             held: Vec::new(),
             head: self.head.clone(),
@@ -1342,6 +1482,7 @@ impl TimeOrder<'_> {
 }
 pub struct OldestFirst<'t> {
     order: &'t TimeOrder<'t>,
+    store: &'t dyn HistoryStore,
     page: usize,
     held: Vec<(u64, HistorySegment)>,
     head: Option<(u64, HistorySegment)>,
@@ -1358,7 +1499,7 @@ impl Iterator for OldestFirst<'_> {
         };
         self.page += 1;
         let walk = Walk {
-            store: order.store,
+            store: self.store,
             format: order.format,
             shape: order.shape,
             origin: order.origin,

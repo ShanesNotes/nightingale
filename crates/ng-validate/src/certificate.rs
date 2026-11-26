@@ -1049,9 +1049,9 @@ impl<'p, 'r> Windows<'p, 'r> {
         let length = self.policy.windows.window_ns.get();
         let end = |segment: &HistorySegment| segment.interval().end().nanoseconds();
         if self.first == self.last {
-            self.first + length <= end(leading)
+            self.first.checked_add(length).is_some() && self.first + length <= end(leading)
         } else {
-            self.from + length < end(leading)
+            self.from.checked_add(length).is_some() && self.from + length < end(leading)
         }
     }
     fn offer(
@@ -1253,14 +1253,14 @@ impl<'m, 'p> CertificateFold<'m, 'p> {
         policy: &'p CertificatePolicy,
     ) -> Result<Self, CertificateFailure> {
         let coverage = of_history(CertificateCheck::Coverage);
-        let mut feed = session.conservation_feed();
-        if policy.basis != feed.basis().digest() {
+        let head = session.conservation();
+        if policy.basis != head.basis().digest() {
             return Err(coverage);
         }
         let rhythm = match &policy.edges {
             Some(limits) => {
                 let clock = limits.windows.clock;
-                let declared = feed.rhythms().find(|&(_, phase)| phase == clock);
+                let declared = head.rhythms().find(|&(_, phase)| phase == clock);
                 Some(
                     declared
                         .ok_or_else(|| of_history(CertificateCheck::UndeclaredRhythm))?
@@ -1269,6 +1269,7 @@ impl<'m, 'p> CertificateFold<'m, 'p> {
             }
             None => None,
         };
+        let mut feed = session.conservation_feed();
         let ExpectedDrift::Zero = policy.expected;
         let length = policy.windows.window_ns.get();
         let first = feed.admission().nanoseconds();
@@ -1324,6 +1325,11 @@ impl<'m, 'p> CertificateFold<'m, 'p> {
         let span = self.feed.span().ok_or(coverage)?;
         if span.length_ns() < self.windows.policy.windows.coverage_ns {
             return Err(coverage);
+        }
+        if let Some(seal) = self.feed.pending_before_head() {
+            return Err(of_history(CertificateCheck::History(
+                CheckpointError::HistoryMissing { seal },
+            )));
         }
         if let Some(error) = self.history_error {
             return Err(of_history(CertificateCheck::History(error)));

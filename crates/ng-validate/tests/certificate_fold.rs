@@ -455,8 +455,18 @@ fn the_fold_refuses_a_foreign_run_a_foreign_branch_a_skipped_step_and_a_repeated
     );
 
     let branch = BranchId::new(Digest::of_canonical(b"child-branch"));
+    let sibling_branch = BranchId::new(Digest::of_canonical(b"sibling-branch"));
     let child = session_a.rewind(&saved_1, branch).expect("rewound");
     let mut child_fold = CertificateFold::open(&child, &ledger.policy).expect("opened on child");
+    let sibling = session_a
+        .rewind(&saved_1, sibling_branch)
+        .expect("rewound sibling");
+    let (sibling, _) = accepted(sibling.step());
+    assert_eq!(
+        child_fold.advance(&sibling),
+        Err(ConservationRefusal::OtherRun),
+        "a sibling branch with identical ancestry and previous seal is refused"
+    );
     let saved_b1 = session_b.checkpoint().expect("checkpoint on run b");
     let child_b = session_b.rewind(&saved_b1, branch).expect("rewound run b");
     let (child_b, _) = accepted(child_b.step());
@@ -974,5 +984,351 @@ fn the_fold_checks_basis_and_undeclared_rhythm_before_any_step() {
     assert_eq!(
         fold.certificate().expect_err("no step yet").check(),
         CertificateCheck::Coverage
+    );
+}
+
+#[derive(Default)]
+struct GivesOnce {
+    kept: MemoryStore,
+    once: RefCell<Vec<Digest>>,
+    lost: RefCell<Vec<Digest>>,
+    reads: Cell<usize>,
+}
+impl HistoryStore for GivesOnce {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        self.reads.set(self.reads.get() + 1);
+        if self.lost.borrow().contains(seal) {
+            return None;
+        }
+        if self.once.borrow().contains(seal) {
+            self.lost.borrow_mut().push(*seal);
+        }
+        self.kept.resolve(seal)
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        self.kept.keep(seal, link)
+    }
+}
+
+struct FlakyKeepStore {
+    kept: MemoryStore,
+    refuse_keeps: Cell<usize>,
+}
+impl FlakyKeepStore {
+    fn refusing(refuse_keeps: usize) -> Self {
+        Self {
+            kept: MemoryStore::default(),
+            refuse_keeps: Cell::new(refuse_keeps),
+        }
+    }
+}
+impl HistoryStore for FlakyKeepStore {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        self.kept.resolve(seal)
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        let left = self.refuse_keeps.get();
+        if left > 0 {
+            self.refuse_keeps.set(left - 1);
+            return Err(CheckpointError::HistoryMissing { seal });
+        }
+        self.kept.keep(seal, link)
+    }
+}
+
+#[test]
+fn the_fold_refuses_another_fork_ancestry_even_with_the_same_branch_id_and_previous_seal() {
+    let case = TwoReservoirs::closed().expect("a body");
+    let core = ReferenceIntegrator::new(SECOND);
+    let store = MemoryStore::default();
+    let root_0 = case.admit(&core, &store).expect("admitted");
+    let ckpt_0 = root_0.checkpoint().expect("checkpoint at rev 0");
+    let (root_1, _) = accepted(root_0.step());
+    let ckpt_1 = root_1.checkpoint().expect("checkpoint at rev 1");
+
+    let shared_branch = BranchId::new(Digest::of_canonical(b"reused-branch"));
+    let child_from_0 = root_1.rewind(&ckpt_0, shared_branch).expect("fork at rev 0");
+    let (child_from_0, _) = accepted(child_from_0.step());
+    let child_from_1 = root_1.rewind(&ckpt_1, shared_branch).expect("fork at rev 1");
+    let (child_from_1, _) = accepted(child_from_1.step());
+
+    assert_eq!(child_from_0.record().seal(), ckpt_1_seal(&root_1));
+    assert_eq!(child_from_1.record().revision(), 2);
+
+    let basis = child_from_0.conservation().basis();
+    let ledger = Ledger::sliding(basis, SECOND, 2 * SECOND, 1e-24, 1e-9, 1.0);
+    let mut fold = CertificateFold::open(&child_from_0, &ledger.policy).expect("opened on fork 0");
+    assert_eq!(
+        fold.advance(&child_from_1),
+        Err(ConservationRefusal::OtherRun),
+        "a fork from a different checkpoint with the same BranchId and previous seal must be refused"
+    );
+
+    let (child_from_0, _) = accepted(child_from_0.step());
+    fold.advance(&child_from_0)
+        .expect("refusal left fold ready for its own child branch");
+    assert_fold_matches_certify(&child_from_0, &fold, &ledger, "fork-0-after-refusal");
+}
+
+fn ckpt_1_seal(session: &Session<'_, Running>) -> ng_record::Seal {
+    session.record().seal()
+}
+
+#[test]
+fn prefix_replay_stops_the_trailing_cursor_at_the_replayed_step() {
+    let case = TwoReservoirs::closed().expect("a body");
+    let core = ReferenceIntegrator::new(SECOND);
+    let store = MemoryStore::default();
+    let session = case.admit(&core, &store).expect("admitted");
+    let (session, _) = accepted(session.step());
+    let (session, _) = accepted(session.step());
+
+    let mut feed = session.conservation_feed();
+    let mut seen: Vec<(u64, Vec<(u64, Interval)>)> = Vec::new();
+    feed.take_prefix(at(0), |step| {
+        let mut pulled = Vec::new();
+        while let Some((rev, seg)) = step.next_trailing().expect("trailing") {
+            pulled.push((rev, seg.interval()));
+        }
+        seen.push((step.revision(), pulled));
+        true
+    })
+    .expect("replayed prefix");
+    assert_eq!(
+        seen,
+        vec![
+            (1, vec![(1, interval(0, SECOND))]),
+            (2, vec![(2, interval(SECOND, 2 * SECOND))]),
+        ]
+    );
+}
+
+#[test]
+fn the_fold_reads_trailing_links_from_a_resumed_store_and_recovers_after_queued_writes() {
+    let case = TwoReservoirs::closed().expect("a body");
+    let core = ReferenceIntegrator::new(SECOND);
+    let store_a = MemoryStore::default();
+    let store_b = MemoryStore::default();
+    let session_a = case.admit(&core, &store_a).expect("admitted on store A");
+    let basis = session_a.conservation().basis();
+    let ledger = Ledger::sliding(basis, 2 * SECOND, 4 * SECOND, 1e-24, 1e-9, 1.0);
+    let mut fold = CertificateFold::open(&session_a, &ledger.policy).expect("opened on store A");
+    let ckpt_0 = session_a.checkpoint().expect("checkpoint at rev 0");
+
+    let mut session_b = Session::resume(
+        &ckpt_0,
+        session_a.record().identity(),
+        case.body(),
+        &core,
+        &store_b,
+    )
+    .expect("resumed on store B");
+    for _ in 0..4 {
+        (session_b, _) = accepted(session_b.step());
+        fold.advance(&session_b).expect("advanced on store B");
+    }
+    assert_fold_matches_certify(&session_b, &fold, &ledger, "switched-store-on-resume");
+
+    let flaky = FlakyKeepStore::refusing(3);
+    let mut session = case.admit(&core, &flaky).expect("admitted on flaky store");
+    let cover_2s = Ledger::sliding(
+        session.conservation().basis(),
+        2 * SECOND,
+        2 * SECOND,
+        1e-24,
+        1e-9,
+        1.0,
+    );
+    let cover_4s = Ledger::sliding(
+        session.conservation().basis(),
+        2 * SECOND,
+        4 * SECOND,
+        1e-24,
+        1e-9,
+        1.0,
+    );
+    let mut f2 = CertificateFold::open(&session, &cover_2s.policy).expect("opened 2s");
+    let mut f4 = CertificateFold::open(&session, &cover_4s.policy).expect("opened 4s");
+    let mut rev2_seal = Digest::of_canonical(b"");
+    for step_idx in 1..=3 {
+        let receipt;
+        (session, receipt) = accepted(session.step());
+        if step_idx == 2 {
+            rev2_seal = receipt.seal().digest();
+        }
+        f2.advance(&session).expect("advanced f2");
+        f4.advance(&session).expect("advanced f4");
+    }
+    assert_eq!(
+        f2.certificate().expect_err("unkept pre-head at rev 3").check(),
+        CertificateCheck::History(CheckpointError::HistoryMissing { seal: rev2_seal })
+    );
+    assert_fold_matches_certify(&session, &f2, &cover_2s, "queued-write-at-rev-3-2s");
+    assert_eq!(
+        f4.certificate()
+            .expect_err("coverage before unkept at rev 3")
+            .check(),
+        CertificateCheck::Coverage
+    );
+    assert_fold_matches_certify(&session, &f4, &cover_4s, "queued-write-at-rev-3-4s");
+
+    let (session, _) = accepted(session.step());
+    f2.advance(&session).expect("advanced f2 at rev 4");
+    f4.advance(&session).expect("advanced f4 at rev 4");
+    f2.certificate().expect("recovered f2 after store caught up");
+    f4.certificate().expect("recovered f4 after store caught up");
+    assert_fold_matches_certify(&session, &f2, &cover_2s, "recovered-write-at-rev-4-2s");
+    assert_fold_matches_certify(&session, &f4, &cover_4s, "recovered-write-at-rev-4-4s");
+}
+
+#[test]
+fn the_fold_handles_max_windows_rebuilt_missing_link_order_prefix_shrink_and_policy_before_walk() {
+    let case = TwoReservoirs::closed().expect("a body");
+    let core = ReferenceIntegrator::new(SECOND);
+
+    let store_max = MemoryStore::default();
+    let empty_lens = case
+        .body()
+        .lens(Vec::new(), NonZeroU64::new(SECOND).expect("positive"))
+        .expect("a lens");
+    let admitted = admit_at(
+        case.body(),
+        case.packet().expect("packet"),
+        BoundaryPort::new(Vec::new()).expect("port"),
+        &core,
+        &empty_lens,
+        at(2 * SECOND),
+        &store_max,
+    )
+    .expect("admitted at 2s");
+    let max_policy = Ledger::sliding(
+        admitted.session.conservation().basis(),
+        u64::MAX,
+        u64::MAX,
+        1e-24,
+        1e-9,
+        1.0,
+    );
+    let mut f_max = CertificateFold::open(&admitted.session, &max_policy.policy).expect("opened");
+    let (session_max, _) = accepted(admitted.session.step());
+    f_max
+        .advance(&session_max)
+        .expect("u64::MAX window must not overflow on non-zero admission");
+    assert_eq!(
+        f_max.certificate().expect_err("short of u64::MAX").check(),
+        CertificateCheck::Coverage
+    );
+    assert_fold_matches_certify(&session_max, &f_max, &max_policy, "u64-max-window");
+
+    let store_once = GivesOnce::default();
+    let mut session = case.admit(&core, &store_once).expect("admitted");
+    let mut seals = Vec::new();
+    for _ in 0..129 {
+        let receipt;
+        (session, receipt) = accepted(session.step());
+        seals.push(receipt.seal().digest());
+    }
+    let rev_64 = seals[63];
+    let rev_128 = seals[127];
+    store_once.once.borrow_mut().extend([rev_64, rev_128]);
+    let policy_100 = Ledger::sliding(
+        session.conservation().basis(),
+        100 * SECOND,
+        129 * SECOND,
+        1e-24,
+        1e-9,
+        1.0,
+    );
+    let rebuilt = CertificateFold::open(&session, &policy_100.policy).expect("opened on GivesOnce");
+    assert_eq!(
+        rebuilt
+            .certificate()
+            .expect_err("oldest damaged page rev 64 reported before rev 128")
+            .check(),
+        CertificateCheck::History(CheckpointError::HistoryMissing { seal: rev_64 })
+    );
+
+    let store_mem = MemoryStore::default();
+    let mut session_mem = case.admit(&core, &store_mem).expect("admitted");
+    let policy_1s = Ledger::sliding(
+        session_mem.conservation().basis(),
+        SECOND,
+        2 * SECOND,
+        1e-24,
+        1e-9,
+        1.0,
+    );
+    let mut rebuilt_65 = 0;
+    let mut rebuilt_2049 = 0;
+    let mut rebuilt_4097 = 0;
+    for rev in 1..=4_097 {
+        (session_mem, _) = accepted(session_mem.step());
+        if rev == 65 {
+            rebuilt_65 = CertificateFold::open(&session_mem, &policy_1s.policy)
+                .expect("opened 65")
+                .memory_bytes();
+        } else if rev == 2_049 {
+            rebuilt_2049 = CertificateFold::open(&session_mem, &policy_1s.policy)
+                .expect("opened 2049")
+                .memory_bytes();
+        } else if rev == 4_097 {
+            rebuilt_4097 = CertificateFold::open(&session_mem, &policy_1s.policy)
+                .expect("opened 4097")
+                .memory_bytes();
+        }
+    }
+    assert_eq!(
+        rebuilt_2049, rebuilt_65,
+        "rebuilt fold memory must not grow with checkpoint age: rev 65={rebuilt_65}, rev 2049={rebuilt_2049}"
+    );
+    assert_eq!(
+        rebuilt_4097, rebuilt_65,
+        "rebuilt fold memory must not grow with checkpoint age: rev 65={rebuilt_65}, rev 4097={rebuilt_4097}"
+    );
+
+    let store_policy = GivesOnce::default();
+    let session_p = case.admit(&core, &store_policy).expect("admitted");
+    let (session_p, r1) = accepted(session_p.step());
+    let (session_p, _) = accepted(session_p.step());
+    store_policy.once.borrow_mut().push(r1.seal().digest());
+    store_policy.reads.set(0);
+
+    let other_body = breathing_body();
+    let wrong_basis = Ledger::sliding(other_body.conserved_basis(), SECOND, 2 * SECOND, 1e-24, 1e-9, 1.0);
+    assert_eq!(
+        CertificateFold::open(&session_p, &wrong_basis.policy)
+            .err()
+            .map(|failure| failure.check()),
+        Some(CertificateCheck::Coverage)
+    );
+    assert_eq!(
+        store_policy.reads.get(),
+        0,
+        "wrong basis must be rejected before walking history"
+    );
+
+    let missing_clock = Slot::from(LawName {
+        owner: "Boundary",
+        local: "other",
+    });
+    let undeclared = Ledger::sliding(
+        session_p.conservation().basis(),
+        SECOND,
+        2 * SECOND,
+        1e-24,
+        1e-9,
+        1.0,
+    )
+    .between_edges(missing_clock, (0, SECOND, 2 * SECOND), &[]);
+    assert_eq!(
+        CertificateFold::open(&session_p, &undeclared.policy)
+            .err()
+            .map(|failure| failure.check()),
+        Some(CertificateCheck::UndeclaredRhythm)
+    );
+    assert_eq!(
+        store_policy.reads.get(),
+        0,
+        "undeclared rhythm must be rejected before walking history"
     );
 }

@@ -49,6 +49,7 @@ name = "fold-feed-accepts-other-run"
 path = "crates/ng-record/src/history.rs"
 old = '''        if record.identity().digest() != self.run
             || record.branch().id() != self.branch
+            || record.branch().forks() != self.ancestry.as_slice()
             || history.origin().seal != self.origin
             || history.format() != self.format'''
 new = '''        if record.branch().id() != self.branch'''
@@ -60,6 +61,22 @@ path = "crates/ng-record/src/history.rs"
 old = '''            || record.branch().id() != self.branch'''
 new = '''            || false && record.branch().id() != self.branch'''
 test = "-p ng-validate --test certificate_fold the_fold_refuses_a_foreign_run_a_foreign_branch_a_skipped_step_and_a_repeated_step"
+
+[[mutant]]
+name = "fold-feed-accepts-other-ancestry"
+path = "crates/ng-record/src/history.rs"
+old = '''            || record.branch().forks() != self.ancestry.as_slice()'''
+new = '''            || false && record.branch().forks() != self.ancestry.as_slice()'''
+test = "-p ng-validate --test certificate_fold the_fold_refuses_another_fork_ancestry_even_with_the_same_branch_id_and_previous_seal"
+
+[[mutant]]
+name = "fold-prefix-cursor-passes-replayed-step"
+path = "crates/ng-record/src/history.rs"
+old = '''        let oldest = page.revision - page.links + 1;
+        if oldest > head_revision {'''
+new = '''        let oldest = page.revision - page.links + 1;
+        if false && oldest > head_revision {'''
+test = "-p ng-validate --test certificate_fold prefix_replay_stops_the_trailing_cursor_at_the_replayed_step"
 
 [[mutant]]
 name = "fold-feed-accepts-gap"
@@ -81,12 +98,22 @@ path = "crates/ng-validate/src/certificate.rs"
 old = '''        if span.length_ns() < self.windows.policy.windows.coverage_ns {
             return Err(coverage);
         }
+        if let Some(seal) = self.feed.pending_before_head() {
+            return Err(of_history(CertificateCheck::History(
+                CheckpointError::HistoryMissing { seal },
+            )));
+        }
         if let Some(error) = self.history_error {'''
 new = '''        if let Some(error) = self.history_error {
             return Err(of_history(CertificateCheck::History(error)));
         }
         if span.length_ns() < self.windows.policy.windows.coverage_ns {
             return Err(coverage);
+        }
+        if let Some(seal) = self.feed.pending_before_head() {
+            return Err(of_history(CertificateCheck::History(
+                CheckpointError::HistoryMissing { seal },
+            )));
         }
         if let Some(error) = None::<CheckpointError> {'''
 test = "-p ng-validate --test certificate_fold the_fold_reproduces_coverage_before_a_lost_link_and_lost_link_during_run_rules"
@@ -112,8 +139,8 @@ test = "-p ng-validate --test certificate_fold a_window_at_24h_lag_is_judged_on_
 [[mutant]]
 name = "fold-open-accepts-other-basis"
 path = "crates/ng-validate/src/certificate.rs"
-old = '''        if policy.basis != feed.basis().digest() {'''
-new = '''        if false && policy.basis != feed.basis().digest() {'''
+old = '''        if policy.basis != head.basis().digest() {'''
+new = '''        if false && policy.basis != head.basis().digest() {'''
 test = "-p ng-validate --test certificate_fold the_fold_checks_basis_and_undeclared_rhythm_before_any_step"
 
 [[mutant]]
