@@ -263,20 +263,19 @@ impl<'p> Trend<'p> {
             n += 1;
         }
         let mut weights = [0.0; 4];
-        for k in 0..n {
+        for (k, weight_out) in weights[..n].iter_mut().enumerate() {
             let time = points[k].0;
             let mut weight = 1.0;
-            for j in 0..n {
+            for (j, &(other, _)) in points[..n].iter().enumerate() {
                 if j != k {
-                    weight = weight * (at - points[j].0) / (time - points[j].0);
+                    weight = weight * (at - other) / (time - other);
                 }
             }
-            weights[k] = weight;
+            *weight_out = weight;
         }
         out.fill(0.0);
-        for k in 0..n {
-            let weight = weights[k];
-            match points[k].1 {
+        for (&weight, &(_, source)) in weights[..n].iter().zip(&points[..n]) {
+            match source {
                 PointValues::Floats(values) => {
                     for (value, &point) in out.iter_mut().zip(values) {
                         *value += weight * point;

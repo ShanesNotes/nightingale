@@ -1,4 +1,4 @@
-use crate::body::RowKind;
+use crate::body::{RowKind, Target};
 use crate::chance::Trigger;
 use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::{Estimate, Stage};
@@ -20,7 +20,6 @@ pub struct StageEvaluation {
     pub(crate) derivative: Vec<f64>,
     pub(crate) columns: Vec<f64>,
     pub(crate) rows: Vec<f64>,
-    pub(crate) values: Vec<Option<f64>>,
     pub(crate) residuals: Vec<f64>,
 }
 impl StageEvaluation {
@@ -55,6 +54,9 @@ impl Quadrature {
         self.total = self.total.plus(weight).ok_or(self.mismatch)?;
         let seconds = weight.seconds_of(self.length_ns);
         for (column, &rate) in columns.iter().enumerate() {
+            if rate == 0.0 {
+                continue;
+            }
             let side = if rate < 0.0 {
                 &mut self.reverse[column]
             } else {
@@ -184,12 +186,6 @@ impl StageWitness {
 impl CoupledProblem<'_> {
     pub fn quadrature(&self, ticket: &StepTicket) -> Quadrature {
         let columns = self.body.columns().len();
-        let first_memory = (self.body.rows().iter())
-            .take_while(|row| matches!(row.kind(), RowKind::Amount { .. }))
-            .count();
-        let memory = (self.body.rows().iter())
-            .filter(|row| matches!(row.kind(), RowKind::Memory(_)))
-            .count();
         Quadrature {
             layout: self.layout(),
             ticket: ticket.digest(),
@@ -197,8 +193,8 @@ impl CoupledProblem<'_> {
             length_ns: ticket.length_ns(),
             forward: vec![Compensated::ZERO; columns],
             reverse: vec![Compensated::ZERO; columns],
-            first_memory,
-            memory: vec![0.0; memory],
+            first_memory: self.first_memory,
+            memory: vec![0.0; self.first_algebraic - self.first_memory],
             total: Ratio::ZERO,
             stages: Vec::new(),
         }
@@ -239,10 +235,15 @@ impl CoupledProblem<'_> {
         end: &SolveWorkspace,
         history: MethodHistory,
     ) -> StepProposal {
-        let algebraic = (self.body.rows().iter().zip(end.coordinates()))
-            .filter(|(row, _)| matches!(row.kind(), RowKind::Algebraic(_)))
-            .map(|(_, &value)| value)
-            .collect();
+        let coordinates = end.coordinates();
+        let algebraic = if coordinates.len() == self.body.rows().len() {
+            coordinates[self.first_algebraic..].to_vec()
+        } else {
+            (self.body.rows().iter().zip(coordinates))
+                .filter(|(row, _)| matches!(row.kind(), RowKind::Algebraic(_)))
+                .map(|(_, &value)| value)
+                .collect()
+        };
         StepProposal {
             ticket: ticket.clone(),
             layout: end.layout(),
@@ -309,9 +310,7 @@ impl StepProposal {
             algebraic,
             history,
         } = self;
-        let algebraic_rows = (problem.body.rows().iter())
-            .filter(|row| matches!(row.kind(), RowKind::Algebraic(_)))
-            .count();
+        let algebraic_rows = problem.body.rows().len() - problem.first_algebraic;
         if layout != problem.layout()
             || extents.layout != problem.layout()
             || finished_for != ticket.digest()
@@ -325,18 +324,30 @@ impl StepProposal {
         if !same_structure(&stages, &witness) {
             return Err(method_mismatch(&ticket).into());
         }
+        let body = problem.body;
+        let scales = resolution.scales();
+        let sizes = &problem.parameters.sizes;
+        let start = &problem.coordinates;
+        let mut stage_defect = Worst::NONE;
         let mut replay = problem.quadrature(&ticket);
-        let mut evaluations = Vec::with_capacity(stages.len());
-        for stage in &witness.stages {
+        for (stage, seen) in stages.iter().zip(&witness.stages) {
             let point = StagePoint {
                 layout: problem.layout(),
-                time: ticket.at(stage.offset_ns)?,
-                unknowns: &stage.unknowns,
-                derivative: &stage.derivative,
+                time: ticket.at(seen.offset_ns)?,
+                unknowns: &seen.unknowns,
+                derivative: &seen.derivative,
             };
-            let evaluation = problem.evaluate(&point)?;
-            replay.add(&evaluation, stage.weight)?;
-            evaluations.push(evaluation);
+            let raw = problem.evaluate_raw(&point)?;
+            replay.accumulate(&raw.columns, &raw.rows, seen.weight)?;
+            note_stage_defect(
+                problem,
+                ticket.length_ns(),
+                stage,
+                seen,
+                &witness.stages,
+                &raw.residuals,
+                &mut stage_defect,
+            );
         }
         let replayed = replay.finish()?;
         let (forward, reverse) = (&extents.forward, &extents.reverse);
@@ -345,37 +356,6 @@ impl StepProposal {
             || !same_floats(&memory, &replayed.memory)
         {
             return Err(method_mismatch(&ticket).into());
-        }
-        let body = problem.body;
-        let scales = resolution.scales();
-        let sizes = &problem.parameters.sizes;
-        let start = &problem.coordinates;
-        let mut stage_defect = Worst::NONE;
-        for ((stage, seen), evaluation) in stages.iter().zip(&witness.stages).zip(&evaluations) {
-            let from = stage
-                .from
-                .map_or(start, |earlier| &witness.stages[earlier].unknowns);
-            let slope = &witness.stages[stage.slope].derivative;
-            for (at, row) in body.rows().iter().enumerate() {
-                let value = seen.unknowns[at];
-                let residual = evaluation.residuals[at].abs();
-                let defect = match row.kind() {
-                    RowKind::Algebraic(_) => residual,
-                    RowKind::Amount { .. } | RowKind::Memory(_) => {
-                        let reached = from[at] + seconds(stage.span_ns) * slope[at];
-                        let position = (value - reached).abs();
-                        let rate = seconds(ticket.length_ns()) * residual;
-                        if position > rate { position } else { rate }
-                    }
-                };
-                let judge = body.judged_at(at);
-                let scale = if judge == at {
-                    scales.at(value, sizes[at])
-                } else {
-                    scales.at(seen.unknowns[judge], sizes[judge])
-                };
-                stage_defect.note(defect / scale, row.id());
-            }
         }
         if let Some(row) = stage_defect.above_one() {
             return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
@@ -404,28 +384,36 @@ impl StepProposal {
         {
             return Err(ticket.refuse(NumericalRefusal::GuardInside));
         }
-        let tangent = vec![0.0; coordinates.len()];
-        let point = StagePoint {
-            layout: problem.layout(),
-            time: ticket.at(ticket.length_ns())?,
-            unknowns: &coordinates,
-            derivative: &tangent,
-        };
-        let published = problem.evaluate(&point)?;
-        let mut algebraic_defect = Worst::NONE;
-        for (at, row) in body.rows().iter().enumerate() {
-            if matches!(row.kind(), RowKind::Algebraic(_)) {
+        let published = problem.evaluate_published(&ticket, &coordinates)?;
+        if algebraic_rows > 0 {
+            let first_algebraic = problem.first_algebraic;
+            let mut algebraic_residuals = vec![0.0; algebraic_rows];
+            for (instance, value) in body.layout.instances.iter().zip(&published) {
+                let Some(value) = *value else { continue };
+                if let Target::Row(row) = instance.target
+                    && let Some(slot) = row.index().checked_sub(first_algebraic)
+                {
+                    algebraic_residuals[slot] += if instance.rectified && value <= 0.0 {
+                        0.0
+                    } else {
+                        value
+                    };
+                }
+            }
+            let mut algebraic_defect = Worst::NONE;
+            for (slot, (at, row)) in body.rows().iter().enumerate().skip(first_algebraic).enumerate() {
                 let judge = body.judged_at(at);
-                let normalized = published.residuals[at].abs() / scales.at(coordinates[judge], sizes[judge]);
+                let normalized =
+                    algebraic_residuals[slot].abs() / scales.at(coordinates[judge], sizes[judge]);
                 algebraic_defect.note(normalized, row.id());
             }
-        }
-        if let Some(row) = algebraic_defect.above_one() {
-            return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
+            if let Some(row) = algebraic_defect.above_one() {
+                return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
+            }
         }
         let end = ticket.interval().end();
         Ok(VerifiedStep {
-            excursions: body.excursions(&published.values, &coordinates, end),
+            excursions: body.excursions(&published, &coordinates, end),
             dense: DenseSegment {
                 interval: Some(ticket.interval()),
                 start: base.values(),
@@ -440,6 +428,47 @@ impl StepProposal {
             reverse: extents.reverse,
             ticket,
         })
+    }
+}
+
+fn note_stage_defect(
+    problem: &CoupledProblem<'_>,
+    ticket_ns: u64,
+    stage: &Stage,
+    seen: &WitnessStage,
+    stages: &[WitnessStage],
+    residuals: &[f64],
+    stage_defect: &mut Worst,
+) {
+    let body = problem.body;
+    let scales = problem.identity.resolution().scales();
+    let sizes = &problem.parameters.sizes;
+    let start = problem.coordinates.as_slice();
+    let from = stage
+        .from
+        .map_or(start, |earlier| stages[earlier].unknowns.as_slice());
+    let slope = &stages[stage.slope].derivative;
+    let step_seconds = seconds(ticket_ns);
+    let span_seconds = seconds(stage.span_ns);
+    for (at, row) in body.rows().iter().enumerate() {
+        let value = seen.unknowns[at];
+        let residual = residuals[at].abs();
+        let defect = match row.kind() {
+            RowKind::Algebraic(_) => residual,
+            RowKind::Amount { .. } | RowKind::Memory(_) => {
+                let reached = from[at] + span_seconds * slope[at];
+                let position = (value - reached).abs();
+                let rate = step_seconds * residual;
+                if position > rate { position } else { rate }
+            }
+        };
+        let judge = body.judged_at(at);
+        let scale = if judge == at {
+            scales.at(value, sizes[at])
+        } else {
+            scales.at(seen.unknowns[judge], sizes[judge])
+        };
+        stage_defect.note(defect / scale, row.id());
     }
 }
 
@@ -475,9 +504,20 @@ fn next_state(
     memory: &[f64],
     algebraic: Vec<f64>,
 ) -> Candidate {
+    const NEG_ZERO: u64 = (-0.0f64).to_bits();
     let mut amounts = base.amounts.clone();
     let gross = extents.forward.iter().zip(&extents.reverse);
     for (column, (&forward, &reverse)) in body.columns().iter().zip(gross) {
+        if forward.bits() == [0, 0] && reverse.bits() == [0, 0] {
+            for &(row, _) in column.terms() {
+                let amount = amounts[row.index()];
+                let bits = amount.bits();
+                if bits[0] == NEG_ZERO || bits[1] == NEG_ZERO || !amount.is_finite() {
+                    amounts[row.index()] = amount.plus(Compensated::ZERO);
+                }
+            }
+            continue;
+        }
         let net = forward.minus(reverse);
         for &(row, coefficient) in column.terms() {
             amounts[row.index()] = amounts[row.index()].plus(net.scaled(coefficient));
@@ -707,5 +747,130 @@ mod tests {
             (0.49, row),
             "t^2 over 7 ns reads h^2 y'' / 4, 24.5, over 1 + 49"
         );
+    }
+
+    fn admitted_one_row(
+        body: &CompiledBody,
+        speed: f64,
+        start_x: f64,
+        scheme: StageScheme,
+    ) -> (AcceptedHead, RunIdentity) {
+        use core::num::NonZeroU64;
+        let mut packet = ParameterPacket::new();
+        packet
+            .synthetic(
+                ParameterKey::new("ns.speed"),
+                Binding::Body,
+                measure::<Rate<Dimensionless>>(speed),
+                "synthetic",
+            )
+            .expect("speed");
+        packet.start_rest(body, |_| start_x, "synthetic").expect("start");
+        let bound = body.bind(packet).expect("bound");
+        let system = body
+            .initialization(
+                bound,
+                BoundaryPort::new(Vec::new()).expect("port"),
+                InitializationRequest::at(SimTime::from_ns(0)),
+            )
+            .expect("system");
+        let solved = system.workspace();
+        let history = MethodHistory::new(Digest::of_canonical(b"test"), SimTime::from_ns(0), Vec::new());
+        let origin = system.admit(solved, history).expect("admitted");
+        let scales = ErrorScales::uniform(measure(1.0), measure(1e-3)).expect("scales");
+        let resolution = DeclaredResolution::new(
+            Digest::of_canonical(b"test core"),
+            NonZeroU64::new(100_000).expect("nonzero"),
+            4,
+            ArithmeticProfile::contract_v1(),
+            scheme,
+            scales,
+        );
+        let identity = RunIdentity::new(
+            body.model_hash(),
+            origin.packet_hash(),
+            Seed::new([1, 2, 3, 4]),
+            resolution,
+        );
+        (AcceptedHead::admitted(origin, RecordHash::Blake2b), identity)
+    }
+
+    #[test]
+    fn stage_jacobian_reevaluate_and_add_owned_match_their_owning_twins() {
+        let body = one_row();
+        let (head, identity) = admitted_one_row(&body, 2.0, 1.0, StageScheme::forward_euler());
+        let base = Digest::of_canonical(b"base");
+        let span_ns = 10_000_000;
+        let _ = head
+            .attempt(
+                &body,
+                &identity,
+                base,
+                Attempt::First { span_ns },
+                |problem, ticket| {
+                    let time = ticket.at(0)?;
+                    let shift = ticket.shift(span_ns)?;
+                    let mut workspace = problem.workspace();
+                    workspace.unknowns_mut()[0] = 1.02;
+                    workspace.derivative_mut()[0] = 2.0;
+                    let point = workspace.point(time);
+                    let owned = problem.linearize(&point, shift)?;
+                    let borrowed = problem.linearize_stage(&point, shift)?;
+                    assert_eq!(owned.view().row_offsets(), borrowed.view().row_offsets());
+                    assert_eq!(owned.view().columns(), borrowed.view().columns());
+                    assert_eq!(
+                        owned
+                            .view()
+                            .values()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .collect::<Vec<_>>(),
+                        borrowed
+                            .view()
+                            .values()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .collect::<Vec<_>>()
+                    );
+                    let mut a = vec![3.0];
+                    let mut b = vec![3.0];
+                    body.factor(&owned).expect("factor").solve(&mut a);
+                    borrowed.factor().expect("factor").solve(&mut b);
+                    assert_eq!(a[0].to_bits(), b[0].to_bits());
+
+                    let mut eval = problem.evaluate(&point)?;
+                    let before_bits = eval.residuals()[0].to_bits();
+                    workspace.unknowns_mut()[0] = f64::NAN;
+                    assert!(problem.reevaluate(&workspace.point(time), &mut eval).is_err());
+                    assert_eq!(eval.residuals()[0].to_bits(), before_bits);
+
+                    workspace.unknowns_mut()[0] = 1.0;
+                    workspace.derivative_mut()[0] = 2.0;
+                    let point = workspace.point(time);
+                    let fresh = problem.evaluate(&point)?;
+                    problem.reevaluate(&point, &mut eval)?;
+                    assert_eq!(fresh.residuals()[0].to_bits(), eval.residuals()[0].to_bits());
+
+                    let mut by_ref = problem.quadrature(ticket);
+                    by_ref.add(&fresh, Ratio::ONE)?;
+                    let inc_ref = by_ref.finish()?;
+                    let mut by_val = problem.quadrature(ticket);
+                    by_val.add_owned(eval, Ratio::ONE)?;
+                    let inc_val = by_val.finish()?;
+                    assert_eq!(inc_ref.memory[0].to_bits(), inc_val.memory[0].to_bits());
+                    assert_eq!(
+                        inc_ref.witness.stages[0].unknowns[0].to_bits(),
+                        inc_val.witness.stages[0].unknowns[0].to_bits()
+                    );
+                    let history = MethodHistory::new(
+                        problem.accepted().method_history().schema(),
+                        SimTime::from_ns(0),
+                        Vec::new(),
+                    );
+                    Ok(problem.propose(ticket, inc_val, &workspace, history))
+                },
+                |_| Ok(()),
+            )
+            .expect("step passes");
     }
 }

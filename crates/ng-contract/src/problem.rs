@@ -1,4 +1,4 @@
-use crate::body::UnknownId;
+use crate::body::{RowKind, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::chance::{Chance, Trigger, period_ns};
 use crate::evaluate::{Inputs, Undefined};
@@ -24,6 +24,8 @@ pub struct CoupledProblem<'r> {
     pub(crate) base: Digest,
     pub(crate) chance: Chance,
     pub(crate) coordinates: Vec<f64>,
+    pub(crate) first_memory: usize,
+    pub(crate) first_algebraic: usize,
 }
 impl<'r> CoupledProblem<'r> {
     pub fn new(
@@ -34,6 +36,10 @@ impl<'r> CoupledProblem<'r> {
         base: Digest,
     ) -> Self {
         let coordinates = accepted.state().coordinates();
+        let rows = body.rows();
+        let first_memory = rows.partition_point(|row| matches!(row.kind(), RowKind::Amount { .. }));
+        let first_algebraic = first_memory
+            + rows[first_memory..].partition_point(|row| matches!(row.kind(), RowKind::Memory(_)));
         Self {
             body,
             parameters,
@@ -42,6 +48,8 @@ impl<'r> CoupledProblem<'r> {
             base,
             chance: Chance::at(body, identity.seed(), accepted.state()),
             coordinates,
+            first_memory,
+            first_algebraic,
         }
     }
     pub fn accepted(&self) -> AcceptedStateView<'r> {
@@ -103,7 +111,6 @@ impl<'r> CoupledProblem<'r> {
         let (columns, rows) = self.body.targets(&values);
         let residuals = self.body.residuals(&columns, &rows, point.derivative);
         Ok(RawEvaluation {
-            values,
             columns,
             rows,
             residuals,
@@ -113,7 +120,6 @@ impl<'r> CoupledProblem<'r> {
     /// head's, never the stage's instant; a forcing reads the stage's instant, which the witness carries.
     pub fn evaluate(&self, point: &StagePoint<'_, '_>) -> Result<StageEvaluation, TrialFailure> {
         let RawEvaluation {
-            values,
             columns,
             rows,
             residuals,
@@ -126,7 +132,6 @@ impl<'r> CoupledProblem<'r> {
             derivative: point.derivative.to_vec(),
             columns,
             rows,
-            values,
             residuals,
         })
     }
@@ -138,7 +143,6 @@ impl<'r> CoupledProblem<'r> {
         evaluation: &mut StageEvaluation,
     ) -> Result<(), TrialFailure> {
         let RawEvaluation {
-            values,
             columns,
             rows,
             residuals,
@@ -152,9 +156,32 @@ impl<'r> CoupledProblem<'r> {
         evaluation.derivative.extend_from_slice(point.derivative);
         evaluation.columns = columns;
         evaluation.rows = rows;
-        evaluation.values = values;
         evaluation.residuals = residuals;
         Ok(())
+    }
+    pub(crate) fn evaluate_published(
+        &self,
+        ticket: &StepTicket,
+        unknowns: &[f64],
+    ) -> Result<Vec<Option<f64>>, TrialFailure> {
+        if unknowns.len() != self.body.rows().len() {
+            return Err(ticket.mismatch().into());
+        }
+        if let Some(at) = unknowns.iter().position(|value| !value.is_finite()) {
+            return Err(ticket.refuse(NumericalRefusal::TrialDomain {
+                source: self.body.row_source(self.body.rows()[at].id()),
+            }));
+        }
+        let factors = self.end_factors(ticket);
+        let inputs = Inputs {
+            parameters: &self.parameters.values,
+            frame: &ticket.frame,
+            unknowns,
+            modes: &self.accepted.state().modes,
+            draws: self.chance.draws(),
+            factors: &factors,
+        };
+        (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))
     }
     fn linearize_values(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Vec<f64>, TrialFailure> {
         self.check(point)?;
@@ -403,7 +430,6 @@ impl<'r> CoupledProblem<'r> {
 }
 
 pub(crate) struct RawEvaluation {
-    pub(crate) values: Vec<Option<f64>>,
     pub(crate) columns: Vec<f64>,
     pub(crate) rows: Vec<f64>,
     pub(crate) residuals: Vec<f64>,

@@ -1,8 +1,8 @@
 use crate::{
-    AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate, CompiledBody,
-    CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind, ImageParts, InitialRevision,
-    MethodHistory, NumericalRefusal, RecordHash, RhythmId, RunIdentity, SimTime, StepExtents, StepProposal,
-    StepTicket, TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
+    AcceptedStateView, AdmissibleSet, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate,
+    CompiledBody, CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind, ImageParts,
+    InitialRevision, MethodHistory, NumericalRefusal, RecordHash, RhythmId, RunIdentity, SimTime,
+    StepExtents, StepProposal, StepTicket, TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,13 +110,7 @@ impl AcceptedHead {
                 return Err(ticket.mismatch().into());
             }
             let step = proposal.verify(&problem)?;
-            for row in body.rows() {
-                if !row.admissible().holds(step.value(row.id())) {
-                    return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
-                        source: body.row_source(row.id()),
-                    }));
-                }
-            }
+            check_admissible(body, &step)?;
             let accepted = accept(&step)?;
             Ok((step, accepted))
         })?;
@@ -222,4 +216,43 @@ impl NextHead {
     pub fn rhythm_edges(&self) -> &[RhythmId] {
         &self.rhythm_edges
     }
+}
+
+fn holds_float(set: AdmissibleSet, value: f64) -> bool {
+    value.is_finite()
+        && match set {
+            AdmissibleSet::Finite => true,
+            AdmissibleSet::Nonnegative => value >= 0.0,
+            AdmissibleSet::Positive => value > 0.0,
+            AdmissibleSet::UnitInterval => (0.0..=1.0).contains(&value),
+        }
+}
+
+fn check_admissible(body: &CompiledBody, step: &VerifiedStep) -> Result<(), TrialFailure> {
+    let state = step.state();
+    let rows = body.rows();
+    let amounts_end = state.amounts.len();
+    let memory_end = amounts_end + state.memory.len();
+    for (row, &amount) in rows[..amounts_end].iter().zip(&state.amounts) {
+        if !row.admissible().holds(amount) {
+            return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
+                source: body.row_source(row.id()),
+            }));
+        }
+    }
+    for (row, &value) in rows[amounts_end..memory_end].iter().zip(&state.memory) {
+        if !holds_float(row.admissible(), value) {
+            return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
+                source: body.row_source(row.id()),
+            }));
+        }
+    }
+    for (row, &value) in rows[memory_end..].iter().zip(&state.algebraic) {
+        if !holds_float(row.admissible(), value) {
+            return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
+                source: body.row_source(row.id()),
+            }));
+        }
+    }
+    Ok(())
 }
