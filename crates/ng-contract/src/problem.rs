@@ -82,9 +82,7 @@ impl<'r> CoupledProblem<'r> {
             source: self.body.undefined_source(undefined),
         })
     }
-    /// `F(t, y, y')` on every row with the bound values, in the head's modes. A drive and a draw read the
-    /// head's, never the stage's instant; a forcing reads the stage's instant, which the witness carries.
-    pub fn evaluate(&self, point: &StagePoint<'_, '_>) -> Result<StageEvaluation, TrialFailure> {
+    pub(crate) fn evaluate_raw(&self, point: &StagePoint<'_, '_>) -> Result<RawEvaluation, TrialFailure> {
         self.check(point)?;
         let ticket = point.time.ticket;
         let factors = self.factors(point);
@@ -101,9 +99,25 @@ impl<'r> CoupledProblem<'r> {
             (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))?;
         let (columns, rows) = self.body.targets(&values);
         let residuals = self.body.residuals(&columns, &rows, point.derivative);
+        Ok(RawEvaluation {
+            values,
+            columns,
+            rows,
+            residuals,
+        })
+    }
+    /// `F(t, y, y')` on every row with the bound values, in the head's modes. A drive and a draw read the
+    /// head's, never the stage's instant; a forcing reads the stage's instant, which the witness carries.
+    pub fn evaluate(&self, point: &StagePoint<'_, '_>) -> Result<StageEvaluation, TrialFailure> {
+        let RawEvaluation {
+            values,
+            columns,
+            rows,
+            residuals,
+        } = self.evaluate_raw(point)?;
         Ok(StageEvaluation {
             layout: point.layout,
-            ticket: ticket.digest,
+            ticket: point.time.ticket.digest,
             offset_ns: point.time.offset_ns,
             unknowns: point.unknowns.to_vec(),
             derivative: point.derivative.to_vec(),
@@ -112,6 +126,32 @@ impl<'r> CoupledProblem<'r> {
             values,
             residuals,
         })
+    }
+    /// Evaluates `point` into an existing `StageEvaluation`, reusing its point buffers. On error `evaluation`
+    /// stays unchanged.
+    pub fn reevaluate(
+        &self,
+        point: &StagePoint<'_, '_>,
+        evaluation: &mut StageEvaluation,
+    ) -> Result<(), TrialFailure> {
+        let RawEvaluation {
+            values,
+            columns,
+            rows,
+            residuals,
+        } = self.evaluate_raw(point)?;
+        evaluation.layout = point.layout;
+        evaluation.ticket = point.time.ticket.digest;
+        evaluation.offset_ns = point.time.offset_ns;
+        evaluation.unknowns.clear();
+        evaluation.unknowns.extend_from_slice(point.unknowns);
+        evaluation.derivative.clear();
+        evaluation.derivative.extend_from_slice(point.derivative);
+        evaluation.columns = columns;
+        evaluation.rows = rows;
+        evaluation.values = values;
+        evaluation.residuals = residuals;
+        Ok(())
     }
     fn linearize_values(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Vec<f64>, TrialFailure> {
         self.check(point)?;
@@ -311,6 +351,13 @@ impl<'r> CoupledProblem<'r> {
         let at = SimTime::from_ns(ticket.interval.start().nanoseconds() + point.time.offset_ns);
         self.chance.factors(&self.parameters.values, at)
     }
+}
+
+pub(crate) struct RawEvaluation {
+    pub(crate) values: Vec<Option<f64>>,
+    pub(crate) columns: Vec<f64>,
+    pub(crate) rows: Vec<f64>,
+    pub(crate) residuals: Vec<f64>,
 }
 
 /// Binds one attempt: its digest covers the run identity and every other field.

@@ -46,16 +46,15 @@ pub struct Quadrature {
     stages: Vec<WitnessStage>,
 }
 impl Quadrature {
-    /// Adds the weighted rates and keeps the point and weight as a witness stage. `weight` is an exact
-    /// fraction of the ticketed interval. An evaluation from another ticket or layout, as from an earlier
-    /// attempt, and weights whose sum does not fit in lowest terms are `BindingMismatch`.
-    pub fn add(&mut self, evaluation: &StageEvaluation, weight: Ratio) -> Result<(), EngineFault> {
-        if evaluation.ticket != self.ticket || evaluation.layout != self.layout {
-            return Err(self.mismatch);
-        }
+    pub(crate) fn accumulate(
+        &mut self,
+        columns: &[f64],
+        rows: &[f64],
+        weight: Ratio,
+    ) -> Result<(), EngineFault> {
         self.total = self.total.plus(weight).ok_or(self.mismatch)?;
         let seconds = weight.seconds_of(self.length_ns);
-        for (column, &rate) in evaluation.columns.iter().enumerate() {
+        for (column, &rate) in columns.iter().enumerate() {
             let side = if rate < 0.0 {
                 &mut self.reverse[column]
             } else {
@@ -63,15 +62,39 @@ impl Quadrature {
             };
             *side = side.plus(Compensated::exact(rate.abs() * seconds));
         }
-        let rates = &evaluation.rows[self.first_memory..];
+        let rates = &rows[self.first_memory..];
         for (sum, &rate) in self.memory.iter_mut().zip(rates) {
             *sum += rate * seconds;
         }
+        Ok(())
+    }
+    /// Adds the weighted rates and keeps the point and weight as a witness stage. `weight` is an exact
+    /// fraction of the ticketed interval. An evaluation from another ticket or layout, as from an earlier
+    /// attempt, and weights whose sum does not fit in lowest terms are `BindingMismatch`.
+    pub fn add(&mut self, evaluation: &StageEvaluation, weight: Ratio) -> Result<(), EngineFault> {
+        if evaluation.ticket != self.ticket || evaluation.layout != self.layout {
+            return Err(self.mismatch);
+        }
+        self.accumulate(&evaluation.columns, &evaluation.rows, weight)?;
         self.stages.push(WitnessStage {
             offset_ns: evaluation.offset_ns,
             weight,
             unknowns: evaluation.unknowns.clone(),
             derivative: evaluation.derivative.clone(),
+        });
+        Ok(())
+    }
+    /// Same as `add`, moving the evaluation's witness point buffers instead of cloning them.
+    pub fn add_owned(&mut self, evaluation: StageEvaluation, weight: Ratio) -> Result<(), EngineFault> {
+        if evaluation.ticket != self.ticket || evaluation.layout != self.layout {
+            return Err(self.mismatch);
+        }
+        self.accumulate(&evaluation.columns, &evaluation.rows, weight)?;
+        self.stages.push(WitnessStage {
+            offset_ns: evaluation.offset_ns,
+            weight,
+            unknowns: evaluation.unknowns,
+            derivative: evaluation.derivative,
         });
         Ok(())
     }
