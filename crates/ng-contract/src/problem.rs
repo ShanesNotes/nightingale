@@ -1,7 +1,7 @@
 use crate::body::{RowKind, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::chance::{Chance, Trigger, period_ns};
-use crate::evaluate::{Inputs, Undefined};
+use crate::evaluate::{Inputs, PublishedEval, Undefined};
 use crate::head::HeadDigest;
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::{StageEvaluation, VerifiedStep};
@@ -136,14 +136,14 @@ impl<'r> CoupledProblem<'r> {
             draws: self.chance.draws(),
             factors: &factors,
         };
-        let values =
-            (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))?;
-        let (columns, rows) = self.body.targets(&values);
-        let residuals = self.body.residuals(&columns, &rows, point.derivative);
+        let stage = self
+            .body
+            .evaluate_stage(&inputs, point.derivative)
+            .map_err(|undefined| self.undefined(ticket, undefined))?;
         Ok(RawEvaluation {
-            columns,
-            rows,
-            residuals,
+            columns: stage.columns,
+            rows: stage.rows,
+            residuals: stage.residuals,
         })
     }
     /// `F(t, y, y')` on every row with the bound values, in the head's modes. A drive and a draw read the
@@ -195,7 +195,7 @@ impl<'r> CoupledProblem<'r> {
         &self,
         ticket: &StepTicket,
         unknowns: &[f64],
-    ) -> Result<Vec<Option<f64>>, TrialFailure> {
+    ) -> Result<PublishedEval, TrialFailure> {
         if unknowns.len() != self.body.rows().len() {
             return Err(ticket.mismatch().into());
         }
@@ -213,7 +213,10 @@ impl<'r> CoupledProblem<'r> {
             draws: self.chance.draws(),
             factors: &factors,
         };
-        (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))
+        (self
+            .body
+            .evaluate_published(&inputs, self.first_algebraic, ticket.interval().end()))
+        .map_err(|undefined| self.undefined(ticket, undefined))
     }
     fn linearize_values(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Vec<f64>, TrialFailure> {
         self.check(point)?;

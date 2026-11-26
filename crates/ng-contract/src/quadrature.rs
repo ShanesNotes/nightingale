@@ -1,4 +1,4 @@
-use crate::body::{RowKind, Target};
+use crate::body::RowKind;
 use crate::chance::Trigger;
 use crate::problem::{ProblemSeal, SolveWorkspace, StagePoint};
 use crate::scheme::{Estimate, Stage};
@@ -44,6 +44,7 @@ pub struct Quadrature {
     first_memory: usize,
     memory: Vec<f64>,
     total: Ratio,
+    accumulated: bool,
     stages: Vec<WitnessStage>,
 }
 impl Quadrature {
@@ -55,16 +56,36 @@ impl Quadrature {
     ) -> Result<(), EngineFault> {
         self.total = self.total.plus(weight).ok_or(self.mismatch)?;
         let seconds = weight.seconds_of(self.length_ns);
-        for (column, &rate) in columns.iter().enumerate() {
-            if rate == 0.0 {
-                continue;
+        let first = !self.accumulated;
+        self.accumulated = true;
+        if first {
+            for (column, &rate) in columns.iter().enumerate() {
+                if rate == 0.0 {
+                    continue;
+                }
+                let extent = rate.abs() * seconds;
+                if extent == 0.0 {
+                    continue;
+                }
+                let scaled = Compensated::exact(extent);
+                if rate < 0.0 {
+                    self.reverse[column] = scaled;
+                } else {
+                    self.forward[column] = scaled;
+                }
             }
-            let side = if rate < 0.0 {
-                &mut self.reverse[column]
-            } else {
-                &mut self.forward[column]
-            };
-            *side = side.plus(Compensated::exact(rate.abs() * seconds));
+        } else {
+            for (column, &rate) in columns.iter().enumerate() {
+                if rate == 0.0 {
+                    continue;
+                }
+                let side = if rate < 0.0 {
+                    &mut self.reverse[column]
+                } else {
+                    &mut self.forward[column]
+                };
+                *side = side.plus(Compensated::exact(rate.abs() * seconds));
+            }
         }
         let rates = &rows[self.first_memory..];
         for (sum, &rate) in self.memory.iter_mut().zip(rates) {
@@ -212,6 +233,7 @@ impl CoupledProblem<'_> {
             first_memory: self.first_memory,
             memory: vec![0.0; self.first_algebraic - self.first_memory],
             total: Ratio::ZERO,
+            accumulated: false,
             stages: Vec::new(),
         }
     }
@@ -420,33 +442,19 @@ impl StepProposal {
         let published = problem.evaluate_published(&ticket, &coordinates)?;
         if algebraic_rows > 0 {
             let first_algebraic = problem.first_algebraic;
-            let mut algebraic_residuals = vec![0.0; algebraic_rows];
-            for (instance, value) in body.layout.instances.iter().zip(&published) {
-                let Some(value) = *value else { continue };
-                if let Target::Row(row) = instance.target
-                    && let Some(slot) = row.index().checked_sub(first_algebraic)
-                {
-                    algebraic_residuals[slot] += if instance.rectified && value <= 0.0 {
-                        0.0
-                    } else {
-                        value
-                    };
-                }
-            }
             let mut algebraic_defect = Worst::NONE;
             for (slot, (at, row)) in body.rows().iter().enumerate().skip(first_algebraic).enumerate() {
                 let judge = body.judged_at(at);
                 let normalized =
-                    algebraic_residuals[slot].abs() / scales.at(coordinates[judge], sizes[judge]);
+                    published.algebraic[slot].abs() / scales.at(coordinates[judge], sizes[judge]);
                 algebraic_defect.note(normalized, row.id());
             }
             if let Some(row) = algebraic_defect.above_one() {
                 return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
             }
         }
-        let end = ticket.interval().end();
         Ok(VerifiedStep {
-            excursions: body.excursions(&published, &coordinates, end),
+            excursions: published.excursions,
             dense: DenseSegment {
                 interval: Some(ticket.interval()),
                 start: base.values(),
@@ -1044,5 +1052,137 @@ mod tests {
             }
             other => panic!("expected MethodMismatch, got {:?}", other.err()),
         }
+    }
+
+    #[test]
+    fn unattested_multi_stage_transfer_proposal_verifies_both_stages() {
+        use core::num::NonZeroU64;
+        let at = || Position::new(measure(0.0), measure(0.0), measure(0.0));
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at());
+        let a = map.site::<VesselSegment>("artery", at());
+        let b = map.site::<VesselSegment>("vein", at());
+        map.contain(root.id(), a.id());
+        map.contain(root.id(), b.id());
+        map.unsupplied(&[a.id(), b.id()]);
+        map.connect(Network::Vascular, a.id(), b.id());
+        map.connect(Network::Vascular, b.id(), a.id());
+        let mut schema = Schema::new(map.finish().expect("anatomy")).expect("schema");
+        schema.partial_volume(measure(0.018)).expect("partial volume");
+        for space in [Space::Cells, Space::Interstitium] {
+            schema.leave_out(space, "bench");
+        }
+        let body = assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Minutes, 1_000_000_000)?;
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let flow = cv.edge_parameter::<VascularEdge, Rate<Water>>(
+                ParameterKey::new("cv.flow"),
+                Admissible::finite(),
+            );
+            let circulation = ports.circulation(&mut cv);
+            let law = cv.edge_kernel(|mut k| {
+                let rate = k.edge_parameter(&flow);
+                k.finish(rate, cv.every_mode(), class)
+            });
+            cv.transfer_along(&circulation, law);
+            body.add(cv.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let mut packet = ParameterPacket::new();
+        for (from, to, rate) in [(a.id(), b.id(), 2.0), (b.id(), a.id(), -0.5)] {
+            packet
+                .synthetic(
+                    ParameterKey::new("cv.flow"),
+                    Binding::Edge { from, to },
+                    measure::<Rate<Water>>(rate),
+                    "synthetic",
+                )
+                .expect("flow");
+        }
+        packet.start_rest(&body, |_| 10.0, "synthetic").expect("start");
+        let bound = body.bind(packet).expect("bound");
+        let system = body
+            .initialization(
+                bound,
+                BoundaryPort::new(Vec::new()).expect("port"),
+                InitializationRequest::at(SimTime::from_ns(0)),
+            )
+            .expect("system");
+        let solved = system.workspace();
+        let history = MethodHistory::new(Digest::of_canonical(b"test"), SimTime::from_ns(0), Vec::new());
+        let origin = system.admit(solved, history).expect("admitted");
+        let scales = ErrorScales::uniform(measure(1.0), measure(1e-3)).expect("scales");
+        let resolution = DeclaredResolution::new(
+            Digest::of_canonical(b"test core"),
+            NonZeroU64::new(100_000).expect("nonzero"),
+            4,
+            ArithmeticProfile::contract_v1(),
+            StageScheme::backward_euler_halved(),
+            scales,
+        );
+        let identity = RunIdentity::new(
+            body.model_hash(),
+            origin.packet_hash(),
+            Seed::new([1, 2, 3, 4]),
+            resolution,
+        );
+        let mut head = AcceptedHead::admitted(origin, RecordHash::Blake2b);
+        let base = Digest::of_canonical(b"base");
+        let span_ns = 10_000_000;
+        let half = span_ns / 2;
+        let rest = span_ns - half;
+        let a_row = body
+            .rows()
+            .iter()
+            .position(|row| matches!(row.kind(), RowKind::Amount { site, .. } if site == a.id()))
+            .expect("a row");
+        let b_row = body
+            .rows()
+            .iter()
+            .position(|row| matches!(row.kind(), RowKind::Amount { site, .. } if site == b.id()))
+            .expect("b row");
+        let (next_head, (forward, reverse)) = head
+            .attempt(
+                &body,
+                &identity,
+                base,
+                Attempt::First { span_ns },
+                |_problem, ticket| {
+                    let unattested =
+                        CoupledProblem::new(&body, head.parts().parameters(), &identity, head.view(), base);
+                    let mut ws = unattested.workspace();
+                    let dt = half as f64 / 1e9;
+                    ws.unknowns_mut()[a_row] = 10.0 - 2.5 * dt;
+                    ws.unknowns_mut()[b_row] = 10.0 + 2.5 * dt;
+                    ws.derivative_mut()[a_row] = -2.5;
+                    ws.derivative_mut()[b_row] = 2.5;
+                    let s1 = unattested.evaluate(&ws.point(ticket.at(half)?))?;
+                    ws.unknowns_mut()[a_row] = 10.0 - 2.5 * (2.0 * dt);
+                    ws.unknowns_mut()[b_row] = 10.0 + 2.5 * (2.0 * dt);
+                    let s2 = unattested.evaluate(&ws.point(ticket.at(span_ns)?))?;
+                    let mut q = unattested.quadrature(ticket);
+                    q.add_owned(s1, ticket.fraction(half))?;
+                    q.add_owned(s2, ticket.fraction(rest))?;
+                    let inc = q.finish()?;
+                    assert!(inc.witness.provenance.is_none());
+                    let history = MethodHistory::new(
+                        unattested.accepted().method_history().schema(),
+                        SimTime::from_ns(0),
+                        Vec::new(),
+                    );
+                    Ok(unattested.propose(ticket, inc, &ws, history))
+                },
+                |step| Ok(step.gross().unzip::<_, _, Vec<_>, Vec<_>>()),
+            )
+            .expect("unattested 2-stage transfer proposal must verify");
+        let _ = head.install(next_head);
+        let amounts = &head.view().state().amounts;
+        assert!((amounts[a_row].rounded() - (10.0 - 0.025)).abs() < 1e-15);
+        assert!((amounts[b_row].rounded() - (10.0 + 0.025)).abs() < 1e-15);
+        let total_forward: f64 = forward.iter().map(|v| v.rounded()).sum();
+        let total_reverse: f64 = reverse.iter().map(|v| v.rounded()).sum();
+        assert!((total_forward - 0.02).abs() < 1e-15);
+        assert!((total_reverse - 0.005).abs() < 1e-15);
     }
 }

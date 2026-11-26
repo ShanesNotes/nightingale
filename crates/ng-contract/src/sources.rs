@@ -106,6 +106,7 @@ impl CompiledBody {
 
 impl AdmissibleSet {
     /// Whether a compensated value lies in the set, read on the exact pair and not its rounding.
+    #[inline]
     pub fn holds(self, value: Compensated) -> bool {
         let one = Compensated::exact(1.0);
         value.is_finite()

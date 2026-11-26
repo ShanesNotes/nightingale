@@ -21,6 +21,33 @@ pub struct EliminationMetrics {
 /// `own` stores off-diagonal reads raw beside each diagonal block's entries and fill, lower and upper apart. `closure`
 /// symmetrizes each diagonal block: its extra entries hold zeros, and `ghosts` lists them so a solve keeps the bits a
 /// walk over them gives. A value that is not finite takes `closure` whole, since a zero times it is not zero.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ZeroMask {
+    pub(crate) probes: Vec<u32>,
+    pub(crate) zeros: Vec<u32>,
+}
+
+#[derive(Debug, PartialEq)]
+struct SpecializedPlan {
+    probes: Vec<u32>,
+    zeros: Vec<u32>,
+    plan: Elimination,
+}
+impl SpecializedPlan {
+    fn matches(&self, values: &[f64]) -> bool {
+        for &entry in &self.probes {
+            if (values[index(entry)].to_bits() << 1) != 0 {
+                return false;
+            }
+        }
+        let mut bits = 0_u64;
+        for &entry in &self.zeros {
+            bits |= values[index(entry)].to_bits() << 1;
+        }
+        bits == 0
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) struct Elimination {
     rows: Vec<u32>,
@@ -30,6 +57,7 @@ pub(crate) struct Elimination {
     own: Pattern,
     closure: Pattern,
     ghosts: Ghosts,
+    specialized: Vec<SpecializedPlan>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -39,6 +67,7 @@ struct Pattern {
     columns: Vec<u32>,
     diagonals: Vec<u32>,
     places: Vec<u32>,
+    scatter: Vec<(u32, u32)>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -61,12 +90,19 @@ fn scales_of(pattern: &Pattern, values: &[f64]) -> (Vec<f64>, Vec<f64>) {
         intra_starts,
         columns,
         places,
+        scatter,
         ..
     } = pattern;
     let size = starts.len() - 1;
     let mut raw = vec![0.0; columns.len()];
-    for (&place, &value) in places.iter().zip(values) {
-        raw[index(place)] += value;
+    if scatter.is_empty() {
+        for (&place, &value) in places.iter().zip(values) {
+            raw[index(place)] += value;
+        }
+    } else {
+        for &(entry, place) in scatter {
+            raw[index(place)] += values[index(entry)];
+        }
     }
     let (mut row_max, mut col_max) = (vec![0.0; size], vec![0.0; size]);
     for at in 0..size {
@@ -136,6 +172,7 @@ impl Pattern {
         offsets: &[usize],
         unknowns: &[UnknownId],
         position: &[u32],
+        is_zero: Option<&[bool]>,
     ) -> Self {
         let (mut starts, mut intra_starts, mut columns, mut diagonals) = (
             vec![0_u32],
@@ -154,23 +191,46 @@ impl Pattern {
                 starts.push(columns.len() as u32);
             }
         }
-        let mut places = vec![0_u32; unknowns.len()];
-        for (at, &row) in rows.iter().enumerate() {
-            let row = index(row);
-            let pattern = &columns[index(starts[at])..index(starts[at + 1])];
-            for entry in offsets[row]..offsets[row + 1] {
-                let column = position[unknowns[entry].index()];
-                let found = pattern.binary_search(&column);
-                let found = found.expect("every entry of a row lies on its pivot's pattern");
-                places[entry] = starts[at] + found as u32;
+        let (places, scatter) = match is_zero {
+            None => {
+                let mut places = vec![0_u32; unknowns.len()];
+                for (at, &row) in rows.iter().enumerate() {
+                    let row = index(row);
+                    let pattern = &columns[index(starts[at])..index(starts[at + 1])];
+                    for entry in offsets[row]..offsets[row + 1] {
+                        let column = position[unknowns[entry].index()];
+                        let found = pattern.binary_search(&column);
+                        let found = found.expect("every entry of a row lies on its pivot's pattern");
+                        places[entry] = starts[at] + found as u32;
+                    }
+                }
+                (places, Vec::new())
             }
-        }
+            Some(masked) => {
+                let mut scatter = Vec::with_capacity(unknowns.len());
+                for (at, &row) in rows.iter().enumerate() {
+                    let row = index(row);
+                    let pattern = &columns[index(starts[at])..index(starts[at + 1])];
+                    for entry in offsets[row]..offsets[row + 1] {
+                        if masked[entry] {
+                            continue;
+                        }
+                        let column = position[unknowns[entry].index()];
+                        let found = pattern.binary_search(&column);
+                        let found = found.expect("every active entry of a row lies on its pivot's pattern");
+                        scatter.push((entry as u32, starts[at] + found as u32));
+                    }
+                }
+                (Vec::new(), scatter)
+            }
+        };
         Self {
             starts,
             intra_starts,
             columns,
             diagonals,
             places,
+            scatter,
         }
     }
     fn line(&self, at: usize) -> &[u32] {
@@ -359,6 +419,77 @@ fn order_block(members: &[u32], adj: &[Vec<u32>], local_of: &mut [u32], out: &mu
 
 impl Elimination {
     pub(crate) fn plan(offsets: &[usize], unknowns: &[UnknownId], solved_by: &[RowId]) -> Self {
+        Self::plan_single(offsets, unknowns, solved_by, None)
+    }
+
+    pub(crate) fn plan_with_masks(
+        offsets: &[usize],
+        unknowns: &[UnknownId],
+        solved_by: &[RowId],
+        masks: &[ZeroMask],
+    ) -> Self {
+        let mut base = Self::plan_single(offsets, unknowns, solved_by, None);
+        if masks.is_empty() {
+            return base;
+        }
+        let size = offsets.len() - 1;
+        let mut node_of_row = vec![0_u32; size];
+        for (unknown, row) in solved_by.iter().enumerate() {
+            node_of_row[row.index()] = unknown as u32;
+        }
+        let mut pivot_entry = vec![false; unknowns.len()];
+        for row in 0..size {
+            let node = node_of_row[row];
+            for entry in offsets[row]..offsets[row + 1] {
+                if unknowns[entry].index() as u32 == node {
+                    pivot_entry[entry] = true;
+                }
+            }
+        }
+        let base_metrics = base.metrics();
+        for mask in masks {
+            if mask.zeros.is_empty() {
+                continue;
+            }
+            let mut is_zero = vec![false; unknowns.len()];
+            let mut zeros = Vec::with_capacity(mask.zeros.len());
+            for &entry in &mask.zeros {
+                let idx = index(entry);
+                if idx < unknowns.len() && !pivot_entry[idx] && !is_zero[idx] {
+                    is_zero[idx] = true;
+                    zeros.push(entry);
+                }
+            }
+            if zeros.is_empty() {
+                continue;
+            }
+            let plan = Self::plan_single(offsets, unknowns, solved_by, Some(&is_zero));
+            let metrics = plan.metrics();
+            if metrics.factor_macs < base_metrics.factor_macs || metrics.nonzeros < base_metrics.nonzeros {
+                let probes: Vec<u32> = mask
+                    .probes
+                    .iter()
+                    .copied()
+                    .filter(|&entry| is_zero[index(entry)])
+                    .collect();
+                base.specialized.push(SpecializedPlan { probes, zeros, plan });
+            }
+        }
+        base
+    }
+
+    pub(crate) fn specialized_masks(&self) -> impl Iterator<Item = (&[u32], &[u32])> + '_ {
+        self.specialized
+            .iter()
+            .map(|spec| (spec.probes.as_slice(), spec.zeros.as_slice()))
+    }
+
+    fn plan_single(
+        offsets: &[usize],
+        unknowns: &[UnknownId],
+        solved_by: &[RowId],
+        is_zero: Option<&[bool]>,
+    ) -> Self {
         let size = offsets.len() - 1;
         let mut node_of_row = vec![0_u32; size];
         for (unknown, row) in solved_by.iter().enumerate() {
@@ -369,8 +500,11 @@ impl Elimination {
         for row in 0..size {
             let node = node_of_row[row];
             let line = &mut adj[index(node)];
-            for read in &unknowns[offsets[row]..offsets[row + 1]] {
-                let other = read.index() as u32;
+            for entry in offsets[row]..offsets[row + 1] {
+                if is_zero.is_some_and(|masked| masked[entry]) {
+                    continue;
+                }
+                let other = unknowns[entry].index() as u32;
                 if other != node {
                     line.push(other);
                 }
@@ -413,7 +547,6 @@ impl Elimination {
                 let row = rows[index(at)];
                 let (mut line, mut pending) = (vec![at], Vec::new());
                 stamp[index(at)] = at;
-                let read = unknowns[offsets[index(row)]..offsets[index(row) + 1]].iter();
                 let mut reach = |column: u32, line: &mut Vec<u32>, pending: &mut Vec<u32>| {
                     if stamp[index(column)] != at {
                         stamp[index(column)] = at;
@@ -423,8 +556,11 @@ impl Elimination {
                         }
                     }
                 };
-                for unknown in read {
-                    reach(position[unknown.index()], &mut line, &mut pending);
+                for entry in offsets[index(row)]..offsets[index(row) + 1] {
+                    if is_zero.is_some_and(|masked| masked[entry]) {
+                        continue;
+                    }
+                    reach(position[unknowns[entry].index()], &mut line, &mut pending);
                 }
                 while let Some(pivot) = pending.pop() {
                     for &column in &own[index(pivot)] {
@@ -449,8 +585,11 @@ impl Elimination {
             let mut sym_intra: Vec<Vec<u32>> = vec![Vec::new(); len];
             for at in lo..hi {
                 let row = rows[index(at)];
-                for read in &unknowns[offsets[index(row)]..offsets[index(row) + 1]] {
-                    let col = position[read.index()];
+                for entry in offsets[index(row)]..offsets[index(row) + 1] {
+                    if is_zero.is_some_and(|masked| masked[entry]) {
+                        continue;
+                    }
+                    let col = position[unknowns[entry].index()];
                     if col >= lo && col != at {
                         sym_intra[index(at - lo)].push(col);
                         sym_intra[index(col - lo)].push(at);
@@ -506,13 +645,14 @@ impl Elimination {
             ghosts.starts.push(ghosts.columns.len() as u32);
         }
         Self {
-            own: Pattern::of(&own, &blocks, &rows, offsets, unknowns, &position),
-            closure: Pattern::of(&closure, &blocks, &rows, offsets, unknowns, &position),
+            own: Pattern::of(&own, &blocks, &rows, offsets, unknowns, &position, is_zero),
+            closure: Pattern::of(&closure, &blocks, &rows, offsets, unknowns, &position, is_zero),
             rows,
             unknowns: order,
             blocks,
             max_block,
             ghosts,
+            specialized: Vec::new(),
         }
     }
 
@@ -556,7 +696,46 @@ impl Elimination {
         }
     }
 
+    fn factor_specialized(&self, values: &[f64]) -> Option<Result<Factors<'_>, usize>> {
+        for spec in &self.specialized {
+            if !spec.matches(values) {
+                continue;
+            }
+            match spec.plan.eliminate(&spec.plan.own, values) {
+                Eliminated {
+                    found: Ok(lu),
+                    finite: true,
+                } => {
+                    return Some(Ok(Factors {
+                        plan: &spec.plan,
+                        base: Some(self),
+                        closed: false,
+                        lu,
+                    }));
+                }
+                Eliminated { finite: false, .. } => {
+                    let found = self.eliminate(&self.closure, values).found;
+                    let lu = found.map_err(|at| index(self.rows[at]));
+                    return Some(lu.map(|lu| Factors {
+                        plan: self,
+                        base: None,
+                        closed: true,
+                        lu,
+                    }));
+                }
+                Eliminated {
+                    found: Err(_),
+                    finite: true,
+                } => return None,
+            }
+        }
+        None
+    }
+
     pub(crate) fn factor(&self, values: &[f64]) -> Result<Factors<'_>, usize> {
+        if let Some(found) = self.factor_specialized(values) {
+            return found;
+        }
         let (found, closed) = match self.eliminate(&self.own, values) {
             Eliminated { found, finite: true } => (found, false),
             Eliminated { finite: false, .. } => (self.eliminate(&self.closure, values).found, true),
@@ -564,6 +743,7 @@ impl Elimination {
         let lu = found.map_err(|at| index(self.rows[at]))?;
         Ok(Factors {
             plan: self,
+            base: None,
             closed,
             lu,
         })
@@ -593,14 +773,21 @@ impl Elimination {
             columns,
             diagonals,
             places,
+            scatter,
         } = pattern;
         let size = self.rows.len();
         let starts = &starts[..=size];
         let intra_starts = &intra_starts[..size];
         let diagonals = &diagonals[..size];
         let mut lu = vec![0.0; columns.len()];
-        for (&place, &value) in places.iter().zip(values) {
-            lu[index(place)] += value;
+        if scatter.is_empty() {
+            for (&place, &value) in places.iter().zip(values) {
+                lu[index(place)] += value;
+            }
+        } else {
+            for &(entry, place) in scatter {
+                lu[index(place)] += values[index(entry)];
+            }
         }
         assert_eq!(lu.len(), columns.len());
         let mut scales: Option<(Vec<f64>, Vec<f64>)> = None;
@@ -686,6 +873,7 @@ impl Elimination {
 }
 pub struct Factors<'b> {
     plan: &'b Elimination,
+    base: Option<&'b Elimination>,
     closed: bool,
     lu: Vec<f64>,
 }
@@ -693,6 +881,12 @@ pub(crate) const LANES: usize = 8;
 const NEGATIVE_ZERO: u64 = 0x8000_0000_0000_0000;
 
 impl Factors<'_> {
+    pub fn metrics(&self) -> EliminationMetrics {
+        self.plan.metrics()
+    }
+    pub(crate) fn places(&self) -> (Vec<usize>, Vec<usize>) {
+        self.plan.places()
+    }
     fn pattern(&self) -> &Pattern {
         if self.closed {
             &self.plan.closure
@@ -734,6 +928,11 @@ impl Factors<'_> {
             *slot = [side[index(row)]];
         }
         if !self.substitute(pivoted) {
+            if let Some(base) = self.base
+                && self.solve_unmasked(base, side, pivoted)
+            {
+                return;
+            }
             for (slot, &row) in pivoted.iter_mut().zip(rows) {
                 *slot = [side[index(row)]];
             }
@@ -742,6 +941,103 @@ impl Factors<'_> {
         for (&unknown, &[value]) in unknowns.iter().zip(pivoted.iter()) {
             side[index(unknown)] = value;
         }
+    }
+    #[cold]
+    #[inline(never)]
+    fn reconstruct_values(&self, total_entries: usize) -> Vec<f64> {
+        let Pattern {
+            starts,
+            intra_starts,
+            columns,
+            diagonals,
+            places,
+            scatter,
+        } = &self.plan.own;
+        let mut raw = vec![0.0; columns.len()];
+        let mut row = vec![0.0; self.plan.max_block];
+        for block in self.plan.blocks.windows(2) {
+            let (lo, hi) = (index(block[0]), index(block[1]));
+            if lo + 1 == hi {
+                let range = index(starts[lo])..index(starts[lo + 1]);
+                raw[range.clone()].copy_from_slice(&self.lu[range]);
+                continue;
+            }
+            for at in lo..hi {
+                let (start, intra, diag, end) = (
+                    index(starts[at]),
+                    index(intra_starts[at]),
+                    index(diagonals[at]),
+                    index(starts[at + 1]),
+                );
+                raw[start..intra].copy_from_slice(&self.lu[start..intra]);
+                row[..hi - lo].fill(0.0);
+                for (&u_val, &col) in self.lu[diag..end].iter().zip(&columns[diag..end]) {
+                    row[index(col) - lo] = u_val;
+                }
+                for (&l_val, &pivot) in self.lu[intra..diag].iter().zip(&columns[intra..diag]) {
+                    let p = index(pivot);
+                    let tail = index(diagonals[p])..index(starts[p + 1]);
+                    for (&u_val, &col) in self.lu[tail.clone()].iter().zip(&columns[tail]) {
+                        row[index(col) - lo] += l_val * u_val;
+                    }
+                }
+                for (slot, &col) in raw[intra..end].iter_mut().zip(&columns[intra..end]) {
+                    *slot = row[index(col) - lo];
+                }
+            }
+        }
+        let mut values = vec![0.0; total_entries];
+        if scatter.is_empty() {
+            for (entry, &place) in places.iter().enumerate() {
+                values[entry] = raw[index(place)];
+            }
+        } else {
+            for &(entry, place) in scatter {
+                values[index(entry)] = raw[index(place)];
+            }
+        }
+        values
+    }
+    #[cold]
+    #[inline(never)]
+    fn solve_unmasked(&self, base: &Elimination, side: &mut [f64], pivoted: &mut [[f64; 1]]) -> bool {
+        let values = self.reconstruct_values(base.own.places.len());
+        let Ok(lu) = base.eliminate(&base.closure, &values).found else {
+            return false;
+        };
+        for (slot, &row) in pivoted.iter_mut().zip(&base.rows) {
+            *slot = [side[index(row)]];
+        }
+        walk(&base.blocks, &base.closure, &lu, None, pivoted);
+        for (&unknown, &[value]) in base.unknowns.iter().zip(pivoted.iter()) {
+            side[index(unknown)] = value;
+        }
+        true
+    }
+    #[cold]
+    #[inline(never)]
+    fn solve_pivoted_unmasked(&self, base: &Elimination, group: &mut [[f64; LANES]]) -> bool {
+        let values = self.reconstruct_values(base.own.places.len());
+        let Ok(lu) = base.eliminate(&base.closure, &values).found else {
+            return false;
+        };
+        let size = group.len();
+        let mut orig = vec![[0.0; LANES]; size];
+        for (&row, &lanes) in self.plan.rows.iter().zip(group.iter()) {
+            orig[index(row)] = lanes;
+        }
+        let mut pivoted = vec![[0.0; LANES]; size];
+        for (slot, &row) in pivoted.iter_mut().zip(&base.rows) {
+            *slot = orig[index(row)];
+        }
+        walk(&base.blocks, &base.closure, &lu, None, &mut pivoted);
+        for (&unknown, &lanes) in base.unknowns.iter().zip(pivoted.iter()) {
+            orig[index(unknown)] = lanes;
+        }
+        for (slot, &unknown) in group.iter_mut().zip(&self.plan.unknowns) {
+            *slot = orig[index(unknown)];
+        }
+        true
     }
     pub(crate) fn reach(&self) -> Option<Reach> {
         Reach::of(self)
@@ -766,13 +1062,23 @@ impl Factors<'_> {
                 for &at in &marks.seeds {
                     group[index(at)] = spare[index(at)];
                 }
-                self.substitute_closed(group);
+                if !self
+                    .base
+                    .is_some_and(|base| self.solve_pivoted_unmasked(base, group))
+                {
+                    self.substitute_closed(group);
+                }
             }
         } else {
             spare.copy_from_slice(group);
             if !self.substitute(group) {
                 group.copy_from_slice(spare);
-                self.substitute_closed(group);
+                if !self
+                    .base
+                    .is_some_and(|base| self.solve_pivoted_unmasked(base, group))
+                {
+                    self.substitute_closed(group);
+                }
             }
         }
     }
@@ -1483,6 +1789,7 @@ mod tests {
             let lu = lu.map_err(|at| self.rows[at] as usize)?;
             Ok(Factors {
                 plan: self,
+                base: None,
                 closed: true,
                 lu,
             })
@@ -1663,6 +1970,7 @@ mod tests {
                 assert!(same_bits(&kept, &had), "a solve alone keeps today's bits");
             }
         }
+        non_finite_specialized_substitution_falls_back_to_unmasked_closure();
     }
 
     #[test]
@@ -1750,6 +2058,7 @@ mod tests {
                 );
                 let own = (plan.eliminate(&plan.own, &system.values).found).map(|lu| Factors {
                     plan: &plan,
+                    base: None,
                     closed: false,
                     lu,
                 });
@@ -1860,5 +2169,188 @@ mod tests {
         let expected: Vec<u32> = (0..size as u32).collect();
         assert_eq!(plan.unknowns, expected);
         assert_eq!(plan.rows, expected);
+    }
+
+    #[test]
+    fn a_specialized_mask_breaks_a_cycle_on_exact_zeros_and_falls_back_otherwise() {
+        let size = 6;
+        let mut offsets = vec![0];
+        let mut unknowns = Vec::new();
+        let mut reverse_entries = Vec::new();
+        let mut cut_entry = 0_u32;
+        for row in 0..size {
+            let mut cols = vec![row, (row + 1) % size, (row + size - 1) % size];
+            cols.sort_unstable();
+            cols.dedup();
+            for col in cols {
+                let entry = unknowns.len() as u32;
+                unknowns.push(UnknownId::at(col));
+                if col == (row + size - 1) % size {
+                    reverse_entries.push(entry);
+                }
+                if row == size - 1 && col == 0 {
+                    cut_entry = entry;
+                }
+            }
+            offsets.push(unknowns.len());
+        }
+        let matching: Vec<RowId> = (0..size).map(RowId::at).collect();
+        let mut cut_zeros = reverse_entries.clone();
+        cut_zeros.push(cut_entry);
+        let masks = vec![
+            super::ZeroMask {
+                probes: vec![cut_entry],
+                zeros: cut_zeros,
+            },
+            super::ZeroMask {
+                probes: Vec::new(),
+                zeros: reverse_entries.clone(),
+            },
+        ];
+        let plan = Elimination::plan_with_masks(&offsets, &unknowns, &matching, &masks);
+        let base = Elimination::plan(&offsets, &unknowns, &matching);
+        assert_eq!(plan.metrics(), base.metrics());
+        assert_eq!(plan.specialized.len(), 2);
+
+        let build_values = |fwd: f64, rev: f64, cut: f64| -> (Vec<f64>, Vec<Vec<f64>>) {
+            let mut values = vec![0.0; unknowns.len()];
+            let mut dense = vec![vec![0.0; size]; size];
+            for row in 0..size {
+                for entry in offsets[row]..offsets[row + 1] {
+                    let col = unknowns[entry].index();
+                    let v = if col == row {
+                        4.0
+                    } else if row == size - 1 && col == 0 {
+                        cut
+                    } else if col == (row + 1) % size {
+                        fwd
+                    } else {
+                        rev
+                    };
+                    values[entry] = v;
+                    dense[row][col] = v;
+                }
+            }
+            (values, dense)
+        };
+        let side: Vec<f64> = (1..=size).map(|i| i as f64 * 0.7 - 1.5).collect();
+
+        // Radau's negative off-diagonal stage weight produces -0.0 in masked slots.
+        for zero in [0.0, -0.0] {
+            let (values, dense) = build_values(0.5, zero, zero);
+            let factors = plan.factor(&values).expect("factors");
+            assert_eq!(factors.metrics().blocks, size);
+            assert_eq!(factors.metrics().factor_macs, 0);
+            let mut found = side.clone();
+            factors.solve(&mut found);
+            for (one, other) in found.iter().zip(dense_solve(dense, side.clone())) {
+                assert!((one - other).abs() < 1e-12, "{one} against {other}");
+            }
+        }
+
+        let (values, dense) = build_values(0.5, 0.0, 0.5);
+        let factors = plan.factor(&values).expect("factors");
+        assert!(factors.metrics().factor_macs < base.metrics().factor_macs);
+        let mut found = side.clone();
+        factors.solve(&mut found);
+        for (one, other) in found.iter().zip(dense_solve(dense, side.clone())) {
+            assert!((one - other).abs() < 1e-12, "{one} against {other}");
+        }
+
+        for bad in [1e-300, f64::MIN_POSITIVE / 2.0, -0.25, f64::NAN, f64::INFINITY] {
+            let (mut values, _) = build_values(0.5, 0.0, 0.0);
+            values[reverse_entries[0] as usize] = bad;
+            let result = plan.factor(&values);
+            if bad.is_finite() {
+                let factors = result.expect("finite factors");
+                assert_eq!(factors.metrics(), base.metrics());
+            } else {
+                assert_eq!(result.is_err(), base.factor(&values).is_err());
+            }
+        }
+
+        let (mut values, _) = build_values(0.5, 0.0, 0.0);
+        values[offsets[0]] = f64::INFINITY;
+        assert_eq!(plan.factor(&values).err(), base.factor_closed(&values).err());
+    }
+
+    #[test]
+    fn non_finite_specialized_substitution_falls_back_to_unmasked_closure() {
+        let offsets = [0, 3, 6, 9];
+        let unknowns: Vec<UnknownId> = (0..3).flat_map(|_| (0..3).map(UnknownId::at)).collect();
+        let matching = [RowId::at(0), RowId::at(1), RowId::at(2)];
+        let values = [1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let masks = vec![super::ZeroMask {
+            probes: Vec::new(),
+            zeros: vec![3, 6, 7],
+        }];
+        let plan = Elimination::plan_with_masks(&offsets, &unknowns, &matching, &masks);
+        let base = Elimination::plan(&offsets, &unknowns, &matching);
+        let specialized = plan.factor(&values).expect("specialized factors");
+        assert_eq!(specialized.metrics().blocks, 3);
+        let unmasked = base.factor_closed(&values).expect("base factors");
+
+        let m = f64::MAX;
+        let sides = vec![
+            vec![m, m, -m],
+            vec![f64::INFINITY, 1.0, 1.0],
+            vec![1.0, f64::INFINITY, 1.0],
+            vec![1.0, 1.0, f64::NEG_INFINITY],
+        ];
+        for side in &sides {
+            let (mut got, mut want) = (side.clone(), side.clone());
+            specialized.solve(&mut got);
+            unmasked.solve(&mut want);
+            assert!(same_bits(&got, &want), "got {got:?} against {want:?}");
+        }
+        let mut group_sides = vec![vec![0.0; 3]; LANES];
+        for (slot, side) in group_sides.iter_mut().zip(&sides) {
+            *slot = side.clone();
+        }
+        let mut marks = Marks::new(3);
+        for reached in [true, false] {
+            let got = grouped(&specialized, &group_sides, reached, &mut marks);
+            let want = grouped(&unmasked, &group_sides, reached, &mut marks);
+            for (g, w) in got.iter().zip(&want) {
+                assert!(same_bits(g, w), "grouped(reached={reached}): {g:?} against {w:?}");
+            }
+        }
+
+        let offsets4 = [0, 3, 6, 9, 12];
+        let unknowns4 = [
+            UnknownId::at(0),
+            UnknownId::at(1),
+            UnknownId::at(2),
+            UnknownId::at(0),
+            UnknownId::at(1),
+            UnknownId::at(2),
+            UnknownId::at(1),
+            UnknownId::at(2),
+            UnknownId::at(3),
+            UnknownId::at(0),
+            UnknownId::at(2),
+            UnknownId::at(3),
+        ];
+        let matching4 = [RowId::at(0), RowId::at(1), RowId::at(2), RowId::at(3)];
+        let values4 = [4.0, 1.0, 0.0, 1.0, 4.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0];
+        let masks4 = vec![super::ZeroMask {
+            probes: Vec::new(),
+            zeros: vec![2, 5, 6, 9, 10],
+        }];
+        let plan4 = Elimination::plan_with_masks(&offsets4, &unknowns4, &matching4, &masks4);
+        let base4 = Elimination::plan(&offsets4, &unknowns4, &matching4);
+        let spec4 = plan4
+            .factor(&values4)
+            .expect("multi-row block specialized factors");
+        assert_eq!(spec4.metrics().largest_block, 2);
+        let base4_closed = base4.factor_closed(&values4).expect("base4 closed");
+        let mut got = vec![1.0, 2.0, f64::INFINITY, 1.0];
+        let mut want = got.clone();
+        spec4.solve(&mut got);
+        base4_closed.solve(&mut want);
+        assert!(
+            same_bits(&got, &want),
+            "multi-row block fallback: {got:?} against {want:?}"
+        );
     }
 }

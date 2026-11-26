@@ -196,6 +196,9 @@ impl CompiledBody {
     pub(crate) fn pivots(&self) -> Vec<RowId> {
         self.elimination.solved_by()
     }
+    pub(crate) fn specialized_masks(&self) -> impl Iterator<Item = (&[u32], &[u32])> + '_ {
+        self.elimination.specialized_masks()
+    }
     /// The cards held, in card order.
     pub fn held(&self) -> impl Iterator<Item = &'static str> + '_ {
         (self.layout.basis.coverage().declarations().iter()).map(|held| held.card)
