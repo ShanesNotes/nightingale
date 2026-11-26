@@ -708,6 +708,7 @@ impl Elimination {
                 } => {
                     return Some(Ok(Factors {
                         plan: &spec.plan,
+                        base: Some(self),
                         closed: false,
                         lu,
                     }));
@@ -717,6 +718,7 @@ impl Elimination {
                     let lu = found.map_err(|at| index(self.rows[at]));
                     return Some(lu.map(|lu| Factors {
                         plan: self,
+                        base: None,
                         closed: true,
                         lu,
                     }));
@@ -741,6 +743,7 @@ impl Elimination {
         let lu = found.map_err(|at| index(self.rows[at]))?;
         Ok(Factors {
             plan: self,
+            base: None,
             closed,
             lu,
         })
@@ -870,6 +873,7 @@ impl Elimination {
 }
 pub struct Factors<'b> {
     plan: &'b Elimination,
+    base: Option<&'b Elimination>,
     closed: bool,
     lu: Vec<f64>,
 }
@@ -924,6 +928,11 @@ impl Factors<'_> {
             *slot = [side[index(row)]];
         }
         if !self.substitute(pivoted) {
+            if let Some(base) = self.base
+                && self.solve_unmasked(base, side, pivoted)
+            {
+                return;
+            }
             for (slot, &row) in pivoted.iter_mut().zip(rows) {
                 *slot = [side[index(row)]];
             }
@@ -932,6 +941,103 @@ impl Factors<'_> {
         for (&unknown, &[value]) in unknowns.iter().zip(pivoted.iter()) {
             side[index(unknown)] = value;
         }
+    }
+    #[cold]
+    #[inline(never)]
+    fn reconstruct_values(&self, total_entries: usize) -> Vec<f64> {
+        let Pattern {
+            starts,
+            intra_starts,
+            columns,
+            diagonals,
+            places,
+            scatter,
+        } = &self.plan.own;
+        let mut raw = vec![0.0; columns.len()];
+        let mut row = vec![0.0; self.plan.max_block];
+        for block in self.plan.blocks.windows(2) {
+            let (lo, hi) = (index(block[0]), index(block[1]));
+            if lo + 1 == hi {
+                let range = index(starts[lo])..index(starts[lo + 1]);
+                raw[range.clone()].copy_from_slice(&self.lu[range]);
+                continue;
+            }
+            for at in lo..hi {
+                let (start, intra, diag, end) = (
+                    index(starts[at]),
+                    index(intra_starts[at]),
+                    index(diagonals[at]),
+                    index(starts[at + 1]),
+                );
+                raw[start..intra].copy_from_slice(&self.lu[start..intra]);
+                row[..hi - lo].fill(0.0);
+                for (&u_val, &col) in self.lu[diag..end].iter().zip(&columns[diag..end]) {
+                    row[index(col) - lo] = u_val;
+                }
+                for (&l_val, &pivot) in self.lu[intra..diag].iter().zip(&columns[intra..diag]) {
+                    let p = index(pivot);
+                    let tail = index(diagonals[p])..index(starts[p + 1]);
+                    for (&u_val, &col) in self.lu[tail.clone()].iter().zip(&columns[tail]) {
+                        row[index(col) - lo] += l_val * u_val;
+                    }
+                }
+                for (slot, &col) in raw[intra..end].iter_mut().zip(&columns[intra..end]) {
+                    *slot = row[index(col) - lo];
+                }
+            }
+        }
+        let mut values = vec![0.0; total_entries];
+        if scatter.is_empty() {
+            for (entry, &place) in places.iter().enumerate() {
+                values[entry] = raw[index(place)];
+            }
+        } else {
+            for &(entry, place) in scatter {
+                values[index(entry)] = raw[index(place)];
+            }
+        }
+        values
+    }
+    #[cold]
+    #[inline(never)]
+    fn solve_unmasked(&self, base: &Elimination, side: &mut [f64], pivoted: &mut [[f64; 1]]) -> bool {
+        let values = self.reconstruct_values(base.own.places.len());
+        let Ok(lu) = base.eliminate(&base.closure, &values).found else {
+            return false;
+        };
+        for (slot, &row) in pivoted.iter_mut().zip(&base.rows) {
+            *slot = [side[index(row)]];
+        }
+        walk(&base.blocks, &base.closure, &lu, None, pivoted);
+        for (&unknown, &[value]) in base.unknowns.iter().zip(pivoted.iter()) {
+            side[index(unknown)] = value;
+        }
+        true
+    }
+    #[cold]
+    #[inline(never)]
+    fn solve_pivoted_unmasked(&self, base: &Elimination, group: &mut [[f64; LANES]]) -> bool {
+        let values = self.reconstruct_values(base.own.places.len());
+        let Ok(lu) = base.eliminate(&base.closure, &values).found else {
+            return false;
+        };
+        let size = group.len();
+        let mut orig = vec![[0.0; LANES]; size];
+        for (&row, &lanes) in self.plan.rows.iter().zip(group.iter()) {
+            orig[index(row)] = lanes;
+        }
+        let mut pivoted = vec![[0.0; LANES]; size];
+        for (slot, &row) in pivoted.iter_mut().zip(&base.rows) {
+            *slot = orig[index(row)];
+        }
+        walk(&base.blocks, &base.closure, &lu, None, &mut pivoted);
+        for (&unknown, &lanes) in base.unknowns.iter().zip(pivoted.iter()) {
+            orig[index(unknown)] = lanes;
+        }
+        for (slot, &unknown) in group.iter_mut().zip(&self.plan.unknowns) {
+            *slot = orig[index(unknown)];
+        }
+        true
     }
     pub(crate) fn reach(&self) -> Option<Reach> {
         Reach::of(self)
@@ -956,13 +1062,23 @@ impl Factors<'_> {
                 for &at in &marks.seeds {
                     group[index(at)] = spare[index(at)];
                 }
-                self.substitute_closed(group);
+                if !self
+                    .base
+                    .is_some_and(|base| self.solve_pivoted_unmasked(base, group))
+                {
+                    self.substitute_closed(group);
+                }
             }
         } else {
             spare.copy_from_slice(group);
             if !self.substitute(group) {
                 group.copy_from_slice(spare);
-                self.substitute_closed(group);
+                if !self
+                    .base
+                    .is_some_and(|base| self.solve_pivoted_unmasked(base, group))
+                {
+                    self.substitute_closed(group);
+                }
             }
         }
     }
@@ -1673,6 +1789,7 @@ mod tests {
             let lu = lu.map_err(|at| self.rows[at] as usize)?;
             Ok(Factors {
                 plan: self,
+                base: None,
                 closed: true,
                 lu,
             })
@@ -1853,6 +1970,7 @@ mod tests {
                 assert!(same_bits(&kept, &had), "a solve alone keeps today's bits");
             }
         }
+        non_finite_specialized_substitution_falls_back_to_unmasked_closure();
     }
 
     #[test]
@@ -1940,6 +2058,7 @@ mod tests {
                 );
                 let own = (plan.eliminate(&plan.own, &system.values).found).map(|lu| Factors {
                     plan: &plan,
+                    base: None,
                     closed: false,
                     lu,
                 });
@@ -2153,5 +2272,85 @@ mod tests {
         let (mut values, _) = build_values(0.5, 0.0, 0.0);
         values[offsets[0]] = f64::INFINITY;
         assert_eq!(plan.factor(&values).err(), base.factor_closed(&values).err());
+    }
+
+    #[test]
+    fn non_finite_specialized_substitution_falls_back_to_unmasked_closure() {
+        let offsets = [0, 3, 6, 9];
+        let unknowns: Vec<UnknownId> = (0..3).flat_map(|_| (0..3).map(UnknownId::at)).collect();
+        let matching = [RowId::at(0), RowId::at(1), RowId::at(2)];
+        let values = [1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let masks = vec![super::ZeroMask {
+            probes: Vec::new(),
+            zeros: vec![3, 6, 7],
+        }];
+        let plan = Elimination::plan_with_masks(&offsets, &unknowns, &matching, &masks);
+        let base = Elimination::plan(&offsets, &unknowns, &matching);
+        let specialized = plan.factor(&values).expect("specialized factors");
+        assert_eq!(specialized.metrics().blocks, 3);
+        let unmasked = base.factor_closed(&values).expect("base factors");
+
+        let m = f64::MAX;
+        let sides = vec![
+            vec![m, m, -m],
+            vec![f64::INFINITY, 1.0, 1.0],
+            vec![1.0, f64::INFINITY, 1.0],
+            vec![1.0, 1.0, f64::NEG_INFINITY],
+        ];
+        for side in &sides {
+            let (mut got, mut want) = (side.clone(), side.clone());
+            specialized.solve(&mut got);
+            unmasked.solve(&mut want);
+            assert!(same_bits(&got, &want), "got {got:?} against {want:?}");
+        }
+        let mut group_sides = vec![vec![0.0; 3]; LANES];
+        for (slot, side) in group_sides.iter_mut().zip(&sides) {
+            *slot = side.clone();
+        }
+        let mut marks = Marks::new(3);
+        for reached in [true, false] {
+            let got = grouped(&specialized, &group_sides, reached, &mut marks);
+            let want = grouped(&unmasked, &group_sides, reached, &mut marks);
+            for (g, w) in got.iter().zip(&want) {
+                assert!(same_bits(g, w), "grouped(reached={reached}): {g:?} against {w:?}");
+            }
+        }
+
+        let offsets4 = [0, 3, 6, 9, 12];
+        let unknowns4 = [
+            UnknownId::at(0),
+            UnknownId::at(1),
+            UnknownId::at(2),
+            UnknownId::at(0),
+            UnknownId::at(1),
+            UnknownId::at(2),
+            UnknownId::at(1),
+            UnknownId::at(2),
+            UnknownId::at(3),
+            UnknownId::at(0),
+            UnknownId::at(2),
+            UnknownId::at(3),
+        ];
+        let matching4 = [RowId::at(0), RowId::at(1), RowId::at(2), RowId::at(3)];
+        let values4 = [4.0, 1.0, 0.0, 1.0, 4.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0];
+        let masks4 = vec![super::ZeroMask {
+            probes: Vec::new(),
+            zeros: vec![2, 5, 6, 9, 10],
+        }];
+        let plan4 = Elimination::plan_with_masks(&offsets4, &unknowns4, &matching4, &masks4);
+        let base4 = Elimination::plan(&offsets4, &unknowns4, &matching4);
+        let spec4 = plan4
+            .factor(&values4)
+            .expect("multi-row block specialized factors");
+        assert_eq!(spec4.metrics().largest_block, 2);
+        let base4_closed = base4.factor_closed(&values4).expect("base4 closed");
+        let mut got = vec![1.0, 2.0, f64::INFINITY, 1.0];
+        let mut want = got.clone();
+        spec4.solve(&mut got);
+        base4_closed.solve(&mut want);
+        assert!(
+            same_bits(&got, &want),
+            "multi-row block fallback: {got:?} against {want:?}"
+        );
     }
 }
