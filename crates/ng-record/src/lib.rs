@@ -192,6 +192,23 @@
 //!     draw.finish()
 //! }
 //! ```
+//! A live conservation view comes only from a session and advances only from that session, never from a
+//! caller-supplied segment.
+//! ```compile_fail,E0599
+//! use ng_record::*;
+//! fn forged(feed: &mut ConservationFeed<'_>, segment: HistorySegment) {
+//!     feed.push(segment);
+//! }
+//! ```
+//! ```
+//! use ng_record::*;
+//! fn stepped<'m>(session: &Session<'m, Running>, feed: &mut ConservationFeed<'m>)
+//!     -> Result<u64, ConservationRefusal> {
+//!     Ok(feed.advance(session)?.revision())
+//! }
+//! ```
+
+extern crate alloc;
 
 mod checkpoint;
 mod history;
@@ -201,8 +218,8 @@ mod session;
 
 pub use checkpoint::{BranchFork, BranchId, Checkpoint, CheckpointError, HistoryStore};
 pub use history::{
-    CompactLink, ConservationView, Curve, HistorySeal, HistorySegment, NewestFirst, OldestFirst, TimeOrder,
-    compact, expand, follows,
+    AcceptedStep, CompactLink, ConservationFeed, ConservationRefusal, ConservationView, Curve, HistorySeal,
+    HistorySegment, NewestFirst, OldestFirst, TimeOrder, compact, expand, follows,
 };
 pub use observation::{ObservationRefusal, ObservationView};
 pub use record::{AuthorizedInput, InputReceipt, NextImage, PatientRecord, RecordDigests, Seal, StepReceipt};

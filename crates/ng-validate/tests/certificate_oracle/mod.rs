@@ -531,22 +531,23 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
             }
         };
         pieces += 1;
-        for ((&quantity, held), updates) in quantities.iter().zip(&mut worst).zip(&ledger.updates_a_step) {
-            let pick = |curve: fn(&HistorySegment, QuantityId) -> Curve<'_>| {
-                differences(&curve(leading, quantity), &curve(trailing, quantity))
-            };
-            let change = pick(HistorySegment::inventory).ok_or_else(coverage)?;
-            let inflow = pick(HistorySegment::inflow).ok_or_else(coverage)?;
-            let outflow = pick(HistorySegment::outflow).ok_or_else(coverage)?;
-            let closing = closing(&leading.inventory(quantity)).ok_or_else(coverage)?;
-            let last_places = [*updates, steps]
-                .into_iter()
-                .try_fold(ledger.per_update, u64::checked_mul)
-                .unwrap_or(u64::MAX);
-            let rounding = i64::try_from(last_places).unwrap_or(i64::MAX);
-            for (index, &start) in pair.iter().enumerate() {
-                let window = Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length))
-                    .ok_or_else(coverage)?;
+        for (index, &start) in pair.iter().enumerate() {
+            let window = Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length))
+                .ok_or_else(coverage)?;
+            for ((&quantity, held), updates) in quantities.iter().zip(&mut worst).zip(&ledger.updates_a_step)
+            {
+                let pick = |curve: fn(&HistorySegment, QuantityId) -> Curve<'_>| {
+                    differences(&curve(leading, quantity), &curve(trailing, quantity))
+                };
+                let change = pick(HistorySegment::inventory).ok_or_else(coverage)?;
+                let inflow = pick(HistorySegment::inflow).ok_or_else(coverage)?;
+                let outflow = pick(HistorySegment::outflow).ok_or_else(coverage)?;
+                let closing = closing(&leading.inventory(quantity)).ok_or_else(coverage)?;
+                let last_places = [*updates, steps]
+                    .into_iter()
+                    .try_fold(ledger.per_update, u64::checked_mul)
+                    .unwrap_or(u64::MAX);
+                let rounding = i64::try_from(last_places).unwrap_or(i64::MAX);
                 let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
                 let gross = inflow[index].plus(outflow[index]);
                 let place = last_place(closing[index]);
