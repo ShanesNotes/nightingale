@@ -1,16 +1,29 @@
-use crate::body::{Bound, Instance, Layout, ParameterId, ProgramId, RowKind, Target, UnknownId};
+use crate::body::{Bound, ColumnId, Instance, Layout, ParameterId, ProgramId, RowKind, Target, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::law::{Op, Validity};
 use crate::pinned;
 use crate::{
     Compensated, CompiledBody, Context, Crossing, ExcursionSide, LawName, SimTime, ValidityExcursion,
 };
+use core::num::NonZeroU32;
 use core::ops::{Deref, DerefMut, Index, IndexMut, Range};
 
 mod enclosure;
 #[cfg(test)]
 mod terms;
 pub(crate) use enclosure::{Bounds, Jet};
+
+#[derive(Debug)]
+pub(crate) struct StageValues {
+    pub(crate) columns: Vec<f64>,
+    pub(crate) rows: Vec<f64>,
+    pub(crate) residuals: Vec<f64>,
+}
+
+struct SlopeScratch {
+    values: [f64; STACK_SLOTS],
+    slopes: [f64; STACK_SLOTS],
+}
 
 pub(crate) struct GuardSlopes {
     pub(crate) unknowns: Vec<(usize, f64)>,
@@ -162,14 +175,72 @@ impl FastInstance {
     }
 }
 
+#[derive(Clone, Copy)]
+enum FastTarget {
+    ColumnUnit(u32),
+    ColumnScaled(ColumnId),
+    Row(u32, bool),
+}
+
+#[derive(Clone, Copy)]
+struct TransportSolute {
+    inst: u32,
+    col: u32,
+    from_amt: u16,
+    to_amt: u16,
+    j_from_flow: u32,
+    j_to_flow: u32,
+    j_from_from_amt: u32,
+    j_to_from_amt: u32,
+    j_from_from_water: u32,
+    j_to_from_water: u32,
+    j_from_to_amt: u32,
+    j_to_to_amt: u32,
+    j_from_to_water: u32,
+    j_to_to_water: u32,
+}
+
+#[derive(Clone, Copy)]
+struct TransportBatch {
+    flow: u16,
+    from_water: u16,
+    to_water: u16,
+    water_col: u32,
+    water_j_from_flow: u32,
+    water_j_to_flow: u32,
+    solutes_start: u32,
+    solutes_end: u32,
+}
+
+#[derive(Clone, Copy)]
+enum FastOp {
+    Single(u32),
+    Batch(u32),
+}
+
 struct FastTape {
     instances: Vec<FastInstance>,
+    targets: Vec<FastTarget>,
+    has_validity: Vec<bool>,
+    batches: Vec<TransportBatch>,
+    batch_solutes: Vec<TransportSolute>,
+    ops: Vec<FastOp>,
+    fused_start_op: usize,
+    fused_prefix_terms: usize,
+    fused_stage: bool,
+    col_term_ranges: Vec<Range<u32>>,
     generals: Vec<FastGeneral>,
     steps: Vec<(u8, FastInstr)>,
     parameters: Vec<(u8, u16)>,
     unknowns: Vec<(u8, u16)>,
     judged_ops: Vec<u8>,
     judged_ranges: Vec<Range<u32>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct PublishedEval {
+    pub(crate) algebraic: Vec<f64>,
+    pub(crate) excursions: Vec<ValidityExcursion>,
 }
 
 #[derive(Clone, Copy)]
@@ -464,8 +535,228 @@ impl Tape {
                 mode_val,
             });
         }
+        let mut targets = Vec::with_capacity(layout.instances.len());
+        for instance in &layout.instances {
+            let target = match instance.target {
+                Target::Column(col) => {
+                    if layout.columns[col.index()].reference_count == NonZeroU32::MIN {
+                        FastTarget::ColumnUnit(col.index() as u32)
+                    } else {
+                        FastTarget::ColumnScaled(col)
+                    }
+                }
+                Target::Row(row) => FastTarget::Row(row.index() as u32, instance.rectified),
+            };
+            targets.push(target);
+        }
+        let unit_pair = |col_idx: usize| -> Option<(u16, u16, bool)> {
+            let col = &layout.columns[col_idx];
+            if col.reference_count != NonZeroU32::MIN {
+                return None;
+            }
+            match col.terms.as_slice() {
+                [(a, -1), (b, 1)] => Some((
+                    u16::try_from(a.index()).ok()?,
+                    u16::try_from(b.index()).ok()?,
+                    false,
+                )),
+                [(a, 1), (b, -1)] => Some((
+                    u16::try_from(b.index()).ok()?,
+                    u16::try_from(a.index()).ok()?,
+                    true,
+                )),
+                _ => None,
+            }
+        };
+        let has_validity: Vec<bool> = layout
+            .instances
+            .iter()
+            .map(|inst| !layout.programs[inst.program.index()].code.validity.is_empty())
+            .collect();
+        let mut batches = Vec::new();
+        let mut batch_solutes = Vec::new();
+        let mut ops = Vec::with_capacity(layout.instances.len());
+        let mut at = 0;
+        while at < layout.instances.len() {
+            let inst = instances[at];
+            let no_judged =
+                |idx: usize| self.judged_total == 0 || judged_ranges[idx].start == judged_ranges[idx].end;
+            if inst.mode_var == u16::MAX
+                && !layout.instances[at].rectified
+                && !has_validity[at]
+                && no_judged(at)
+                && let FastKind::ReadUnknown(flow) = inst.kind
+                && let Target::Column(water_col) = layout.instances[at].target
+                && let Some((from_water, to_water, water_swapped)) = unit_pair(water_col.index())
+                && self.entries(at).len() == 2
+            {
+                let solutes_start = batch_solutes.len() as u32;
+                let mut next = at + 1;
+                while next < layout.instances.len() {
+                    let s_inst = instances[next];
+                    if s_inst.mode_var == u16::MAX
+                        && !layout.instances[next].rectified
+                        && !has_validity[next]
+                        && no_judged(next)
+                        && let FastKind::Upwind5([f, fa, fw, ta, tw]) = s_inst.kind
+                        && f == flow
+                        && fw == from_water
+                        && tw == to_water
+                        && let Target::Column(col) = layout.instances[next].target
+                        && let Some((r_from, r_to, swapped)) = unit_pair(col.index())
+                        && r_from == fa
+                        && r_to == ta
+                        && self.entries(next).len() == 10
+                    {
+                        let e = self.entries(next);
+                        let pair = |k: usize| {
+                            if swapped {
+                                (e[2 * k + 1], e[2 * k])
+                            } else {
+                                (e[2 * k], e[2 * k + 1])
+                            }
+                        };
+                        let (j_from_flow, j_to_flow) = pair(0);
+                        let (j_from_from_amt, j_to_from_amt) = pair(1);
+                        let (j_from_from_water, j_to_from_water) = pair(2);
+                        let (j_from_to_amt, j_to_to_amt) = pair(3);
+                        let (j_from_to_water, j_to_to_water) = pair(4);
+                        batch_solutes.push(TransportSolute {
+                            inst: next as u32,
+                            col: col.index() as u32,
+                            from_amt: fa,
+                            to_amt: ta,
+                            j_from_flow,
+                            j_to_flow,
+                            j_from_from_amt,
+                            j_to_from_amt,
+                            j_from_from_water,
+                            j_to_from_water,
+                            j_from_to_amt,
+                            j_to_to_amt,
+                            j_from_to_water,
+                            j_to_to_water,
+                        });
+                        next += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let solutes_end = batch_solutes.len() as u32;
+                if solutes_end > solutes_start {
+                    let we = self.entries(at);
+                    let (water_j_from_flow, water_j_to_flow) = if water_swapped {
+                        (we[1], we[0])
+                    } else {
+                        (we[0], we[1])
+                    };
+                    let batch_at = batches.len() as u32;
+                    batches.push(TransportBatch {
+                        flow,
+                        from_water,
+                        to_water,
+                        water_col: water_col.index() as u32,
+                        water_j_from_flow,
+                        water_j_to_flow,
+                        solutes_start,
+                        solutes_end,
+                    });
+                    ops.push(FastOp::Batch(batch_at));
+                    at = next;
+                    continue;
+                }
+            }
+            ops.push(FastOp::Single(at as u32));
+            at += 1;
+        }
+        let mut col_term_ranges = vec![0_u32..0_u32; layout.columns.len()];
+        let mut term_at = 0_u32;
+        for (col, range) in col_term_ranges.iter_mut().enumerate() {
+            let start = term_at;
+            while (term_at as usize) < self.column_terms.len()
+                && self.column_terms[term_at as usize].column as usize == col
+            {
+                term_at += 1;
+            }
+            *range = start..term_at;
+        }
+        let fused_start_op = ops
+            .iter()
+            .position(|op| matches!(op, FastOp::Batch(_)))
+            .unwrap_or(ops.len());
+        let mut fused_stage = false;
+        let mut fused_prefix_terms = 0;
+        if self.contiguous_rows && fused_start_op < ops.len() {
+            let first_batch = match ops[fused_start_op] {
+                FastOp::Batch(b) => batches[b as usize],
+                FastOp::Single(_) => unreachable!(),
+            };
+            let first_col = first_batch.water_col as usize;
+            let mut next_col = first_col;
+            let mut ok = true;
+            for &op in &ops[fused_start_op..] {
+                match op {
+                    FastOp::Batch(b) => {
+                        let batch = batches[b as usize];
+                        if batch.water_col as usize != next_col {
+                            ok = false;
+                            break;
+                        }
+                        next_col += 1;
+                        for s in &batch_solutes[batch.solutes_start as usize..batch.solutes_end as usize] {
+                            if s.col as usize != next_col {
+                                ok = false;
+                                break;
+                            }
+                            next_col += 1;
+                        }
+                        if !ok {
+                            break;
+                        }
+                    }
+                    FastOp::Single(idx) => {
+                        let inst = instances[idx as usize];
+                        if inst.mode_var != u16::MAX {
+                            ok = false;
+                            break;
+                        }
+                        match layout.instances[idx as usize].target {
+                            Target::Column(col) if col.index() == next_col => {
+                                next_col += 1;
+                            }
+                            _ => {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if ok && next_col == layout.columns.len() {
+                let prefix_ok = ops[..fused_start_op].iter().all(|&op| match op {
+                    FastOp::Single(idx) => match layout.instances[idx as usize].target {
+                        Target::Column(col) => col.index() < first_col,
+                        Target::Row(_) => true,
+                    },
+                    FastOp::Batch(_) => false,
+                });
+                if prefix_ok {
+                    fused_prefix_terms = col_term_ranges[first_col].start as usize;
+                    fused_stage = true;
+                }
+            }
+        }
         Some(FastTape {
             instances,
+            targets,
+            has_validity,
+            batches,
+            batch_solutes,
+            ops,
+            fused_start_op,
+            fused_prefix_terms,
+            fused_stage,
+            col_term_ranges,
             generals,
             steps,
             parameters,
@@ -1140,6 +1431,77 @@ impl CompiledBody {
         out.extend(judged);
         Ok(out)
     }
+    #[inline(always)]
+    fn eval_single_fast(
+        &self,
+        fast: &FastTape,
+        at: usize,
+        inst: FastInstance,
+        inputs: &Inputs<'_>,
+        partial_volume: f64,
+        values: &mut [f64; STACK_SLOTS],
+    ) -> Result<f64, Undefined> {
+        let parameters = inputs.parameters;
+        let unknowns = inputs.unknowns;
+        Ok(match inst.kind {
+            FastKind::Upwind5(u) => {
+                let flow = unknowns[usize::from(u[0])];
+                let value = if flow > 0.0 {
+                    let water = unknowns[usize::from(u[2])];
+                    if water <= 0.0 {
+                        return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+                    }
+                    flow * (unknowns[usize::from(u[1])] / water)
+                } else if flow < 0.0 {
+                    let water = unknowns[usize::from(u[4])];
+                    if water <= 0.0 {
+                        return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+                    }
+                    flow * (unknowns[usize::from(u[3])] / water)
+                } else {
+                    0.0
+                };
+                if !value.is_finite() {
+                    return Err(self.undefined(at, inputs, OperatorDomain::NonFinite));
+                }
+                value
+            }
+            FastKind::ReadUnknown(u) => unknowns[usize::from(u)],
+            FastKind::ReadParameter(p) => parameters[usize::from(p)],
+            FastKind::General(general_at) => {
+                let g = fast.generals[general_at as usize];
+                for &(slot, index) in &fast.parameters[g.param_start as usize..g.param_end as usize] {
+                    values[usize::from(slot)] = parameters[usize::from(index)];
+                }
+                for &(slot, index) in &fast.unknowns[g.unknown_start as usize..g.unknown_end as usize] {
+                    values[usize::from(slot)] = unknowns[usize::from(index)];
+                }
+                let mut clean = true;
+                if g.other_start != g.other_end {
+                    for &(slot, bound) in &self.tape.others[g.other_start as usize..g.other_end as usize] {
+                        match read(&bound, inputs) {
+                            Some(value) if value.is_finite() => values[slot as usize] = value,
+                            _ => clean = false,
+                        }
+                    }
+                }
+                if clean {
+                    forward_fast(
+                        &fast.steps[g.steps_start as usize..g.steps_end as usize],
+                        partial_volume,
+                        values,
+                    )
+                    .map_err(|domain| self.undefined(at, inputs, domain))?;
+                    values[usize::from(g.output)]
+                } else {
+                    let instance = &self.layout.instances[at];
+                    let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.instance(at));
+                    forward(arithmetic, reads, inputs, partial_volume, values)
+                        .map_err(|domain| self.undefined(at, inputs, domain))?
+                }
+            }
+        })
+    }
     fn instance_values_fast(
         &self,
         fast: &FastTape,
@@ -1150,82 +1512,78 @@ impl CompiledBody {
         let mut out = Vec::with_capacity(fast.instances.len() + self.tape.judged_total);
         let has_judged = self.tape.judged_total > 0;
         let mut judged = Vec::with_capacity(self.tape.judged_total);
-        let parameters = inputs.parameters;
         let unknowns = inputs.unknowns;
-        for (at, inst) in fast.instances.iter().enumerate() {
-            if !inst.holds(inputs.modes) {
-                out.push(None);
-                if has_judged {
-                    let range = &fast.judged_ranges[at];
-                    judged.resize(judged.len() + (range.end - range.start) as usize, None);
-                }
-                continue;
-            }
-            let value = match inst.kind {
-                FastKind::Upwind5(u) => {
-                    let flow = unknowns[usize::from(u[0])];
-                    let value = if flow > 0.0 {
-                        let water = unknowns[usize::from(u[2])];
-                        if water <= 0.0 {
-                            return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+        for &op in &fast.ops {
+            match op {
+                FastOp::Single(at) => {
+                    let at = at as usize;
+                    let inst = fast.instances[at];
+                    if !inst.holds(inputs.modes) {
+                        out.push(None);
+                        if has_judged {
+                            let range = &fast.judged_ranges[at];
+                            judged.resize(judged.len() + (range.end - range.start) as usize, None);
                         }
-                        flow * (unknowns[usize::from(u[1])] / water)
-                    } else if flow < 0.0 {
-                        let water = unknowns[usize::from(u[4])];
-                        if water <= 0.0 {
-                            return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+                        continue;
+                    }
+                    let value = self.eval_single_fast(fast, at, inst, inputs, partial_volume, &mut values)?;
+                    out.push(Some(value));
+                    if has_judged {
+                        let range = &fast.judged_ranges[at];
+                        for &op in &fast.judged_ops[slice_range(range)] {
+                            judged.push(Some(values[usize::from(op)]));
                         }
-                        flow * (unknowns[usize::from(u[3])] / water)
-                    } else {
-                        0.0
-                    };
-                    if !value.is_finite() {
-                        return Err(self.undefined(at, inputs, OperatorDomain::NonFinite));
                     }
-                    value
                 }
-                FastKind::ReadUnknown(u) => unknowns[usize::from(u)],
-                FastKind::ReadParameter(p) => parameters[usize::from(p)],
-                FastKind::General(general_at) => {
-                    let g = fast.generals[general_at as usize];
-                    for &(slot, index) in &fast.parameters[g.param_start as usize..g.param_end as usize] {
-                        values[usize::from(slot)] = parameters[usize::from(index)];
-                    }
-                    for &(slot, index) in &fast.unknowns[g.unknown_start as usize..g.unknown_end as usize] {
-                        values[usize::from(slot)] = unknowns[usize::from(index)];
-                    }
-                    let mut clean = true;
-                    if g.other_start != g.other_end {
-                        for &(slot, bound) in &self.tape.others[g.other_start as usize..g.other_end as usize]
-                        {
-                            match read(&bound, inputs) {
-                                Some(value) if value.is_finite() => values[slot as usize] = value,
-                                _ => clean = false,
+                FastOp::Batch(batch_at) => {
+                    let batch = fast.batches[batch_at as usize];
+                    let solutes =
+                        &fast.batch_solutes[batch.solutes_start as usize..batch.solutes_end as usize];
+                    let flow = unknowns[usize::from(batch.flow)];
+                    out.push(Some(flow));
+                    if flow > 0.0 {
+                        let water = unknowns[usize::from(batch.from_water)];
+                        if water <= 0.0 {
+                            return Err(self.undefined(
+                                solutes[0].inst as usize,
+                                inputs,
+                                OperatorDomain::Divisor,
+                            ));
+                        }
+                        for s in solutes {
+                            let rate = flow * (unknowns[usize::from(s.from_amt)] / water);
+                            if !rate.is_finite() {
+                                return Err(self.undefined(
+                                    s.inst as usize,
+                                    inputs,
+                                    OperatorDomain::NonFinite,
+                                ));
                             }
+                            out.push(Some(rate));
                         }
-                    }
-                    if clean {
-                        forward_fast(
-                            &fast.steps[g.steps_start as usize..g.steps_end as usize],
-                            partial_volume,
-                            &mut values,
-                        )
-                        .map_err(|domain| self.undefined(at, inputs, domain))?;
-                        values[usize::from(g.output)]
+                    } else if flow < 0.0 {
+                        let water = unknowns[usize::from(batch.to_water)];
+                        if water <= 0.0 {
+                            return Err(self.undefined(
+                                solutes[0].inst as usize,
+                                inputs,
+                                OperatorDomain::Divisor,
+                            ));
+                        }
+                        for s in solutes {
+                            let rate = flow * (unknowns[usize::from(s.to_amt)] / water);
+                            if !rate.is_finite() {
+                                return Err(self.undefined(
+                                    s.inst as usize,
+                                    inputs,
+                                    OperatorDomain::NonFinite,
+                                ));
+                            }
+                            out.push(Some(rate));
+                        }
                     } else {
-                        let instance = &self.layout.instances[at];
-                        let (arithmetic, reads) =
-                            (self.tape.program(instance.program), self.tape.instance(at));
-                        forward(arithmetic, reads, inputs, partial_volume, &mut values)
-                            .map_err(|domain| self.undefined(at, inputs, domain))?
+                        out.resize(out.len() + solutes.len(), Some(0.0));
                     }
-                }
-            };
-            out.push(Some(value));
-            if has_judged {
-                let range = &fast.judged_ranges[at];
-                for &op in &fast.judged_ops[slice_range(range)] {
-                    judged.push(Some(values[usize::from(op)]));
                 }
             }
         }
@@ -1233,6 +1591,241 @@ impl CompiledBody {
             out.extend(judged);
         }
         Ok(out)
+    }
+    #[inline(always)]
+    fn write_scaled_column(&self, columns: &mut [f64], column: ColumnId, value: f64) {
+        columns[column.index()] = self.layout.columns[column.index()].turnovers(value);
+    }
+    #[inline(always)]
+    fn store_target(&self, target: FastTarget, value: f64, columns: &mut [f64], rows: &mut [f64]) {
+        match target {
+            FastTarget::ColumnUnit(col) => columns[col as usize] = value,
+            FastTarget::ColumnScaled(col) => self.write_scaled_column(columns, col, value),
+            FastTarget::Row(row, rectified) => {
+                rows[row as usize] += if rectified && value <= 0.0 { 0.0 } else { value };
+            }
+        }
+    }
+    pub(crate) fn evaluate_stage(
+        &self,
+        inputs: &Inputs<'_>,
+        derivative: &[f64],
+    ) -> Result<StageValues, Undefined> {
+        let partial_volume = self.partial_volume();
+        if let Some(fast) = &self.tape.fast
+            && self.tape.clean_inputs(inputs)
+            && derivative.len() == self.layout.rows.len()
+        {
+            return self.evaluate_stage_fast(fast, inputs, derivative, partial_volume);
+        }
+        let values = self.instance_values(inputs)?;
+        let (columns, rows) = self.targets(&values);
+        let residuals = self.residuals(&columns, &rows, derivative);
+        Ok(StageValues {
+            columns,
+            rows,
+            residuals,
+        })
+    }
+    fn evaluate_stage_fast(
+        &self,
+        fast: &FastTape,
+        inputs: &Inputs<'_>,
+        derivative: &[f64],
+        partial_volume: f64,
+    ) -> Result<StageValues, Undefined> {
+        let mut values = [0.0; STACK_SLOTS];
+        let mut columns = vec![0.0; self.layout.columns.len()];
+        let mut rows = vec![0.0; self.layout.rows.len()];
+        let unknowns = inputs.unknowns;
+        if fast.fused_stage {
+            for &op in &fast.ops[..fast.fused_start_op] {
+                let FastOp::Single(at) = op else { unreachable!() };
+                let at = at as usize;
+                let inst = fast.instances[at];
+                if !inst.holds(inputs.modes) {
+                    continue;
+                }
+                let value = self.eval_single_fast(fast, at, inst, inputs, partial_volume, &mut values)?;
+                self.store_target(fast.targets[at], value, &mut columns, &mut rows);
+            }
+            let mut residuals = Vec::with_capacity(rows.len());
+            residuals.extend_from_slice(&derivative[..self.tape.amounts_end]);
+            for (&value, &tangent) in rows[self.tape.amounts_end..self.tape.memory_end]
+                .iter()
+                .zip(&derivative[self.tape.amounts_end..self.tape.memory_end])
+            {
+                residuals.push(tangent - value);
+            }
+            residuals.extend_from_slice(&rows[self.tape.memory_end..]);
+            for &ColumnTerm {
+                column,
+                row,
+                coefficient,
+            } in &self.tape.column_terms[..fast.fused_prefix_terms]
+            {
+                residuals[row as usize] -= coefficient * columns[column as usize];
+            }
+            for &op in &fast.ops[fast.fused_start_op..] {
+                match op {
+                    FastOp::Batch(batch_at) => {
+                        let batch = fast.batches[batch_at as usize];
+                        let solutes =
+                            &fast.batch_solutes[batch.solutes_start as usize..batch.solutes_end as usize];
+                        let flow = unknowns[usize::from(batch.flow)];
+                        columns[batch.water_col as usize] = flow;
+                        residuals[usize::from(batch.from_water)] -= -flow;
+                        residuals[usize::from(batch.to_water)] -= flow;
+                        if flow > 0.0 {
+                            let water = unknowns[usize::from(batch.from_water)];
+                            if water <= 0.0 {
+                                return Err(self.undefined(
+                                    solutes[0].inst as usize,
+                                    inputs,
+                                    OperatorDomain::Divisor,
+                                ));
+                            }
+                            for s in solutes {
+                                let rate = flow * (unknowns[usize::from(s.from_amt)] / water);
+                                if !rate.is_finite() {
+                                    return Err(self.undefined(
+                                        s.inst as usize,
+                                        inputs,
+                                        OperatorDomain::NonFinite,
+                                    ));
+                                }
+                                columns[s.col as usize] = rate;
+                                residuals[usize::from(s.from_amt)] -= -rate;
+                                residuals[usize::from(s.to_amt)] -= rate;
+                            }
+                        } else if flow < 0.0 {
+                            let water = unknowns[usize::from(batch.to_water)];
+                            if water <= 0.0 {
+                                return Err(self.undefined(
+                                    solutes[0].inst as usize,
+                                    inputs,
+                                    OperatorDomain::Divisor,
+                                ));
+                            }
+                            for s in solutes {
+                                let rate = flow * (unknowns[usize::from(s.to_amt)] / water);
+                                if !rate.is_finite() {
+                                    return Err(self.undefined(
+                                        s.inst as usize,
+                                        inputs,
+                                        OperatorDomain::NonFinite,
+                                    ));
+                                }
+                                columns[s.col as usize] = rate;
+                                residuals[usize::from(s.from_amt)] -= -rate;
+                                residuals[usize::from(s.to_amt)] -= rate;
+                            }
+                        } else {
+                            let zero = 0.0_f64;
+                            for s in solutes {
+                                residuals[usize::from(s.from_amt)] -= -zero;
+                                residuals[usize::from(s.to_amt)] -= zero;
+                            }
+                        }
+                    }
+                    FastOp::Single(at) => {
+                        let at = at as usize;
+                        let inst = fast.instances[at];
+                        let value =
+                            self.eval_single_fast(fast, at, inst, inputs, partial_volume, &mut values)?;
+                        let col = match fast.targets[at] {
+                            FastTarget::ColumnUnit(col) => {
+                                columns[col as usize] = value;
+                                col as usize
+                            }
+                            FastTarget::ColumnScaled(col) => {
+                                self.write_scaled_column(&mut columns, col, value);
+                                col.index()
+                            }
+                            FastTarget::Row(_, _) => unreachable!(),
+                        };
+                        let rate = columns[col];
+                        for &ColumnTerm { row, coefficient, .. } in
+                            &self.tape.column_terms[slice_range(&fast.col_term_ranges[col])]
+                        {
+                            residuals[row as usize] -= coefficient * rate;
+                        }
+                    }
+                }
+            }
+            return Ok(StageValues {
+                columns,
+                rows,
+                residuals,
+            });
+        }
+        for &op in &fast.ops {
+            match op {
+                FastOp::Single(at) => {
+                    let at = at as usize;
+                    let inst = fast.instances[at];
+                    if !inst.holds(inputs.modes) {
+                        continue;
+                    }
+                    let value = self.eval_single_fast(fast, at, inst, inputs, partial_volume, &mut values)?;
+                    self.store_target(fast.targets[at], value, &mut columns, &mut rows);
+                }
+                FastOp::Batch(batch_at) => {
+                    let batch = fast.batches[batch_at as usize];
+                    let solutes =
+                        &fast.batch_solutes[batch.solutes_start as usize..batch.solutes_end as usize];
+                    let flow = unknowns[usize::from(batch.flow)];
+                    columns[batch.water_col as usize] = flow;
+                    if flow > 0.0 {
+                        let water = unknowns[usize::from(batch.from_water)];
+                        if water <= 0.0 {
+                            return Err(self.undefined(
+                                solutes[0].inst as usize,
+                                inputs,
+                                OperatorDomain::Divisor,
+                            ));
+                        }
+                        for s in solutes {
+                            let rate = flow * (unknowns[usize::from(s.from_amt)] / water);
+                            if !rate.is_finite() {
+                                return Err(self.undefined(
+                                    s.inst as usize,
+                                    inputs,
+                                    OperatorDomain::NonFinite,
+                                ));
+                            }
+                            columns[s.col as usize] = rate;
+                        }
+                    } else if flow < 0.0 {
+                        let water = unknowns[usize::from(batch.to_water)];
+                        if water <= 0.0 {
+                            return Err(self.undefined(
+                                solutes[0].inst as usize,
+                                inputs,
+                                OperatorDomain::Divisor,
+                            ));
+                        }
+                        for s in solutes {
+                            let rate = flow * (unknowns[usize::from(s.to_amt)] / water);
+                            if !rate.is_finite() {
+                                return Err(self.undefined(
+                                    s.inst as usize,
+                                    inputs,
+                                    OperatorDomain::NonFinite,
+                                ));
+                            }
+                            columns[s.col as usize] = rate;
+                        }
+                    }
+                }
+            }
+        }
+        let residuals = self.residuals(&columns, &rows, derivative);
+        Ok(StageValues {
+            columns,
+            rows,
+            residuals,
+        })
     }
     fn slopes(
         &self,
@@ -1265,6 +1858,136 @@ impl CompiledBody {
         }
         Ok(())
     }
+    #[inline(always)]
+    fn slope_single_fast(
+        &self,
+        fast: &FastTape,
+        at: usize,
+        inputs: &Inputs<'_>,
+        partial_volume: f64,
+        scratch: &mut SlopeScratch,
+        mut each: impl FnMut(&Swept<'_>) -> Result<(), Undefined>,
+    ) -> Result<(), Undefined> {
+        let inst = fast.instances[at];
+        let instance = &self.layout.instances[at];
+        let (values, slopes) = (&mut scratch.values, &mut scratch.slopes);
+        let (parameters, unknowns) = (inputs.parameters, inputs.unknowns);
+        let reads = self.tape.instance(at);
+        match inst.kind {
+            FastKind::Upwind5(u) => {
+                let flow = unknowns[usize::from(u[0])];
+                let mut upwind_slopes = [0.0; 5];
+                let value = if flow >= 0.0 {
+                    let (amount, water) = (unknowns[usize::from(u[1])], unknowns[usize::from(u[2])]);
+                    let share = if water > 0.0 { amount / water } else { 0.0 };
+                    let value = if flow == 0.0 {
+                        0.0
+                    } else if water <= 0.0 {
+                        return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+                    } else {
+                        flow * share
+                    };
+                    if !value.is_finite() {
+                        return Err(self.undefined(at, inputs, OperatorDomain::NonFinite));
+                    }
+                    if water > 0.0 {
+                        upwind_slopes[0] += share;
+                        upwind_slopes[1] += flow / water;
+                        upwind_slopes[2] -= flow * share / water;
+                    }
+                    value
+                } else {
+                    let (amount, water) = (unknowns[usize::from(u[3])], unknowns[usize::from(u[4])]);
+                    if water <= 0.0 {
+                        return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
+                    }
+                    let share = amount / water;
+                    let value = flow * share;
+                    if !value.is_finite() {
+                        return Err(self.undefined(at, inputs, OperatorDomain::NonFinite));
+                    }
+                    upwind_slopes[0] += share;
+                    upwind_slopes[3] += flow / water;
+                    upwind_slopes[4] -= flow * share / water;
+                    value
+                };
+                let flat = positive_part(instance, value) != value;
+                each(&Swept {
+                    at,
+                    instance,
+                    reads,
+                    slopes: &upwind_slopes,
+                    flat,
+                })?;
+            }
+            FastKind::ReadUnknown(u) => {
+                let value = unknowns[usize::from(u)];
+                let flat = positive_part(instance, value) != value;
+                let slot = reads.unknowns[0].0 as usize;
+                slopes[slot] = 1.0;
+                each(&Swept {
+                    at,
+                    instance,
+                    reads,
+                    slopes,
+                    flat,
+                })?;
+            }
+            FastKind::ReadParameter(p) => {
+                let value = parameters[usize::from(p)];
+                let flat = positive_part(instance, value) != value;
+                let slot = reads.parameters[0].0 as usize;
+                slopes[slot] = 1.0;
+                each(&Swept {
+                    at,
+                    instance,
+                    reads,
+                    slopes,
+                    flat,
+                })?;
+            }
+            FastKind::General(general_at) => {
+                let g = fast.generals[general_at as usize];
+                let arithmetic = self.tape.program(instance.program);
+                for &(slot, index) in &fast.parameters[g.param_start as usize..g.param_end as usize] {
+                    values[usize::from(slot)] = parameters[usize::from(index)];
+                }
+                for &(slot, index) in &fast.unknowns[g.unknown_start as usize..g.unknown_end as usize] {
+                    values[usize::from(slot)] = unknowns[usize::from(index)];
+                }
+                let mut clean = true;
+                if g.other_start != g.other_end {
+                    for &(slot, bound) in &self.tape.others[g.other_start as usize..g.other_end as usize] {
+                        match read(&bound, inputs) {
+                            Some(value) if value.is_finite() => values[slot as usize] = value,
+                            _ => clean = false,
+                        }
+                    }
+                }
+                let value = if clean {
+                    for &(slot, instr) in arithmetic.steps {
+                        let val = apply(instr, values, partial_volume)
+                            .map_err(|domain| self.undefined(at, inputs, domain))?;
+                        values[slot as usize] = val;
+                    }
+                    values[arithmetic.length as usize - 1]
+                } else {
+                    forward(arithmetic, reads, inputs, partial_volume, values)
+                        .map_err(|domain| self.undefined(at, inputs, domain))?
+                };
+                backward(arithmetic, values, partial_volume, slopes);
+                let flat = positive_part(instance, value) != value;
+                each(&Swept {
+                    at,
+                    instance,
+                    reads,
+                    slopes,
+                    flat,
+                })?;
+            }
+        }
+        Ok(())
+    }
     fn slopes_fast(
         &self,
         fast: &FastTape,
@@ -1272,125 +1995,113 @@ impl CompiledBody {
         partial_volume: f64,
         mut each: impl FnMut(&Swept<'_>) -> Result<(), Undefined>,
     ) -> Result<(), Undefined> {
-        let (mut values, mut slopes) = ([0.0; STACK_SLOTS], [0.0; STACK_SLOTS]);
-        let (parameters, unknowns) = (inputs.parameters, inputs.unknowns);
-        for (at, (inst, instance)) in fast.instances.iter().zip(&self.layout.instances).enumerate() {
+        let mut scratch = SlopeScratch {
+            values: [0.0; STACK_SLOTS],
+            slopes: [0.0; STACK_SLOTS],
+        };
+        for (at, &inst) in fast.instances.iter().enumerate() {
             if !inst.holds(inputs.modes) {
                 continue;
             }
-            let reads = self.tape.instance(at);
-            match inst.kind {
-                FastKind::Upwind5(u) => {
-                    let flow = unknowns[usize::from(u[0])];
-                    let mut upwind_slopes = [0.0; 5];
-                    let value = if flow >= 0.0 {
-                        let (amount, water) = (unknowns[usize::from(u[1])], unknowns[usize::from(u[2])]);
-                        let value = if flow == 0.0 {
-                            0.0
-                        } else if water <= 0.0 {
-                            return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
-                        } else {
-                            flow * (amount / water)
-                        };
-                        if !value.is_finite() {
-                            return Err(self.undefined(at, inputs, OperatorDomain::NonFinite));
-                        }
-                        if water > 0.0 {
-                            let share = amount / water;
-                            upwind_slopes[0] += share;
-                            upwind_slopes[1] += flow / water;
-                            upwind_slopes[2] -= flow * share / water;
-                        }
-                        value
+            self.slope_single_fast(fast, at, inputs, partial_volume, &mut scratch, &mut each)?;
+        }
+        Ok(())
+    }
+    #[inline(always)]
+    fn jacobian_batch(
+        &self,
+        batch: TransportBatch,
+        fast: &FastTape,
+        inputs: &Inputs<'_>,
+        values: &mut [f64],
+    ) -> Result<(), Undefined> {
+        let unknowns = inputs.unknowns;
+        let flow = unknowns[usize::from(batch.flow)];
+        values[batch.water_j_from_flow as usize] -= -1.0;
+        values[batch.water_j_to_flow as usize] -= 1.0;
+        let solutes = &fast.batch_solutes[batch.solutes_start as usize..batch.solutes_end as usize];
+        if flow > 0.0 {
+            let water = unknowns[usize::from(batch.from_water)];
+            if water <= 0.0 {
+                return Err(self.undefined(solutes[0].inst as usize, inputs, OperatorDomain::Divisor));
+            }
+            let alpha = flow / water;
+            for s in solutes {
+                let share = unknowns[usize::from(s.from_amt)] / water;
+                let value = flow * share;
+                if !value.is_finite() {
+                    return Err(self.undefined(s.inst as usize, inputs, OperatorDomain::NonFinite));
+                }
+                let d_water = 0.0 - flow * share / water;
+                if !(share.is_finite() & alpha.is_finite() & d_water.is_finite()) {
+                    let slot = if !share.is_finite() {
+                        0
+                    } else if !alpha.is_finite() {
+                        1
                     } else {
-                        let (amount, water) = (unknowns[usize::from(u[3])], unknowns[usize::from(u[4])]);
-                        if water <= 0.0 {
-                            return Err(self.undefined(at, inputs, OperatorDomain::Divisor));
-                        }
-                        let value = flow * (amount / water);
-                        if !value.is_finite() {
-                            return Err(self.undefined(at, inputs, OperatorDomain::NonFinite));
-                        }
-                        let share = amount / water;
-                        upwind_slopes[0] += share;
-                        upwind_slopes[3] += flow / water;
-                        upwind_slopes[4] -= flow * share / water;
-                        value
+                        2
                     };
-                    let flat = positive_part(instance, value) != value;
-                    each(&Swept {
-                        at,
-                        instance,
-                        reads,
-                        slopes: &upwind_slopes,
-                        flat,
-                    })?;
+                    return Err(self.undefined_at(
+                        &self.layout.instances[s.inst as usize],
+                        slot,
+                        OperatorDomain::NonFinite,
+                    ));
                 }
-                FastKind::ReadUnknown(u) => {
-                    let value = unknowns[usize::from(u)];
-                    let flat = positive_part(instance, value) != value;
-                    let slot = reads.unknowns[0].0 as usize;
-                    slopes[slot] = 1.0;
-                    each(&Swept {
-                        at,
-                        instance,
-                        reads,
-                        slopes: &slopes,
-                        flat,
-                    })?;
+                values[s.j_from_flow as usize] -= -share;
+                values[s.j_to_flow as usize] -= share;
+                values[s.j_from_from_amt as usize] -= -alpha;
+                values[s.j_to_from_amt as usize] -= alpha;
+                values[s.j_from_from_water as usize] -= -d_water;
+                values[s.j_to_from_water as usize] -= d_water;
+            }
+        } else if flow < 0.0 {
+            let water = unknowns[usize::from(batch.to_water)];
+            if water <= 0.0 {
+                return Err(self.undefined(solutes[0].inst as usize, inputs, OperatorDomain::Divisor));
+            }
+            let alpha = flow / water;
+            for s in solutes {
+                let share = unknowns[usize::from(s.to_amt)] / water;
+                let value = flow * share;
+                if !value.is_finite() {
+                    return Err(self.undefined(s.inst as usize, inputs, OperatorDomain::NonFinite));
                 }
-                FastKind::ReadParameter(p) => {
-                    let value = parameters[usize::from(p)];
-                    let flat = positive_part(instance, value) != value;
-                    let slot = reads.parameters[0].0 as usize;
-                    slopes[slot] = 1.0;
-                    each(&Swept {
-                        at,
-                        instance,
-                        reads,
-                        slopes: &slopes,
-                        flat,
-                    })?;
-                }
-                FastKind::General(general_at) => {
-                    let g = fast.generals[general_at as usize];
-                    let arithmetic = self.tape.program(instance.program);
-                    for &(slot, index) in &fast.parameters[g.param_start as usize..g.param_end as usize] {
-                        values[usize::from(slot)] = parameters[usize::from(index)];
-                    }
-                    for &(slot, index) in &fast.unknowns[g.unknown_start as usize..g.unknown_end as usize] {
-                        values[usize::from(slot)] = unknowns[usize::from(index)];
-                    }
-                    let mut clean = true;
-                    if g.other_start != g.other_end {
-                        for &(slot, bound) in &self.tape.others[g.other_start as usize..g.other_end as usize]
-                        {
-                            match read(&bound, inputs) {
-                                Some(value) if value.is_finite() => values[slot as usize] = value,
-                                _ => clean = false,
-                            }
-                        }
-                    }
-                    let value = if clean {
-                        for &(slot, instr) in arithmetic.steps {
-                            let val = apply(instr, &values, partial_volume)
-                                .map_err(|domain| self.undefined(at, inputs, domain))?;
-                            values[slot as usize] = val;
-                        }
-                        values[arithmetic.length as usize - 1]
+                let d_water = 0.0 - flow * share / water;
+                if !(share.is_finite() & alpha.is_finite() & d_water.is_finite()) {
+                    let slot = if !share.is_finite() {
+                        0
+                    } else if !alpha.is_finite() {
+                        3
                     } else {
-                        forward(arithmetic, reads, inputs, partial_volume, &mut values)
-                            .map_err(|domain| self.undefined(at, inputs, domain))?
+                        4
                     };
-                    backward(arithmetic, &values, partial_volume, &mut slopes);
-                    let flat = positive_part(instance, value) != value;
-                    each(&Swept {
-                        at,
-                        instance,
-                        reads,
-                        slopes: &slopes,
-                        flat,
-                    })?;
+                    return Err(self.undefined_at(
+                        &self.layout.instances[s.inst as usize],
+                        slot,
+                        OperatorDomain::NonFinite,
+                    ));
+                }
+                values[s.j_from_flow as usize] -= -share;
+                values[s.j_to_flow as usize] -= share;
+                values[s.j_from_to_amt as usize] -= -alpha;
+                values[s.j_to_to_amt as usize] -= alpha;
+                values[s.j_from_to_water as usize] -= -d_water;
+                values[s.j_to_to_water as usize] -= d_water;
+            }
+        } else {
+            let water = unknowns[usize::from(batch.from_water)];
+            if water > 0.0 {
+                for s in solutes {
+                    let share = unknowns[usize::from(s.from_amt)] / water;
+                    if !share.is_finite() {
+                        return Err(self.undefined_at(
+                            &self.layout.instances[s.inst as usize],
+                            0,
+                            OperatorDomain::NonFinite,
+                        ));
+                    }
+                    values[s.j_from_flow as usize] -= -share;
+                    values[s.j_to_flow as usize] -= share;
                 }
             }
         }
@@ -1401,8 +2112,7 @@ impl CompiledBody {
             Column(&'a crate::body::Column),
             Row(f64),
         }
-        let mut values = vec![0.0; self.layout.sparsity.unknowns.len()];
-        self.slopes(inputs, |swept| {
+        let scatter = |swept: &Swept<'_>, values: &mut [f64]| -> Result<(), Undefined> {
             let mut entries = self.tape.entries(swept.at).iter();
             let mut next = || *entries.next().expect("an entry per unknown read and term") as usize;
             let target = match swept.instance.target {
@@ -1431,7 +2141,35 @@ impl CompiledBody {
                 }
             }
             Ok(())
-        })?;
+        };
+        let mut values = vec![0.0; self.layout.sparsity.unknowns.len()];
+        if let Some(fast) = &self.tape.fast
+            && self.tape.clean_inputs(inputs)
+        {
+            let partial_volume = self.partial_volume();
+            let mut scratch = SlopeScratch {
+                values: [0.0; STACK_SLOTS],
+                slopes: [0.0; STACK_SLOTS],
+            };
+            for &op in &fast.ops {
+                match op {
+                    FastOp::Batch(batch_at) => {
+                        self.jacobian_batch(fast.batches[batch_at as usize], fast, inputs, &mut values)?;
+                    }
+                    FastOp::Single(at) => {
+                        let at = at as usize;
+                        if !fast.instances[at].holds(inputs.modes) {
+                            continue;
+                        }
+                        self.slope_single_fast(fast, at, inputs, partial_volume, &mut scratch, |swept| {
+                            scatter(swept, &mut values)
+                        })?;
+                    }
+                }
+            }
+        } else {
+            self.slopes(inputs, |swept| scatter(swept, &mut values))?;
+        }
         for &entry in &self.tape.diagonals {
             values[entry as usize] += shift;
         }
@@ -1474,9 +2212,7 @@ impl CompiledBody {
         for (instance, value) in self.layout.instances.iter().zip(values) {
             let Some(value) = *value else { continue };
             match instance.target {
-                Target::Column(column) => {
-                    columns[column.index()] = self.layout.columns[column.index()].turnovers(value);
-                }
+                Target::Column(column) => self.write_scaled_column(&mut columns, column, value),
                 Target::Row(row) => rows[row.index()] += positive_part(instance, value),
             }
         }
@@ -1521,29 +2257,28 @@ impl CompiledBody {
         }
         residuals
     }
-    pub(crate) fn excursions(
+    fn push_validity(
         &self,
-        values: &[Option<f64>],
+        instance: &Instance,
+        value: f64,
         unknowns: &[f64],
         at: SimTime,
-    ) -> Vec<ValidityExcursion> {
-        let mut excursions = Vec::new();
-        for (instance, value) in self.layout.instances.iter().zip(values) {
-            let Some(value) = *value else { continue };
-            let program = &self.layout.programs[instance.program.index()];
-            let value = match instance.target {
-                Target::Row(row) if program.code.defines => unknowns[row.index()],
-                _ => value,
-            };
-            for &Validity { lower, upper, .. } in &program.code.validity {
-                excursions.extend(excursion(program.law, instance.context, at, value, lower, upper));
-            }
+        excursions: &mut Vec<ValidityExcursion>,
+    ) {
+        let program = &self.layout.programs[instance.program.index()];
+        let value = match instance.target {
+            Target::Row(row) if program.code.defines => unknowns[row.index()],
+            _ => value,
+        };
+        for &Validity { lower, upper, .. } in &program.code.validity {
+            excursions.extend(excursion(program.law, instance.context, at, value, lower, upper));
         }
+    }
+    fn push_judged(&self, tail: &[Option<f64>], at: SimTime, excursions: &mut Vec<ValidityExcursion>) {
         let judged = (self.layout.instances.iter()).flat_map(|instance| {
             let program = &self.layout.programs[instance.program.index()];
             (program.code.judged.iter()).map(move |&(_, law, range)| (instance.context, law, range))
         });
-        let tail = &values[self.layout.instances.len().min(values.len())..];
         let mut reported: Vec<(LawName, Context, Validity)> = Vec::new();
         for ((context, law, range), value) in judged.zip(tail) {
             if let Some(value) = *value
@@ -1553,7 +2288,143 @@ impl CompiledBody {
                 excursions.extend(excursion(law, context, at, value, range.lower, range.upper));
             }
         }
+    }
+    pub(crate) fn excursions(
+        &self,
+        values: &[Option<f64>],
+        unknowns: &[f64],
+        at: SimTime,
+    ) -> Vec<ValidityExcursion> {
+        let mut excursions = Vec::new();
+        for (instance, value) in self.layout.instances.iter().zip(values) {
+            let Some(value) = *value else { continue };
+            self.push_validity(instance, value, unknowns, at, &mut excursions);
+        }
+        let tail = &values[self.layout.instances.len().min(values.len())..];
+        self.push_judged(tail, at, &mut excursions);
         excursions
+    }
+    pub(crate) fn evaluate_published(
+        &self,
+        inputs: &Inputs<'_>,
+        first_algebraic: usize,
+        at: SimTime,
+    ) -> Result<PublishedEval, Undefined> {
+        let algebraic_rows = self.layout.rows.len() - first_algebraic;
+        let partial_volume = self.partial_volume();
+        if let Some(fast) = &self.tape.fast
+            && self.tape.clean_inputs(inputs)
+        {
+            let mut algebraic = vec![0.0; algebraic_rows];
+            let mut excursions = Vec::new();
+            let mut judged_tail = vec![None; self.tape.judged_total];
+            let mut values = [0.0; STACK_SLOTS];
+            let unknowns = inputs.unknowns;
+            for &op in &fast.ops {
+                match op {
+                    FastOp::Batch(batch_at) => {
+                        let batch = fast.batches[batch_at as usize];
+                        let solutes =
+                            &fast.batch_solutes[batch.solutes_start as usize..batch.solutes_end as usize];
+                        let flow = unknowns[usize::from(batch.flow)];
+                        if flow > 0.0 {
+                            let water = unknowns[usize::from(batch.from_water)];
+                            if water <= 0.0 {
+                                return Err(self.undefined(
+                                    solutes[0].inst as usize,
+                                    inputs,
+                                    OperatorDomain::Divisor,
+                                ));
+                            }
+                            for s in solutes {
+                                let rate = flow * (unknowns[usize::from(s.from_amt)] / water);
+                                if !rate.is_finite() {
+                                    return Err(self.undefined(
+                                        s.inst as usize,
+                                        inputs,
+                                        OperatorDomain::NonFinite,
+                                    ));
+                                }
+                            }
+                        } else if flow < 0.0 {
+                            let water = unknowns[usize::from(batch.to_water)];
+                            if water <= 0.0 {
+                                return Err(self.undefined(
+                                    solutes[0].inst as usize,
+                                    inputs,
+                                    OperatorDomain::Divisor,
+                                ));
+                            }
+                            for s in solutes {
+                                let rate = flow * (unknowns[usize::from(s.to_amt)] / water);
+                                if !rate.is_finite() {
+                                    return Err(self.undefined(
+                                        s.inst as usize,
+                                        inputs,
+                                        OperatorDomain::NonFinite,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    FastOp::Single(idx) => {
+                        let idx = idx as usize;
+                        let inst = fast.instances[idx];
+                        if !inst.holds(inputs.modes) {
+                            continue;
+                        }
+                        let value =
+                            self.eval_single_fast(fast, idx, inst, inputs, partial_volume, &mut values)?;
+                        if let FastTarget::Row(row, rectified) = fast.targets[idx]
+                            && let Some(slot) = (row as usize).checked_sub(first_algebraic)
+                        {
+                            algebraic[slot] += if rectified && value <= 0.0 { 0.0 } else { value };
+                        }
+                        if fast.has_validity[idx] {
+                            self.push_validity(
+                                &self.layout.instances[idx],
+                                value,
+                                unknowns,
+                                at,
+                                &mut excursions,
+                            );
+                        }
+                        if self.tape.judged_total > 0 {
+                            let jrange = &fast.judged_ranges[idx];
+                            for j in jrange.start as usize..jrange.end as usize {
+                                judged_tail[j] = Some(values[usize::from(fast.judged_ops[j])]);
+                            }
+                        }
+                    }
+                }
+            }
+            if self.tape.judged_total > 0 {
+                self.push_judged(&judged_tail, at, &mut excursions);
+            }
+            return Ok(PublishedEval {
+                algebraic,
+                excursions,
+            });
+        }
+        let published = self.instance_values(inputs)?;
+        let mut algebraic = vec![0.0; algebraic_rows];
+        for (instance, value) in self.layout.instances.iter().zip(&published) {
+            let Some(value) = *value else { continue };
+            if let Target::Row(row) = instance.target
+                && let Some(slot) = row.index().checked_sub(first_algebraic)
+            {
+                algebraic[slot] += if instance.rectified && value <= 0.0 {
+                    0.0
+                } else {
+                    value
+                };
+            }
+        }
+        let excursions = self.excursions(&published, inputs.unknowns, at);
+        Ok(PublishedEval {
+            algebraic,
+            excursions,
+        })
     }
 }
 
@@ -2247,6 +3118,8 @@ mod tests {
         })
         .expect("compiled");
         let fast = body.tape.fast.as_ref().expect("fast tape");
+        assert_eq!(fast.batches.len(), 1);
+        assert!(fast.fused_stage);
         assert!(
             fast.instances
                 .iter()
@@ -2274,72 +3147,104 @@ mod tests {
         let frame = DriveFrame::default();
         let mut slow_params = bound.values.clone();
         slow_params.push(f64::NAN);
-        let cases: &[[f64; 4]] = &[
-            [10.0, 4.0, 2.0, 1.0],
-            [4.0, 10.0, 2.0, 1.0],
-            [5.0, 5.0, 2.0, 1.0],
-            [5.0, 5.0, -0.0, -0.0],
-            [0.0, 0.0, 2.0, 1.0],
-            [10.0, 0.0, 2.0, 1.0],
-            [0.0, 10.0, 2.0, 1.0],
+        let cases: &[[f64; 5]] = &[
+            [10.0, 4.0, 2.0, 1.0, 3.0],
+            [4.0, 10.0, 2.0, 1.0, -3.0],
+            [5.0, 5.0, 2.0, 1.0, 0.0],
+            [5.0, 5.0, -0.0, -0.0, -0.0],
+            [0.0, 0.0, 2.0, 1.0, 2.5],
+            [10.0, 0.0, 2.0, 1.0, -2.5],
+            [0.0, 10.0, 2.0, 1.0, 2.5],
+            [10.0, 4.0, 0.0, 0.0, 3.0],
+            [10.0, 4.0, 0.0, 0.0, -3.0],
+            [1e-200, 1e-200, 1e200, 1e200, 1e200],
         ];
-        let derivative = vec![0.25; body.rows().len()];
-        for case in cases {
-            let mut unknowns = vec![0.0; body.rows().len()];
-            for (dst, &src) in unknowns.iter_mut().zip(case) {
-                *dst = src;
-            }
-            let fast_in = Inputs {
-                parameters: &bound.values,
-                frame: &frame,
-                unknowns: &unknowns,
-                modes: &bound.modes,
-                draws: &[],
-                factors: &[],
-            };
-            let slow_in = Inputs {
-                parameters: &slow_params,
-                ..fast_in
-            };
-            let fv = body.instance_values(&fast_in);
-            let sv = body.instance_values(&slow_in);
-            match (&fv, &sv) {
-                (Ok(a), Ok(b)) => {
-                    let bits =
-                        |xs: &[Option<f64>]| xs.iter().map(|v| v.map(f64::to_bits)).collect::<Vec<_>>();
-                    assert_eq!(bits(a), bits(b), "values differ on {case:?}");
-                    let (fc, fr) = body.targets(a);
-                    let fres: Vec<u64> = body
-                        .residuals(&fc, &fr, &derivative)
-                        .into_iter()
-                        .map(f64::to_bits)
-                        .collect();
-                    let (sc, sr) = body.targets(b);
-                    let sres: Vec<u64> = body
-                        .residuals(&sc, &sr, &derivative)
-                        .into_iter()
-                        .map(f64::to_bits)
-                        .collect();
-                    assert_eq!(fres, sres, "residuals differ on {case:?}");
+        for deriv_val in [0.25, -0.0, 0.0] {
+            let derivative = vec![deriv_val; body.rows().len()];
+            for case in cases {
+                let mut unknowns = vec![0.0; body.rows().len()];
+                for (dst, &src) in unknowns.iter_mut().zip(case) {
+                    *dst = src;
                 }
-                (Err(a), Err(b)) => assert_eq!(
-                    (a.law, format!("{:?}", a.domain)),
-                    (b.law, format!("{:?}", b.domain))
-                ),
-                _ => panic!("mismatch on {case:?}: {fv:?} vs {sv:?}"),
-            }
-            let fj = body.jacobian(&fast_in, 1.5);
-            let sj = body.jacobian(&slow_in, 1.5);
-            match (&fj, &sj) {
-                (Ok(a), Ok(b)) => {
-                    let bits = |xs: &[f64]| xs.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
-                    assert_eq!(bits(a), bits(b), "jacobian differ on {case:?}");
+                let fast_in = Inputs {
+                    parameters: &bound.values,
+                    frame: &frame,
+                    unknowns: &unknowns,
+                    modes: &bound.modes,
+                    draws: &[],
+                    factors: &[],
+                };
+                let slow_in = Inputs {
+                    parameters: &slow_params,
+                    ..fast_in
+                };
+                let fv = body.instance_values(&fast_in);
+                let sv = body.instance_values(&slow_in);
+                match (&fv, &sv) {
+                    (Ok(a), Ok(b)) => {
+                        let bits =
+                            |xs: &[Option<f64>]| xs.iter().map(|v| v.map(f64::to_bits)).collect::<Vec<_>>();
+                        assert_eq!(bits(a), bits(b), "values differ on {case:?}");
+                        let (fc, fr) = body.targets(a);
+                        let fres: Vec<u64> = body
+                            .residuals(&fc, &fr, &derivative)
+                            .into_iter()
+                            .map(f64::to_bits)
+                            .collect();
+                        let (sc, sr) = body.targets(b);
+                        let sres: Vec<u64> = body
+                            .residuals(&sc, &sr, &derivative)
+                            .into_iter()
+                            .map(f64::to_bits)
+                            .collect();
+                        assert_eq!(fres, sres, "residuals differ on {case:?}");
+                    }
+                    (Err(a), Err(b)) => assert_eq!(
+                        (a.law, format!("{:?}", a.domain)),
+                        (b.law, format!("{:?}", b.domain))
+                    ),
+                    _ => panic!("mismatch on {case:?}: {fv:?} vs {sv:?}"),
                 }
-                (Err(a), Err(b)) => assert_eq!(
-                    (a.law, format!("{:?}", a.domain)),
-                    (b.law, format!("{:?}", b.domain))
-                ),
-                _ => panic!("jacobian mismatch on {case:?}: {fj:?} vs {sj:?}"),
+                let fs = body.evaluate_stage(&fast_in, &derivative);
+                let ss = body.evaluate_stage(&slow_in, &derivative);
+                match (&fs, &ss) {
+                    (Ok(f), Ok(s)) => {
+                        let bits = |xs: &[f64]| xs.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+                        assert_eq!(
+                            bits(&f.columns),
+                            bits(&s.columns),
+                            "stage cols differ on {case:?} deriv={deriv_val:?}"
+                        );
+                        assert_eq!(
+                            bits(&f.rows),
+                            bits(&s.rows),
+                            "stage rows differ on {case:?} deriv={deriv_val:?}"
+                        );
+                        assert_eq!(
+                            bits(&f.residuals),
+                            bits(&s.residuals),
+                            "stage res differ on {case:?} deriv={deriv_val:?}"
+                        );
+                    }
+                    (Err(a), Err(b)) => assert_eq!(
+                        (a.law, format!("{:?}", a.domain)),
+                        (b.law, format!("{:?}", b.domain))
+                    ),
+                    _ => panic!("stage mismatch on {case:?}: {fs:?} vs {ss:?}"),
+                }
+                let fj = body.jacobian(&fast_in, 1.5);
+                let sj = body.jacobian(&slow_in, 1.5);
+                match (&fj, &sj) {
+                    (Ok(a), Ok(b)) => {
+                        let bits = |xs: &[f64]| xs.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+                        assert_eq!(bits(a), bits(b), "jacobian differ on {case:?}");
+                    }
+                    (Err(a), Err(b)) => assert_eq!(
+                        (a.law, format!("{:?}", a.domain)),
+                        (b.law, format!("{:?}", b.domain))
+                    ),
+                    _ => panic!("jacobian mismatch on {case:?}: {fj:?} vs {sj:?}"),
+                }
             }
         }
     }

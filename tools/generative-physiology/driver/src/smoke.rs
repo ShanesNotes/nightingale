@@ -8,8 +8,8 @@ use std::path::Path;
 
 pub const SMOKE_SPEC: &str = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 20000\nevent at-ms 10000 trunk 1000 legs \
                               standing\nvariant none\n";
-pub const SMOKE_PACKET: &str = "1e5a18925402c8ba8ef8c0c9614fc851ba50e39b8d4c8d34b74f7a6613fc7de2";
-pub const SMOKE_SEAL: &str = "427d61d07e2738ca7fd397c64c29d17df019a339d2849295913c0e3ccd04c72e";
+pub const SMOKE_PACKET: &str = "f0336c4afe527428777161bedb8f4c74bb2017feae5384076990e7c30066a25a";
+pub const SMOKE_SEAL: &str = "1a3daf2b7e51928122bd7fab2cb0c60d1336de56567662051bc8f2027d21ec5d";
 pub const SMOKE_HEAD_NS: u64 = 1_000_225_153;
 const SMOKE_BEATS: u64 = 15;
 const SECOND_NS: u64 = 1_000_000_000;

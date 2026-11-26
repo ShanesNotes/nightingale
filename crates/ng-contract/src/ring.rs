@@ -211,7 +211,8 @@ impl InitializationSystem<'_> {
         let width = seeds + 1;
         let mut factors = Vec::with_capacity(last);
         let groups = width.div_ceil(LANES);
-        let (at_row, at_unknown) = plan.places();
+        let base_places = plan.places();
+        let (mut first_unknown, mut prev_unknown): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
         let (mut order, mut slot_of): (Vec<usize>, Vec<usize>) = ((0..width).collect(), (0..width).collect());
         let (mut before, mut first): (Vec<[f64; LANES]>, Vec<[f64; LANES]>) = (Vec::new(), Vec::new());
         let mut anchors = vec![vec![0.0; width]; fits];
@@ -229,6 +230,10 @@ impl InitializationSystem<'_> {
             let lu = match system.factor(&block) {
                 Ok(factors) => Block::Fixed(factors),
                 Err(_) => Block::Whole(inverse(&block)?),
+            };
+            let (at_row, at_unknown) = match &lu {
+                Block::Fixed(factors) => factors.places(),
+                Block::Whole(_) => base_places.clone(),
             };
             let reach = lu.reach();
             let foreign: Vec<Vec<(usize, f64)>> = (0..size)
@@ -261,7 +266,7 @@ impl InitializationSystem<'_> {
             for (row, entries) in foreign.iter().enumerate() {
                 for &(place, value) in entries {
                     if !seeded(place) {
-                        reads[row].push((at_unknown[place - (point - 1) * size], value));
+                        reads[row].push((prev_unknown[place - (point - 1) * size], value));
                     } else if let Ok(column) = target(place) {
                         let slot = slot_of[column];
                         terms[slot / LANES].push((row, reads[row].len(), slot % LANES, value));
@@ -295,7 +300,8 @@ impl InitializationSystem<'_> {
                                     }
                                 }
                             } else {
-                                let earlier = &before[group * size + at_unknown[place - (point - 1) * size]];
+                                let earlier =
+                                    &before[group * size + prev_unknown[place - (point - 1) * size]];
                                 // A side for a column `read` names or for a fit is a positive zero or not zero, so a
                                 // finite term over a zero read leaves it as it is. The right side's can be a negative
                                 // zero, and takes every term.
@@ -362,15 +368,21 @@ impl InitializationSystem<'_> {
             }
             if point == 0 {
                 first.clone_from(&walked);
+                first_unknown.clone_from(&at_unknown);
             }
             before = walked;
+            prev_unknown = at_unknown;
             factors.push(lu);
         }
         let corner = size + fits;
         let mut matrix = vec![vec![0.0; corner + 1]; corner];
-        let add = |cells: &mut Vec<f64>, source: &[[f64; LANES]], place: usize, value: f64| {
+        let add = |cells: &mut Vec<f64>,
+                   source: &[[f64; LANES]],
+                   source_unknown: &[usize],
+                   place: usize,
+                   value: f64| {
             let side =
-                |at: usize| source[slot_of[at] / LANES * size + at_unknown[place]][slot_of[at] % LANES];
+                |at: usize| source[slot_of[at] / LANES * size + source_unknown[place]][slot_of[at] % LANES];
             for (at, &seed) in read.iter().enumerate() {
                 cells[seed] += value * side(at);
             }
@@ -388,9 +400,9 @@ impl InitializationSystem<'_> {
                 } else if place >= border {
                     cells[size + place - border] += value;
                 } else if place < size {
-                    add(cells, &first, place, value);
+                    add(cells, &first, &first_unknown, place, value);
                 } else {
-                    add(cells, &before, place - (last - 1) * size, value);
+                    add(cells, &before, &prev_unknown, place - (last - 1) * size, value);
                 }
             }
         }

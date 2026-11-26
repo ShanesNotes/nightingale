@@ -2,7 +2,7 @@ use crate::body::{Bound, Instance, ModeLayout, Target};
 use crate::boundary::{Delivery, DriveFrame, PendingInputs};
 use crate::chance::{HELD_DRAW, HELD_FACTOR};
 use crate::conservation::AdmissionTotal;
-use crate::elimination::{Elimination, Factors};
+use crate::elimination::{Elimination, Factors, ZeroMask};
 use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::packet::{BoundAnchor, Fit, Owed};
@@ -334,7 +334,38 @@ impl StagePattern {
         let lifted: Vec<RowId> = (0..2 * size)
             .map(|unknown| RowId::at(unknown / size * size + pivots[unknown % size].index()))
             .collect();
-        let plan = Elimination::plan(&offsets, &unknowns, &lifted);
+        let base_offsets = sparsity.row_offsets();
+        let is_staged: Vec<bool> = (0..size).map(&staged).collect();
+        let mut row_of_entry = vec![0_u32; sparsity.unknowns().len()];
+        for row in 0..size {
+            row_of_entry[base_offsets[row]..base_offsets[row + 1]].fill(row as u32);
+        }
+        let lift = |entries: &[u32]| -> Vec<u32> {
+            let mut out = Vec::with_capacity(entries.len() * 4);
+            for &entry in entries {
+                let entry = entry as usize;
+                let row = row_of_entry[entry] as usize;
+                let local = entry - base_offsets[row];
+                let row_len = base_offsets[row + 1] - base_offsets[row];
+                let end_start = offsets[row];
+                let int_start = offsets[size + row];
+                out.push((end_start + local) as u32);
+                out.push((int_start + local) as u32);
+                if is_staged[row] {
+                    out.push((end_start + row_len + local) as u32);
+                    out.push((int_start + row_len + local) as u32);
+                }
+            }
+            out
+        };
+        let masks: Vec<ZeroMask> = body
+            .specialized_masks()
+            .map(|(probes, zeros)| ZeroMask {
+                probes: lift(probes),
+                zeros: lift(zeros),
+            })
+            .collect();
+        let plan = Elimination::plan_with_masks(&offsets, &unknowns, &lifted, &masks);
         Self {
             offsets,
             unknowns,
@@ -854,9 +885,8 @@ impl InitializationSystem<'_> {
         let held = &workspace.legs[leg];
         for &stage in self.stage_list() {
             let inputs = self.inputs(held, &workspace.unknowns[self.slots(leg, stage)], values);
-            let laws = self.body.instance_values(&inputs).map_err(undefined)?;
-            let (columns, rows) = self.body.targets(&laws);
-            rates[stage] = self.body.residuals(&columns, &rows, &still);
+            let evaluated = self.body.evaluate_stage(&inputs, &still).map_err(undefined)?;
+            rates[stage] = evaluated.residuals;
         }
         Ok(rates)
     }

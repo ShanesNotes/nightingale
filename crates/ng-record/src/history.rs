@@ -230,9 +230,19 @@ impl LedgerChunk {
                     .map_or((Compensated::ZERO, Compensated::ZERO), |chunk| {
                         (chunk.columns[column].forward[1], chunk.columns[column].reverse[1])
                     });
+                let next_forward = if forward.bits() == [0, 0] {
+                    from_forward
+                } else {
+                    from_forward.plus(forward)
+                };
+                let next_reverse = if reverse.bits() == [0, 0] {
+                    from_reverse
+                } else {
+                    from_reverse.plus(reverse)
+                };
                 ColumnStep {
-                    forward: [from_forward, from_forward.plus(forward)],
-                    reverse: [from_reverse, from_reverse.plus(reverse)],
+                    forward: [from_forward, next_forward],
+                    reverse: [from_reverse, next_reverse],
                 }
             })
             .collect();
