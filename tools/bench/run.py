@@ -24,12 +24,13 @@ What a run did (its `work` lines) must match across its length's or interval's r
 seal ends the script with no median. Each run's numbers print as it ends, so a killed script keeps them.
 
 The cost mode prints one cost line, the figure a body ticket's PR quotes against ticket 26's budget. It admits the
-assembly once on ng-solver at 10 ms, then runs the first COST_SPAN_S simulated seconds from that start, a few
+assembly once on ng-solver at 10 ms, then runs the first COST_SIMULATED_S simulated seconds from that start, a few
 times, and refuses repeats that took other steps, solves or seals. Its fields come in a fixed
 order, units in their names. Under perf the counters run only inside the repeats, so the user instructions a
 simulated second leave out compiling and admission and hold to a few parts a million at any load. Where perf
-cannot count them the field reads none, and a tree with changed tracked files marks the head -dirty. Neither
-line can show a budget met. Wall time is the median repeat.
+cannot count them the field reads none, and a tree with changed, untracked or hidden tracked files marks the head
+-dirty. Build-altering CARGO*/RUST* variables and any Cargo config file in an ancestor directory or CARGO_HOME are
+refused with no cost line. Neither a marked nor a refused line can show a budget met. Wall time is the median repeat.
 
 tools/verify never runs this: a wall clock cannot gate a merge, and the workspace bans one, so this project sits
 outside it.
@@ -49,8 +50,56 @@ INTERVALS_MS = {"reference": (5, 1), "ng-solver": (10, 5)}
 SECONDS = (5, 50)
 # Eight times the 64 kB spread of run peaks measured on the tower, and 50 bytes a step over 10424 steps.
 MARGIN_KB = 512
-COST_SPAN_S = 60
+COST_SIMULATED_S = 60
 HERE = pathlib.Path(__file__).resolve().parent
+REPO = HERE.parents[1]
+SAFE_BUILD_ENV = frozenset(
+    {
+        "CARGO_HOME",
+        "CARGO_TARGET_DIR",
+        "CARGO_TERM_COLOR",
+        "CARGO_TERM_VERBOSE",
+        "CARGO_TERM_QUIET",
+        "CARGO_TERM_PROGRESS_WHEN",
+        "CARGO_NET_OFFLINE",
+        "CARGO_BUILD_JOBS",
+        "RUSTUP_HOME",
+        "RUST_BACKTRACE",
+        "RUST_LOG",
+    }
+)
+
+
+def check_clean_build_env(env, start=HERE):
+    bad_vars = sorted(k for k in env if k.startswith(("CARGO", "RUST")) and k not in SAFE_BUILD_ENV)
+    if bad_vars:
+        refuse(f"build environment sets {', '.join(bad_vars)}; unset before running cost")
+    configs = []
+    for ancestor in (start, *start.parents):
+        for name in ("config.toml", "config"):
+            candidate = ancestor / ".cargo" / name
+            if os.path.lexists(candidate):
+                configs.append(str(candidate))
+    cargo_home = start / env["CARGO_HOME"] if env.get("CARGO_HOME") else pathlib.Path.home() / ".cargo"
+    for name in ("config.toml", "config"):
+        candidate = cargo_home / name
+        if os.path.lexists(candidate) and str(candidate) not in configs:
+            configs.append(str(candidate))
+    if configs:
+        refuse(f"Cargo config outside the tree's control: {', '.join(configs)}")
+
+
+def tree_is_dirty(cwd=REPO):
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        check=True,
+    ).stdout
+    if status:
+        return True
+    listed = subprocess.run(["git", "ls-files", "-z", "-v"], cwd=cwd, stdout=subprocess.PIPE, check=True).stdout
+    return any(entry and not entry.startswith("H ") for entry in listed.decode().split("\0"))
 
 
 def refuse(why):
@@ -147,13 +196,14 @@ def memory(core):
 
 
 def cost(assembly):
+    check_clean_build_env(os.environ)
     executable = built()
     repeats = {"slice": 5, "body": 3}[assembly]
     describe = ["git", "rev-parse", "--short=12", "HEAD"]
     head = subprocess.run(describe, cwd=HERE, stdout=subprocess.PIPE, text=True).stdout.strip()
-    if subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=HERE).returncode != 0:
+    if tree_is_dirty():
         head += "-dirty"
-    command = [executable, "cost", assembly, str(COST_SPAN_S), str(repeats)]
+    command = [executable, "cost", assembly, str(COST_SIMULATED_S), str(repeats)]
     with tempfile.TemporaryDirectory() as fifos:
         ctl, ack, counts = (os.path.join(fifos, name) for name in ("ctl", "ack", "counts"))
         os.mkfifo(ctl)
@@ -177,9 +227,9 @@ def cost(assembly):
             for row in pathlib.Path(counts).read_text().splitlines():
                 parts = row.split(",")
                 if len(parts) > 2 and parts[2].startswith("instructions") and parts[0].isdigit():
-                    instructions = f"{int(parts[0]) / (COST_SPAN_S * repeats) / 1e6:.1f}"
+                    instructions = f"{int(parts[0]) / (COST_SIMULATED_S * repeats) / 1e6:.1f}"
     named = dict(field.split("=", 1) for field in fields[1:])
-    order = ["assembly", "core", "span_s", "repeats", "rows", "unknowns", "columns", "jacobian_nonzeros", "steps",
+    order = ["assembly", "core", "simulated_s", "repeats", "rows", "unknowns", "columns", "jacobian_nonzeros", "steps",
              "solves", "steps_a_simulated_s", "solves_a_step"]
     timed = ["wall_ms_a_simulated_s", "wall_spread_pct", "admission_wall_s"]
     print(" ".join(
