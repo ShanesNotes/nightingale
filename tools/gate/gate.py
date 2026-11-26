@@ -1729,6 +1729,7 @@ class PlanCase:
     crates: frozenset[str] | None = None
     reaches: frozenset[str] = frozenset()
     steps: frozenset[str] = frozenset()
+    forbids: frozenset[str] = frozenset()
     modes: Modes = (REGULAR, REGULAR)
     first: tuple[str, ...] = ()
 
@@ -1739,6 +1740,32 @@ PLAN_CASES = (
     PlanCase("merge", ".scratch/foundation/map.md", "docs-only", frozenset(), steps=frozenset({"30-data"})),
     PlanCase("merge", "data/closure.jsonl", "affected", frozenset(), steps=frozenset({"30-data"})),
     PlanCase("merge", "clinical-workspace/src/chart.ts", "affected", frozenset(), steps=frozenset({"50-workspace"})),
+    PlanCase(
+        "merge",
+        "tools/generative-physiology/gp.py",
+        "affected",
+        frozenset(),
+        steps=frozenset({"10-docs", "10-rust"}),
+        forbids=frozenset({"40-mutants"}),
+    ),
+    PlanCase(
+        "merge",
+        "tools/generative-physiology/driver/src/main.rs",
+        "affected",
+        frozenset(),
+        steps=frozenset({"10-docs", "10-rust"}),
+        forbids=frozenset({"40-mutants"}),
+    ),
+    PlanCase(
+        "merge",
+        "tools/generative-physiology/notes.md",
+        "affected",
+        frozenset(),
+        steps=frozenset({"10-docs", "10-rust"}),
+        forbids=frozenset({"40-mutants"}),
+    ),
+    PlanCase("merge", "tools/generative-physiology/.cargo/config.toml", "everything"),
+    PlanCase("merge", "tools/generative-physiology/driver/clippy.toml", "everything"),
     PlanCase("merge", "AGENTS.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
     PlanCase("merge", CONTRACT, "docs-only", frozenset(), steps=frozenset({"05-seam", "10-docs", "20-sketch"})),
     PlanCase(
@@ -1779,6 +1806,8 @@ def plan_cases(ws: Workspace) -> list[Violation]:
             out.append(Violation("plan", subject, f"does not reach {' '.join(sorted(missing))}"))
         if missing := (ws.steps if c.scope == "everything" else c.steps) - steps:
             out.append(Violation("plan", subject, f"does not select {' '.join(sorted(missing))}"))
+        if forbidden := c.forbids & steps:
+            out.append(Violation("plan", subject, f"selects {' '.join(sorted(forbidden))}"))
         if c.scope == "docs-only" and steps & set(ws.registry.crate_steps) - c.steps:
             out.append(Violation("plan", subject, "a docs-only plan selects a crate step"))
         if p.first != c.first:
