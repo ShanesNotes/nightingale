@@ -208,13 +208,13 @@ fn the_first_window_holds_each_core_to_the_references_own_distances() {
     );
 
     let manufactured = AccuracyPolicy::manufactured().expect("the model default");
-    let sixteen = Sweeps {
-        interval_ns: 16 * SECOND,
+    let passing = Sweeps {
+        interval_ns: 500 * MILLISECOND,
         scales: loose(),
         updates: 1,
         behind: Vec::new(),
     };
-    accuracy(&sixteen, &manufactured).expect("one update solves a linear law");
+    accuracy(&passing, &manufactured).expect("one update settles every manufactured case at its step");
     let after_one_update = Sweeps {
         interval_ns: 10 * MILLISECOND,
         scales: loose(),

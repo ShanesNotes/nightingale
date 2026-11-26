@@ -193,9 +193,16 @@ mod tests {
         certify(view, &policy).expect("the ledger closes and the body holds")
     }
 
+    fn accuracy_policy() -> AccuracyPolicy {
+        let cases = vec![
+            AccuracyCase::TwoReservoir(Box::new(TwoReservoirs::stepped_inflow().expect("a body"))),
+            AccuracyCase::DrainAndRefill,
+        ];
+        AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy")
+    }
+
     fn accurate(interval_ns: u64) -> AccuracyEvidence {
-        let policy = AccuracyPolicy::manufactured().expect("the model default");
-        accuracy(&reference(interval_ns), &policy).expect("within the policy")
+        accuracy(&reference(interval_ns), &accuracy_policy()).expect("within the policy")
     }
 
     fn replayed(case: &TwoReservoirs, interval_ns: u64) -> ReplayEvidence {
@@ -227,9 +234,7 @@ mod tests {
             repeats: NonZeroU32::MIN,
             ..ArenaProtocol::pick()
         };
-        let policy = AccuracyPolicy::manufactured()
-            .expect("the model default")
-            .digest();
+        let policy = accuracy_policy().digest();
         bound(
             protocol,
             policy,

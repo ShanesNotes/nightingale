@@ -60,8 +60,36 @@ fn the_stepped_inflow_meets_its_closed_form_at_first_order_over_three_caps() {
 #[test]
 fn the_core_meets_every_manufactured_case_at_first_order() {
     let policy = AccuracyPolicy::manufactured().expect("the model default");
-    let error = |cap| accuracy(&Core::new(cap), &policy).expect("within the policy");
+    accuracy(&Core::new(500 * MILLISECOND), &policy).expect("within the policy");
+
+    let reservoirs = AccuracyPolicy::new(
+        AccuracyCase::manufactured()
+            .expect("every case builds")
+            .into_iter()
+            .filter(|case| !matches!(case, AccuracyCase::SelfSustainedOscillation))
+            .collect(),
+        measure(5.0),
+        measure(0.0),
+        100 * SECOND,
+    )
+    .expect("a policy");
+    let error = |cap| accuracy(&Core::new(cap), &reservoirs).expect("within the policy");
     let (coarse, medium, fine) = (error(16 * SECOND), error(8 * SECOND), error(4 * SECOND));
+    observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
+
+    let oscillation = AccuracyPolicy::new(
+        vec![AccuracyCase::SelfSustainedOscillation],
+        measure(5.0),
+        measure(0.0),
+        100 * SECOND,
+    )
+    .expect("a policy");
+    let osc_error = |cap| accuracy(&Core::new(cap), &oscillation).expect("within the policy");
+    let (coarse, medium, fine) = (
+        osc_error(500 * MILLISECOND),
+        osc_error(250 * MILLISECOND),
+        osc_error(125 * MILLISECOND),
+    );
     observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
 }
 

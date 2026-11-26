@@ -11,6 +11,10 @@ core = "Forward Euler on the two-reservoir case with h > RC and a nonzero initia
 mutants = ["forward-euler-inside-rc"]
 
 [[row]]
+core = "Halved backward Euler or the reference scheme on the self-sustained oscillation with a cap past 4 * growth / w^2: every step passes verify and every ledger closes, while the oscillation decays"
+mutants = ["oscillation-cap-below-damping-bound", "oscillation-amplitude-unchecked"]
+
+[[row]]
 core = "Accepts a step whose normalized error exceeds one at its minimum interval (SB network.rs:439–449)"
 mutants = ["error-above-one-floor-lowered", "halved-reads-no-estimate"]
 
