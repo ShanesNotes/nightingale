@@ -222,11 +222,9 @@ impl CoupledProblem<'_> {
         let Some(estimate) = set.estimate() else {
             return Ok(0.0);
         };
-        let start = self.accepted.state().coordinates();
+        let start = &self.coordinates;
         let (scales, sizes) = (self.identity.resolution().scales(), &self.parameters.sizes);
-        let worst = increment
-            .witness
-            .error(estimate, &start, scales, sizes, self.body);
+        let worst = increment.witness.error(estimate, start, scales, sizes, self.body);
         if let Some(row) = worst.above_one() {
             return Err(ticket.refuse(NumericalRefusal::Accuracy { row }));
         }
@@ -351,12 +349,12 @@ impl StepProposal {
         let body = problem.body;
         let scales = resolution.scales();
         let sizes = &problem.parameters.sizes;
-        let start = problem.accepted.state().coordinates();
+        let start = &problem.coordinates;
         let mut stage_defect = Worst::NONE;
         for ((stage, seen), evaluation) in stages.iter().zip(&witness.stages).zip(&evaluations) {
             let from = stage
                 .from
-                .map_or(&start, |earlier| &witness.stages[earlier].unknowns);
+                .map_or(start, |earlier| &witness.stages[earlier].unknowns);
             let slope = &witness.stages[stage.slope].derivative;
             for (at, row) in body.rows().iter().enumerate() {
                 let value = seen.unknowns[at];
@@ -383,7 +381,7 @@ impl StepProposal {
             return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
         }
         if let Some(estimate) = set.estimate()
-            && let Some(row) = witness.error(estimate, &start, scales, sizes, body).above_one()
+            && let Some(row) = witness.error(estimate, start, scales, sizes, body).above_one()
         {
             return Err(ticket.refuse(NumericalRefusal::Accuracy { row }));
         }
@@ -395,17 +393,17 @@ impl StepProposal {
         }
         let base = problem.accepted.state();
         let state = next_state(body, base, &extents, &memory, algebraic);
+        let coordinates = state.coordinates();
         // A crossing and a crossing back inside one step leave no mark at its end, so every stage before the end is read.
         // At the floor no shorter step can look again, so the declared resolution is the limit.
         let before_the_end = (witness.stages.iter())
             .filter(|stage| stage.offset_ns < ticket.length_ns())
             .map(|stage| (stage.unknowns.as_slice(), stage.offset_ns));
         if ticket.length_ns() > ticket.floor_ns.get()
-            && problem.crossed_inside(&ticket, before_the_end, &state)?
+            && problem.crossed_inside(&ticket, before_the_end, &state, &coordinates)?
         {
             return Err(ticket.refuse(NumericalRefusal::GuardInside));
         }
-        let coordinates = state.coordinates();
         let tangent = vec![0.0; coordinates.len()];
         let point = StagePoint {
             layout: problem.layout(),
@@ -436,6 +434,7 @@ impl StepProposal {
             fired: Vec::new(),
             rhythm_edges: Vec::new(),
             state,
+            coordinates,
             continuation: history,
             forward: extents.forward,
             reverse: extents.reverse,
@@ -502,6 +501,7 @@ fn next_state(
 pub struct VerifiedStep {
     ticket: StepTicket,
     state: Candidate,
+    coordinates: Vec<f64>,
     continuation: MethodHistory,
     dense: DenseSegment,
     forward: Vec<Compensated>,
@@ -522,6 +522,12 @@ impl VerifiedStep {
     pub fn ticket(&self) -> &StepTicket {
         &self.ticket
     }
+    pub(crate) fn state(&self) -> &Candidate {
+        &self.state
+    }
+    pub(crate) fn coordinates(&self) -> &[f64] {
+        &self.coordinates
+    }
     pub fn value(&self, row: RowId) -> Compensated {
         self.state.value(row)
     }
@@ -534,19 +540,21 @@ impl VerifiedStep {
         &self.ticket.due
     }
     pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: Trigger<'_>) -> Result<f64, TrialFailure> {
-        problem.gap(&self.ticket, &self.state, guard)
+        problem.gap(&self.ticket, &self.state, &self.coordinates, guard)
     }
     /// The dense segment keeps the left limit, so a chord never runs through a reset and the next segment
     /// starts at the reset. A firing moves a mode, a draw and an integral, so what it leaves is read again: a law
     /// with no value there refuses the trial, and a range is judged on both sides of the instant.
     pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Result<Self, TrialFailure> {
         let at = self.ticket.interval().end();
-        let (state, fired, rhythm_edges) = problem.fired(&self.ticket, self.state, at)?;
-        let values = problem.values_after_firing(&self.ticket, &state)?;
+        let (state, fired, rhythm_edges) = problem.fired(&self.ticket, self.state, &self.coordinates, at)?;
+        let coordinates = state.coordinates();
+        let values = problem.values_after_firing(&self.ticket, &state, &coordinates)?;
         let mut excursions = self.excursions;
-        excursions.extend(problem.body.excursions(&values, &state.coordinates(), at));
+        excursions.extend(problem.body.excursions(&values, &coordinates, at));
         Ok(Self {
             state,
+            coordinates,
             fired,
             rhythm_edges,
             excursions,
@@ -557,6 +565,7 @@ impl VerifiedStep {
         let Self {
             ticket: _,
             state,
+            coordinates: _,
             continuation,
             dense,
             forward: _,
