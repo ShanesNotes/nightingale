@@ -456,6 +456,15 @@ fn the_fold_refuses_a_foreign_run_a_foreign_branch_a_skipped_step_and_a_repeated
 
     let branch = BranchId::new(Digest::of_canonical(b"child-branch"));
     let child = session_a.rewind(&saved_1, branch).expect("rewound");
+    let mut child_fold = CertificateFold::open(&child, &ledger.policy).expect("opened on child");
+    let saved_b1 = session_b.checkpoint().expect("checkpoint on run b");
+    let child_b = session_b.rewind(&saved_b1, branch).expect("rewound run b");
+    let (child_b, _) = accepted(child_b.step());
+    assert_eq!(
+        child_fold.advance(&child_b),
+        Err(ConservationRefusal::OtherRun),
+        "another run sharing the same caller branch id is still refused as OtherRun"
+    );
     let (child, _) = accepted(child.step());
     assert_eq!(
         fold.advance(&child),

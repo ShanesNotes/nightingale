@@ -315,7 +315,7 @@ fn among_windows_judged_together_a_later_closure_outranks_an_earlier_drift_and_a
     let held = 1e18;
     let tiny = held * PAIR_PRECISION / 4.0;
     let step = 60 * SECOND;
-    let span = 2 * HOUR;
+    let span = HOUR + step;
     let at = SimTime::from_ns;
     let window = |from, to| Some(Interval::new(at(from), at(to)).expect("a window"));
     let lumen = |site| RowKind::Amount {
