@@ -12,8 +12,8 @@ use ng_validate::*;
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
 const LONGEST_STEP: u64 = 10 * MILLISECOND;
-const PACKET: &str = "cbf140b541e4d974de98f85dd9a52e7b728d18a5f384c006446410087e90f55b";
-const ADMITTED_SEAL: &str = "f5c3b95d522fca28af8605af97fec1b82a3d702f1ee7010eef712c706e7dee6a";
+const PACKET: &str = "4c0bb3db1d7c35493fafd5fb0f5a720d12d081f98df7c9976a86d0fd3ef6d283";
+const ADMITTED_SEAL: &str = "b6421b3cc38aec0a66493883dc1bd767c3a9b9e30735157088a38ca4e860ad6b";
 
 struct Counted {
     core: ng_solver::Core,
@@ -2357,8 +2357,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet cbf140b541e4d974de98f85dd9a52e7b728d18a5f384c006446410087e90f55b
-        seal 864d670cfbc03922f9a52c839e75bf97f6f59aca1be7e60ebba81a383994868b
+        packet 4c0bb3db1d7c35493fafd5fb0f5a720d12d081f98df7c9976a86d0fd3ef6d283
+        seal 20c11fd295061adb01a12e1472ba39b74f302722d262af42b3bbc2c91dbd8faf
         steps 198
         viscosity over its reference at the start 1.001301675
     "#]]
@@ -3552,7 +3552,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         Of(Vasopressin): worst 3.6472e-3, from admission 3.4907e-4, steady 2.9450e-3, inside a breath 2.1338e-2
         controlled admission: aortic valve shuts 0.285420563 s into the beat, leg veins 0.284260864 s
         held admission: aortic valve shuts 0.285420563 s into the beat, leg veins 0.284260864 s
-        largest difference over every row but the drive scale 5.143e-10, 5.098e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "bladder", class: VesselSegment }, space: Lumen, species: Sodium }); over the 3 calibrated parameters 9.152e-12, 3.342e-14 of its value and 3.224e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
+        largest difference over every row but the drive scale 1.700e-8, 1.272e-2 of admission's tolerance, at Some(Amount { site: SiteId { key: "muscle bed", class: CapillaryBed }, space: Interstitium, species: Potassium }); over the 3 calibrated parameters 1.006e-11, 3.674e-14 of its value and 3.544e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
         held run: the drive scale is its rest's bits at all 11660 accepted steps
         held Energy: worst 5.4080e5, from admission 4.3731e5, steady 5.4091e5, inside a breath 2.6832e5
         held Element(Carbon): worst 4.6075e1, from admission 3.8270e1, steady 4.3072e1, inside a breath 2.0152e2
@@ -3916,9 +3916,9 @@ fn over_admissions_cycle_each_tissue_heat_stores_transfers_net_within_its_tolera
         MethodHistory::new(core.resolution().policy(), at, Vec::new()),
     )?;
     expect![[r#"
-        body: nets -1.033e-10 over the cycle against 1.31441e-1
-        skin heat site: nets -1.007e-12 over the cycle against 2e-3
-        conducting airway: nets +6.474e-11 over the cycle against 2e-3
+        body: nets -2.970e-11 over the cycle against 1.31441e-1
+        skin heat site: nets -2.433e-11 over the cycle against 2e-3
+        conducting airway: nets +2.211e-11 over the cycle against 2e-3
     "#]]
     .assert_eq(&report);
     Ok(())

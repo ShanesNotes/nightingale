@@ -1671,7 +1671,7 @@ pub use boundary::{
 };
 pub use compensated::*;
 pub use conservation::*;
-pub use elimination::Factors;
+pub use elimination::{EliminationMetrics, Factors};
 pub use failure::*;
 pub use head::*;
 pub use healthy::*;
