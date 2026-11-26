@@ -971,7 +971,9 @@ pub struct TimeOrder<'r> {
 impl TimeOrder<'_> {
     /// Each accepted segment with its revision, oldest first, from the oldest of the last page whose oldest segment
     /// starts before `instant`, or from admission when none does. It reads each link of a page through the store
-    /// again, checked as `newest_first` checks it, when it reaches that page, and holds one page at most.
+    /// again, checked as `newest_first` checks it, when it reaches that page, and holds one page at most. A link
+    /// lost after `in_time_order` fails here only if this cursor reaches its page; if several pages lose links
+    /// mid-walk, the oldest damaged page reached reports its newest lost link.
     pub fn from(&self, instant: SimTime) -> OldestFirst<'_> {
         let before = |start: SimTime| start < instant;
         let page = match &self.head {
