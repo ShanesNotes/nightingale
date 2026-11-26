@@ -100,15 +100,12 @@ impl RecordHash {
         dense: &DenseSegment,
         applied: &AppliedInputs,
     ) -> Digest {
-        let mut bytes = time.nanoseconds().to_be_bytes().to_vec();
-        for part in [
-            state.canonical(),
-            continuation.canonical(),
-            dense.canonical(),
-            applied.canonical(),
-        ] {
-            bytes.extend_from_slice(Digest::for_record(&part.into_bytes(), self).as_bytes());
-        }
+        let mut bytes = [0u8; 8 + 4 * 32];
+        bytes[..8].copy_from_slice(&time.nanoseconds().to_be_bytes());
+        bytes[8..40].copy_from_slice(state.record_digest(self).as_bytes());
+        bytes[40..72].copy_from_slice(continuation.record_digest(self).as_bytes());
+        bytes[72..104].copy_from_slice(dense.record_digest(self).as_bytes());
+        bytes[104..136].copy_from_slice(applied.canonical().digest_for(self).as_bytes());
         Digest::for_record(&bytes, self)
     }
 }

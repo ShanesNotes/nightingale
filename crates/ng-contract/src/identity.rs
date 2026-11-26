@@ -46,26 +46,79 @@ const INITIAL: [u32; 8] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 ];
 
+#[derive(Clone, Copy)]
+struct Sha256 {
+    state: [u32; 8],
+    buffer: [u8; 64],
+    filled: usize,
+    total: u64,
+}
+impl Sha256 {
+    fn new() -> Self {
+        Self {
+            state: INITIAL,
+            buffer: [0; 64],
+            filled: 0,
+            total: 0,
+        }
+    }
+    fn write(&mut self, mut bytes: &[u8]) {
+        self.total = self.total.wrapping_add(bytes.len() as u64);
+        if self.filled > 0 {
+            let take = (64 - self.filled).min(bytes.len());
+            self.buffer[self.filled..self.filled + take].copy_from_slice(&bytes[..take]);
+            self.filled += take;
+            bytes = &bytes[take..];
+            if self.filled == 64 {
+                compress(&mut self.state, &self.buffer);
+                self.filled = 0;
+            }
+        }
+        let (blocks, rest) = bytes.as_chunks::<64>();
+        for block in blocks {
+            compress(&mut self.state, block);
+        }
+        if !rest.is_empty() {
+            self.buffer[..rest.len()].copy_from_slice(rest);
+            self.filled = rest.len();
+        }
+    }
+    #[inline(always)]
+    fn write_number(&mut self, value: u64) {
+        let bytes = value.to_be_bytes();
+        if self.filled < 56 {
+            self.buffer[self.filled..self.filled + 8].copy_from_slice(&bytes);
+            self.filled += 8;
+            self.total = self.total.wrapping_add(8);
+        } else {
+            self.write(&bytes);
+        }
+    }
+    fn finish(mut self) -> [u8; 32] {
+        let bits = self.total.wrapping_mul(8);
+        self.buffer[self.filled] = 0x80;
+        self.filled += 1;
+        if self.filled > 56 {
+            self.buffer[self.filled..].fill(0);
+            compress(&mut self.state, &self.buffer);
+            self.buffer[..56].fill(0);
+        } else {
+            self.buffer[self.filled..56].fill(0);
+        }
+        self.buffer[56..64].copy_from_slice(&bits.to_be_bytes());
+        compress(&mut self.state, &self.buffer);
+        let mut out = [0u8; 32];
+        for (bytes, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(self.state) {
+            *bytes = word.to_be_bytes();
+        }
+        out
+    }
+}
+
 fn sha256(message: &[u8]) -> [u8; 32] {
-    let mut state = INITIAL;
-    let (blocks, rest) = message.as_chunks::<64>();
-    for block in blocks {
-        compress(&mut state, block);
-    }
-    let mut tail = [0u8; 128];
-    tail[..rest.len()].copy_from_slice(rest);
-    tail[rest.len()] = 0x80;
-    let end = if rest.len() < 56 { 64 } else { 128 };
-    let bits = (message.len() as u64).wrapping_mul(8);
-    tail[end - 8..end].copy_from_slice(&bits.to_be_bytes());
-    for block in tail[..end].as_chunks::<64>().0 {
-        compress(&mut state, block);
-    }
-    let mut out = [0u8; 32];
-    for (bytes, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(state) {
-        *bytes = word.to_be_bytes();
-    }
-    out
+    let mut hasher = Sha256::new();
+    hasher.write(message);
+    hasher.finish()
 }
 
 fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
@@ -135,24 +188,83 @@ const SIGMA: [[usize; 16]; 12] = [
     [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
 ];
 
+#[derive(Clone, Copy)]
+struct Blake2b {
+    state: [u64; 8],
+    buffer: [u8; 128],
+    filled: usize,
+    total: u128,
+}
+impl Blake2b {
+    fn new() -> Self {
+        let mut state = BLAKE2B_INITIAL;
+        // RFC 7693, section 2.5: depth 1, fanout 1, no key, a 32-byte digest.
+        state[0] ^= 0x0101_0020;
+        Self {
+            state,
+            buffer: [0; 128],
+            filled: 0,
+            total: 0,
+        }
+    }
+    fn write(&mut self, mut bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        // RFC 7693 marks the final block with a flag, so a full buffer compresses only when more bytes follow.
+        if self.filled == 128 {
+            blake2b_block(&mut self.state, &self.buffer, self.total, false);
+            self.filled = 0;
+        }
+        if self.filled > 0 {
+            let take = (128 - self.filled).min(bytes.len());
+            self.buffer[self.filled..self.filled + take].copy_from_slice(&bytes[..take]);
+            self.filled += take;
+            self.total += take as u128;
+            bytes = &bytes[take..];
+            if bytes.is_empty() {
+                return;
+            }
+            blake2b_block(&mut self.state, &self.buffer, self.total, false);
+            self.filled = 0;
+        }
+        let before_last = (bytes.len() - 1) / 128;
+        let (blocks, _) = bytes.as_chunks::<128>();
+        for block in &blocks[..before_last] {
+            self.total += 128;
+            blake2b_block(&mut self.state, block, self.total, false);
+        }
+        let tail = &bytes[128 * before_last..];
+        self.buffer[..tail.len()].copy_from_slice(tail);
+        self.filled = tail.len();
+        self.total += tail.len() as u128;
+    }
+    #[inline(always)]
+    fn write_number(&mut self, value: u64) {
+        let bytes = value.to_be_bytes();
+        if self.filled <= 120 {
+            self.buffer[self.filled..self.filled + 8].copy_from_slice(&bytes);
+            self.filled += 8;
+            self.total += 8;
+        } else {
+            self.write(&bytes);
+        }
+    }
+    fn finish(mut self) -> [u8; 32] {
+        self.buffer[self.filled..].fill(0);
+        blake2b_block(&mut self.state, &self.buffer, self.total, true);
+        let mut out = [0u8; 32];
+        for (bytes, word) in out.as_chunks_mut::<8>().0.iter_mut().zip(self.state) {
+            *bytes = word.to_le_bytes();
+        }
+        out
+    }
+}
+
 fn blake2b(message: &[u8]) -> [u8; 32] {
-    let mut state = BLAKE2B_INITIAL;
-    // RFC 7693, section 2.5: depth 1, fanout 1, no key, a 32-byte digest.
-    state[0] ^= 0x0101_0020;
-    let before_last = message.len().saturating_sub(1) / 128;
-    let (blocks, _) = message.as_chunks::<128>();
-    for (at, block) in blocks[..before_last].iter().enumerate() {
-        blake2b_block(&mut state, block, 128 * (at as u128 + 1), false);
-    }
-    let tail = &message[128 * before_last..];
-    let mut last = [0u8; 128];
-    last[..tail.len()].copy_from_slice(tail);
-    blake2b_block(&mut state, &last, message.len() as u128, true);
-    let mut out = [0u8; 32];
-    for (bytes, word) in out.as_chunks_mut::<8>().0.iter_mut().zip(state) {
-        *bytes = word.to_le_bytes();
-    }
-    out
+    let mut hasher = Blake2b::new();
+    hasher.write(message);
+    hasher.finish()
 }
 
 fn blake2b_block(state: &mut [u64; 8], block: &[u8; 128], counted: u128, last: bool) {
@@ -212,12 +324,134 @@ fn mix(work: &mut [u64; 16], [a, b, c, d]: [usize; 4], x: u64, y: u64) {
     work[b] = (work[b] ^ work[c]).rotate_right(63);
 }
 
+/// `Seal` written straight into a hash, for an identity too large to buffer each step. Each impl writes the bytes the
+/// `Seal` of its type writes into a `Canonical`.
+pub(crate) mod stream {
+    use super::{Blake2b, Digest, RecordHash, Sha256};
+    use crate::{Compensated, SimTime};
+
+    pub(crate) trait Sink {
+        fn number(&mut self, number: u64);
+        fn raw(&mut self, bytes: &[u8]);
+        fn length(&mut self, length: usize) {
+            self.number(length as u64);
+        }
+        fn text(&mut self, text: &str) {
+            self.number(text.len() as u64);
+            self.raw(text.as_bytes());
+        }
+    }
+    impl Sink for Sha256 {
+        #[inline(always)]
+        fn number(&mut self, number: u64) {
+            self.write_number(number);
+        }
+        fn raw(&mut self, bytes: &[u8]) {
+            self.write(bytes);
+        }
+    }
+    impl Sink for Blake2b {
+        #[inline(always)]
+        fn number(&mut self, number: u64) {
+            self.write_number(number);
+        }
+        fn raw(&mut self, bytes: &[u8]) {
+            self.write(bytes);
+        }
+    }
+
+    pub(crate) trait Seal {
+        fn seal<S: Sink>(&self, out: &mut S);
+    }
+    impl<T: Seal> Seal for [T] {
+        fn seal<S: Sink>(&self, out: &mut S) {
+            out.length(self.len());
+            for item in self {
+                item.seal(out);
+            }
+        }
+    }
+    impl<T: Seal> Seal for Option<T> {
+        fn seal<S: Sink>(&self, out: &mut S) {
+            match self {
+                None => out.number(0),
+                Some(value) => {
+                    out.number(1);
+                    value.seal(out);
+                }
+            }
+        }
+    }
+    impl<A: Seal, B: Seal> Seal for (A, B) {
+        fn seal<S: Sink>(&self, out: &mut S) {
+            self.0.seal(out);
+            self.1.seal(out);
+        }
+    }
+    impl Seal for u64 {
+        fn seal<S: Sink>(&self, out: &mut S) {
+            out.number(*self);
+        }
+    }
+    impl Seal for usize {
+        fn seal<S: Sink>(&self, out: &mut S) {
+            out.number(*self as u64);
+        }
+    }
+    impl Seal for f64 {
+        fn seal<S: Sink>(&self, out: &mut S) {
+            out.number(self.to_bits());
+        }
+    }
+    impl Seal for Compensated {
+        fn seal<S: Sink>(&self, out: &mut S) {
+            let [hi, lo] = self.bits();
+            out.number(hi);
+            out.number(lo);
+        }
+    }
+    impl Seal for SimTime {
+        fn seal<S: Sink>(&self, out: &mut S) {
+            out.number(self.nanoseconds());
+        }
+    }
+    impl Seal for Digest {
+        fn seal<S: Sink>(&self, out: &mut S) {
+            let Self { bytes } = self;
+            for &byte in bytes {
+                out.number(u64::from(byte));
+            }
+        }
+    }
+
+    /// The digest `Canonical::new(tag)` then `item.seal` would give under `hash`.
+    pub(crate) fn digest(tag: &str, hash: RecordHash, item: &(impl Seal + ?Sized)) -> Digest {
+        let bytes = match hash {
+            RecordHash::Sha256 => {
+                let mut out = Sha256::new();
+                out.text(tag);
+                item.seal(&mut out);
+                out.finish()
+            }
+            RecordHash::Blake2b => {
+                let mut out = Blake2b::new();
+                out.text(tag);
+                item.seal(&mut out);
+                out.finish()
+            }
+        };
+        Digest { bytes }
+    }
+}
+
 pub(crate) struct Canonical {
     bytes: Vec<u8>,
 }
 impl Canonical {
     pub(crate) fn new(tag: &str) -> Self {
-        let mut canonical = Self { bytes: Vec::new() };
+        let mut canonical = Self {
+            bytes: Vec::with_capacity(256),
+        };
         canonical.text(tag);
         canonical
     }
@@ -236,6 +470,9 @@ impl Canonical {
     }
     pub(crate) fn digest(&self) -> Digest {
         Digest::of_canonical(&self.bytes)
+    }
+    pub(crate) fn digest_for(&self, hash: RecordHash) -> Digest {
+        Digest::for_record(&self.bytes, hash)
     }
     pub(crate) fn into_bytes(self) -> Vec<u8> {
         self.bytes
@@ -300,6 +537,133 @@ impl Seal for Digest {
         let Self { bytes } = self;
         for &byte in bytes {
             out.number(u64::from(byte));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        BLAKE2B_INITIAL, Blake2b, Canonical, Digest, INITIAL, RecordHash, Seal, Sha256, blake2b_block,
+        compress, stream,
+    };
+    use crate::{Compensated, SimTime};
+
+    fn oneshot_sha256(message: &[u8]) -> [u8; 32] {
+        let mut state = INITIAL;
+        let (blocks, rest) = message.as_chunks::<64>();
+        for block in blocks {
+            compress(&mut state, block);
+        }
+        let mut tail = [0u8; 128];
+        tail[..rest.len()].copy_from_slice(rest);
+        tail[rest.len()] = 0x80;
+        let end = if rest.len() < 56 { 64 } else { 128 };
+        let bits = (message.len() as u64).wrapping_mul(8);
+        tail[end - 8..end].copy_from_slice(&bits.to_be_bytes());
+        for block in tail[..end].as_chunks::<64>().0 {
+            compress(&mut state, block);
+        }
+        let mut out = [0u8; 32];
+        for (bytes, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(state) {
+            *bytes = word.to_be_bytes();
+        }
+        out
+    }
+
+    fn oneshot_blake2b(message: &[u8]) -> [u8; 32] {
+        let mut state = BLAKE2B_INITIAL;
+        state[0] ^= 0x0101_0020;
+        let before_last = message.len().saturating_sub(1) / 128;
+        let (blocks, _) = message.as_chunks::<128>();
+        for (at, block) in blocks[..before_last].iter().enumerate() {
+            blake2b_block(&mut state, block, 128 * (at as u128 + 1), false);
+        }
+        let tail = &message[128 * before_last..];
+        let mut last = [0u8; 128];
+        last[..tail.len()].copy_from_slice(tail);
+        blake2b_block(&mut state, &last, message.len() as u128, true);
+        let mut out = [0u8; 32];
+        for (bytes, word) in out.as_chunks_mut::<8>().0.iter_mut().zip(state) {
+            *bytes = word.to_le_bytes();
+        }
+        out
+    }
+
+    #[test]
+    fn streaming_sha256_and_blake2b_match_oneshot_across_block_boundaries() {
+        let lengths = [
+            0, 1, 7, 8, 54, 55, 56, 57, 63, 64, 65, 119, 120, 127, 128, 129, 191, 192, 255, 256, 257, 512,
+            1300,
+        ];
+        let chunks = [1, 3, 7, 8, 13, 55, 64, 127, 128, 200];
+        for length in lengths {
+            let data: Vec<u8> = (0..length).map(|i| ((i * 37 + 11) & 0xff) as u8).collect();
+            let expected_sha = oneshot_sha256(&data);
+            let expected_b2 = oneshot_blake2b(&data);
+            assert_eq!(super::sha256(&data), expected_sha, "oneshot sha len={length}");
+            assert_eq!(super::blake2b(&data), expected_b2, "oneshot b2 len={length}");
+            for step in chunks {
+                let mut sha = Sha256::new();
+                let mut b2 = Blake2b::new();
+                sha.write(&[]);
+                b2.write(&[]);
+                for part in data.chunks(step) {
+                    sha.write(part);
+                    b2.write(part);
+                    sha.write(&[]);
+                    b2.write(&[]);
+                }
+                assert_eq!(sha.finish(), expected_sha, "stream sha len={length} step={step}");
+                assert_eq!(b2.finish(), expected_b2, "stream b2 len={length} step={step}");
+            }
+        }
+    }
+
+    #[test]
+    fn streaming_canonical_matches_buffered_across_inline_and_heap_sizes() {
+        struct Sample {
+            values: Vec<Compensated>,
+            floats: Vec<f64>,
+            time: SimTime,
+            digest: Digest,
+        }
+        impl stream::Seal for Sample {
+            fn seal<S: stream::Sink>(&self, out: &mut S) {
+                let Self {
+                    values,
+                    floats,
+                    time,
+                    digest,
+                } = self;
+                stream::Seal::seal(values.as_slice(), out);
+                stream::Seal::seal(floats.as_slice(), out);
+                stream::Seal::seal(time, out);
+                stream::Seal::seal(digest, out);
+            }
+        }
+        for count in [0, 1, 7, 16, 80, 400] {
+            let sample = Sample {
+                values: (0..count)
+                    .map(|i| Compensated::exact(i as f64 * 0.25 - 3.5))
+                    .collect(),
+                floats: (0..count).map(|i| -(i as f64) * 1.5).collect(),
+                time: SimTime::from_ns(count as u64 * 1_000_000 + 42),
+                digest: Digest::of_canonical(b"seed"),
+            };
+            let mut buffered = Canonical::new("ng-contract sample 1");
+            Seal::seal(sample.values.as_slice(), &mut buffered);
+            Seal::seal(sample.floats.as_slice(), &mut buffered);
+            Seal::seal(&sample.time, &mut buffered);
+            Seal::seal(&sample.digest, &mut buffered);
+            let bytes = buffered.into_bytes();
+            for hash in [RecordHash::Sha256, RecordHash::Blake2b] {
+                assert_eq!(
+                    stream::digest("ng-contract sample 1", hash, &sample),
+                    Digest::for_record(&bytes, hash),
+                    "count={count} hash={hash:?}"
+                );
+            }
         }
     }
 }
