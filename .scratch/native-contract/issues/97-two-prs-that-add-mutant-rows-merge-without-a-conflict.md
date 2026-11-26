@@ -4,7 +4,7 @@ Spec: `tools/gate/mutants.toml`, `tools/mutate.py` and `tools/gate/gate.py` (the
 
 Type: task
 
-Status: open
+Status: resolved
 
 Blocked by: none
 
@@ -16,9 +16,15 @@ Blocks: none
 
 Candidates, not picked: one row file for each crate, or a folder of row files that the gate reads in a stated order.
 
-- [ ] Two scratch branches from one base that each append rows at the end of the table conflict today and merge with no conflict after the change
-- [ ] `tools/mutate.py --check` and the sweep read the same rows in the same order as today
-- [ ] `seam.must-fail` still finds each row `tools/gate/must-fail.toml` names
-- [ ] The repo's `AGENTS.md` and the `verify-nightingale` skill name the new place, and `tools/verify.d/40-mutants.sh` replays a changed row as it does today
+- [x] Two scratch branches from one base that each append rows at the end of the table conflict today and merge with no conflict after the change
+- [x] `tools/mutate.py --check` and the sweep read the same rows in the same order as today
+- [x] `seam.must-fail` still finds each row `tools/gate/must-fail.toml` names
+- [x] The repo's `AGENTS.md` and the `verify-nightingale` skill name the new place, and `tools/verify.d/40-mutants.sh` replays a changed row as it does today
 
 **Non-goals:** which rows the gate keeps, a row's budget ([native-contract 84](84-a-mutant-rows-budget-follows-its-tests-own-time.md)), and the order the sweep runs its parts in.
+
+## Answer
+
+- **Layout:** Moved `tools/gate/mutants.toml` byte-for-byte to `tools/gate/mutants.d/00-base.toml` (all 707 rows at `9f5ba6ce`, exact order and git history preserved). New PRs add their own `tools/gate/mutants.d/<ticket-slug>.toml` file, so two PRs in flight never touch the same file even when mutating the same crate (86.6% of existing rows touch `ng-contract` or `ng-validate`, so per-crate files would still conflict).
+- **Reader and gate (`tools/mutate.py`, `tools/gate/gate.py`):** `load_rows` accepts either a single `.toml` file (preserving hand-run ticket tables) or a directory of `*.toml` files read in sorted filename order, refusing empty directories, non-`.toml` entries, empty files, and duplicate row names across files. `gate.py`'s `MUTANTS` points to `tools/gate/mutants.d`, `mutant_tests` and `_copy` read all `*.toml` files under it, and `rows_at(rev)` reads `tools/gate/mutants.d/*.toml` with fallback to legacy `tools/gate/mutants.toml` so diffs against pre-move bases compare exact row parity (0 rows falsely marked new).
+- **Verification:** `mutants_dir_case` in `gate.py` (`DRIVER_CASES`, run by `05-seam.sh`) merges two sibling branches that each add a file under `tools/gate/mutants.d/` with zero conflicts and checks order, `--check`, duplicate-name refusal, non-`.toml` refusal and empty-directory refusal. `tools/mutate.py tools/gate/mutants.d --check` verifies all 707 rows apply in exact order; `seam.must-fail` pairs all 55 rows; `AGENTS.md` (60 lines), `.agents/skills/verify-nightingale/SKILL.md`, `tools/gate/must-fail.toml` and `docs/adr/0011` name `tools/gate/mutants.d/`.
