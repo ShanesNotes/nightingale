@@ -6,7 +6,7 @@ use ng_contract::{
     CoupledSolver, DeclaredResolution, Digest, Dimensionless, EngineFault, InitializationFailure, Interval,
     Measure, NumericalRefusal, RunIdentity, SimTime, StepProposal, StepTicket, TrialFailure, Water,
 };
-use ng_record::{Curve, Faulted, HistorySegment, PatientRecord, Session};
+use ng_record::{CheckpointError, Curve, Faulted, HistorySegment, HistoryStore, PatientRecord, Session};
 
 const SECOND: u64 = 1_000_000_000;
 
@@ -388,13 +388,23 @@ pub(crate) fn faulted(stopped: Session<'_, Faulted>) -> AccuracyFailure {
     AccuracyFailure::Faulted(*stopped.fault())
 }
 
+struct KeepsNothing;
+impl HistoryStore for KeepsNothing {
+    fn resolve(&self, _: &Digest) -> Option<Vec<u8>> {
+        None
+    }
+    fn keep(&self, _: Digest, _: &[u8]) -> Result<(), CheckpointError> {
+        Ok(())
+    }
+}
+
 fn oscillation_amplitude(
     solver: &dyn CoupledSolver,
     case: &Oscillation,
     policy: &AccuracyPolicy,
     index: usize,
 ) -> Result<Compensated, AccuracyFailure> {
-    let store = MemoryStore::default();
+    let store = KeepsNothing;
     let mut session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
     let [x_row, y_row] = case.rows();
     let tolerance = case.tolerance_compensated();
@@ -405,7 +415,13 @@ fn oscillation_amplitude(
         let Some(interval) = dense.interval() else {
             continue;
         };
-        for at in compared_instants(interval, policy.grid_ns) {
+        let end = if interval.end() > case.end() {
+            case.end()
+        } else {
+            interval.end()
+        };
+        let compared = Interval::new(interval.start(), end).expect("a step starts before the case ends");
+        for at in compared_instants(compared, policy.grid_ns) {
             let x = high(
                 dense
                     .sample(x_row, at)

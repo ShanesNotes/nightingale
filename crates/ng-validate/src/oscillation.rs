@@ -44,16 +44,21 @@ fn named(local: &'static str) -> RowKind {
 ///
 /// The halved backward Euler step damps the oscillation at roughly `w^2 h / 4` per second, so a
 /// core with step past `4 g / w^2` (about 3.65 s here) decays the oscillation to zero while every
-/// step passes `verify` and water closes. Holding the amplitude within `tolerance = 0.1` of `1`
-/// allows damping up to `(2 * 0.1 - 0.1^2) g = 0.19 g` (`0.0019 / s`), so a halved-step core may
-/// declare at most about `0.76 g / w^2` (0.69 s at period 60 s). `ReferenceIntegrator` passes at
-/// `0.5 s` (damping `0.00137 / s`, steady amplitude `0.9289`, worst amplitude error `0.0799`).
+/// step passes `verify` and water closes. Holding the steady-state amplitude within
+/// `tolerance = 0.1` of `1` allows damping up to `(2 * 0.1 - 0.1^2) g = 0.19 g` (`0.0019 / s`),
+/// giving a necessary steady-state bound of roughly `0.76 g / w^2` (0.693 s at period 60 s).
+/// Because the gate also judges the growth transient from `r_0 = 0.5`, the measured passing
+/// cutoff for halved/doubled backward Euler sits between `600 ms` (passes, worst error `0.09635`)
+/// and `625 ms` (fails at `156.25 s`, error `0.100007`). `ReferenceIntegrator` passes at `0.5 s`
+/// (damping `0.00137 / s`, steady amplitude `0.9289`, worst amplitude error `0.0799`).
 pub struct Oscillation {
     body: CompiledBody,
     period: f64,
     growth: f64,
     pull: f64,
     start: f64,
+    water_start: f64,
+    water_exchange: f64,
     tolerance: f64,
     end: SimTime,
 }
@@ -129,6 +134,8 @@ impl Oscillation {
             growth: GROWTH_PER_SECOND,
             pull: PULL_PER_SECOND,
             start: START_AMPLITUDE,
+            water_start: WATER_START,
+            water_exchange: WATER_EXCHANGE_PER_SECOND,
             tolerance: AMPLITUDE_TOLERANCE,
             end: SimTime::from_ns(END_SECONDS * SECOND),
         })
@@ -198,14 +205,14 @@ impl Oscillation {
         packet.synthetic(
             ParameterKey::new("cv.oscillation-exchange"),
             Binding::Body,
-            Measure::<Rate<Water>>::new(WATER_EXCHANGE_PER_SECOND)?,
+            Measure::<Rate<Water>>::new(self.water_exchange)?,
             note,
         )?;
         let x_kind = named(X);
         packet.start_rest(
             &self.body,
             |row| match row {
-                RowKind::Amount { .. } => WATER_START,
+                RowKind::Amount { .. } => self.water_start,
                 kind if kind == x_kind => self.start,
                 _ => 0.0,
             },
@@ -220,11 +227,21 @@ impl Oscillation {
             growth,
             pull,
             start,
+            water_start,
+            water_exchange,
             tolerance,
             end,
         } = self;
         let mut bytes = body.model_hash().digest().as_bytes().to_vec();
-        for value in [period, growth, pull, start, tolerance] {
+        for value in [
+            period,
+            growth,
+            pull,
+            start,
+            water_start,
+            water_exchange,
+            tolerance,
+        ] {
             bytes.extend_from_slice(&value.to_bits().to_be_bytes());
         }
         bytes.extend_from_slice(&end.nanoseconds().to_be_bytes());

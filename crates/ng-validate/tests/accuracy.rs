@@ -243,16 +243,41 @@ fn verdict(core: &dyn CoupledSolver, case: AccuracyCase) -> &'static str {
 #[test]
 fn the_reference_passes_every_manufactured_case_at_first_order() {
     let policy = AccuracyPolicy::manufactured().expect("the model default");
-    assert_eq!(manufactured().len(), 6);
-    let error = |interval| accuracy(&ReferenceIntegrator::new(interval), &policy).expect("within the policy");
-    let (coarse, medium, fine) = (
-        error(500 * MILLISECOND),
-        error(250 * MILLISECOND),
-        error(125 * MILLISECOND),
-    );
-    assert_eq!(coarse.worst().len(), 6);
+    let cases = manufactured();
+    assert_eq!(cases.len(), 6);
+    let combined =
+        accuracy(&ReferenceIntegrator::new(500 * MILLISECOND), &policy).expect("within the policy");
+    assert_eq!(combined.worst().len(), 6);
     let expected_tolerance = Compensated::of(&Oscillation::self_sustained().expect("a body").tolerance());
-    assert_eq!(coarse.amplitude_tolerance(), Some(expected_tolerance));
+    assert_eq!(combined.amplitude_tolerance(), Some(expected_tolerance));
+
+    let reservoirs = AccuracyPolicy::new(
+        cases
+            .into_iter()
+            .filter(|case| !matches!(case, AccuracyCase::SelfSustainedOscillation))
+            .collect(),
+        measure(5.0),
+        measure(0.0),
+        100 * SECOND,
+    )
+    .expect("a policy");
+    let reservoir_error =
+        |interval| accuracy(&ReferenceIntegrator::new(interval), &reservoirs).expect("within the policy");
+    let (coarse, medium, fine) = (
+        reservoir_error(16 * SECOND),
+        reservoir_error(8 * SECOND),
+        reservoir_error(4 * SECOND),
+    );
+    observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
+
+    let oscillation = alone(AccuracyCase::SelfSustainedOscillation);
+    let osc_error =
+        |interval| accuracy(&ReferenceIntegrator::new(interval), &oscillation).expect("within the policy");
+    let (coarse, medium, fine) = (
+        osc_error(500 * MILLISECOND),
+        osc_error(250 * MILLISECOND),
+        osc_error(125 * MILLISECOND),
+    );
     observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
 }
 
@@ -389,20 +414,55 @@ fn oscillation_tolerance_and_reference_step_bound_the_damping() {
     assert!(6 * SECOND > case.damping_step_ns());
 
     let policy = alone(AccuracyCase::SelfSustainedOscillation);
-    let tolerance = high(Compensated::of(&case.tolerance()));
+    let tolerance = Compensated::of(&case.tolerance());
     for passing in [
         &ReferenceIntegrator::new(case.reference_step_ns()) as &dyn CoupledSolver,
         &Core::new(case.reference_step_ns()),
     ] {
         let evidence = accuracy(passing, &policy).expect("passes at the stated reference step");
-        let worst = high(evidence.worst()[0]);
-        assert!(worst > 0.06 && worst < tolerance, "worst amplitude error {worst}");
+        assert!(
+            evidence.worst()[0].at_most(tolerance),
+            "worst amplitude error {:?}",
+            evidence.worst()[0]
+        );
     }
     let damped = accuracy(&Core::new(SECOND), &policy);
     assert!(
         matches!(damped, Err(AccuracyFailure::Exceeded { case: 0, .. })),
         "1 s damps the steady amplitude by 0.148, past 0.1: {damped:?}"
     );
+}
+
+struct OvershootsEnd {
+    inner: ReferenceIntegrator,
+    switch_at: SimTime,
+    tail_ns: u64,
+}
+impl CoupledSolver for OvershootsEnd {
+    fn resolution(&self) -> DeclaredResolution {
+        resolution(b"overshoots end")
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        if accepted.time() >= self.switch_at {
+            self.tail_ns
+        } else {
+            self.inner.next_step(accepted)
+        }
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}
+
+#[test]
+fn oscillation_scoring_clips_at_case_end() {
+    let core = OvershootsEnd {
+        inner: ReferenceIntegrator::new(500 * MILLISECOND),
+        switch_at: SimTime::from_ns(1_199 * SECOND + 500 * MILLISECOND),
+        tail_ns: 6 * SECOND,
+    };
+    accuracy(&core, &alone(AccuracyCase::SelfSustainedOscillation))
+        .expect("amplitude at 1200 s is within tolerance even when the final step ends past it");
 }
 
 #[test]
