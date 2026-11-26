@@ -1034,7 +1034,7 @@ fn land<T>(
     };
     let floor = problem.identity.resolution().minimum_interval_ns();
     let identity = problem.identity.digest();
-    let base = problem.gap(ticket, problem.accepted.state(), guard)?;
+    let base = problem.base_gap(ticket, guard)?;
     let mut bracket = Bracket::new(base, ticket.length_ns(), passed.0.gap(problem, guard)?, floor);
     let (mut origin_ns, mut bottom_ns, mut bottom) = (0, 0, None);
     let mut top = passed;
@@ -1059,7 +1059,7 @@ fn land<T>(
             guard = earliest;
             let below = match &bottom {
                 Some(step) => step.gap(problem, guard)?,
-                None => problem.gap(ticket, problem.accepted.state(), guard)?,
+                None => problem.base_gap(ticket, guard)?,
             };
             origin_ns = bottom_ns;
             bracket = Bracket::new(below, length - origin_ns, top.0.gap(problem, guard)?, floor);

@@ -806,7 +806,7 @@ The floating-point operations a run may use: correctly rounded add, subtract, mu
 The amount a transfer moved over one step, kept as gross forward and reverse parts and produced only by summing evaluated rates. A reaction's extent counts turnovers.
 
 **Stage witness**:
-The record of each numerical stage a step used (its time, point and weight), which the contract re-evaluates on the record crate's own values before the step can be accepted.
+The record of each numerical stage a step used (its time, point and weight). Stages attested to the record's own `AcceptedHead` via the crate-internal `ProblemSeal` (unforgeable under `forbid(unsafe_code)`) are verified directly without redundant re-evaluation of the contract's own pure evaluator, while any unattested or mixed stage is re-evaluated on the record crate's own values before the step can be accepted.
 
 **Stage set**:
 The stages a ticket must show under its run's declared scheme, read from the ticket alone. A backward Euler ticket under 2 ns shows one whole stage. Otherwise the doubled scheme shows the doubled set, the whole ticket at weight zero and then its two halves, and the halved scheme shows the halved set, the two halves alone, except after a breakpoint, where it shows the doubled set. The doubled set's error estimate is the difference of its two ends. The halved set's is half the ticket's length times the change in slope from the first half to the second, measured from the start: the second difference of the halves when they are equal, and on an odd ticket a weighing by their lengths that reads no error on a straight line.

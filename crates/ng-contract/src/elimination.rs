@@ -220,38 +220,67 @@ impl Elimination {
     }
 
     fn eliminate(&self, pattern: &Pattern, values: &[f64]) -> Eliminated {
+        let size = self.rows.len();
+        if size <= 320 {
+            let mut seen = [0.0; 320];
+            self.eliminate_in(pattern, values, &mut seen[..size])
+        } else if size <= 2048 {
+            let mut seen = [0.0; 2048];
+            self.eliminate_in(pattern, values, &mut seen[..size])
+        } else {
+            let mut seen = vec![0.0; size];
+            self.eliminate_in(pattern, values, &mut seen)
+        }
+    }
+
+    fn eliminate_in(&self, pattern: &Pattern, values: &[f64], seen: &mut [f64]) -> Eliminated {
         let Pattern {
             starts,
             columns,
             diagonals,
             places,
         } = pattern;
+        let size = self.rows.len();
+        let starts = &starts[..=size];
+        let diagonals = &diagonals[..size];
         let mut lu = vec![0.0; columns.len()];
         for (&place, &value) in places.iter().zip(values) {
             lu[index(place)] += value;
         }
-        let (mut seen, mut finite) = (vec![0.0; self.rows.len()], true);
-        for at in 0..self.rows.len() {
-            let (start, end) = (index(starts[at]), index(starts[at + 1]));
+        assert_eq!(lu.len(), columns.len());
+        let mut finite = true;
+        for at in 0..size {
+            let (start, diag, end) = (index(starts[at]), index(diagonals[at]), index(starts[at + 1]));
             let (done, rest) = lu.split_at_mut(start);
             let line = &mut rest[..end - start];
-            for (cell, &column) in line.iter().zip(&columns[start..end]) {
-                seen[index(column)] = *cell;
-            }
-            for &pivot in &columns[start..index(diagonals[at])] {
-                let pivot = index(pivot);
-                let factor = seen[pivot] / done[index(diagonals[pivot])];
-                seen[pivot] = factor;
-                let tail = index(diagonals[pivot]) + 1..index(starts[pivot + 1]);
-                for (cell, &column) in done[tail.clone()].iter().zip(&columns[tail]) {
-                    seen[index(column)] -= factor * cell;
+            let diagonal = if start == diag {
+                for &cell in line.iter() {
+                    finite &= cell.is_finite();
                 }
-            }
-            for (cell, &column) in line.iter_mut().zip(&columns[start..end]) {
-                *cell = seen[index(column)];
-                finite &= cell.is_finite();
-            }
-            let diagonal = seen[at];
+                line[0]
+            } else {
+                for (&cell, &column) in line.iter().zip(&columns[start..end]) {
+                    seen[index(column)] = cell;
+                }
+                let (lower, upper) = line.split_at_mut(diag - start);
+                for (lower_cell, &pivot) in lower.iter_mut().zip(&columns[start..diag]) {
+                    let pivot = index(pivot);
+                    let pivot_diag = index(diagonals[pivot]);
+                    let factor = seen[pivot] / done[pivot_diag];
+                    *lower_cell = factor;
+                    finite &= factor.is_finite();
+                    let tail = pivot_diag + 1..index(starts[pivot + 1]);
+                    for (&cell, &column) in done[tail.clone()].iter().zip(&columns[tail]) {
+                        seen[index(column)] -= factor * cell;
+                    }
+                }
+                for (cell, &column) in upper.iter_mut().zip(&columns[diag..end]) {
+                    let value = seen[index(column)];
+                    *cell = value;
+                    finite &= value.is_finite();
+                }
+                upper[0]
+            };
             if diagonal == 0.0 || !diagonal.is_finite() {
                 return Eliminated {
                     found: Err(at),
@@ -291,14 +320,33 @@ impl Factors<'_> {
     }
     /// Replaces a right side, one slot per row, with the update, one slot per unknown.
     pub fn solve(&self, side: &mut [f64]) {
-        let Elimination { rows, unknowns, .. } = self.plan;
-        let pivot = |side: &[f64]| -> Vec<[f64; 1]> { rows.iter().map(|&row| [side[index(row)]]).collect() };
-        let mut pivoted = pivot(side);
-        if !self.substitute(&mut pivoted) {
-            pivoted = pivot(side);
-            self.substitute_closed(&mut pivoted);
+        let size = self.plan.rows.len();
+        if size <= 64 {
+            let mut buf = [[0.0; 1]; 64];
+            self.solve_in(side, &mut buf[..size]);
+        } else if size <= 320 {
+            let mut buf = [[0.0; 1]; 320];
+            self.solve_in(side, &mut buf[..size]);
+        } else if size <= 2048 {
+            let mut buf = [[0.0; 1]; 2048];
+            self.solve_in(side, &mut buf[..size]);
+        } else {
+            let mut buf = vec![[0.0; 1]; size];
+            self.solve_in(side, &mut buf);
         }
-        for (&unknown, [value]) in unknowns.iter().zip(pivoted) {
+    }
+    fn solve_in(&self, side: &mut [f64], pivoted: &mut [[f64; 1]]) {
+        let Elimination { rows, unknowns, .. } = self.plan;
+        for (slot, &row) in pivoted.iter_mut().zip(rows) {
+            *slot = [side[index(row)]];
+        }
+        if !self.substitute(pivoted) {
+            for (slot, &row) in pivoted.iter_mut().zip(rows) {
+                *slot = [side[index(row)]];
+            }
+            self.substitute_closed(pivoted);
+        }
+        for (&unknown, &[value]) in unknowns.iter().zip(pivoted.iter()) {
             side[index(unknown)] = value;
         }
     }
@@ -312,9 +360,23 @@ impl Factors<'_> {
         spare: &mut [[f64; LANES]],
         marks: &mut Marks,
     ) {
-        spare.copy_from_slice(group);
-        if !reach.is_some_and(|reach| self.substitute_reached(group, reach, marks)) {
-            group.copy_from_slice(spare);
+        if let Some(reach) = reach {
+            if self.substitute_reached(group, reach, spare, marks) {
+                return;
+            }
+            group.fill([0.0; LANES]);
+            for &at in &marks.seeds {
+                group[index(at)] = spare[index(at)];
+            }
+            if !self.substitute(group) {
+                group.fill([0.0; LANES]);
+                for &at in &marks.seeds {
+                    group[index(at)] = spare[index(at)];
+                }
+                self.substitute_closed(group);
+            }
+        } else {
+            spare.copy_from_slice(group);
             if !self.substitute(group) {
                 group.copy_from_slice(spare);
                 self.substitute_closed(group);
@@ -325,20 +387,41 @@ impl Factors<'_> {
     /// whose side is a positive zero and whose nonzero factors read only such rows keeps that zero going forward and
     /// takes zero over its pivot going back, as a full walk gives it. A value that is not finite sends the group back
     /// to the full walk, since a zero factor times it is not zero.
-    fn substitute_reached(&self, pivoted: &mut [[f64; LANES]], reach: &Reach, marks: &mut Marks) -> bool {
+    fn substitute_reached(
+        &self,
+        pivoted: &mut [[f64; LANES]],
+        reach: &Reach,
+        spare: &mut [[f64; LANES]],
+        marks: &mut Marks,
+    ) -> bool {
         let pattern = self.pattern();
-        let (diagonals, ghosts) = (&pattern.diagonals, self.ghosts(pivoted));
         let size = pivoted.len();
+        let starts = &pattern.starts[..=size];
+        let diagonals = &pattern.diagonals[..size];
+        let columns = &pattern.columns;
+        assert_eq!(self.lu.len(), columns.len());
+        let ghosts = self.ghosts(pivoted);
         marks.clear();
         for (at, values) in pivoted.iter().enumerate() {
             if values.iter().any(|value| value.to_bits() != 0) {
                 marks.forward[at] = true;
                 marks.stack.push(at as u32);
+                marks.seeds.push(at as u32);
+                spare[at] = *values;
             }
         }
         marks.spread(|marks| &mut marks.forward, &reach.lower_starts, &reach.lower);
-        for at in (0..size).filter(|&at| marks.forward[at]) {
-            forward(pattern, &self.lu, ghosts, pivoted, at);
+        match ghosts {
+            Some(ghosts) => {
+                for at in (0..size).filter(|&at| marks.forward[at]) {
+                    forward(starts, diagonals, columns, &self.lu, Some(ghosts), pivoted, at);
+                }
+            }
+            None => {
+                for at in (0..size).filter(|&at| marks.forward[at]) {
+                    forward(starts, diagonals, columns, &self.lu, None, pivoted, at);
+                }
+            }
         }
         marks.back.copy_from_slice(&marks.forward);
         marks
@@ -348,8 +431,17 @@ impl Factors<'_> {
         for at in (0..size).filter(|&at| !marks.back[at]) {
             pivoted[at] = [0.0 / self.lu[index(diagonals[at])]; LANES];
         }
-        for at in (0..size).rev().filter(|&at| marks.back[at]) {
-            back(pattern, &self.lu, ghosts, pivoted, at);
+        match ghosts {
+            Some(ghosts) => {
+                for at in (0..size).rev().filter(|&at| marks.back[at]) {
+                    back(starts, diagonals, columns, &self.lu, Some(ghosts), pivoted, at);
+                }
+            }
+            None => {
+                for at in (0..size).rev().filter(|&at| marks.back[at]) {
+                    back(starts, diagonals, columns, &self.lu, None, pivoted, at);
+                }
+            }
         }
         (0..size)
             .filter(|&at| marks.back[at])
@@ -387,31 +479,42 @@ impl Factors<'_> {
 
 #[inline(always)]
 fn walk<const L: usize>(pattern: &Pattern, lu: &[f64], ghosts: Option<&Ghosts>, pivoted: &mut [[f64; L]]) {
-    for at in 0..pivoted.len() {
-        forward(pattern, lu, ghosts, pivoted, at);
+    let size = pivoted.len();
+    let starts = &pattern.starts[..=size];
+    let diagonals = &pattern.diagonals[..size];
+    let columns = &pattern.columns;
+    assert_eq!(lu.len(), columns.len());
+    for at in 0..size {
+        forward(starts, diagonals, columns, lu, ghosts, pivoted, at);
     }
-    for at in (0..pivoted.len()).rev() {
-        back(pattern, lu, ghosts, pivoted, at);
+    for at in (0..size).rev() {
+        back(starts, diagonals, columns, lu, ghosts, pivoted, at);
     }
 }
 
 #[inline(always)]
 fn forward<const L: usize>(
-    pattern: &Pattern,
+    starts: &[u32],
+    diagonals: &[u32],
+    columns: &[u32],
     lu: &[f64],
     ghosts: Option<&Ghosts>,
     pivoted: &mut [[f64; L]],
     at: usize,
 ) {
-    let line = index(pattern.starts[at])..index(pattern.diagonals[at]);
+    let (start, diag) = (index(starts[at]), index(diagonals[at]));
+    if start == diag && ghosts.is_none() {
+        return;
+    }
     let mut sum = pivoted[at];
-    for (cell, &column) in lu[line.clone()].iter().zip(&pattern.columns[line]) {
-        for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
+    for (&cell, &column) in lu[start..diag].iter().zip(&columns[start..diag]) {
+        let read = pivoted[index(column)];
+        for (value, read) in sum.iter_mut().zip(read) {
             *value -= cell * read;
         }
     }
     if let Some(ghosts) = ghosts.filter(|_| sum.iter().any(|value| value.to_bits() == NEGATIVE_ZERO)) {
-        let negative = |pivot: usize| lu[index(pattern.diagonals[pivot])].is_sign_negative();
+        let negative = |pivot: usize| lu[index(diagonals[pivot])].is_sign_negative();
         ghosts.settle(&mut sum, ghosts.lower(at), negative, pivoted);
     }
     pivoted[at] = sum;
@@ -419,23 +522,28 @@ fn forward<const L: usize>(
 
 #[inline(always)]
 fn back<const L: usize>(
-    pattern: &Pattern,
+    starts: &[u32],
+    diagonals: &[u32],
+    columns: &[u32],
     lu: &[f64],
     ghosts: Option<&Ghosts>,
     pivoted: &mut [[f64; L]],
     at: usize,
 ) {
-    let line = index(pattern.diagonals[at]) + 1..index(pattern.starts[at + 1]);
+    let (diag, end) = (index(diagonals[at]), index(starts[at + 1]));
     let mut sum = pivoted[at];
-    for (cell, &column) in lu[line.clone()].iter().zip(&pattern.columns[line]) {
-        for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
-            *value -= cell * read;
+    if diag + 1 < end {
+        for (&cell, &column) in lu[diag + 1..end].iter().zip(&columns[diag + 1..end]) {
+            let read = pivoted[index(column)];
+            for (value, read) in sum.iter_mut().zip(read) {
+                *value -= cell * read;
+            }
         }
     }
     if let Some(ghosts) = ghosts.filter(|_| sum.iter().any(|value| value.to_bits() == NEGATIVE_ZERO)) {
         ghosts.settle(&mut sum, ghosts.upper(at), |_| false, pivoted);
     }
-    let pivot = lu[index(pattern.diagonals[at])];
+    let pivot = lu[diag];
     for value in &mut sum {
         *value /= pivot;
     }
@@ -520,10 +628,15 @@ impl Reach {
             return None;
         }
         let size = diagonals.len();
-        let transpose = |lines: &dyn Fn(usize) -> core::ops::Range<usize>| {
+        fn transpose(
+            size: usize,
+            lu: &[f64],
+            columns: &[u32],
+            lines: impl Fn(usize) -> core::ops::Range<usize>,
+        ) -> (Vec<u32>, Vec<u32>) {
             let mut counts = vec![0_u32; size + 1];
             for at in 0..size {
-                for entry in lines(at).filter(|&entry| factors.lu[entry] != 0.0) {
+                for entry in lines(at).filter(|&entry| lu[entry] != 0.0) {
                     counts[index(columns[entry]) + 1] += 1;
                 }
             }
@@ -533,16 +646,20 @@ impl Reach {
             let mut filled = counts.clone();
             let mut readers = vec![0_u32; index(counts[size])];
             for at in 0..size {
-                for entry in lines(at).filter(|&entry| factors.lu[entry] != 0.0) {
+                for entry in lines(at).filter(|&entry| lu[entry] != 0.0) {
                     let column = index(columns[entry]);
                     readers[index(filled[column])] = at as u32;
                     filled[column] += 1;
                 }
             }
             (counts, readers)
-        };
-        let (lower_starts, lower) = transpose(&|at| index(starts[at])..index(diagonals[at]));
-        let (upper_starts, upper) = transpose(&|at| index(diagonals[at]) + 1..index(starts[at + 1]));
+        }
+        let (lower_starts, lower) = transpose(size, &factors.lu, columns, |at| {
+            index(starts[at])..index(diagonals[at])
+        });
+        let (upper_starts, upper) = transpose(size, &factors.lu, columns, |at| {
+            index(diagonals[at]) + 1..index(starts[at + 1])
+        });
         Some(Self {
             lower_starts,
             lower,
@@ -556,6 +673,7 @@ pub(crate) struct Marks {
     forward: Vec<bool>,
     back: Vec<bool>,
     stack: Vec<u32>,
+    seeds: Vec<u32>,
 }
 impl Marks {
     pub(crate) fn new(size: usize) -> Self {
@@ -563,12 +681,14 @@ impl Marks {
             forward: vec![false; size],
             back: vec![false; size],
             stack: Vec::with_capacity(size),
+            seeds: Vec::with_capacity(size),
         }
     }
     fn clear(&mut self) {
         self.forward.fill(false);
         self.back.fill(false);
         self.stack.clear();
+        self.seeds.clear();
     }
     fn spread(&mut self, set: impl Fn(&mut Self) -> &mut Vec<bool>, starts: &[u32], readers: &[u32]) {
         while let Some(row) = self.stack.pop() {

@@ -1,15 +1,15 @@
 use crate::{
-    AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate, CompiledBody,
-    CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind, ImageParts, InitialRevision,
-    MethodHistory, NumericalRefusal, RecordHash, RhythmId, RunIdentity, SimTime, StepExtents, StepProposal,
-    StepTicket, TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
+    AcceptedStateView, AdmissibleSet, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate,
+    CompiledBody, CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind, ImageParts,
+    InitialRevision, MethodHistory, NumericalRefusal, RecordHash, RhythmId, RunIdentity, SimTime,
+    StepExtents, StepProposal, StepTicket, TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct HeadDigest {
-    parameters: Digest,
-    image: Digest,
-    from_admission: bool,
+    pub(crate) parameters: Digest,
+    pub(crate) image: Digest,
+    pub(crate) from_admission: bool,
 }
 
 /// Only `install` moves its parts, so its digest stays theirs.
@@ -98,7 +98,7 @@ impl AcceptedHead {
                 last_refusal: None,
             }));
         }
-        let problem = CoupledProblem::new(body, parameters, identity, self.view(), base);
+        let problem = CoupledProblem::for_head(body, parameters, identity, self.view(), base, self.digest);
         let (step, accepted) = parts.pending.attempt(&problem, attempt, |ticket| {
             let proposal = solve(&problem, ticket).map_err(|failure| match failure {
                 TrialFailure::Refused(refused) if refused.ticket() != ticket.digest() => {
@@ -110,13 +110,7 @@ impl AcceptedHead {
                 return Err(ticket.mismatch().into());
             }
             let step = proposal.verify(&problem)?;
-            for row in body.rows() {
-                if !row.admissible().holds(step.value(row.id())) {
-                    return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
-                        source: body.row_source(row.id()),
-                    }));
-                }
-            }
+            check_admissible(body, &step)?;
             let accepted = accept(&step)?;
             Ok((step, accepted))
         })?;
@@ -179,7 +173,9 @@ impl AcceptedHead {
             rhythm_edges: _,
             extents,
         } = next;
-        let from_admission = digest.from_admission && known == self.parts.pending.known();
+        let from_admission = digest.from_admission
+            && digest.parameters == self.digest.parameters
+            && known == self.parts.pending.known();
         let parts = &mut self.parts;
         parts.time = time;
         parts.state = state;
@@ -187,8 +183,9 @@ impl AcceptedHead {
         parts.dense = dense;
         parts.pending.advance(applied);
         self.digest = HeadDigest {
+            parameters: self.digest.parameters,
+            image: digest.image,
             from_admission,
-            ..digest
         };
         self.admission = false;
         extents
@@ -222,4 +219,43 @@ impl NextHead {
     pub fn rhythm_edges(&self) -> &[RhythmId] {
         &self.rhythm_edges
     }
+}
+
+fn holds_float(set: AdmissibleSet, value: f64) -> bool {
+    value.is_finite()
+        && match set {
+            AdmissibleSet::Finite => true,
+            AdmissibleSet::Nonnegative => value >= 0.0,
+            AdmissibleSet::Positive => value > 0.0,
+            AdmissibleSet::UnitInterval => (0.0..=1.0).contains(&value),
+        }
+}
+
+fn check_admissible(body: &CompiledBody, step: &VerifiedStep) -> Result<(), TrialFailure> {
+    let state = step.state();
+    let rows = body.rows();
+    let amounts_end = state.amounts.len();
+    let memory_end = amounts_end + state.memory.len();
+    for (row, &amount) in rows[..amounts_end].iter().zip(&state.amounts) {
+        if !row.admissible().holds(amount) {
+            return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
+                source: body.row_source(row.id()),
+            }));
+        }
+    }
+    for (row, &value) in rows[amounts_end..memory_end].iter().zip(&state.memory) {
+        if !holds_float(row.admissible(), value) {
+            return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
+                source: body.row_source(row.id()),
+            }));
+        }
+    }
+    for (row, &value) in rows[memory_end..].iter().zip(&state.algebraic) {
+        if !holds_float(row.admissible(), value) {
+            return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
+                source: body.row_source(row.id()),
+            }));
+        }
+    }
+    Ok(())
 }

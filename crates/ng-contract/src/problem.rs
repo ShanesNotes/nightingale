@@ -1,20 +1,31 @@
-use crate::body::UnknownId;
+use crate::body::{RowKind, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::chance::{Chance, Trigger, period_ns};
 use crate::evaluate::{Inputs, Undefined};
+use crate::head::HeadDigest;
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::{StageEvaluation, VerifiedStep};
 use crate::{
     AcceptedStateView, BoundParameters, Candidate, CompiledBody, Digest, EngineFault, EngineFaultKind,
-    InputId, Interval, NumericalRefusal, Ratio, Refused, RhythmId, RowId, RunIdentity, SimTime, TrialFailure,
+    Factors, InputId, Interval, ModelHash, NumericalRefusal, Ratio, Refused, RhythmId, RowId, RunIdentity,
+    SimTime, TrialFailure,
 };
 use core::num::NonZeroU64;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
-/// What a solver core sees of one attempt. The record builds one per attempt from its own fields. Building
-/// one on other values is allowed and reaches nothing, because `StepProposal::verify` re-evaluates on the
-/// record's.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProblemSeal {
+    model: ModelHash,
+    parameters: Digest,
+    image: Digest,
+    identity: Digest,
+    base: Digest,
+}
+
+/// What a solver core sees of one attempt. The record builds one per attempt from its own fields, attested to
+/// that head. Building one on other values is allowed and reaches nothing, because `StepProposal::verify`
+/// re-evaluates any unattested stage on the record's.
 pub struct CoupledProblem<'r> {
     pub(crate) body: &'r CompiledBody,
     pub(crate) parameters: &'r BoundParameters,
@@ -22,6 +33,10 @@ pub struct CoupledProblem<'r> {
     pub(crate) accepted: AcceptedStateView<'r>,
     pub(crate) base: Digest,
     pub(crate) chance: Chance,
+    pub(crate) coordinates: Vec<f64>,
+    pub(crate) first_memory: usize,
+    pub(crate) first_algebraic: usize,
+    pub(crate) provenance: Option<ProblemSeal>,
 }
 impl<'r> CoupledProblem<'r> {
     pub fn new(
@@ -31,6 +46,11 @@ impl<'r> CoupledProblem<'r> {
         accepted: AcceptedStateView<'r>,
         base: Digest,
     ) -> Self {
+        let coordinates = accepted.state().coordinates();
+        let rows = body.rows();
+        let first_memory = rows.partition_point(|row| matches!(row.kind(), RowKind::Amount { .. }));
+        let first_algebraic = first_memory
+            + rows[first_memory..].partition_point(|row| matches!(row.kind(), RowKind::Memory(_)));
         Self {
             body,
             parameters,
@@ -38,7 +58,29 @@ impl<'r> CoupledProblem<'r> {
             accepted,
             base,
             chance: Chance::at(body, identity.seed(), accepted.state()),
+            coordinates,
+            first_memory,
+            first_algebraic,
+            provenance: None,
         }
+    }
+    pub(crate) fn for_head(
+        body: &'r CompiledBody,
+        parameters: &'r BoundParameters,
+        identity: &'r RunIdentity,
+        accepted: AcceptedStateView<'r>,
+        base: Digest,
+        head: HeadDigest,
+    ) -> Self {
+        let mut problem = Self::new(body, parameters, identity, accepted, base);
+        problem.provenance = Some(ProblemSeal {
+            model: body.model_hash(),
+            parameters: head.parameters,
+            image: head.image,
+            identity: identity.digest(),
+            base,
+        });
+        problem
     }
     pub fn accepted(&self) -> AcceptedStateView<'r> {
         self.accepted
@@ -51,12 +93,13 @@ impl<'r> CoupledProblem<'r> {
         self.body
     }
     /// The natural size of the row at a workspace slot, for a Newton stop that reads each row in its own unit.
+    #[inline]
     pub fn row_size(&self, slot: usize) -> f64 {
         self.parameters.sizes[slot]
     }
     /// Numerical scratch seeded from the accepted state: each amount rounded once, the tangent at zero.
     pub fn workspace(&self) -> SolveWorkspace {
-        SolveWorkspace::seeded(self.body, self.accepted.state().coordinates())
+        SolveWorkspace::seeded(self.body, self.coordinates.clone())
     }
     pub(crate) fn layout(&self) -> Digest {
         self.body.model_hash().digest()
@@ -80,9 +123,7 @@ impl<'r> CoupledProblem<'r> {
             source: self.body.undefined_source(undefined),
         })
     }
-    /// `F(t, y, y')` on every row with the bound values, in the head's modes. A drive and a draw read the
-    /// head's, never the stage's instant; a forcing reads the stage's instant, which the witness carries.
-    pub fn evaluate(&self, point: &StagePoint<'_, '_>) -> Result<StageEvaluation, TrialFailure> {
+    pub(crate) fn evaluate_raw(&self, point: &StagePoint<'_, '_>) -> Result<RawEvaluation, TrialFailure> {
         self.check(point)?;
         let ticket = point.time.ticket;
         let factors = self.factors(point);
@@ -99,20 +140,82 @@ impl<'r> CoupledProblem<'r> {
             (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))?;
         let (columns, rows) = self.body.targets(&values);
         let residuals = self.body.residuals(&columns, &rows, point.derivative);
+        Ok(RawEvaluation {
+            columns,
+            rows,
+            residuals,
+        })
+    }
+    /// `F(t, y, y')` on every row with the bound values, in the head's modes. A drive and a draw read the
+    /// head's, never the stage's instant; a forcing reads the stage's instant, which the witness carries.
+    pub fn evaluate(&self, point: &StagePoint<'_, '_>) -> Result<StageEvaluation, TrialFailure> {
+        let RawEvaluation {
+            columns,
+            rows,
+            residuals,
+        } = self.evaluate_raw(point)?;
         Ok(StageEvaluation {
             layout: point.layout,
-            ticket: ticket.digest,
+            ticket: point.time.ticket.digest,
             offset_ns: point.time.offset_ns,
+            provenance: self.provenance,
             unknowns: point.unknowns.to_vec(),
             derivative: point.derivative.to_vec(),
             columns,
             rows,
-            values,
             residuals,
         })
     }
-    /// `dF/dy + shift * dF/dy'` by fixed-order forward differentiation over the compiled sparsity.
-    pub fn linearize(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Jacobian, TrialFailure> {
+    /// Evaluates `point` into an existing `StageEvaluation`, reusing its point buffers. On error `evaluation`
+    /// stays unchanged.
+    pub fn reevaluate(
+        &self,
+        point: &StagePoint<'_, '_>,
+        evaluation: &mut StageEvaluation,
+    ) -> Result<(), TrialFailure> {
+        let RawEvaluation {
+            columns,
+            rows,
+            residuals,
+        } = self.evaluate_raw(point)?;
+        evaluation.layout = point.layout;
+        evaluation.ticket = point.time.ticket.digest;
+        evaluation.offset_ns = point.time.offset_ns;
+        evaluation.provenance = self.provenance;
+        evaluation.unknowns.clear();
+        evaluation.unknowns.extend_from_slice(point.unknowns);
+        evaluation.derivative.clear();
+        evaluation.derivative.extend_from_slice(point.derivative);
+        evaluation.columns = columns;
+        evaluation.rows = rows;
+        evaluation.residuals = residuals;
+        Ok(())
+    }
+    pub(crate) fn evaluate_published(
+        &self,
+        ticket: &StepTicket,
+        unknowns: &[f64],
+    ) -> Result<Vec<Option<f64>>, TrialFailure> {
+        if unknowns.len() != self.body.rows().len() {
+            return Err(ticket.mismatch().into());
+        }
+        if let Some(at) = unknowns.iter().position(|value| !value.is_finite()) {
+            return Err(ticket.refuse(NumericalRefusal::TrialDomain {
+                source: self.body.row_source(self.body.rows()[at].id()),
+            }));
+        }
+        let factors = self.end_factors(ticket);
+        let inputs = Inputs {
+            parameters: &self.parameters.values,
+            frame: &ticket.frame,
+            unknowns,
+            modes: &self.accepted.state().modes,
+            draws: self.chance.draws(),
+            factors: &factors,
+        };
+        (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))
+    }
+    fn linearize_values(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Vec<f64>, TrialFailure> {
         self.check(point)?;
         let ticket = point.time.ticket;
         let factors = self.factors(point);
@@ -124,13 +227,28 @@ impl<'r> CoupledProblem<'r> {
             draws: self.chance.draws(),
             factors: &factors,
         };
-        let values = (self.body.jacobian(&inputs, shift.per_second))
-            .map_err(|undefined| self.undefined(ticket, undefined))?;
+        (self.body.jacobian(&inputs, shift.per_second)).map_err(|undefined| self.undefined(ticket, undefined))
+    }
+    /// `dF/dy + shift * dF/dy'` by fixed-order forward differentiation over the compiled sparsity.
+    pub fn linearize(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Jacobian, TrialFailure> {
+        let values = self.linearize_values(point, shift)?;
         let sparsity = self.body.sparsity();
         Ok(Jacobian {
             row_offsets: sparsity.row_offsets().to_vec(),
             columns: sparsity.unknowns().to_vec(),
             values,
+        })
+    }
+    /// `dF/dy + shift * dF/dy'` borrowing the compiled body's sparsity without copying it.
+    pub fn linearize_stage(
+        &self,
+        point: &StagePoint<'_, '_>,
+        shift: Shift,
+    ) -> Result<StageJacobian<'r>, TrialFailure> {
+        let values = self.linearize_values(point, shift)?;
+        Ok(StageJacobian {
+            body: self.body,
+            jacobian: Jacobian::of_parts(Vec::new(), Vec::new(), values),
         })
     }
     fn guard_inputs<'a>(
@@ -149,6 +267,17 @@ impl<'r> CoupledProblem<'r> {
             draws: chance.draws(),
             factors,
         }
+    }
+    fn plain_gap(
+        &self,
+        ticket: &StepTicket,
+        state: &Candidate,
+        unknowns: &[f64],
+        factors: &[f64],
+        guard: usize,
+    ) -> Result<f64, TrialFailure> {
+        let inputs = self.guard_inputs(ticket, state, unknowns, &self.chance, factors);
+        (self.body.guard_gap(guard, &inputs)).map_err(|undefined| self.undefined(ticket, undefined))
     }
     /// Layout order would read a guard that crosses later in the span, so each trial that only an earlier guard
     /// crossed would put a gap below zero at the bracket's top, and the bracket would halve. Roots on the line less
@@ -169,13 +298,28 @@ impl<'r> CoupledProblem<'r> {
         let guards = (self.body.layout.guards.iter().enumerate())
             .filter(|(_, guard)| guard.armed(&base.modes))
             .map(|(guard, _)| Trigger::Plain(guard));
+        let (below_ticket, below_state, below_unknowns) = match bottom {
+            Some(step) => (step.ticket(), step.state(), step.coordinates()),
+            None => (ticket, base, self.coordinates.as_slice()),
+        };
+        let mut above_factors: Option<Vec<f64>> = None;
+        let mut below_factors: Option<Vec<f64>> = None;
         let mut earliest: Option<(f64, Trigger<'r>)> = None;
         for trigger in hazards.chain(guards) {
-            let after = top.gap(self, trigger)?;
+            let after = match trigger {
+                Trigger::Hazard(hazard) => self.chance.gap(top.state(), hazard),
+                Trigger::Plain(guard) => {
+                    let factors = above_factors.get_or_insert_with(|| self.end_factors(top.ticket()));
+                    self.plain_gap(top.ticket(), top.state(), top.coordinates(), factors, guard)?
+                }
+            };
             if after >= 0.0 {
-                let before = match bottom {
-                    Some(step) => step.gap(self, trigger)?,
-                    None => self.gap(ticket, base, trigger)?,
+                let before = match trigger {
+                    Trigger::Hazard(hazard) => self.chance.gap(below_state, hazard),
+                    Trigger::Plain(guard) => {
+                        let factors = below_factors.get_or_insert_with(|| self.end_factors(below_ticket));
+                        self.plain_gap(below_ticket, below_state, below_unknowns, factors, guard)?
+                    }
                 };
                 let root = if before >= 0.0 {
                     0.0
@@ -190,31 +334,44 @@ impl<'r> CoupledProblem<'r> {
         }
         Ok(earliest.map(|(_, trigger)| trigger))
     }
+    fn end_factors(&self, ticket: &StepTicket) -> Vec<f64> {
+        self.chance
+            .factors(&self.parameters.values, ticket.interval().end())
+    }
     /// Whether an armed plain guard stands past its crossing at a stage before the end and not at the end. Each guard is
     /// read alone, so another guard's crossing at the end hides nothing. Stages run in the base's modes.
     pub(crate) fn crossed_inside<'s>(
         &self,
         ticket: &StepTicket,
-        stages: impl Iterator<Item = (&'s [f64], u64)> + Clone,
+        stages: impl Iterator<Item = (&'s [f64], u64)>,
         end: &Candidate,
+        end_unknowns: &[f64],
     ) -> Result<bool, TrialFailure> {
         let base = self.accepted.state();
+        if !(self.body.layout.guards.iter()).any(|layout| layout.armed(&base.modes)) {
+            return Ok(false);
+        }
+        let mut points = Vec::new();
+        for (unknowns, offset_ns) in stages {
+            let at = ticket
+                .interval()
+                .start()
+                .plus_ns(offset_ns)
+                .ok_or(ticket.mismatch())?;
+            points.push((unknowns, self.chance.factors(&self.parameters.values, at)));
+        }
+        let mut end_factors: Option<Vec<f64>> = None;
         let guards = self.body.layout.guards.iter().enumerate();
         for (guard, _) in guards.filter(|(_, layout)| layout.armed(&base.modes)) {
             let mut seen = false;
-            for (unknowns, offset_ns) in stages.clone() {
-                let at = ticket
-                    .interval()
-                    .start()
-                    .plus_ns(offset_ns)
-                    .ok_or(ticket.mismatch())?;
-                let factors = self.chance.factors(&self.parameters.values, at);
-                let inputs = self.guard_inputs(ticket, base, unknowns, &self.chance, &factors);
-                let gap = self.body.guard_gap(guard, &inputs);
-                seen |= gap.map_err(|undefined| self.undefined(ticket, undefined))? >= 0.0;
+            for (unknowns, factors) in &points {
+                seen |= self.plain_gap(ticket, base, unknowns, factors, guard)? >= 0.0;
             }
-            if seen && self.gap(ticket, end, Trigger::Plain(guard))? < 0.0 {
-                return Ok(true);
+            if seen {
+                let factors = end_factors.get_or_insert_with(|| self.end_factors(ticket));
+                if self.plain_gap(ticket, end, end_unknowns, factors, guard)? < 0.0 {
+                    return Ok(true);
+                }
             }
         }
         Ok(false)
@@ -223,19 +380,19 @@ impl<'r> CoupledProblem<'r> {
         &self,
         ticket: &StepTicket,
         state: &Candidate,
+        unknowns: &[f64],
         guard: Trigger<'_>,
     ) -> Result<f64, TrialFailure> {
         match guard {
             Trigger::Hazard(hazard) => Ok(self.chance.gap(state, hazard)),
             Trigger::Plain(guard) => {
-                let factors = self
-                    .chance
-                    .factors(&self.parameters.values, ticket.interval().end());
-                let unknowns = state.coordinates();
-                let inputs = self.guard_inputs(ticket, state, &unknowns, &self.chance, &factors);
-                (self.body.guard_gap(guard, &inputs)).map_err(|undefined| self.undefined(ticket, undefined))
+                self.plain_gap(ticket, state, unknowns, &self.end_factors(ticket), guard)
             }
         }
+    }
+    /// A guard's gap on the accepted state, read with `ticket`'s frame and end.
+    pub(crate) fn base_gap(&self, ticket: &StepTicket, guard: Trigger<'_>) -> Result<f64, TrialFailure> {
+        self.gap(ticket, self.accepted.state(), &self.coordinates, guard)
     }
     /// A firing's whole effect: hazards as `Chance::fired` has them, then every plain guard armed before any fired and
     /// crossed here sets its mode and resets its row. Plain firings are no chance event, so they make no `Fired`, and
@@ -244,13 +401,19 @@ impl<'r> CoupledProblem<'r> {
         &self,
         ticket: &StepTicket,
         state: Candidate,
+        unknowns: &[f64],
         at: SimTime,
     ) -> Result<(Candidate, Vec<crate::Fired>, Vec<RhythmId>), TrialFailure> {
         let guards = &self.body.layout.guards;
         let armed: Vec<bool> = guards.iter().map(|guard| guard.armed(&state.modes)).collect();
         let mut crossed = Vec::with_capacity(guards.len());
+        let mut factors: Option<Vec<f64>> = None;
         for (guard, armed) in armed.into_iter().enumerate() {
-            crossed.push(armed && self.gap(ticket, &state, Trigger::Plain(guard))? >= 0.0);
+            let hit = armed && {
+                let factors = factors.get_or_insert_with(|| self.end_factors(ticket));
+                self.plain_gap(ticket, &state, unknowns, factors, guard)? >= 0.0
+            };
+            crossed.push(hit);
         }
         let (mut state, fired) = self.chance.fired(self.body, state, at);
         let mut edges = Vec::new();
@@ -278,12 +441,13 @@ impl<'r> CoupledProblem<'r> {
         &self,
         ticket: &StepTicket,
         state: &Candidate,
+        unknowns: &[f64],
     ) -> Result<Vec<Option<f64>>, TrialFailure> {
         let chance = Chance::at(self.body, self.identity.seed(), state);
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
-            unknowns: &state.coordinates(),
+            unknowns,
             modes: &state.modes,
             draws: chance.draws(),
             factors: &chance.factors(&self.parameters.values, ticket.interval().end()),
@@ -295,6 +459,12 @@ impl<'r> CoupledProblem<'r> {
         let at = SimTime::from_ns(ticket.interval.start().nanoseconds() + point.time.offset_ns);
         self.chance.factors(&self.parameters.values, at)
     }
+}
+
+pub(crate) struct RawEvaluation {
+    pub(crate) columns: Vec<f64>,
+    pub(crate) rows: Vec<f64>,
+    pub(crate) residuals: Vec<f64>,
 }
 
 /// Binds one attempt: its digest covers the run identity and every other field.
@@ -497,6 +667,23 @@ impl Jacobian {
             columns: &self.columns,
             values: &self.values,
         }
+    }
+}
+pub struct StageJacobian<'r> {
+    body: &'r CompiledBody,
+    jacobian: Jacobian,
+}
+impl<'r> StageJacobian<'r> {
+    pub fn view(&self) -> SparseView<'_> {
+        let sparsity = self.body.sparsity();
+        SparseView {
+            row_offsets: sparsity.row_offsets(),
+            columns: sparsity.unknowns(),
+            values: &self.jacobian.values,
+        }
+    }
+    pub fn factor(&self) -> Result<Factors<'r>, usize> {
+        self.body.factor(&self.jacobian)
     }
 }
 /// Compressed rows on the compiled sparsity. View row `r` is `residuals()[r]`, its entries are

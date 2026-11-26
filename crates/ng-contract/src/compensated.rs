@@ -1,4 +1,4 @@
-use crate::identity::{Canonical, Seal};
+use crate::identity::{Canonical, Seal, stream};
 use crate::{Dimensionless, Measure};
 
 /// A value as a compensated pair: `hi` the rounded sum and `lo` what rounding left out, normalized so
@@ -129,6 +129,13 @@ impl Seal for Compensated {
         let Self { hi, lo } = self;
         hi.seal(out);
         lo.seal(out);
+    }
+}
+impl stream::Seal for Compensated {
+    fn seal<S: stream::Sink>(&self, out: &mut S) {
+        let Self { hi, lo } = self;
+        stream::Seal::seal(hi, out);
+        stream::Seal::seal(lo, out);
     }
 }
 

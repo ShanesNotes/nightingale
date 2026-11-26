@@ -1,6 +1,6 @@
-use crate::body::RowKind;
+use crate::body::{RowKind, Target};
 use crate::chance::Trigger;
-use crate::problem::{SolveWorkspace, StagePoint};
+use crate::problem::{ProblemSeal, SolveWorkspace, StagePoint};
 use crate::scheme::{Estimate, Stage};
 use crate::{
     Candidate, Compensated, CompiledBody, CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind,
@@ -16,11 +16,11 @@ pub struct StageEvaluation {
     pub(crate) layout: Digest,
     pub(crate) ticket: Digest,
     pub(crate) offset_ns: u64,
+    pub(crate) provenance: Option<ProblemSeal>,
     pub(crate) unknowns: Vec<f64>,
     pub(crate) derivative: Vec<f64>,
     pub(crate) columns: Vec<f64>,
     pub(crate) rows: Vec<f64>,
-    pub(crate) values: Vec<Option<f64>>,
     pub(crate) residuals: Vec<f64>,
 }
 impl StageEvaluation {
@@ -36,6 +36,7 @@ impl StageEvaluation {
 pub struct Quadrature {
     layout: Digest,
     ticket: Digest,
+    provenance: Option<ProblemSeal>,
     mismatch: EngineFault,
     length_ns: u64,
     forward: Vec<Compensated>,
@@ -46,16 +47,18 @@ pub struct Quadrature {
     stages: Vec<WitnessStage>,
 }
 impl Quadrature {
-    /// Adds the weighted rates and keeps the point and weight as a witness stage. `weight` is an exact
-    /// fraction of the ticketed interval. An evaluation from another ticket or layout, as from an earlier
-    /// attempt, and weights whose sum does not fit in lowest terms are `BindingMismatch`.
-    pub fn add(&mut self, evaluation: &StageEvaluation, weight: Ratio) -> Result<(), EngineFault> {
-        if evaluation.ticket != self.ticket || evaluation.layout != self.layout {
-            return Err(self.mismatch);
-        }
+    pub(crate) fn accumulate(
+        &mut self,
+        columns: &[f64],
+        rows: &[f64],
+        weight: Ratio,
+    ) -> Result<(), EngineFault> {
         self.total = self.total.plus(weight).ok_or(self.mismatch)?;
         let seconds = weight.seconds_of(self.length_ns);
-        for (column, &rate) in evaluation.columns.iter().enumerate() {
+        for (column, &rate) in columns.iter().enumerate() {
+            if rate == 0.0 {
+                continue;
+            }
             let side = if rate < 0.0 {
                 &mut self.reverse[column]
             } else {
@@ -63,15 +66,49 @@ impl Quadrature {
             };
             *side = side.plus(Compensated::exact(rate.abs() * seconds));
         }
-        let rates = &evaluation.rows[self.first_memory..];
+        let rates = &rows[self.first_memory..];
         for (sum, &rate) in self.memory.iter_mut().zip(rates) {
             *sum += rate * seconds;
         }
+        Ok(())
+    }
+    /// Adds the weighted rates and keeps the point and weight as a witness stage. `weight` is an exact
+    /// fraction of the ticketed interval. An evaluation from another ticket or layout, as from an earlier
+    /// attempt, and weights whose sum does not fit in lowest terms are `BindingMismatch`.
+    pub fn add(&mut self, evaluation: &StageEvaluation, weight: Ratio) -> Result<(), EngineFault> {
+        if evaluation.ticket != self.ticket || evaluation.layout != self.layout {
+            return Err(self.mismatch);
+        }
+        self.accumulate(&evaluation.columns, &evaluation.rows, weight)?;
+        if evaluation.provenance != self.provenance {
+            self.provenance = None;
+        }
+        let residuals = self.provenance.is_some().then(|| evaluation.residuals.clone());
         self.stages.push(WitnessStage {
             offset_ns: evaluation.offset_ns,
             weight,
             unknowns: evaluation.unknowns.clone(),
             derivative: evaluation.derivative.clone(),
+            residuals,
+        });
+        Ok(())
+    }
+    /// Same as `add`, moving the evaluation's witness point buffers instead of cloning them.
+    pub fn add_owned(&mut self, evaluation: StageEvaluation, weight: Ratio) -> Result<(), EngineFault> {
+        if evaluation.ticket != self.ticket || evaluation.layout != self.layout {
+            return Err(self.mismatch);
+        }
+        self.accumulate(&evaluation.columns, &evaluation.rows, weight)?;
+        if evaluation.provenance != self.provenance {
+            self.provenance = None;
+        }
+        let residuals = self.provenance.is_some().then_some(evaluation.residuals);
+        self.stages.push(WitnessStage {
+            offset_ns: evaluation.offset_ns,
+            weight,
+            unknowns: evaluation.unknowns,
+            derivative: evaluation.derivative,
+            residuals,
         });
         Ok(())
     }
@@ -83,6 +120,7 @@ impl Quadrature {
         let Self {
             layout,
             ticket,
+            provenance,
             forward,
             reverse,
             memory,
@@ -97,7 +135,7 @@ impl Quadrature {
                 reverse,
             },
             memory,
-            witness: StageWitness { stages },
+            witness: StageWitness { provenance, stages },
         })
     }
 }
@@ -114,6 +152,7 @@ pub struct Extents {
     reverse: Vec<Compensated>,
 }
 struct StageWitness {
+    provenance: Option<ProblemSeal>,
     stages: Vec<WitnessStage>,
 }
 struct WitnessStage {
@@ -121,6 +160,7 @@ struct WitnessStage {
     weight: Ratio,
     unknowns: Vec<f64>,
     derivative: Vec<f64>,
+    residuals: Option<Vec<f64>>,
 }
 impl StageWitness {
     fn error(
@@ -161,21 +201,16 @@ impl StageWitness {
 impl CoupledProblem<'_> {
     pub fn quadrature(&self, ticket: &StepTicket) -> Quadrature {
         let columns = self.body.columns().len();
-        let first_memory = (self.body.rows().iter())
-            .take_while(|row| matches!(row.kind(), RowKind::Amount { .. }))
-            .count();
-        let memory = (self.body.rows().iter())
-            .filter(|row| matches!(row.kind(), RowKind::Memory(_)))
-            .count();
         Quadrature {
             layout: self.layout(),
             ticket: ticket.digest(),
+            provenance: self.provenance,
             mismatch: ticket.mismatch(),
             length_ns: ticket.length_ns(),
             forward: vec![Compensated::ZERO; columns],
             reverse: vec![Compensated::ZERO; columns],
-            first_memory,
-            memory: vec![0.0; memory],
+            first_memory: self.first_memory,
+            memory: vec![0.0; self.first_algebraic - self.first_memory],
             total: Ratio::ZERO,
             stages: Vec::new(),
         }
@@ -199,11 +234,9 @@ impl CoupledProblem<'_> {
         let Some(estimate) = set.estimate() else {
             return Ok(0.0);
         };
-        let start = self.accepted.state().coordinates();
+        let start = &self.coordinates;
         let (scales, sizes) = (self.identity.resolution().scales(), &self.parameters.sizes);
-        let worst = increment
-            .witness
-            .error(estimate, &start, scales, sizes, self.body);
+        let worst = increment.witness.error(estimate, start, scales, sizes, self.body);
         if let Some(row) = worst.above_one() {
             return Err(ticket.refuse(NumericalRefusal::Accuracy { row }));
         }
@@ -218,10 +251,15 @@ impl CoupledProblem<'_> {
         end: &SolveWorkspace,
         history: MethodHistory,
     ) -> StepProposal {
-        let algebraic = (self.body.rows().iter().zip(end.coordinates()))
-            .filter(|(row, _)| matches!(row.kind(), RowKind::Algebraic(_)))
-            .map(|(_, &value)| value)
-            .collect();
+        let coordinates = end.coordinates();
+        let algebraic = if coordinates.len() == self.body.rows().len() {
+            coordinates[self.first_algebraic..].to_vec()
+        } else {
+            (self.body.rows().iter().zip(coordinates))
+                .filter(|(row, _)| matches!(row.kind(), RowKind::Algebraic(_)))
+                .map(|(_, &value)| value)
+                .collect()
+        };
         StepProposal {
             ticket: ticket.clone(),
             layout: end.layout(),
@@ -272,8 +310,9 @@ impl StepProposal {
         &self.ticket
     }
     /// Whether the core followed its declared method on this body. `problem` must be the record's own:
-    /// every value re-read here comes from it, none from the core. A refusal is an honest attempt a smaller
-    /// step can fix; a fault is a lie about the method or a binding that no smaller step can.
+    /// every value read here comes from it, directly when attested to that head or re-evaluated otherwise,
+    /// none from the core. A refusal is an honest attempt a smaller step can fix; a fault is a lie about the
+    /// method or a binding that no smaller step can.
     pub fn verify(self, problem: &CoupledProblem<'_>) -> Result<VerifiedStep, TrialFailure> {
         let Self {
             ticket,
@@ -288,9 +327,7 @@ impl StepProposal {
             algebraic,
             history,
         } = self;
-        let algebraic_rows = (problem.body.rows().iter())
-            .filter(|row| matches!(row.kind(), RowKind::Algebraic(_)))
-            .count();
+        let algebraic_rows = problem.body.rows().len() - problem.first_algebraic;
         if layout != problem.layout()
             || extents.layout != problem.layout()
             || finished_for != ticket.digest()
@@ -304,63 +341,60 @@ impl StepProposal {
         if !same_structure(&stages, &witness) {
             return Err(method_mismatch(&ticket).into());
         }
-        let mut replay = problem.quadrature(&ticket);
-        let mut evaluations = Vec::with_capacity(stages.len());
-        for stage in &witness.stages {
-            let point = StagePoint {
-                layout: problem.layout(),
-                time: ticket.at(stage.offset_ns)?,
-                unknowns: &stage.unknowns,
-                derivative: &stage.derivative,
-            };
-            let evaluation = problem.evaluate(&point)?;
-            replay.add(&evaluation, stage.weight)?;
-            evaluations.push(evaluation);
-        }
-        let replayed = replay.finish()?;
-        let (forward, reverse) = (&extents.forward, &extents.reverse);
-        if !same_bits(forward, &replayed.extents.forward)
-            || !same_bits(reverse, &replayed.extents.reverse)
-            || !same_floats(&memory, &replayed.memory)
-        {
-            return Err(method_mismatch(&ticket).into());
-        }
         let body = problem.body;
         let scales = resolution.scales();
         let sizes = &problem.parameters.sizes;
-        let start = problem.accepted.state().coordinates();
+        let start = &problem.coordinates;
         let mut stage_defect = Worst::NONE;
-        for ((stage, seen), evaluation) in stages.iter().zip(&witness.stages).zip(&evaluations) {
-            let from = stage
-                .from
-                .map_or(&start, |earlier| &witness.stages[earlier].unknowns);
-            let slope = &witness.stages[stage.slope].derivative;
-            for (at, row) in body.rows().iter().enumerate() {
-                let value = seen.unknowns[at];
-                let residual = evaluation.residuals[at].abs();
-                let defect = match row.kind() {
-                    RowKind::Algebraic(_) => residual,
-                    RowKind::Amount { .. } | RowKind::Memory(_) => {
-                        let reached = from[at] + seconds(stage.span_ns) * slope[at];
-                        let position = (value - reached).abs();
-                        let rate = seconds(ticket.length_ns()) * residual;
-                        if position > rate { position } else { rate }
-                    }
+        let attested = problem.provenance.is_some() && witness.provenance == problem.provenance;
+        if attested {
+            for (stage, seen) in stages.iter().zip(&witness.stages) {
+                let residuals = seen.residuals.as_deref().expect("attested stage holds residuals");
+                note_stage_defect(
+                    problem,
+                    ticket.length_ns(),
+                    stage,
+                    seen,
+                    &witness.stages,
+                    residuals,
+                    &mut stage_defect,
+                );
+            }
+        } else {
+            let mut replay = problem.quadrature(&ticket);
+            for (stage, seen) in stages.iter().zip(&witness.stages) {
+                let point = StagePoint {
+                    layout: problem.layout(),
+                    time: ticket.at(seen.offset_ns)?,
+                    unknowns: &seen.unknowns,
+                    derivative: &seen.derivative,
                 };
-                let judge = body.judged_at(at);
-                let scale = if judge == at {
-                    scales.at(value, sizes[at])
-                } else {
-                    scales.at(seen.unknowns[judge], sizes[judge])
-                };
-                stage_defect.note(defect / scale, row.id());
+                let raw = problem.evaluate_raw(&point)?;
+                replay.accumulate(&raw.columns, &raw.rows, seen.weight)?;
+                note_stage_defect(
+                    problem,
+                    ticket.length_ns(),
+                    stage,
+                    seen,
+                    &witness.stages,
+                    &raw.residuals,
+                    &mut stage_defect,
+                );
+            }
+            let replayed = replay.finish()?;
+            let (forward, reverse) = (&extents.forward, &extents.reverse);
+            if !same_bits(forward, &replayed.extents.forward)
+                || !same_bits(reverse, &replayed.extents.reverse)
+                || !same_floats(&memory, &replayed.memory)
+            {
+                return Err(method_mismatch(&ticket).into());
             }
         }
         if let Some(row) = stage_defect.above_one() {
             return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
         }
         if let Some(estimate) = set.estimate()
-            && let Some(row) = witness.error(estimate, &start, scales, sizes, body).above_one()
+            && let Some(row) = witness.error(estimate, start, scales, sizes, body).above_one()
         {
             return Err(ticket.refuse(NumericalRefusal::Accuracy { row }));
         }
@@ -372,39 +406,47 @@ impl StepProposal {
         }
         let base = problem.accepted.state();
         let state = next_state(body, base, &extents, &memory, algebraic);
+        let coordinates = state.coordinates();
         // A crossing and a crossing back inside one step leave no mark at its end, so every stage before the end is read.
         // At the floor no shorter step can look again, so the declared resolution is the limit.
         let before_the_end = (witness.stages.iter())
             .filter(|stage| stage.offset_ns < ticket.length_ns())
             .map(|stage| (stage.unknowns.as_slice(), stage.offset_ns));
         if ticket.length_ns() > ticket.floor_ns.get()
-            && problem.crossed_inside(&ticket, before_the_end, &state)?
+            && problem.crossed_inside(&ticket, before_the_end, &state, &coordinates)?
         {
             return Err(ticket.refuse(NumericalRefusal::GuardInside));
         }
-        let coordinates = state.coordinates();
-        let tangent = vec![0.0; coordinates.len()];
-        let point = StagePoint {
-            layout: problem.layout(),
-            time: ticket.at(ticket.length_ns())?,
-            unknowns: &coordinates,
-            derivative: &tangent,
-        };
-        let published = problem.evaluate(&point)?;
-        let mut algebraic_defect = Worst::NONE;
-        for (at, row) in body.rows().iter().enumerate() {
-            if matches!(row.kind(), RowKind::Algebraic(_)) {
+        let published = problem.evaluate_published(&ticket, &coordinates)?;
+        if algebraic_rows > 0 {
+            let first_algebraic = problem.first_algebraic;
+            let mut algebraic_residuals = vec![0.0; algebraic_rows];
+            for (instance, value) in body.layout.instances.iter().zip(&published) {
+                let Some(value) = *value else { continue };
+                if let Target::Row(row) = instance.target
+                    && let Some(slot) = row.index().checked_sub(first_algebraic)
+                {
+                    algebraic_residuals[slot] += if instance.rectified && value <= 0.0 {
+                        0.0
+                    } else {
+                        value
+                    };
+                }
+            }
+            let mut algebraic_defect = Worst::NONE;
+            for (slot, (at, row)) in body.rows().iter().enumerate().skip(first_algebraic).enumerate() {
                 let judge = body.judged_at(at);
-                let normalized = published.residuals[at].abs() / scales.at(coordinates[judge], sizes[judge]);
+                let normalized =
+                    algebraic_residuals[slot].abs() / scales.at(coordinates[judge], sizes[judge]);
                 algebraic_defect.note(normalized, row.id());
             }
-        }
-        if let Some(row) = algebraic_defect.above_one() {
-            return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
+            if let Some(row) = algebraic_defect.above_one() {
+                return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
+            }
         }
         let end = ticket.interval().end();
         Ok(VerifiedStep {
-            excursions: body.excursions(&published.values, &coordinates, end),
+            excursions: body.excursions(&published, &coordinates, end),
             dense: DenseSegment {
                 interval: Some(ticket.interval()),
                 start: base.values(),
@@ -413,11 +455,53 @@ impl StepProposal {
             fired: Vec::new(),
             rhythm_edges: Vec::new(),
             state,
+            coordinates,
             continuation: history,
             forward: extents.forward,
             reverse: extents.reverse,
             ticket,
         })
+    }
+}
+
+fn note_stage_defect(
+    problem: &CoupledProblem<'_>,
+    ticket_ns: u64,
+    stage: &Stage,
+    seen: &WitnessStage,
+    stages: &[WitnessStage],
+    residuals: &[f64],
+    stage_defect: &mut Worst,
+) {
+    let body = problem.body;
+    let scales = problem.identity.resolution().scales();
+    let sizes = &problem.parameters.sizes;
+    let start = problem.coordinates.as_slice();
+    let from = stage
+        .from
+        .map_or(start, |earlier| stages[earlier].unknowns.as_slice());
+    let slope = &stages[stage.slope].derivative;
+    let step_seconds = seconds(ticket_ns);
+    let span_seconds = seconds(stage.span_ns);
+    for (at, row) in body.rows().iter().enumerate() {
+        let value = seen.unknowns[at];
+        let residual = residuals[at].abs();
+        let defect = match row.kind() {
+            RowKind::Algebraic(_) => residual,
+            RowKind::Amount { .. } | RowKind::Memory(_) => {
+                let reached = from[at] + span_seconds * slope[at];
+                let position = (value - reached).abs();
+                let rate = step_seconds * residual;
+                if position > rate { position } else { rate }
+            }
+        };
+        let judge = body.judged_at(at);
+        let scale = if judge == at {
+            scales.at(value, sizes[at])
+        } else {
+            scales.at(seen.unknowns[judge], sizes[judge])
+        };
+        stage_defect.note(defect / scale, row.id());
     }
 }
 
@@ -453,9 +537,20 @@ fn next_state(
     memory: &[f64],
     algebraic: Vec<f64>,
 ) -> Candidate {
+    const NEG_ZERO: u64 = (-0.0f64).to_bits();
     let mut amounts = base.amounts.clone();
     let gross = extents.forward.iter().zip(&extents.reverse);
     for (column, (&forward, &reverse)) in body.columns().iter().zip(gross) {
+        if forward.bits() == [0, 0] && reverse.bits() == [0, 0] {
+            for &(row, _) in column.terms() {
+                let amount = amounts[row.index()];
+                let bits = amount.bits();
+                if bits[0] == NEG_ZERO || bits[1] == NEG_ZERO || !amount.is_finite() {
+                    amounts[row.index()] = amount.plus(Compensated::ZERO);
+                }
+            }
+            continue;
+        }
         let net = forward.minus(reverse);
         for &(row, coefficient) in column.terms() {
             amounts[row.index()] = amounts[row.index()].plus(net.scaled(coefficient));
@@ -479,6 +574,7 @@ fn next_state(
 pub struct VerifiedStep {
     ticket: StepTicket,
     state: Candidate,
+    coordinates: Vec<f64>,
     continuation: MethodHistory,
     dense: DenseSegment,
     forward: Vec<Compensated>,
@@ -499,6 +595,12 @@ impl VerifiedStep {
     pub fn ticket(&self) -> &StepTicket {
         &self.ticket
     }
+    pub(crate) fn state(&self) -> &Candidate {
+        &self.state
+    }
+    pub(crate) fn coordinates(&self) -> &[f64] {
+        &self.coordinates
+    }
     pub fn value(&self, row: RowId) -> Compensated {
         self.state.value(row)
     }
@@ -511,19 +613,21 @@ impl VerifiedStep {
         &self.ticket.due
     }
     pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: Trigger<'_>) -> Result<f64, TrialFailure> {
-        problem.gap(&self.ticket, &self.state, guard)
+        problem.gap(&self.ticket, &self.state, &self.coordinates, guard)
     }
     /// The dense segment keeps the left limit, so a chord never runs through a reset and the next segment
     /// starts at the reset. A firing moves a mode, a draw and an integral, so what it leaves is read again: a law
     /// with no value there refuses the trial, and a range is judged on both sides of the instant.
     pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Result<Self, TrialFailure> {
         let at = self.ticket.interval().end();
-        let (state, fired, rhythm_edges) = problem.fired(&self.ticket, self.state, at)?;
-        let values = problem.values_after_firing(&self.ticket, &state)?;
+        let (state, fired, rhythm_edges) = problem.fired(&self.ticket, self.state, &self.coordinates, at)?;
+        let coordinates = state.coordinates();
+        let values = problem.values_after_firing(&self.ticket, &state, &coordinates)?;
         let mut excursions = self.excursions;
-        excursions.extend(problem.body.excursions(&values, &state.coordinates(), at));
+        excursions.extend(problem.body.excursions(&values, &coordinates, at));
         Ok(Self {
             state,
+            coordinates,
             fired,
             rhythm_edges,
             excursions,
@@ -534,6 +638,7 @@ impl VerifiedStep {
         let Self {
             ticket: _,
             state,
+            coordinates: _,
             continuation,
             dense,
             forward: _,
@@ -619,8 +724,10 @@ mod tests {
             weight: Ratio::ZERO,
             unknowns: vec![value],
             derivative: vec![0.0],
+            residuals: None,
         };
         StageWitness {
+            provenance: None,
             stages: stages.iter().map(stage).collect(),
         }
     }
@@ -675,5 +782,267 @@ mod tests {
             (0.49, row),
             "t^2 over 7 ns reads h^2 y'' / 4, 24.5, over 1 + 49"
         );
+    }
+
+    fn admitted_one_row(
+        body: &CompiledBody,
+        speed: f64,
+        start_x: f64,
+        scheme: StageScheme,
+    ) -> (AcceptedHead, RunIdentity) {
+        use core::num::NonZeroU64;
+        let mut packet = ParameterPacket::new();
+        packet
+            .synthetic(
+                ParameterKey::new("ns.speed"),
+                Binding::Body,
+                measure::<Rate<Dimensionless>>(speed),
+                "synthetic",
+            )
+            .expect("speed");
+        packet.start_rest(body, |_| start_x, "synthetic").expect("start");
+        let bound = body.bind(packet).expect("bound");
+        let system = body
+            .initialization(
+                bound,
+                BoundaryPort::new(Vec::new()).expect("port"),
+                InitializationRequest::at(SimTime::from_ns(0)),
+            )
+            .expect("system");
+        let solved = system.workspace();
+        let history = MethodHistory::new(Digest::of_canonical(b"test"), SimTime::from_ns(0), Vec::new());
+        let origin = system.admit(solved, history).expect("admitted");
+        let scales = ErrorScales::uniform(measure(1.0), measure(1e-3)).expect("scales");
+        let resolution = DeclaredResolution::new(
+            Digest::of_canonical(b"test core"),
+            NonZeroU64::new(100_000).expect("nonzero"),
+            4,
+            ArithmeticProfile::contract_v1(),
+            scheme,
+            scales,
+        );
+        let identity = RunIdentity::new(
+            body.model_hash(),
+            origin.packet_hash(),
+            Seed::new([1, 2, 3, 4]),
+            resolution,
+        );
+        (AcceptedHead::admitted(origin, RecordHash::Blake2b), identity)
+    }
+
+    #[test]
+    fn stage_jacobian_reevaluate_and_add_owned_match_their_owning_twins() {
+        let body = one_row();
+        let (head, identity) = admitted_one_row(&body, 2.0, 1.0, StageScheme::forward_euler());
+        let base = Digest::of_canonical(b"base");
+        let span_ns = 10_000_000;
+        let _ = head
+            .attempt(
+                &body,
+                &identity,
+                base,
+                Attempt::First { span_ns },
+                |problem, ticket| {
+                    let time = ticket.at(0)?;
+                    let shift = ticket.shift(span_ns)?;
+                    let mut workspace = problem.workspace();
+                    workspace.unknowns_mut()[0] = 1.02;
+                    workspace.derivative_mut()[0] = 2.0;
+                    let point = workspace.point(time);
+                    let owned = problem.linearize(&point, shift)?;
+                    let borrowed = problem.linearize_stage(&point, shift)?;
+                    assert_eq!(owned.view().row_offsets(), borrowed.view().row_offsets());
+                    assert_eq!(owned.view().columns(), borrowed.view().columns());
+                    assert_eq!(
+                        owned
+                            .view()
+                            .values()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .collect::<Vec<_>>(),
+                        borrowed
+                            .view()
+                            .values()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .collect::<Vec<_>>()
+                    );
+                    let mut a = vec![3.0];
+                    let mut b = vec![3.0];
+                    body.factor(&owned).expect("factor").solve(&mut a);
+                    borrowed.factor().expect("factor").solve(&mut b);
+                    assert_eq!(a[0].to_bits(), b[0].to_bits());
+
+                    let mut eval = problem.evaluate(&point)?;
+                    let before_bits = eval.residuals()[0].to_bits();
+                    workspace.unknowns_mut()[0] = f64::NAN;
+                    assert!(problem.reevaluate(&workspace.point(time), &mut eval).is_err());
+                    assert_eq!(eval.residuals()[0].to_bits(), before_bits);
+
+                    workspace.unknowns_mut()[0] = 1.0;
+                    workspace.derivative_mut()[0] = 2.0;
+                    let point = workspace.point(time);
+                    let fresh = problem.evaluate(&point)?;
+                    problem.reevaluate(&point, &mut eval)?;
+                    assert_eq!(fresh.residuals()[0].to_bits(), eval.residuals()[0].to_bits());
+
+                    let mut by_ref = problem.quadrature(ticket);
+                    by_ref.add(&fresh, Ratio::ONE)?;
+                    let inc_ref = by_ref.finish()?;
+                    let mut by_val = problem.quadrature(ticket);
+                    by_val.add_owned(eval, Ratio::ONE)?;
+                    let inc_val = by_val.finish()?;
+                    assert_eq!(inc_ref.memory[0].to_bits(), inc_val.memory[0].to_bits());
+                    assert_eq!(
+                        inc_ref.witness.stages[0].unknowns[0].to_bits(),
+                        inc_val.witness.stages[0].unknowns[0].to_bits()
+                    );
+                    let history = MethodHistory::new(
+                        problem.accepted().method_history().schema(),
+                        SimTime::from_ns(0),
+                        Vec::new(),
+                    );
+                    Ok(problem.propose(ticket, inc_val, &workspace, history))
+                },
+                |_| Ok(()),
+            )
+            .expect("step passes");
+    }
+
+    #[test]
+    fn mixing_an_unattested_stage_replays_and_catches_other_values() {
+        let body = one_row();
+        let (head, identity) = admitted_one_row(&body, 2.0, 1.0, StageScheme::backward_euler_halved());
+        let (other_head, other_identity) =
+            admitted_one_row(&body, 5.0, 1.0, StageScheme::backward_euler_halved());
+        let base = Digest::of_canonical(b"base");
+        let span_ns = 10_000_000;
+        let outcome = head.attempt(
+            &body,
+            &identity,
+            base,
+            Attempt::First { span_ns },
+            |problem, ticket| {
+                let half = span_ns / 2;
+                let rest = span_ns - half;
+                let other_problem = CoupledProblem::new(
+                    &body,
+                    other_head.parts().parameters(),
+                    &other_identity,
+                    other_head.view(),
+                    base,
+                );
+                let mut ws = problem.workspace();
+                let x1 = 1.0 / (1.0 - 2.0 * (half as f64 / 1e9));
+                ws.unknowns_mut()[0] = x1;
+                ws.derivative_mut()[0] = (x1 - 1.0) / (half as f64 / 1e9);
+                let early = problem.evaluate(&ws.point(ticket.at(half)?))?;
+                let x2 = x1 / (1.0 - 5.0 * (rest as f64 / 1e9));
+                ws.unknowns_mut()[0] = x2;
+                ws.derivative_mut()[0] = (x2 - x1) / (rest as f64 / 1e9);
+                let forged_late = other_problem.evaluate(&ws.point(ticket.at(span_ns)?))?;
+                let mut q = problem.quadrature(ticket);
+                q.add_owned(early, ticket.fraction(half))?;
+                q.add_owned(forged_late, ticket.fraction(rest))?;
+                let inc = q.finish()?;
+                assert!(inc.witness.provenance.is_none());
+                let history = MethodHistory::new(
+                    problem.accepted().method_history().schema(),
+                    SimTime::from_ns(0),
+                    Vec::new(),
+                );
+                Ok(problem.propose(ticket, inc, &ws, history))
+            },
+            |_| Ok(()),
+        );
+        match outcome {
+            Err(TrialFailure::EngineFault(fault)) => {
+                assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch)
+            }
+            other => panic!("expected MethodMismatch, got {:?}", other.err()),
+        }
+    }
+
+    #[test]
+    fn cross_head_install_keeps_receiving_heads_parameter_digest() {
+        let body = one_row();
+        let (mut head, identity) = admitted_one_row(&body, 2.0, 1.0, StageScheme::forward_euler());
+        let (mut other_head, other_identity) =
+            admitted_one_row(&body, 5.0, 1.0, StageScheme::forward_euler());
+        let base = Digest::of_canonical(b"base");
+        let span_ns = 10_000_000;
+        let step_other = |h: &AcceptedHead| {
+            h.attempt(
+                &body,
+                &other_identity,
+                base,
+                Attempt::First { span_ns },
+                |problem, ticket| {
+                    let time = ticket.at(0)?;
+                    let mut ws = problem.workspace();
+                    ws.unknowns_mut()[0] = 1.0;
+                    ws.derivative_mut()[0] = 5.0;
+                    let eval = problem.evaluate(&ws.point(time))?;
+                    let mut q = problem.quadrature(ticket);
+                    q.add_owned(eval, Ratio::ONE)?;
+                    let inc = q.finish()?;
+                    let history = MethodHistory::new(
+                        problem.accepted().method_history().schema(),
+                        SimTime::from_ns(0),
+                        Vec::new(),
+                    );
+                    Ok(problem.propose(ticket, inc, &ws, history))
+                },
+                |_| Ok(()),
+            )
+            .expect("other step passes")
+            .0
+        };
+        let next_for_head = step_other(&other_head);
+        let next_for_other = step_other(&other_head);
+        let _ = head.install(next_for_head);
+        let _ = other_head.install(next_for_other);
+        assert_eq!(head.digest().parameters, head.parts().parameters().digest());
+        assert_ne!(head.digest().parameters, other_head.parts().parameters().digest());
+        assert!(!head.digest().from_admission);
+        assert_eq!(head.image_digest(), other_head.image_digest());
+        let outcome = head.attempt(
+            &body,
+            &identity,
+            base,
+            Attempt::First { span_ns },
+            |problem, ticket| {
+                let time = ticket.at(0)?;
+                let other_problem = CoupledProblem::for_head(
+                    &body,
+                    other_head.parts().parameters(),
+                    &identity,
+                    other_head.view(),
+                    base,
+                    other_head.digest(),
+                );
+                let mut ws = problem.workspace();
+                ws.unknowns_mut()[0] = problem.accepted().state().memory[0];
+                ws.derivative_mut()[0] = 5.0;
+                let forged = other_problem.evaluate(&ws.point(time))?;
+                let mut q = problem.quadrature(ticket);
+                q.add_owned(forged, Ratio::ONE)?;
+                let inc = q.finish()?;
+                assert!(inc.witness.provenance.is_none());
+                let history = MethodHistory::new(
+                    problem.accepted().method_history().schema(),
+                    SimTime::from_ns(0),
+                    Vec::new(),
+                );
+                Ok(problem.propose(ticket, inc, &ws, history))
+            },
+            |_| Ok(()),
+        );
+        match outcome {
+            Err(TrialFailure::EngineFault(fault)) => {
+                assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch)
+            }
+            other => panic!("expected MethodMismatch, got {:?}", other.err()),
+        }
     }
 }
