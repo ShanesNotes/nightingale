@@ -2,11 +2,11 @@
 
 Type: research
 Status: open
-Blocked by: `.scratch/body/issues/28-two-synthetic-days.md`
+Blocked by: `.scratch/body/issues/13-gut-absorbs-a-meal.md`, `.scratch/body/issues/14-liver-glucose-hub.md`, `.scratch/body/issues/15-insulin-and-glucagon.md`, `.scratch/body/issues/16-fuel-stores.md`
 
-**Question:** Once the whole body lives two synthetic days, which first experiment tests the most about a generative physiology model of the whole body? What does it need from the engine, and which parts of tickets 02 to 12 carry over to it?
+**Question:** Once the whole body answers a meal, which first experiment tests the most about a generative physiology model of the whole body? What does it need from the engine, and which parts of tickets 02 to 12 carry over to it?
 
-The line is parked until then, and tickets 05 to 12 wait on this ticket ([the map](../map.md)). What follows was read at main `f7192b5` and is a starting point. The pass that takes this ticket reads the engine again at its own commit, because the body moves a long way before body 28.
+The line is parked until then, and tickets 05 to 12 wait on this ticket ([the map](../map.md)). What follows was read at main `f7192b5` and is a starting point. The pass that takes this ticket reads the engine again at its own commit, because the body moves a long way before the fuel loop closes (body tickets 13 to 16).
 
 - [ ] The experiment: its question, input, named state, readings, paired branches, outside check and falsifier, as ticket 01's section 5 gives them for posture
 - [ ] Each need below asked of the engine's process, and answered there or filed there as a ticket. This line changes no engine file
@@ -69,4 +69,4 @@ Each item is a question for the engine's process.
 ## Non-goals
 
 - Training, teacher runs and any engine change.
-- Starting before body 28 resolves.
+- Starting before body tickets 13 to 16 resolve.
