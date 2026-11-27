@@ -17,11 +17,14 @@ const HEMOGLOBIN: f64 = 2.0;
 /// (research 11, Nunn pp. 244 to 245).
 const SHUNT: f64 = 0.09 * 0.98 / 0.02;
 
-/// The thermal zero is 0 degrees Celsius on the room's absolute scale (ticket 12's second ruling). The skin store's
-/// capacity serves the conducting airway's store too, as a model default.
+/// The thermal zero is 0 degrees Celsius on the room's absolute scale (ticket 12's second ruling). The conducting
+/// airway's store has its own capacity, a labelled synthetic model default with no research 16 row until a reviewed
+/// value or an admissible inference exists (record 0011, consequence 42), unequal to the skin's so that a temperature
+/// published on the other store's capacity shows.
 const THERMAL_ZERO: f64 = 273.15;
 const CORE_CAPACITY: f64 = 4e9;
 const SKIN_CAPACITY: f64 = 1.7e8;
+const AIRWAY_CAPACITY: f64 = 2e7;
 const CORE_REFERENCE: f64 = 310.15;
 const SKIN_REFERENCE: f64 = 307.15;
 /// The skin's evaporative heat the start guesses, near where the body admits in its room.
@@ -275,7 +278,7 @@ fn start_guess(row: RowKind) -> f64 {
             let (capacity, reference) = match site.key() {
                 "body" => (CORE_CAPACITY, CORE_REFERENCE),
                 "skin heat site" => (SKIN_CAPACITY, SKIN_REFERENCE),
-                _ => (SKIN_CAPACITY, CORE_REFERENCE),
+                _ => (AIRWAY_CAPACITY, CORE_REFERENCE),
             };
             capacity * (reference - THERMAL_ZERO)
         }
@@ -338,6 +341,9 @@ fn start_guess(row: RowKind) -> f64 {
                 "pump_force" => BODY_RHYTHM.rest_force(),
                 "work_of_breathing" => BODY_RHYTHM.work(),
                 "evaporation" => EVAPORATION_AT_REST,
+                "core_temperature" => CORE_REFERENCE,
+                "tissue_temperature" if bed == "skin heat site" => SKIN_REFERENCE,
+                "tissue_temperature" => CORE_REFERENCE,
                 _ => 1.0,
             }
         }
@@ -1105,19 +1111,22 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
 /// conductance `K_min A` (MT-020, MT-021), radiation's `h_r A` (MT-021, MT-022), still air's `h_c0 A` (MT-021,
 /// MT-023), still air's speed `v_0` (MT-024) and its width (MT-025), the Lewis relation (MT-026), the skin's
 /// wettedness from diffusion (MT-027). The room's air speed is its ratio to 0.1 m/s, so still air reads 1.
-/// Model defaults with no row: the thermal zero (ticket 12's second ruling), the airway store's conductance, the air
-/// speed's exponent (Stolwijk's square root), one clo's conductance over the body's surface for dry heat (Gagge's
-/// 0.155 m2 C/W a clo) and for vapour (0.143), and the evaporation's forcing, which keeps the period and amplitude of
-/// the skin water loss it replaces.
+/// Model defaults with no row: the thermal zero (ticket 12's second ruling), the airway store's capacity and its
+/// conductance, the air speed's exponent (Stolwijk's square root), one clo's conductance over the body's surface for
+/// dry heat (Gagge's 0.155 m2 C/W a clo) and for vapour (0.143), and the evaporation's forcing, which keeps the period
+/// and amplitude of the skin water loss it replaces.
 fn tissue_heat(packet: &mut ParameterPacket<SyntheticFixture>, amplitude: f64) -> Result<(), AdmissionError> {
     type HeatConductance = Quotient<Rate<Energy>, Temperature>;
     let body = Binding::Body;
     set::<Temperature>(packet, "mt.thermal-zero", body, THERMAL_ZERO)?;
     set::<Quotient<Energy, Temperature>>(packet, "mt.core-capacity", body, CORE_CAPACITY)?;
-    set::<Quotient<Energy, Temperature>>(packet, "mt.skin-capacity", body, SKIN_CAPACITY)?;
-    for (store, conductance) in [("skin heat site", 1.4e5), ("conducting airway", 1e5)] {
+    for (store, conductance, capacity) in [
+        ("skin heat site", 1.4e5, SKIN_CAPACITY),
+        ("conducting airway", 1e5, AIRWAY_CAPACITY),
+    ] {
         let at = Binding::Site(site::<TissueSite>(store)?);
         set::<HeatConductance>(packet, "mt.heat-conductance", at, conductance)?;
+        set::<Quotient<Energy, Temperature>>(packet, "mt.tissue-capacity", at, capacity)?;
     }
     set::<HeatConductance>(packet, "mt.radiant-conductance", body, 1.4e5)?;
     set::<HeatConductance>(packet, "mt.convective-conductance", body, 7.6e4)?;

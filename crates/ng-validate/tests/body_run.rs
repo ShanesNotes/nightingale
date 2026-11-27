@@ -12,8 +12,8 @@ use ng_validate::*;
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
 const LONGEST_STEP: u64 = 10 * MILLISECOND;
-const PACKET: &str = "4aaf26e34db422f348362399e982bb7547b1e2a9b31de33b9a15a0ac190f8447";
-const ADMITTED_SEAL: &str = "ac5d24e7251e2be0814e14f396f2544d184d9e40686031160e2de2392a7b4f8a";
+const PACKET: &str = "b398e0dceda3abb2a5db93d1001dff8919e64116749b4b50886f531fce3c438c";
+const ADMITTED_SEAL: &str = "3c1798742af6bb6d28bcc50aaf6b3e64471fbf5799b0151523525eb0183f8c8d";
 
 struct Counted {
     core: ng_solver::Core,
@@ -2357,8 +2357,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 4aaf26e34db422f348362399e982bb7547b1e2a9b31de33b9a15a0ac190f8447
-        seal caa5348b8f1973ffb1f8678679fdfaddbd0ed39330c00daa7f38afe0984b418a
+        packet b398e0dceda3abb2a5db93d1001dff8919e64116749b4b50886f531fce3c438c
+        seal 7dfc286bc5453b808b402d0767773e12a45be7193561a74cb60f9afdb68f35bd
         steps 198
         viscosity over its reference at the start 1.001312401
     "#]]
@@ -3558,7 +3558,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         Of(Vasopressin): worst 3.4065e-3, from admission 3.1126e-4, steady 2.7390e-3, inside a breath 2.0050e-2
         controlled admission: aortic valve shuts 0.285419956 s into the beat, leg veins 0.284243101 s
         held admission: aortic valve shuts 0.285419956 s into the beat, leg veins 0.284243101 s
-        largest difference over every row but the drive scale 1.630e-10, 4.985e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "collecting duct", class: VesselSegment }, space: Lumen, species: Sodium }); over the 3 calibrated parameters 5.116e-12, 1.871e-14 of its value and 1.805e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
+        largest difference over every row but the drive scale 1.139e-8, 8.543e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "muscle bed", class: CapillaryBed }, space: Interstitium, species: Potassium }); over the 3 calibrated parameters 5.855e-12, 2.142e-14 of its value and 2.066e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
         held run: the drive scale is its rest's bits at all 11660 accepted steps
         held Energy: worst 5.1410e5, from admission 5.1409e5, steady 4.9301e5, inside a breath 5.0992e5
         held Element(Carbon): worst 4.6075e1, from admission 3.8270e1, steady 4.3073e1, inside a breath 2.0152e2
@@ -3589,7 +3589,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         asleep Of(Vasopressin): worst 1.4348e-2 from 44.214 s to 54.214 s; from 30 s any ten seconds 1.4308e-2, inside a breath 2.4729e-2
         awake again from 150 s to 300 s; over whole breaths from 160 s, 29 breaths, the drive scale 1.057410 and the breath 4.7285 s, against 1.024350 and 4.8811 s awake and 0.874233 and 5.7193 s asleep
         reference run: 59 breath edges from 5.006 s to 298.787 s, 56 windows between edges, the widest gap 5.8267 s to 35.870 s, the widest stretch 5.8267 s to 35.870 s
-        Energy: ten seconds 1.0884e6 from 150.092 s, inside a breath 5.8653e5; between edges 7.0103e4 a second from 147.616 s to 161.661 s, before the settling time 3.9815e4 from 15.074 s to 25.078 s
+        Energy: ten seconds 1.0884e6 from 150.092 s, inside a breath 5.8654e5; between edges 7.0103e4 a second from 147.616 s to 161.661 s, before the settling time 3.9815e4 from 15.074 s to 25.078 s
         Element(Carbon): ten seconds 3.3725e2 from 34.185 s, inside a breath 2.1645e2; between edges 1.0707e1 a second from 30.043 s to 41.672 s, before the settling time 4.8557e0 from 5.006 s to 15.074 s
         Element(Oxygen): ten seconds 4.2635e3 from 31.802 s, inside a breath 4.6606e3; between edges 1.8624e1 a second from 147.616 s to 161.661 s, before the settling time 3.4762e0 from 5.006 s to 15.074 s
         Element(Hydrogen): ten seconds 6.9678e-5 from 60.359 s, inside a breath 3.8740e-5; between edges 6.8249e-6 a second from 64.476 s to 75.698 s, before the settling time 8.4375e-7 from 5.006 s to 15.074 s
@@ -3600,7 +3600,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         Of(Chloride): ten seconds 2.8615e-3 from 290.004 s; between edges 2.8101e-4 a second from 284.506 s to 298.787 s, before the settling time 4.8021e-6 from 15.074 s to 25.078 s
         Of(Potassium): ten seconds 1.3626e-4 from 290.004 s; between edges 1.3381e-5 a second from 284.506 s to 298.787 s, before the settling time 2.2867e-7 from 15.074 s to 25.078 s
         Of(Vasopressin): ten seconds 2.1136e-2 from 287.815 s, inside a breath 2.4729e-2; between edges 2.1662e-3 a second from 284.506 s to 298.787 s, before the settling time 1.3631e-4 from 15.074 s to 25.078 s
-        heat made less heat lost over whole breaths, as a share of heat made: worst -5.3400e-2 from 147.616 s to 161.661 s over 53 windows
+        heat made less heat lost over whole breaths, as a share of heat made: worst -5.3401e-2 from 147.616 s to 161.661 s over 53 windows
         two breaths from 64.298 s to 74.022 s
         Oxygen: in 4559.5945, out 3636.6819, across 899.3316, along 922.0472, gained 2.3581e1
         CarbonDioxide: in 8.6849, out 679.6929, across -667.7697, along -671.3351, gained -3.2383e0
@@ -3682,9 +3682,12 @@ impl HeatForms {
         let value = |name| lead(parameter(start, name));
         let site = |name, store| lead(site_parameter(start, name, site::<TissueSite>(store)));
         let zero = value("mt.thermal-zero");
-        let (core_capacity, skin_capacity) = (value("mt.core-capacity"), value("mt.skin-capacity"));
-        let (core, airway) = (zero + core / core_capacity, zero + airway / skin_capacity);
-        let skin = zero + skin / skin_capacity;
+        let own = |store| site("mt.tissue-capacity", store);
+        let core = zero + core / value("mt.core-capacity");
+        let (skin, airway) = (
+            zero + skin / own("skin heat site"),
+            zero + airway / own("conducting airway"),
+        );
         let (still, width) = (value("mt.still-air-speed"), value("mt.air-speed-width"));
         let effective =
             0.5 * (room.speed + still + ((room.speed - still) * (room.speed - still) + width * width).sqrt());
@@ -3827,15 +3830,74 @@ fn each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_wate
     }
     expect![[r#"
         conduction to the skin at 1.000 s: 1.225919e6 a second
-        conduction to the airway at 1.000 s: 8.852547e4 a second
+        conduction to the airway at 1.000 s: 8.799646e4 a second
         dry heat loss at 1.000 s: 1.008355e6 a second
         skin evaporative heat at 1.000 s: 2.175644e5 a second
         conduction to the skin at 1.001 s: 1.225919e6 a second
-        conduction to the airway at 1.001 s: 8.852538e4 a second
+        conduction to the airway at 1.001 s: 8.799565e4 a second
         dry heat loss at 1.001 s: 4.634335e5 a second
         skin evaporative heat at 1.001 s: 4.202316e5 a second
     "#]]
     .assert_eq(&report);
+}
+
+/// Record 0011's ninth and tenth consequences on the body: MT publishes each tissue heat store's temperature as the
+/// thermal zero plus the store's heat over its own capacity, at the admitted start and a second on, within the packet's
+/// error scale. The skin's and the airway's capacities differ, so a temperature published on another store's capacity
+/// shows here.
+#[test]
+fn each_tissue_heat_store_publishes_the_thermal_zero_plus_its_heat_over_its_own_capacity() {
+    let start = Start::admitted();
+    let value = |name| lead(parameter(&start, name));
+    let own = |store| {
+        lead(site_parameter(
+            &start,
+            "mt.tissue-capacity",
+            site::<TissueSite>(store),
+        ))
+    };
+    let capacities = [
+        value("mt.core-capacity"),
+        own("skin heat site"),
+        own("conducting airway"),
+    ];
+    assert_ne!(
+        capacities[1], capacities[2],
+        "the skin store and the airway store each have their own capacity"
+    );
+    let at = |store| Context::Site(site::<TissueSite>(store));
+    let rows = [
+        field("MT", "core_temperature", Context::Body),
+        field("MT", "tissue_temperature", at("skin heat site")),
+        field("MT", "tissue_temperature", at("conducting airway")),
+    ]
+    .map(|kind| {
+        (start.body.rows().iter())
+            .find(|row| row.kind() == kind)
+            .unwrap_or_else(|| panic!("no published temperature {kind:?}"))
+            .id()
+    });
+    let zero = value("mt.thermal-zero");
+    let holds = |session: &Session<'_, Running>| {
+        let view = session.record().accepted();
+        let held = stores(&start, session);
+        let each = ["core", "skin", "airway"]
+            .into_iter()
+            .zip(rows)
+            .zip(capacities)
+            .zip(held);
+        for (((store, row), capacity), heat) in each {
+            let (published, form) = (lead(view.value(row)), zero + heat / capacity);
+            assert!(
+                (published - form).abs() <= 1e-9 + 1e-10 * form.abs(),
+                "the {store} store publishes {published} at {} s, its heat over its capacity gives {form}",
+                seconds(view.time().nanoseconds())
+            );
+        }
+    };
+    let session = start.session();
+    holds(&session);
+    holds(&until(session, SECOND));
 }
 
 const TWINS: [(&str, &str); 5] = [
@@ -4056,9 +4118,9 @@ fn over_admissions_cycle_each_tissue_heat_stores_transfers_net_within_its_tolera
         MethodHistory::new(core.resolution().policy(), at, Vec::new()),
     )?;
     expect![[r#"
-        body: nets -5.048e-12 over the cycle against 1.31441e-1
-        skin heat site: nets +1.527e-10 over the cycle against 2e-3
-        conducting airway: nets -5.939e-11 over the cycle against 2e-3
+        body: nets +1.488e-10 over the cycle against 1.31441e-1
+        skin heat site: nets -1.819e-10 over the cycle against 2e-3
+        conducting airway: nets -7.414e-11 over the cycle against 2e-3
     "#]]
     .assert_eq(&report);
     Ok(())

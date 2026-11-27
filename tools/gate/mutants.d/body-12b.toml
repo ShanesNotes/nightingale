@@ -1,0 +1,8 @@
+[[mutant]]
+name = "a-tissue-temperature-is-published-on-the-core-capacity"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let (heat, capacity) = (k.at_site(&stores.tissue_heat), k.site_parameter(&own));'''
+new = '''        let (heat, own) = (k.at_site(&stores.tissue_heat), k.site_parameter(&own));
+        let (core, none) = (k.parameter(&core), k.subtract(own, own));
+        let capacity = k.add(core, none);'''
+test = "-p ng-validate --test body_run each_tissue_heat_store_publishes_the_thermal_zero_plus_its_heat_over_its_own_capacity"

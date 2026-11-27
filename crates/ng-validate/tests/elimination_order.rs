@@ -44,7 +44,7 @@ fn joining_rows_to_the_largest_block_stays_within_the_factoring_price() {
         );
     }
     assert_eq!(
-        base.largest_block, 671,
+        base.largest_block, 674,
         "the largest block the whole body compiles to"
     );
 

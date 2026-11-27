@@ -7,76 +7,89 @@ type Mt = Metabolism;
 
 const HEAT_NS: u64 = 1_000_000_000;
 
-/// What reads a tissue heat store's temperature, `T = T_0 + H / C`: the thermal zero `T_0` every store's amount is
-/// measured from, and each store's capacity (research 12, the row 'Heat stores and their temperatures'). The skin store
-/// and the conducting airway's store share one capacity, since a body kernel reads no site's parameter and the skin's
-/// own losses are body kernels.
-struct Stores<'b> {
-    zero: Parameter<'b, Mt, Temperature>,
-    core: Parameter<'b, Mt, Capacity>,
-    shell: Parameter<'b, Mt, Capacity>,
-}
-
-impl<'b> Stores<'b> {
-    fn declare(laws: &mut FragmentBuilder<'b, Mt>) -> Self {
-        let key = ParameterKey::new;
-        Self {
-            zero: laws.parameter(key("mt.thermal-zero"), Admissible::finite()),
-            core: laws.parameter(key("mt.core-capacity"), Admissible::positive()),
-            shell: laws.parameter(key("mt.skin-capacity"), Admissible::positive()),
-        }
-    }
-
-    fn temperature<'k, S>(
-        &self,
-        k: &mut Kernel<'b, 'k, Mt, S>,
-        held: Expr<'b, 'k, Mt, Energy>,
-        capacity: &Parameter<'b, Mt, Capacity>,
-    ) -> Expr<'b, 'k, Mt, Temperature> {
-        let (zero, capacity) = (k.parameter(&self.zero), k.parameter(capacity));
-        let ratio = k.divide(held, capacity);
-        let rise = k.as_dimension(ratio);
-        k.add(zero, rise)
-    }
-}
-
 pub fn tissue_heat<'b>(
     laws: &mut FragmentBuilder<'b, Mt>,
     ports: &MetabolismPorts<'b>,
 ) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, HEAT_NS)?;
-    let stores = Stores::declare(laws);
-    conduction(laws, ports, &stores, class);
+    let stores = ports.temperatures(laws);
+    publish(laws, &stores, class);
+    let published = stores.published();
+    let route = ports.conduction(laws);
+    conduction(laws, &route, &published.core, &published.other, class);
     let convection = Convection::declare(laws);
-    dry_heat_loss(laws, ports, &stores, &convection, class)?;
-    evaporation(laws, ports, &stores, &convection, class)
+    let dry = ports.boundary::<DryHeatLoss>()?;
+    dry_heat_loss(laws, &dry.route, published.at_exit(&dry), &convection, class);
+    let (heat, water) = (
+        ports.boundary::<SkinEvaporativeHeat>()?,
+        ports.boundary::<SkinEvaporation>()?,
+    );
+    evaporation(
+        laws,
+        (&heat.route, &water.route),
+        published.at_exit(&heat),
+        &convection,
+        class,
+    );
+    Ok(())
+}
+
+/// Each tissue heat store's temperature, `T = T_0 + H / C`, defined once where its heat and capacity are: the core
+/// store's as arrow 91's scalar on the core's capacity, and every other store's at its site on its own (research 12,
+/// the row 'Heat stores and their temperatures').
+fn publish<'b>(laws: &mut FragmentBuilder<'b, Mt>, stores: &TissueTemperatures<'b>, class: RateClass) {
+    let key = ParameterKey::new;
+    let zero = laws.parameter::<Temperature>(key("mt.thermal-zero"), Admissible::finite());
+    let core = laws.parameter::<Capacity>(key("mt.core-capacity"), Admissible::positive());
+    let own = laws.site_parameter::<TissueSite, Capacity>(key("mt.tissue-capacity"), Admissible::positive());
+    let value = laws.kernel(|mut k| {
+        let (heat, capacity) = (k.read(&stores.core_heat), k.parameter(&core));
+        let value = above_zero(&mut k, &zero, heat, capacity);
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.define(&stores.core, value);
+    let value = laws.site_kernel(|mut k| {
+        let (heat, capacity) = (k.at_site(&stores.tissue_heat), k.site_parameter(&own));
+        let value = above_zero(&mut k, &zero, heat, capacity);
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.define_at(&stores.other, value);
+}
+
+fn above_zero<'b, 'k, S>(
+    k: &mut Kernel<'b, 'k, Mt, S>,
+    zero: &Parameter<'b, Mt, Temperature>,
+    held: Expr<'b, 'k, Mt, Energy>,
+    capacity: Expr<'b, 'k, Mt, Capacity>,
+) -> Expr<'b, 'k, Mt, Temperature> {
+    let zero = k.parameter(zero);
+    let ratio = k.divide(held, capacity);
+    let rise = k.as_dimension(ratio);
+    k.add(zero, rise)
 }
 
 /// `Q = K (T_c - T_s)` from the core store to each store conduction reaches, with `K` the tissue's conductance at that
 /// site (research 12, the row 'Core to skin', its fixed tissue term).
 fn conduction<'b>(
     laws: &mut FragmentBuilder<'b, Mt>,
-    ports: &MetabolismPorts<'b>,
-    stores: &Stores<'b>,
+    route: &SiteRoute<'b, Mt, TissueSite, Energy>,
+    core: &ReadPort<'b, Mt, Temperature>,
+    own: &ReadPort<'b, Mt, PerSite<TissueSite, Temperature>>,
     class: RateClass,
 ) {
-    let route = ports.conduction(laws);
-    let (core, here) = (route.from_amount::<Energy>(), route.to_amount::<Energy>());
     let conductance = laws.site_parameter::<TissueSite, HeatConductance>(
         ParameterKey::new("mt.heat-conductance"),
         Admissible::nonnegative(),
     );
     let rate = laws.site_kernel(|mut k| {
-        let (core, here) = (k.at_site(&core), k.at_site(&here));
-        let core = stores.temperature(&mut k, core, &stores.core);
-        let here = stores.temperature(&mut k, here, &stores.shell);
+        let (core, here) = (k.read(core), k.at_site(own));
         let gap = k.subtract(core, here);
         let conductance = k.site_parameter(&conductance);
         let product = k.multiply(conductance, gap);
         let value = k.as_dimension(product);
         k.finish(value, laws.every_mode(), class)
     });
-    laws.transfer_at(&route, rate);
+    laws.transfer_at(route, rate);
 }
 
 /// Convection's conductance at the room's air speed, `h_c = h_c0 exp(n ln(v_e / v_0))` with `v_e = smooth_max(v, v_0,
@@ -139,18 +152,16 @@ fn clothed<'b, 'k>(
 /// `F_cl = 1 / (1 + 0.155 h I_clo)` per square metre (research 12, the row 'Dry heat loss', Gagge's Eq 8).
 fn dry_heat_loss<'b>(
     laws: &mut FragmentBuilder<'b, Mt>,
-    ports: &MetabolismPorts<'b>,
-    stores: &Stores<'b>,
+    exit: &Pair<'b, Mt, Energy>,
+    at_exit: ReadPort<'b, Mt, Temperature>,
     convection: &Convection<'b>,
     class: RateClass,
-) -> Result<(), AdmissionError> {
-    let route = ports.boundary::<DryHeatLoss>()?.route;
+) {
     let key = ParameterKey::new;
     let radiant = laws.parameter::<HeatConductance>(key("mt.radiant-conductance"), Admissible::positive());
     let clothing = laws.parameter::<HeatConductance>(key("mt.clothing-conductance"), Admissible::positive());
     let rate = laws.kernel(|mut k| {
-        let held = k.read(&route.amount::<Energy>());
-        let skin = stores.temperature(&mut k, held, &stores.shell);
+        let skin = k.read(&at_exit);
         let (walls, air) = (k.room_radiant(), k.room_air());
         let (radiant, convective) = (k.parameter(&radiant), convection.at(&mut k));
         let to_walls = k.subtract(skin, walls);
@@ -164,8 +175,7 @@ fn dry_heat_loss<'b>(
         let value = clothed(&mut k, &clothing, both, bare);
         k.finish(value, laws.every_mode(), class)
     });
-    laws.transfer(Transfer::new(&route, rate));
-    Ok(())
+    laws.transfer(Transfer::new(exit, rate));
 }
 
 /// `P_sat(T) = P_ref exp(a - b / (T + c))`, an Antoine form (research 12, the row 'Saturated vapour pressure').
@@ -209,15 +219,11 @@ impl<'b> Vapour<'b> {
 /// `E` and water leaves the skin bed at `E / lambda`, so the two stand in one fixed proportion.
 fn evaporation<'b>(
     laws: &mut FragmentBuilder<'b, Mt>,
-    ports: &MetabolismPorts<'b>,
-    stores: &Stores<'b>,
+    (heat, water): (&Pair<'b, Mt, Energy>, &Pair<'b, Mt, Water>),
+    at_exit: ReadPort<'b, Mt, Temperature>,
     convection: &Convection<'b>,
     class: RateClass,
-) -> Result<(), AdmissionError> {
-    let (heat, water) = (
-        ports.boundary::<SkinEvaporativeHeat>()?.route,
-        ports.boundary::<SkinEvaporation>()?.route,
-    );
+) {
     let key = ParameterKey::new;
     let vapour = Vapour::declare(laws);
     let lewis =
@@ -234,8 +240,7 @@ fn evaporation<'b>(
     );
     let rate = laws.algebraic::<Rate<Energy>>("evaporation", Admissible::finite());
     let law = laws.kernel(|mut k| {
-        let held = k.read(&heat.amount::<Energy>());
-        let skin = stores.temperature(&mut k, held, &stores.shell);
+        let skin = k.read(&at_exit);
         let air = k.room_air();
         let (at_skin, in_air) = (vapour.saturated(&mut k, skin), vapour.saturated(&mut k, air));
         let humidity = k.room_humidity();
@@ -260,13 +265,12 @@ fn evaporation<'b>(
         let value = k.algebraic(&rate);
         k.finish(value, laws.every_mode(), class)
     });
-    laws.transfer(Transfer::new(&heat, heat_rate));
+    laws.transfer(Transfer::new(heat, heat_rate));
     let water_rate = laws.kernel(|mut k| {
         let (value, latent) = (k.algebraic(&rate), k.parameter(&latent));
         let ratio = k.divide(value, latent);
         let value = k.as_dimension(ratio);
         k.finish(value, laws.every_mode(), class)
     });
-    laws.transfer(Transfer::new(&water, water_rate));
-    Ok(())
+    laws.transfer(Transfer::new(water, water_rate));
 }
