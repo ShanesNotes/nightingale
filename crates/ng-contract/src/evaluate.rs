@@ -249,6 +249,12 @@ enum HoistedOp {
 struct FastGeneral {
     steps_start: u32,
     steps_end: u32,
+    raw_steps_start: u32,
+    raw_steps_end: u32,
+    bwd_start: u32,
+    bwd_end: u32,
+    bwd_fast_start: u32,
+    bwd_fast_end: u32,
     param_start: u32,
     param_end: u32,
     unknown_start: u32,
@@ -257,6 +263,7 @@ struct FastGeneral {
     other_end: u32,
     program: u16,
     output: u8,
+    bwd_max_slot: u8,
     hoist_finite: bool,
 }
 
@@ -340,6 +347,10 @@ enum StageFusedOp {
 struct FastQuad {
     steps_start: u32,
     steps_end: u32,
+    raw_steps_start: u32,
+    raw_steps_end: u32,
+    bwd_fast_start: u32,
+    bwd_fast_end: u32,
     param_slots_start: u32,
     param_slots_end: u32,
     param_indices_start: u32,
@@ -350,8 +361,11 @@ struct FastQuad {
     other_slots_end: u32,
     other_bounds_start: u32,
     targets: [FastTarget; 4],
+    jac_slope_offsets: [u32; 4],
     output: u8,
+    bwd_max_slot: u8,
     pub_safe: bool,
+    jac_safe: bool,
 }
 
 struct FastTape {
@@ -374,10 +388,14 @@ struct FastTape {
     stage_fused_ops: Vec<StageFusedOp>,
     stage_unfused_ops: Vec<FastOp>,
     in_pub_quad: Vec<bool>,
+    jac_quad_offset: Vec<u32>,
+    jac_quad_slopes_len: usize,
     col_term_ranges: Vec<Range<u32>>,
     generals: Vec<FastGeneral>,
     steps: Vec<(u8, FastInstr)>,
     hoisted_steps: Vec<(u8, HoistedOp)>,
+    bwd_steps: Vec<(u32, Instr)>,
+    bwd_fast_steps: Vec<(u8, FastInstr)>,
     parameters: Vec<(u8, u16)>,
     unknowns: Vec<(u8, u16)>,
     judged_ops: Vec<u8>,
@@ -834,6 +852,10 @@ impl Tape {
         let mut generals = Vec::new();
         let mut parameters = Vec::new();
         let mut unknowns = Vec::new();
+        let mut bwd_steps = Vec::new();
+        let mut bwd_fast_steps = Vec::new();
+        type BwdKey = (usize, Vec<u8>);
+        let mut bwd_cache: BTreeMap<BwdKey, (u32, u32, u32, u32, u8)> = BTreeMap::new();
         let mut judged_ops = Vec::with_capacity(self.judged_total);
         let mut judged_ranges = if self.judged_total > 0 {
             Vec::with_capacity(layout.instances.len())
@@ -910,15 +932,60 @@ impl Tape {
                 }
                 let param_end = parameters.len() as u32;
                 let unknown_start = unknowns.len() as u32;
+                let mut u_slots = Vec::with_capacity(reads.unknowns.len());
                 for &(slot, index) in reads.unknowns {
-                    unknowns.push((slot as u8, index as u16));
+                    let s = slot as u8;
+                    u_slots.push(s);
+                    unknowns.push((s, index as u16));
                 }
                 let unknown_end = unknowns.len() as u32;
+                let (bwd_start, bwd_end, bwd_fast_start, bwd_fast_end, bwd_max_slot) =
+                    *bwd_cache.entry((pid, u_slots.clone())).or_insert_with(|| {
+                        let mut dep = [false; STACK_SLOTS];
+                        let mut max_slot = output;
+                        for &u in &u_slots {
+                            dep[usize::from(u)] = true;
+                            max_slot = max_slot.max(u);
+                        }
+                        for &(slot, instr) in p_steps {
+                            dep[usize::from(slot)] = fast_instr_depends(instr, &dep);
+                        }
+                        let mut live = [false; STACK_SLOTS];
+                        live[usize::from(output)] = true;
+                        for &(slot, instr) in p_steps.iter().rev() {
+                            if !live[usize::from(slot)] || !dep[usize::from(slot)] {
+                                continue;
+                            }
+                            mark_fast_operands(instr, &mut live);
+                        }
+                        let bs = bwd_steps.len() as u32;
+                        let bfs = bwd_fast_steps.len() as u32;
+                        for &(slot, instr) in p_steps {
+                            if live[usize::from(slot)] && dep[usize::from(slot)] {
+                                max_slot = max_slot.max(slot).max(fast_instr_max_operand(instr));
+                                bwd_steps.push((u32::from(slot), fast_to_instr(instr)));
+                                bwd_fast_steps.push((slot, instr));
+                            }
+                        }
+                        (
+                            bs,
+                            bwd_steps.len() as u32,
+                            bfs,
+                            bwd_fast_steps.len() as u32,
+                            max_slot,
+                        )
+                    });
                 let other_range = &self.instances[at].others;
                 let general_at = generals.len() as u32;
                 generals.push(FastGeneral {
                     steps_start: run_start,
                     steps_end: run_end,
+                    raw_steps_start: raw_start,
+                    raw_steps_end: raw_end,
+                    bwd_start,
+                    bwd_end,
+                    bwd_fast_start,
+                    bwd_fast_end,
                     param_start,
                     param_end,
                     unknown_start,
@@ -927,6 +994,7 @@ impl Tape {
                     other_end: other_range.end,
                     program: pid as u16,
                     output,
+                    bwd_max_slot,
                     hoist_finite,
                 });
                 FastKind::General(general_at)
@@ -1211,6 +1279,8 @@ impl Tape {
         let mut quad_other_bounds = Vec::new();
         let mut in_stage_quad = vec![false; layout.instances.len()];
         let mut in_pub_quad = vec![false; layout.instances.len()];
+        let mut jac_quad_offset = vec![u32::MAX; layout.instances.len()];
+        let mut jac_quad_slopes_len = 0_usize;
         for ((_, p_slots, u_slots, o_slots), bucket) in quad_buckets {
             let (chunks, _) = bucket.as_chunks::<4>();
             if chunks.is_empty() {
@@ -1261,6 +1331,20 @@ impl Tape {
                     !has_validity[at]
                         && (self.judged_total == 0 || judged_ranges[at].start == judged_ranges[at].end)
                 });
+                let q_targets = [targets[a0], targets[a1], targets[a2], targets[a3]];
+                let jac_safe = !u_slots.is_empty()
+                    && q_targets
+                        .iter()
+                        .all(|t| !matches!(t, FastTarget::ColumnScaled(_)));
+                let mut jac_slope_offsets = [u32::MAX; 4];
+                if jac_safe {
+                    for (lane, &at) in [a0, a1, a2, a3].iter().enumerate() {
+                        let off = jac_quad_slopes_len as u32;
+                        jac_slope_offsets[lane] = off;
+                        jac_quad_offset[at] = off;
+                        jac_quad_slopes_len += u_slots.len();
+                    }
+                }
                 for &at in &[a0, a1, a2, a3] {
                     in_stage_quad[at] = true;
                     if pub_safe {
@@ -1270,6 +1354,10 @@ impl Tape {
                 stage_quads.push(FastQuad {
                     steps_start: gs[0].steps_start,
                     steps_end: gs[0].steps_end,
+                    raw_steps_start: gs[0].raw_steps_start,
+                    raw_steps_end: gs[0].raw_steps_end,
+                    bwd_fast_start: gs[0].bwd_fast_start,
+                    bwd_fast_end: gs[0].bwd_fast_end,
                     param_slots_start,
                     param_slots_end,
                     param_indices_start,
@@ -1279,9 +1367,12 @@ impl Tape {
                     other_slots_start,
                     other_slots_end,
                     other_bounds_start,
-                    targets: [targets[a0], targets[a1], targets[a2], targets[a3]],
+                    targets: q_targets,
+                    jac_slope_offsets,
                     output: gs[0].output,
+                    bwd_max_slot: gs[0].bwd_max_slot,
                     pub_safe,
+                    jac_safe,
                 });
             }
         }
@@ -1340,10 +1431,14 @@ impl Tape {
             stage_fused_ops,
             stage_unfused_ops,
             in_pub_quad,
+            jac_quad_offset,
+            jac_quad_slopes_len,
             col_term_ranges,
             generals,
             steps,
             hoisted_steps,
+            bwd_steps,
+            bwd_fast_steps,
             parameters,
             unknowns,
             judged_ops,
@@ -2184,6 +2279,449 @@ fn forward_stack_hoisted(
     Ok(())
 }
 
+fn fast_instr_depends(instr: FastInstr, dep: &[bool; STACK_SLOTS]) -> bool {
+    match instr {
+        FastInstr::Zero => false,
+        FastInstr::Add([a, b])
+        | FastInstr::Subtract([a, b])
+        | FastInstr::Multiply([a, b])
+        | FastInstr::Divide([a, b]) => dep[usize::from(a)] || dep[usize::from(b)],
+        FastInstr::SmoothMax([a, b, w]) | FastInstr::SmoothMin([a, b, w]) | FastInstr::Relax([a, b, w]) => {
+            dep[usize::from(a)] || dep[usize::from(b)] || dep[usize::from(w)]
+        }
+        FastInstr::Exp([x])
+        | FastInstr::Expm1([x])
+        | FastInstr::Logistic([x])
+        | FastInstr::Ln([x])
+        | FastInstr::Volume([x]) => dep[usize::from(x)],
+        FastInstr::Upwind(u) => u.iter().any(|&x| dep[usize::from(x)]),
+    }
+}
+
+fn mark_fast_operands(instr: FastInstr, live: &mut [bool; STACK_SLOTS]) {
+    match instr {
+        FastInstr::Zero => {}
+        FastInstr::Add([a, b])
+        | FastInstr::Subtract([a, b])
+        | FastInstr::Multiply([a, b])
+        | FastInstr::Divide([a, b]) => {
+            live[usize::from(a)] = true;
+            live[usize::from(b)] = true;
+        }
+        FastInstr::SmoothMax([a, b, w]) | FastInstr::SmoothMin([a, b, w]) | FastInstr::Relax([a, b, w]) => {
+            live[usize::from(a)] = true;
+            live[usize::from(b)] = true;
+            live[usize::from(w)] = true;
+        }
+        FastInstr::Exp([x])
+        | FastInstr::Expm1([x])
+        | FastInstr::Logistic([x])
+        | FastInstr::Ln([x])
+        | FastInstr::Volume([x]) => {
+            live[usize::from(x)] = true;
+        }
+        FastInstr::Upwind(u) => {
+            for x in u {
+                live[usize::from(x)] = true;
+            }
+        }
+    }
+}
+
+fn fast_instr_max_operand(instr: FastInstr) -> u8 {
+    match instr {
+        FastInstr::Zero => 0,
+        FastInstr::Add([a, b])
+        | FastInstr::Subtract([a, b])
+        | FastInstr::Multiply([a, b])
+        | FastInstr::Divide([a, b]) => a.max(b),
+        FastInstr::SmoothMax([a, b, w]) | FastInstr::SmoothMin([a, b, w]) | FastInstr::Relax([a, b, w]) => {
+            a.max(b).max(w)
+        }
+        FastInstr::Exp([x])
+        | FastInstr::Expm1([x])
+        | FastInstr::Logistic([x])
+        | FastInstr::Ln([x])
+        | FastInstr::Volume([x]) => x,
+        FastInstr::Upwind([a, b, c, d, e]) => a.max(b).max(c).max(d).max(e),
+    }
+}
+
+fn fast_to_instr(instr: FastInstr) -> Instr {
+    match instr {
+        FastInstr::Zero => Instr::Zero,
+        FastInstr::Add([a, b]) => Instr::Add([u32::from(a), u32::from(b)]),
+        FastInstr::Subtract([a, b]) => Instr::Subtract([u32::from(a), u32::from(b)]),
+        FastInstr::Multiply([a, b]) => Instr::Multiply([u32::from(a), u32::from(b)]),
+        FastInstr::Divide([a, b]) => Instr::Divide([u32::from(a), u32::from(b)]),
+        FastInstr::SmoothMax([a, b, w]) => Instr::SmoothMax([u32::from(a), u32::from(b), u32::from(w)]),
+        FastInstr::SmoothMin([a, b, w]) => Instr::SmoothMin([u32::from(a), u32::from(b), u32::from(w)]),
+        FastInstr::Exp([x]) => Instr::Exp([u32::from(x)]),
+        FastInstr::Expm1([x]) => Instr::Expm1([u32::from(x)]),
+        FastInstr::Logistic([x]) => Instr::Logistic([u32::from(x)]),
+        FastInstr::Ln([x]) => Instr::Ln([u32::from(x)]),
+        FastInstr::Relax([a, b, c]) => Instr::Relax([u32::from(a), u32::from(b), u32::from(c)]),
+        FastInstr::Volume([x]) => Instr::Volume([u32::from(x)]),
+        FastInstr::Upwind([a, b, c, d, e]) => Instr::Upwind([
+            u32::from(a),
+            u32::from(b),
+            u32::from(c),
+            u32::from(d),
+            u32::from(e),
+        ]),
+    }
+}
+
+#[inline(always)]
+fn forward_fast_unfused_hoisted(
+    steps: &[(u8, FastInstr)],
+    partial_volume: f64,
+    values: &mut [f64; STACK_SLOTS],
+) -> Result<(), ()> {
+    for &(slot, instr) in steps {
+        let value = match instr {
+            FastInstr::Zero => 0.0,
+            FastInstr::Add([a, b]) => values[usize::from(a)] + values[usize::from(b)],
+            FastInstr::Subtract([a, b]) => values[usize::from(a)] - values[usize::from(b)],
+            FastInstr::Multiply([a, b]) => values[usize::from(a)] * values[usize::from(b)],
+            FastInstr::Divide([a, b]) => {
+                let divisor = values[usize::from(b)];
+                if !(divisor > 0.0 && divisor < f64::INFINITY) {
+                    return Err(());
+                }
+                values[usize::from(a)] / divisor
+            }
+            FastInstr::SmoothMax([a, b, width]) => smooth_value(
+                values[usize::from(a)],
+                values[usize::from(b)],
+                values[usize::from(width)],
+                1.0,
+            ),
+            FastInstr::SmoothMin([a, b, width]) => smooth_value(
+                values[usize::from(a)],
+                values[usize::from(b)],
+                values[usize::from(width)],
+                -1.0,
+            ),
+            FastInstr::Exp([x]) => {
+                let x = values[usize::from(x)];
+                if !is_finite_fp(x) {
+                    return Err(());
+                }
+                pinned::exp(x)
+            }
+            FastInstr::Expm1([x]) => {
+                let x = values[usize::from(x)];
+                if !is_finite_fp(x) {
+                    return Err(());
+                }
+                pinned::expm1(x)
+            }
+            FastInstr::Logistic([x]) => {
+                let x = values[usize::from(x)];
+                if !is_finite_fp(x) {
+                    return Err(());
+                }
+                1.0 / (1.0 + pinned::exp(-x))
+            }
+            FastInstr::Ln([x]) => {
+                let x = values[usize::from(x)];
+                if !(x > 0.0 && x < f64::INFINITY) {
+                    return Err(());
+                }
+                pinned::ln_positive_finite(x)
+            }
+            FastInstr::Relax([target, current, speed]) => {
+                values[usize::from(speed)] * (values[usize::from(target)] - values[usize::from(current)])
+            }
+            FastInstr::Volume([amount]) => values[usize::from(amount)] * partial_volume,
+            FastInstr::Upwind(_) => return Err(()),
+        };
+        values[usize::from(slot)] = value;
+    }
+    Ok(())
+}
+
+#[inline(always)]
+fn forward_fast_unfused_hoisted_4(
+    steps: &[(u8, FastInstr)],
+    partial_volume: f64,
+    values: &mut [[f64; 4]; STACK_SLOTS],
+) -> Result<(), ()> {
+    for &(slot, instr) in steps {
+        let value = match instr {
+            FastInstr::Zero => [0.0; 4],
+            FastInstr::Add([a, b]) => {
+                let (x, y) = (values[usize::from(a)], values[usize::from(b)]);
+                [x[0] + y[0], x[1] + y[1], x[2] + y[2], x[3] + y[3]]
+            }
+            FastInstr::Subtract([a, b]) => {
+                let (x, y) = (values[usize::from(a)], values[usize::from(b)]);
+                [x[0] - y[0], x[1] - y[1], x[2] - y[2], x[3] - y[3]]
+            }
+            FastInstr::Multiply([a, b]) => {
+                let (x, y) = (values[usize::from(a)], values[usize::from(b)]);
+                [x[0] * y[0], x[1] * y[1], x[2] * y[2], x[3] * y[3]]
+            }
+            FastInstr::Divide([a, b]) => {
+                let (x, d) = (values[usize::from(a)], values[usize::from(b)]);
+                if !all_pos_finite_4(d) {
+                    return Err(());
+                }
+                [x[0] / d[0], x[1] / d[1], x[2] / d[2], x[3] / d[3]]
+            }
+            FastInstr::SmoothMax([a, b, w]) => {
+                let (x, y, z) = (
+                    values[usize::from(a)],
+                    values[usize::from(b)],
+                    values[usize::from(w)],
+                );
+                [
+                    smooth_value(x[0], y[0], z[0], 1.0),
+                    smooth_value(x[1], y[1], z[1], 1.0),
+                    smooth_value(x[2], y[2], z[2], 1.0),
+                    smooth_value(x[3], y[3], z[3], 1.0),
+                ]
+            }
+            FastInstr::SmoothMin([a, b, w]) => {
+                let (x, y, z) = (
+                    values[usize::from(a)],
+                    values[usize::from(b)],
+                    values[usize::from(w)],
+                );
+                [
+                    smooth_value(x[0], y[0], z[0], -1.0),
+                    smooth_value(x[1], y[1], z[1], -1.0),
+                    smooth_value(x[2], y[2], z[2], -1.0),
+                    smooth_value(x[3], y[3], z[3], -1.0),
+                ]
+            }
+            FastInstr::Exp([x]) => {
+                let v = values[usize::from(x)];
+                if !all_finite_4(v) {
+                    return Err(());
+                }
+                [
+                    pinned::exp(v[0]),
+                    pinned::exp(v[1]),
+                    pinned::exp(v[2]),
+                    pinned::exp(v[3]),
+                ]
+            }
+            FastInstr::Expm1([x]) => {
+                let v = values[usize::from(x)];
+                if !all_finite_4(v) {
+                    return Err(());
+                }
+                [
+                    pinned::expm1(v[0]),
+                    pinned::expm1(v[1]),
+                    pinned::expm1(v[2]),
+                    pinned::expm1(v[3]),
+                ]
+            }
+            FastInstr::Logistic([x]) => {
+                let v = values[usize::from(x)];
+                if !all_finite_4(v) {
+                    return Err(());
+                }
+                [
+                    1.0 / (1.0 + pinned::exp(-v[0])),
+                    1.0 / (1.0 + pinned::exp(-v[1])),
+                    1.0 / (1.0 + pinned::exp(-v[2])),
+                    1.0 / (1.0 + pinned::exp(-v[3])),
+                ]
+            }
+            FastInstr::Ln([x]) => {
+                let v = values[usize::from(x)];
+                if !all_pos_finite_4(v) {
+                    return Err(());
+                }
+                [
+                    pinned::ln_positive_finite(v[0]),
+                    pinned::ln_positive_finite(v[1]),
+                    pinned::ln_positive_finite(v[2]),
+                    pinned::ln_positive_finite(v[3]),
+                ]
+            }
+            FastInstr::Relax([target, current, speed]) => {
+                let (t, c, s) = (
+                    values[usize::from(target)],
+                    values[usize::from(current)],
+                    values[usize::from(speed)],
+                );
+                [
+                    s[0] * (t[0] - c[0]),
+                    s[1] * (t[1] - c[1]),
+                    s[2] * (t[2] - c[2]),
+                    s[3] * (t[3] - c[3]),
+                ]
+            }
+            FastInstr::Volume([amount]) => {
+                let x = values[usize::from(amount)];
+                [
+                    x[0] * partial_volume,
+                    x[1] * partial_volume,
+                    x[2] * partial_volume,
+                    x[3] * partial_volume,
+                ]
+            }
+            FastInstr::Upwind(_) => return Err(()),
+        };
+        values[usize::from(slot)] = value;
+    }
+    Ok(())
+}
+
+#[inline(always)]
+fn backward_4(
+    steps: &[(u8, FastInstr)],
+    values: &[[f64; 4]; STACK_SLOTS],
+    partial_volume: f64,
+    slopes: &mut [[f64; 4]; STACK_SLOTS],
+) {
+    for &(at, instr) in steps.iter().rev() {
+        let s = slopes[usize::from(at)];
+        if (s[0] == 0.0) & (s[1] == 0.0) & (s[2] == 0.0) & (s[3] == 0.0) {
+            continue;
+        }
+        match instr {
+            FastInstr::Zero | FastInstr::Upwind(_) => {}
+            FastInstr::Add([a, b]) => {
+                let sa = &mut slopes[usize::from(a)];
+                for k in 0..4 {
+                    sa[k] += s[k];
+                }
+                let sb = &mut slopes[usize::from(b)];
+                for k in 0..4 {
+                    sb[k] += s[k];
+                }
+            }
+            FastInstr::Subtract([a, b]) => {
+                let sa = &mut slopes[usize::from(a)];
+                for k in 0..4 {
+                    sa[k] += s[k];
+                }
+                let sb = &mut slopes[usize::from(b)];
+                for k in 0..4 {
+                    sb[k] -= s[k];
+                }
+            }
+            FastInstr::Multiply([a, b]) => {
+                let va = values[usize::from(a)];
+                let vb = values[usize::from(b)];
+                let sa = &mut slopes[usize::from(a)];
+                for k in 0..4 {
+                    sa[k] += s[k] * vb[k];
+                }
+                let sb = &mut slopes[usize::from(b)];
+                for k in 0..4 {
+                    sb[k] += s[k] * va[k];
+                }
+            }
+            FastInstr::Divide([a, b]) => {
+                let va = values[usize::from(a)];
+                let d = values[usize::from(b)];
+                let sa = &mut slopes[usize::from(a)];
+                for k in 0..4 {
+                    sa[k] += s[k] / d[k];
+                }
+                let sb = &mut slopes[usize::from(b)];
+                for k in 0..4 {
+                    sb[k] -= s[k] * va[k] / (d[k] * d[k]);
+                }
+            }
+            FastInstr::SmoothMax([a, b, w]) | FastInstr::SmoothMin([a, b, w]) => {
+                let sign = if matches!(instr, FastInstr::SmoothMax(_)) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let (va, vb, vw) = (
+                    values[usize::from(a)],
+                    values[usize::from(b)],
+                    values[usize::from(w)],
+                );
+                let mut da = [0.0; 4];
+                let mut db = [0.0; 4];
+                let mut dw = [0.0; 4];
+                for k in 0..4 {
+                    let (_, along, across) = smooth(va[k], vb[k], vw[k], sign);
+                    da[k] = s[k] * 0.5 * (1.0 + sign * along);
+                    db[k] = s[k] * 0.5 * (1.0 - sign * along);
+                    dw[k] = s[k] * 0.5 * sign * across;
+                }
+                let sa = &mut slopes[usize::from(a)];
+                for k in 0..4 {
+                    sa[k] += da[k];
+                }
+                let sb = &mut slopes[usize::from(b)];
+                for k in 0..4 {
+                    sb[k] += db[k];
+                }
+                let sw = &mut slopes[usize::from(w)];
+                for k in 0..4 {
+                    sw[k] += dw[k];
+                }
+            }
+            FastInstr::Exp([x]) => {
+                let vat = values[usize::from(at)];
+                let sx = &mut slopes[usize::from(x)];
+                for k in 0..4 {
+                    sx[k] += s[k] * vat[k];
+                }
+            }
+            FastInstr::Expm1([x]) => {
+                let vx = values[usize::from(x)];
+                let sx = &mut slopes[usize::from(x)];
+                for k in 0..4 {
+                    sx[k] += s[k] * pinned::exp(vx[k]);
+                }
+            }
+            FastInstr::Logistic([x]) => {
+                let vat = values[usize::from(at)];
+                let sx = &mut slopes[usize::from(x)];
+                for k in 0..4 {
+                    sx[k] += s[k] * vat[k] * (1.0 - vat[k]);
+                }
+            }
+            FastInstr::Ln([x]) => {
+                let vx = values[usize::from(x)];
+                let sx = &mut slopes[usize::from(x)];
+                for k in 0..4 {
+                    sx[k] += s[k] / vx[k];
+                }
+            }
+            FastInstr::Relax([target, current, speed]) => {
+                let (vt, vc, vs) = (
+                    values[usize::from(target)],
+                    values[usize::from(current)],
+                    values[usize::from(speed)],
+                );
+                let gap = [vt[0] - vc[0], vt[1] - vc[1], vt[2] - vc[2], vt[3] - vc[3]];
+                let st = &mut slopes[usize::from(target)];
+                for k in 0..4 {
+                    st[k] += s[k] * vs[k];
+                }
+                let sc = &mut slopes[usize::from(current)];
+                for k in 0..4 {
+                    sc[k] -= s[k] * vs[k];
+                }
+                let ss = &mut slopes[usize::from(speed)];
+                for k in 0..4 {
+                    ss[k] += s[k] * gap[k];
+                }
+            }
+            FastInstr::Volume([amount]) => {
+                let sa = &mut slopes[usize::from(amount)];
+                for k in 0..4 {
+                    sa[k] += s[k] * partial_volume;
+                }
+            }
+        }
+    }
+}
+
 fn forward(
     arithmetic: Arithmetic<'_>,
     reads: Reads<'_>,
@@ -2782,13 +3320,12 @@ impl CompiledBody {
         Ok(out)
     }
     #[inline(always)]
-    fn eval_quad_values(
+    fn load_quad_inputs(
         fast: &FastTape,
         quad: &FastQuad,
         inputs: &Inputs<'_>,
-        partial_volume: f64,
         values: &mut [[f64; 4]; STACK_SLOTS],
-    ) -> Result<[f64; 4], ()> {
+    ) -> Result<(), ()> {
         let parameters = inputs.parameters;
         let unknowns = inputs.unknowns;
         let p_slots = &fast.quad_param_slots[quad.param_slots_start as usize..quad.param_slots_end as usize];
@@ -2835,6 +3372,17 @@ impl CompiledBody {
                 values[usize::from(slot)] = v;
             }
         }
+        Ok(())
+    }
+    #[inline(always)]
+    fn eval_quad_values(
+        fast: &FastTape,
+        quad: &FastQuad,
+        inputs: &Inputs<'_>,
+        partial_volume: f64,
+        values: &mut [[f64; 4]; STACK_SLOTS],
+    ) -> Result<[f64; 4], ()> {
+        Self::load_quad_inputs(fast, quad, inputs, values)?;
         forward_fast_hoisted_4(
             &fast.hoisted_steps[quad.steps_start as usize..quad.steps_end as usize],
             partial_volume,
@@ -2845,6 +3393,76 @@ impl CompiledBody {
             return Err(());
         }
         Ok(out)
+    }
+    fn eval_jac_quads(
+        fast: &FastTape,
+        inputs: &Inputs<'_>,
+        partial_volume: f64,
+        quad_slopes: &mut [f64],
+    ) -> Result<(), ()> {
+        let mut values = [[0.0; 4]; STACK_SLOTS];
+        let mut slopes = [[0.0; 4]; STACK_SLOTS];
+        for quad in &fast.stage_quads {
+            if !quad.jac_safe {
+                continue;
+            }
+            Self::load_quad_inputs(fast, quad, inputs, &mut values)?;
+            forward_fast_unfused_hoisted_4(
+                &fast.steps[quad.raw_steps_start as usize..quad.raw_steps_end as usize],
+                partial_volume,
+                &mut values,
+            )?;
+            let out = values[usize::from(quad.output)];
+            if !all_finite_4(out) {
+                return Err(());
+            }
+            let flat = [0, 1, 2, 3].map(|k| {
+                matches!(
+                    quad.targets[k],
+                    FastTarget::Row { rectified: true, .. } if out[k] < 0.0
+                )
+            });
+            let u_slots =
+                &fast.quad_unknown_slots[quad.unknown_slots_start as usize..quad.unknown_slots_end as usize];
+            if flat[0] & flat[1] & flat[2] & flat[3] {
+                for off in quad.jac_slope_offsets {
+                    quad_slopes[off as usize..off as usize + u_slots.len()].fill(0.0);
+                }
+                continue;
+            }
+            slopes[..=usize::from(quad.bwd_max_slot)].fill([0.0; 4]);
+            slopes[usize::from(quad.output)] = [
+                if flat[0] { 0.0 } else { 1.0 },
+                if flat[1] { 0.0 } else { 1.0 },
+                if flat[2] { 0.0 } else { 1.0 },
+                if flat[3] { 0.0 } else { 1.0 },
+            ];
+            backward_4(
+                &fast.bwd_fast_steps[quad.bwd_fast_start as usize..quad.bwd_fast_end as usize],
+                &values,
+                partial_volume,
+                &mut slopes,
+            );
+            let mut all_ok = true;
+            for &slot in u_slots {
+                all_ok &= all_finite_4(slopes[usize::from(slot)]);
+            }
+            if !all_ok {
+                return Err(());
+            }
+            for lane in 0..4 {
+                let dst = &mut quad_slopes[quad.jac_slope_offsets[lane] as usize
+                    ..quad.jac_slope_offsets[lane] as usize + u_slots.len()];
+                if flat[lane] {
+                    dst.fill(0.0);
+                } else {
+                    for (out_slot, &slot) in dst.iter_mut().zip(u_slots) {
+                        *out_slot = slopes[usize::from(slot)][lane];
+                    }
+                }
+            }
+        }
+        Ok(())
     }
     fn eval_stage_quads(
         &self,
@@ -3515,104 +4133,181 @@ impl CompiledBody {
             Ok(())
         };
         let mut values = vec![0.0; self.layout.sparsity.unknowns.len()];
+        let mut fast_done = false;
         if let Some(fast) = &self.tape.fast
             && clean
         {
             let partial_volume = self.partial_volume();
-            let mut scratch = SlopeScratch {
-                values: [0.0; STACK_SLOTS],
-                slopes: [0.0; STACK_SLOTS],
-            };
-            for &op in &fast.ops {
-                match op {
-                    FastOp::Batch(batch_at) => {
-                        self.jacobian_batch(fast.batches[batch_at as usize], fast, inputs, &mut values)?;
-                    }
-                    FastOp::Single(at) => {
-                        let at = at as usize;
-                        let inst = fast.instances[at];
-                        if !inst.holds(inputs.modes) {
-                            continue;
+            let mut quad_slopes = vec![0.0; fast.jac_quad_slopes_len];
+            let quads_ok = fast.jac_quad_slopes_len == 0
+                || Self::eval_jac_quads(fast, inputs, partial_volume, &mut quad_slopes).is_ok();
+            if quads_ok {
+                fast_done = true;
+                let mut scratch = SlopeScratch {
+                    values: [0.0; STACK_SLOTS],
+                    slopes: [0.0; STACK_SLOTS],
+                };
+                for &op in &fast.ops {
+                    match op {
+                        FastOp::Batch(batch_at) => {
+                            self.jacobian_batch(fast.batches[batch_at as usize], fast, inputs, &mut values)?;
                         }
-                        match inst.kind {
-                            FastKind::Zero | FastKind::ReadParameter(_) => {}
-                            FastKind::ReadUnknown(u) => match fast.targets[at] {
-                                FastTarget::Row {
-                                    rectified, algebraic, ..
-                                } => {
-                                    let value = inputs.unknowns[usize::from(u)];
-                                    let slope = if rectified && value < 0.0 { 0.0 } else { 1.0 };
-                                    let sign = if algebraic { 1.0 } else { -1.0 };
-                                    values[self.tape.entries(at)[0] as usize] += sign * slope;
-                                }
-                                FastTarget::ColumnUnit(col) => {
-                                    let terms = &self.tape.column_terms
-                                        [slice_range(&fast.col_term_ranges[col as usize])];
-                                    let entries = self.tape.entries(at);
-                                    for (&ColumnTerm { coefficient, .. }, &entry) in terms.iter().zip(entries)
-                                    {
-                                        values[entry as usize] -= coefficient;
+                        FastOp::Single(at) => {
+                            let at = at as usize;
+                            let inst = fast.instances[at];
+                            if !inst.holds(inputs.modes) {
+                                continue;
+                            }
+                            let q_off = fast.jac_quad_offset[at];
+                            if q_off != u32::MAX {
+                                let off = q_off as usize;
+                                let n_unk = match inst.kind {
+                                    FastKind::General(gi) => {
+                                        let g = fast.generals[gi as usize];
+                                        (g.unknown_end - g.unknown_start) as usize
                                     }
-                                }
-                                FastTarget::ColumnScaled(_) => {
-                                    self.slope_single_fast(
-                                        fast,
-                                        at,
-                                        inputs,
-                                        partial_volume,
-                                        &mut scratch,
-                                        |swept| scatter(swept, &mut values),
-                                    )?;
-                                }
-                            },
-                            FastKind::General(general_at) => {
-                                let g = fast.generals[general_at as usize];
-                                let unk = &fast.unknowns[g.unknown_start as usize..g.unknown_end as usize];
-                                if unk.is_empty() {
-                                    self.eval_single_fast(
-                                        fast,
-                                        at,
-                                        inst,
-                                        inputs,
-                                        partial_volume,
-                                        &mut scratch.values,
-                                    )?;
-                                    continue;
-                                }
-                                let arithmetic =
-                                    self.tape.arithmetic(&self.tape.programs[usize::from(g.program)]);
-                                for &(slot, index) in
-                                    &fast.parameters[g.param_start as usize..g.param_end as usize]
-                                {
-                                    scratch.values[usize::from(slot)] = inputs.parameters[usize::from(index)];
-                                }
-                                for &(slot, index) in unk {
-                                    scratch.values[usize::from(slot)] = inputs.unknowns[usize::from(index)];
-                                }
-                                let mut read_clean = true;
-                                if g.other_start != g.other_end {
-                                    for &(slot, bound) in
-                                        &self.tape.others[g.other_start as usize..g.other_end as usize]
-                                    {
-                                        match read(&bound, inputs) {
-                                            Some(v) if v.is_finite() => scratch.values[slot as usize] = v,
-                                            _ => read_clean = false,
+                                    _ => unreachable!(),
+                                };
+                                let lane_slopes = &quad_slopes[off..off + n_unk];
+                                let entries = self.tape.entries(at);
+                                match fast.targets[at] {
+                                    FastTarget::Row { algebraic, .. } => {
+                                        let sign = if algebraic { 1.0 } else { -1.0 };
+                                        for (&slope, &entry) in lane_slopes.iter().zip(entries) {
+                                            values[entry as usize] += sign * slope;
                                         }
                                     }
+                                    FastTarget::ColumnUnit(col) => {
+                                        let terms = &self.tape.column_terms
+                                            [slice_range(&fast.col_term_ranges[col as usize])];
+                                        match terms {
+                                            [a, b] => {
+                                                let (ca, cb) = (a.coefficient, b.coefficient);
+                                                for (&slope, &[e0, e1]) in
+                                                    lane_slopes.iter().zip(entries.as_chunks::<2>().0)
+                                                {
+                                                    values[e0 as usize] -= ca * slope;
+                                                    values[e1 as usize] -= cb * slope;
+                                                }
+                                            }
+                                            [a] => {
+                                                let ca = a.coefficient;
+                                                for (&slope, &entry) in lane_slopes.iter().zip(entries) {
+                                                    values[entry as usize] -= ca * slope;
+                                                }
+                                            }
+                                            _ => {
+                                                let mut e = entries.iter();
+                                                for &slope in lane_slopes {
+                                                    for &ColumnTerm { coefficient, .. } in terms {
+                                                        let entry = *e
+                                                            .next()
+                                                            .expect("an entry per unknown read and term");
+                                                        values[entry as usize] -= coefficient * slope;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    FastTarget::ColumnScaled(_) => unreachable!(),
                                 }
-                                let value = if read_clean {
-                                    if g.hoist_finite {
-                                        if forward_stack_hoisted(
-                                            arithmetic.steps,
+                                continue;
+                            }
+                            match inst.kind {
+                                FastKind::Zero | FastKind::ReadParameter(_) => {}
+                                FastKind::ReadUnknown(u) => match fast.targets[at] {
+                                    FastTarget::Row {
+                                        rectified, algebraic, ..
+                                    } => {
+                                        let value = inputs.unknowns[usize::from(u)];
+                                        let slope = if rectified && value < 0.0 { 0.0 } else { 1.0 };
+                                        let sign = if algebraic { 1.0 } else { -1.0 };
+                                        values[self.tape.entries(at)[0] as usize] += sign * slope;
+                                    }
+                                    FastTarget::ColumnUnit(col) => {
+                                        let terms = &self.tape.column_terms
+                                            [slice_range(&fast.col_term_ranges[col as usize])];
+                                        let entries = self.tape.entries(at);
+                                        for (&ColumnTerm { coefficient, .. }, &entry) in
+                                            terms.iter().zip(entries)
+                                        {
+                                            values[entry as usize] -= coefficient;
+                                        }
+                                    }
+                                    FastTarget::ColumnScaled(_) => {
+                                        self.slope_single_fast(
+                                            fast,
+                                            at,
+                                            inputs,
+                                            partial_volume,
+                                            &mut scratch,
+                                            |swept| scatter(swept, &mut values),
+                                        )?;
+                                    }
+                                },
+                                FastKind::General(general_at) => {
+                                    let g = fast.generals[general_at as usize];
+                                    let unk =
+                                        &fast.unknowns[g.unknown_start as usize..g.unknown_end as usize];
+                                    if unk.is_empty() {
+                                        self.eval_single_fast(
+                                            fast,
+                                            at,
+                                            inst,
+                                            inputs,
                                             partial_volume,
                                             &mut scratch.values,
-                                        )
-                                        .is_ok()
+                                        )?;
+                                        continue;
+                                    }
+                                    let arithmetic =
+                                        self.tape.arithmetic(&self.tape.programs[usize::from(g.program)]);
+                                    for &(slot, index) in
+                                        &fast.parameters[g.param_start as usize..g.param_end as usize]
+                                    {
+                                        scratch.values[usize::from(slot)] =
+                                            inputs.parameters[usize::from(index)];
+                                    }
+                                    for &(slot, index) in unk {
+                                        scratch.values[usize::from(slot)] =
+                                            inputs.unknowns[usize::from(index)];
+                                    }
+                                    let mut read_clean = true;
+                                    if g.other_start != g.other_end {
+                                        for &(slot, bound) in
+                                            &self.tape.others[g.other_start as usize..g.other_end as usize]
                                         {
-                                            let out =
-                                                scratch.values[usize::from((arithmetic.length - 1) as u8)];
-                                            if is_finite_fp(out) {
-                                                out
+                                            match read(&bound, inputs) {
+                                                Some(v) if v.is_finite() => scratch.values[slot as usize] = v,
+                                                _ => read_clean = false,
+                                            }
+                                        }
+                                    }
+                                    let mut used_fast_raw = false;
+                                    let value = if read_clean {
+                                        if g.hoist_finite {
+                                            if forward_fast_unfused_hoisted(
+                                                &fast.steps
+                                                    [g.raw_steps_start as usize..g.raw_steps_end as usize],
+                                                partial_volume,
+                                                &mut scratch.values,
+                                            )
+                                            .is_ok()
+                                            {
+                                                let out = scratch.values[usize::from(g.output)];
+                                                if is_finite_fp(out) {
+                                                    used_fast_raw = true;
+                                                    out
+                                                } else {
+                                                    forward(
+                                                        arithmetic,
+                                                        self.tape.instance(at),
+                                                        inputs,
+                                                        partial_volume,
+                                                        &mut scratch.values,
+                                                    )
+                                                    .map_err(|domain| self.undefined(at, inputs, domain))?
+                                                }
                                             } else {
                                                 forward(
                                                     arithmetic,
@@ -3624,44 +4319,33 @@ impl CompiledBody {
                                                 .map_err(|domain| self.undefined(at, inputs, domain))?
                                             }
                                         } else {
-                                            forward(
-                                                arithmetic,
-                                                self.tape.instance(at),
-                                                inputs,
-                                                partial_volume,
-                                                &mut scratch.values,
-                                            )
-                                            .map_err(|domain| self.undefined(at, inputs, domain))?
+                                            for &(slot, instr) in arithmetic.steps {
+                                                let val = apply(instr, &scratch.values, partial_volume)
+                                                    .map_err(|domain| self.undefined(at, inputs, domain))?;
+                                                scratch.values[usize::from(slot as u8)] = val;
+                                            }
+                                            scratch.values[usize::from((arithmetic.length - 1) as u8)]
                                         }
                                     } else {
-                                        for &(slot, instr) in arithmetic.steps {
-                                            let val = apply(instr, &scratch.values, partial_volume)
-                                                .map_err(|domain| self.undefined(at, inputs, domain))?;
-                                            scratch.values[usize::from(slot as u8)] = val;
-                                        }
-                                        scratch.values[usize::from((arithmetic.length - 1) as u8)]
-                                    }
-                                } else {
-                                    forward(
-                                        arithmetic,
-                                        self.tape.instance(at),
-                                        inputs,
-                                        partial_volume,
-                                        &mut scratch.values,
-                                    )
-                                    .map_err(|domain| self.undefined(at, inputs, domain))?
-                                };
-                                match fast.targets[at] {
-                                    FastTarget::Row {
-                                        rectified, algebraic, ..
-                                    } => {
-                                        let sign = if algebraic { 1.0 } else { -1.0 };
-                                        let entries = self.tape.entries(at);
-                                        if rectified && value < 0.0 {
-                                            let zero = sign * 0.0;
-                                            for &entry in entries {
-                                                values[entry as usize] += zero;
-                                            }
+                                        forward(
+                                            arithmetic,
+                                            self.tape.instance(at),
+                                            inputs,
+                                            partial_volume,
+                                            &mut scratch.values,
+                                        )
+                                        .map_err(|domain| self.undefined(at, inputs, domain))?
+                                    };
+                                    let run_backward = |scratch: &mut SlopeScratch| {
+                                        if used_fast_raw {
+                                            scratch.slopes[..=usize::from(g.bwd_max_slot)].fill(0.0);
+                                            scratch.slopes[usize::from(g.output)] = 1.0;
+                                            backward_in(
+                                                &fast.bwd_steps[g.bwd_start as usize..g.bwd_end as usize],
+                                                StackSlots(&scratch.values),
+                                                partial_volume,
+                                                StackSlotsMut(&mut scratch.slopes),
+                                            );
                                         } else {
                                             backward_stack(
                                                 arithmetic,
@@ -3669,14 +4353,84 @@ impl CompiledBody {
                                                 partial_volume,
                                                 &mut scratch.slopes,
                                             );
+                                        }
+                                    };
+                                    match fast.targets[at] {
+                                        FastTarget::Row {
+                                            rectified, algebraic, ..
+                                        } => {
+                                            let sign = if algebraic { 1.0 } else { -1.0 };
+                                            let entries = self.tape.entries(at);
+                                            if rectified && value < 0.0 {
+                                                let zero = sign * 0.0;
+                                                for &entry in entries {
+                                                    values[entry as usize] += zero;
+                                                }
+                                            } else {
+                                                run_backward(&mut scratch);
+                                                let mut finite = true;
+                                                for &(slot, _) in unk {
+                                                    finite &= is_finite_fp(scratch.slopes[usize::from(slot)]);
+                                                }
+                                                if finite {
+                                                    for (&(slot, _), &entry) in unk.iter().zip(entries) {
+                                                        values[entry as usize] +=
+                                                            sign * scratch.slopes[usize::from(slot)];
+                                                    }
+                                                } else {
+                                                    scatter(
+                                                        &Swept {
+                                                            at,
+                                                            instance: &self.layout.instances[at],
+                                                            reads: self.tape.instance(at),
+                                                            slopes: &scratch.slopes,
+                                                            flat: false,
+                                                        },
+                                                        &mut values,
+                                                    )?;
+                                                }
+                                            }
+                                        }
+                                        FastTarget::ColumnUnit(col) => {
+                                            run_backward(&mut scratch);
                                             let mut finite = true;
                                             for &(slot, _) in unk {
                                                 finite &= is_finite_fp(scratch.slopes[usize::from(slot)]);
                                             }
                                             if finite {
-                                                for (&(slot, _), &entry) in unk.iter().zip(entries) {
-                                                    values[entry as usize] +=
-                                                        sign * scratch.slopes[usize::from(slot)];
+                                                let terms = &self.tape.column_terms
+                                                    [slice_range(&fast.col_term_ranges[col as usize])];
+                                                let entries = self.tape.entries(at);
+                                                match terms {
+                                                    [a, b] => {
+                                                        let (ca, cb) = (a.coefficient, b.coefficient);
+                                                        for (&(slot, _), &[e0, e1]) in
+                                                            unk.iter().zip(entries.as_chunks::<2>().0)
+                                                        {
+                                                            let slope = scratch.slopes[usize::from(slot)];
+                                                            values[e0 as usize] -= ca * slope;
+                                                            values[e1 as usize] -= cb * slope;
+                                                        }
+                                                    }
+                                                    [a] => {
+                                                        let ca = a.coefficient;
+                                                        for (&(slot, _), &entry) in unk.iter().zip(entries) {
+                                                            values[entry as usize] -=
+                                                                ca * scratch.slopes[usize::from(slot)];
+                                                        }
+                                                    }
+                                                    _ => {
+                                                        let mut e = entries.iter();
+                                                        for &(slot, _) in unk {
+                                                            let slope = scratch.slopes[usize::from(slot)];
+                                                            for &ColumnTerm { coefficient, .. } in terms {
+                                                                let entry = *e.next().expect(
+                                                                    "an entry per unknown read and term",
+                                                                );
+                                                                values[entry as usize] -= coefficient * slope;
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             } else {
                                                 scatter(
@@ -3691,105 +4445,42 @@ impl CompiledBody {
                                                 )?;
                                             }
                                         }
-                                    }
-                                    FastTarget::ColumnUnit(col) => {
-                                        backward_stack(
-                                            arithmetic,
-                                            &scratch.values,
-                                            partial_volume,
-                                            &mut scratch.slopes,
-                                        );
-                                        let mut finite = true;
-                                        for &(slot, _) in unk {
-                                            finite &= is_finite_fp(scratch.slopes[usize::from(slot)]);
-                                        }
-                                        if finite {
-                                            let terms = &self.tape.column_terms
-                                                [slice_range(&fast.col_term_ranges[col as usize])];
-                                            let entries = self.tape.entries(at);
-                                            match terms {
-                                                [a, b] => {
-                                                    let (ca, cb) = (a.coefficient, b.coefficient);
-                                                    for (&(slot, _), &[e0, e1]) in
-                                                        unk.iter().zip(entries.as_chunks::<2>().0)
-                                                    {
-                                                        let slope = scratch.slopes[usize::from(slot)];
-                                                        values[e0 as usize] -= ca * slope;
-                                                        values[e1 as usize] -= cb * slope;
-                                                    }
-                                                }
-                                                [a] => {
-                                                    let ca = a.coefficient;
-                                                    for (&(slot, _), &entry) in unk.iter().zip(entries) {
-                                                        values[entry as usize] -=
-                                                            ca * scratch.slopes[usize::from(slot)];
-                                                    }
-                                                }
-                                                _ => {
-                                                    let mut e = entries.iter();
-                                                    for &(slot, _) in unk {
-                                                        let slope = scratch.slopes[usize::from(slot)];
-                                                        for &ColumnTerm { coefficient, .. } in terms {
-                                                            let entry = *e
-                                                                .next()
-                                                                .expect("an entry per unknown read and term");
-                                                            values[entry as usize] -= coefficient * slope;
-                                                        }
-                                                    }
-                                                }
+                                        FastTarget::ColumnScaled(_) => {
+                                            let instance = &self.layout.instances[at];
+                                            let flat = positive_part(instance, value) != value;
+                                            if !flat {
+                                                run_backward(&mut scratch);
                                             }
-                                        } else {
                                             scatter(
                                                 &Swept {
                                                     at,
-                                                    instance: &self.layout.instances[at],
+                                                    instance,
                                                     reads: self.tape.instance(at),
                                                     slopes: &scratch.slopes,
-                                                    flat: false,
+                                                    flat,
                                                 },
                                                 &mut values,
                                             )?;
                                         }
                                     }
-                                    FastTarget::ColumnScaled(_) => {
-                                        let instance = &self.layout.instances[at];
-                                        let flat = positive_part(instance, value) != value;
-                                        if !flat {
-                                            backward_stack(
-                                                arithmetic,
-                                                &scratch.values,
-                                                partial_volume,
-                                                &mut scratch.slopes,
-                                            );
-                                        }
-                                        scatter(
-                                            &Swept {
-                                                at,
-                                                instance,
-                                                reads: self.tape.instance(at),
-                                                slopes: &scratch.slopes,
-                                                flat,
-                                            },
-                                            &mut values,
-                                        )?;
-                                    }
                                 }
-                            }
-                            FastKind::Upwind5(_) => {
-                                self.slope_single_fast(
-                                    fast,
-                                    at,
-                                    inputs,
-                                    partial_volume,
-                                    &mut scratch,
-                                    |swept| scatter(swept, &mut values),
-                                )?;
+                                FastKind::Upwind5(_) => {
+                                    self.slope_single_fast(
+                                        fast,
+                                        at,
+                                        inputs,
+                                        partial_volume,
+                                        &mut scratch,
+                                        |swept| scatter(swept, &mut values),
+                                    )?;
+                                }
                             }
                         }
                     }
                 }
             }
-        } else {
+        }
+        if !fast_done {
             self.slopes(inputs, |swept| scatter(swept, &mut values))?;
         }
         for &entry in &self.tape.diagonals {
@@ -5234,5 +5925,146 @@ mod tests {
                 pub_err.domain
             );
         }
+    }
+
+    #[test]
+    fn fast_quad_stage_published_and_jacobian_match_general_including_error_order() {
+        let at = |z: f64| Position::new(measure(0.0), measure(0.0), measure(z));
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at(0.0));
+        let names = ["v0", "v1", "v2", "v3", "v4", "v5"];
+        let sites: Vec<_> = names
+            .iter()
+            .enumerate()
+            .map(|(i, &name)| {
+                let s = map.site::<VesselSegment>(name, at(i as f64 * 0.1));
+                map.contain(root.id(), s.id());
+                s
+            })
+            .collect();
+        let ids: Vec<_> = sites.iter().map(|s| s.id()).collect();
+        map.unsupplied(&ids);
+        for i in 0..5 {
+            map.connect(Network::Vascular, ids[i], ids[i + 1]);
+        }
+        let mut schema = Schema::new(map.finish().expect("anatomy")).expect("schema");
+        schema
+            .partial_volume(Measure::new(0.018).expect("pv"))
+            .expect("pv");
+        for space in [Space::Cells, Space::Interstitium] {
+            schema.leave_out(space, "quad test");
+        }
+        let body = assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Minutes, 1_000_000_000)?;
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let gain = cv.edge_parameter::<VascularEdge, Rate<Water>>(
+                ParameterKey::new("cv.gain"),
+                Admissible::positive(),
+            );
+            let width = cv.edge_parameter::<VascularEdge, Dimensionless>(
+                ParameterKey::new("cv.w"),
+                Admissible::positive(),
+            );
+            let circulation = ports.circulation(&mut cv);
+            let from_water = circulation.from_amount::<Water>();
+            let to_water = circulation.to_amount::<Water>();
+            let law = cv.edge_kernel(|mut k| {
+                let a = k.at_edge(&from_water);
+                let b = k.at_edge(&to_water);
+                let va = k.volume(a);
+                let vb = k.volume(b);
+                let r = k.divide(va, vb);
+                let r = k.as_dimension::<_, Dimensionless>(r);
+                let l = k.ln(r);
+                let e = k.expm1(l);
+                let s = k.logistic(e);
+                let w = k.edge_parameter(&width);
+                let z0 = k.zero();
+                let sm = k.smooth_max(s, z0, w);
+                let exp_v = k.exp(sm);
+                let g = k.edge_parameter(&gain);
+                let rate = k.scale(g, exp_v);
+                k.finish(rate, cv.every_mode(), class)
+            });
+            cv.transfer_along(&circulation, law);
+            body.add(cv.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let fast = body.tape.fast.as_ref().expect("fast tape");
+        assert_eq!(fast.stage_quads.len(), 1);
+        assert!(fast.stage_quads[0].jac_safe);
+        assert!(fast.stage_quads[0].pub_safe);
+        let params: Vec<f64> = (0..body.parameters().len())
+            .map(|i| 0.5 + 0.13 * i as f64)
+            .collect();
+        let unknowns: Vec<f64> = (0..body.rows().len()).map(|i| 1.0 + 0.27 * i as f64).collect();
+        let deriv: Vec<f64> = (0..body.rows().len()).map(|i| -0.05 * i as f64).collect();
+        let frame = DriveFrame::default();
+        let inputs = Inputs {
+            parameters: &params,
+            frame: &frame,
+            unknowns: &unknowns,
+            modes: &[],
+            draws: &[],
+            factors: &[],
+        };
+        let fast_stage = body
+            .evaluate_stage_checked(&inputs, &deriv, true)
+            .expect("fast stage");
+        let slow_stage = body
+            .evaluate_stage_checked(&inputs, &deriv, false)
+            .expect("slow stage");
+        let bits = |xs: &[f64]| xs.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&fast_stage.columns), bits(&slow_stage.columns));
+        assert_eq!(bits(&fast_stage.rows), bits(&slow_stage.rows));
+        assert_eq!(bits(&fast_stage.residuals), bits(&slow_stage.residuals));
+        let fast_jac = body.jacobian_checked(&inputs, 3.5, true).expect("fast jac");
+        let slow_jac = body.jacobian_checked(&inputs, 3.5, false).expect("slow jac");
+        assert_eq!(bits(&fast_jac), bits(&slow_jac));
+        let fast_pub = body
+            .evaluate_published_checked(&inputs, body.rows().len(), SimTime::from_ns(0), true)
+            .expect("fast pub");
+        let slow_pub = body
+            .evaluate_published_checked(&inputs, body.rows().len(), SimTime::from_ns(0), false)
+            .expect("slow pub");
+        assert_eq!(bits(&fast_pub.algebraic), bits(&slow_pub.algebraic));
+
+        let mut bad_unknowns = unknowns.clone();
+        bad_unknowns[2] = 0.0;
+        let bad_inputs = Inputs {
+            unknowns: &bad_unknowns,
+            ..inputs
+        };
+        let fast_err = body
+            .evaluate_stage_checked(&bad_inputs, &deriv, true)
+            .expect_err("zero divisor refused");
+        let slow_err = body
+            .evaluate_stage_checked(&bad_inputs, &deriv, false)
+            .expect_err("zero divisor refused");
+        assert_eq!(fast_err.law, slow_err.law);
+        assert_eq!(format!("{:?}", fast_err.domain), format!("{:?}", slow_err.domain));
+        let fast_jerr = body
+            .jacobian_checked(&bad_inputs, 3.5, true)
+            .expect_err("zero divisor jac refused");
+        let slow_jerr = body
+            .jacobian_checked(&bad_inputs, 3.5, false)
+            .expect_err("zero divisor jac refused");
+        assert_eq!(fast_jerr.law, slow_jerr.law);
+        assert_eq!(
+            format!("{:?}", fast_jerr.domain),
+            format!("{:?}", slow_jerr.domain)
+        );
+        let fast_perr = body
+            .evaluate_published_checked(&bad_inputs, body.rows().len(), SimTime::from_ns(0), true)
+            .expect_err("zero divisor pub refused");
+        let slow_perr = body
+            .evaluate_published_checked(&bad_inputs, body.rows().len(), SimTime::from_ns(0), false)
+            .expect_err("zero divisor pub refused");
+        assert_eq!(fast_perr.law, slow_perr.law);
+        assert_eq!(
+            format!("{:?}", fast_perr.domain),
+            format!("{:?}", slow_perr.domain)
+        );
     }
 }
