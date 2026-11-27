@@ -161,8 +161,7 @@ impl Seal for Compensated {
 impl stream::Seal for Compensated {
     fn seal<S: stream::Sink>(&self, out: &mut S) {
         let Self { hi, lo } = self;
-        stream::Seal::seal(hi, out);
-        stream::Seal::seal(lo, out);
+        out.pair(hi.to_bits(), lo.to_bits());
     }
 }
 

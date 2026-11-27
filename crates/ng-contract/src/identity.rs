@@ -193,7 +193,7 @@ struct Blake2b {
     state: [u64; 8],
     buffer: [u8; 128],
     filled: usize,
-    total: u128,
+    compressed: u128,
 }
 impl Blake2b {
     fn new() -> Self {
@@ -204,8 +204,14 @@ impl Blake2b {
             state,
             buffer: [0; 128],
             filled: 0,
-            total: 0,
+            compressed: 0,
         }
+    }
+    #[inline(always)]
+    fn compress_buffer(&mut self) {
+        self.compressed += 128;
+        blake2b_block::<false>(&mut self.state, &self.buffer, self.compressed);
+        self.filled = 0;
     }
     fn write(&mut self, mut bytes: &[u8]) {
         if bytes.is_empty() {
@@ -213,31 +219,27 @@ impl Blake2b {
         }
         // RFC 7693 marks the final block with a flag, so a full buffer compresses only when more bytes follow.
         if self.filled == 128 {
-            blake2b_block(&mut self.state, &self.buffer, self.total, false);
-            self.filled = 0;
+            self.compress_buffer();
         }
         if self.filled > 0 {
             let take = (128 - self.filled).min(bytes.len());
             self.buffer[self.filled..self.filled + take].copy_from_slice(&bytes[..take]);
             self.filled += take;
-            self.total += take as u128;
             bytes = &bytes[take..];
             if bytes.is_empty() {
                 return;
             }
-            blake2b_block(&mut self.state, &self.buffer, self.total, false);
-            self.filled = 0;
+            self.compress_buffer();
         }
         let before_last = (bytes.len() - 1) / 128;
         let (blocks, _) = bytes.as_chunks::<128>();
         for block in &blocks[..before_last] {
-            self.total += 128;
-            blake2b_block(&mut self.state, block, self.total, false);
+            self.compressed += 128;
+            blake2b_block::<false>(&mut self.state, block, self.compressed);
         }
         let tail = &bytes[128 * before_last..];
         self.buffer[..tail.len()].copy_from_slice(tail);
         self.filled = tail.len();
-        self.total += tail.len() as u128;
     }
     #[inline(always)]
     fn write_number(&mut self, value: u64) {
@@ -245,14 +247,37 @@ impl Blake2b {
         if self.filled <= 120 {
             self.buffer[self.filled..self.filled + 8].copy_from_slice(&bytes);
             self.filled += 8;
-            self.total += 8;
         } else {
-            self.write(&bytes);
+            self.write_straddling(&bytes);
         }
+    }
+    #[inline(always)]
+    fn write_pair(&mut self, first: u64, second: u64) {
+        if self.filled <= 112 {
+            self.buffer[self.filled..self.filled + 8].copy_from_slice(&first.to_be_bytes());
+            self.buffer[self.filled + 8..self.filled + 16].copy_from_slice(&second.to_be_bytes());
+            self.filled += 16;
+        } else {
+            let mut bytes = [0u8; 16];
+            bytes[..8].copy_from_slice(&first.to_be_bytes());
+            bytes[8..].copy_from_slice(&second.to_be_bytes());
+            self.write_straddling(&bytes);
+        }
+    }
+    #[cold]
+    #[inline(never)]
+    fn write_straddling(&mut self, bytes: &[u8]) {
+        let take = 128 - self.filled;
+        self.buffer[self.filled..].copy_from_slice(&bytes[..take]);
+        self.compress_buffer();
+        let rest = &bytes[take..];
+        self.buffer[..rest.len()].copy_from_slice(rest);
+        self.filled = rest.len();
     }
     fn finish(mut self) -> [u8; 32] {
         self.buffer[self.filled..].fill(0);
-        blake2b_block(&mut self.state, &self.buffer, self.total, true);
+        let total = self.compressed + self.filled as u128;
+        blake2b_block::<true>(&mut self.state, &self.buffer, total);
         let mut out = [0u8; 32];
         for (bytes, word) in out.as_chunks_mut::<8>().0.iter_mut().zip(self.state) {
             *bytes = word.to_le_bytes();
@@ -267,61 +292,118 @@ fn blake2b(message: &[u8]) -> [u8; 32] {
     hasher.finish()
 }
 
-fn blake2b_block(state: &mut [u64; 8], block: &[u8; 128], counted: u128, last: bool) {
-    let mut words = [0u64; 16];
-    for (word, bytes) in words.iter_mut().zip(block.as_chunks::<8>().0) {
-        *word = u64::from_le_bytes(*bytes);
+fn blake2b_block<const LAST: bool>(state: &mut [u64; 8], block: &[u8; 128], counted: u128) {
+    let chunks: &[[u8; 8]; 16] = block.as_chunks::<8>().0.try_into().expect("128 bytes");
+    let word = |i: usize| u64::from_le_bytes(chunks[i]);
+    let mut a0 = [state[0], state[1]];
+    let mut a1 = [state[2], state[3]];
+    let mut b0 = [state[4], state[5]];
+    let mut b1 = [state[6], state[7]];
+    let mut c0 = [BLAKE2B_INITIAL[0], BLAKE2B_INITIAL[1]];
+    let mut c1 = [BLAKE2B_INITIAL[2], BLAKE2B_INITIAL[3]];
+    let mut d0 = [
+        BLAKE2B_INITIAL[4] ^ (counted as u64),
+        BLAKE2B_INITIAL[5] ^ ((counted >> 64) as u64),
+    ];
+    let mut d1 = [
+        if LAST {
+            !BLAKE2B_INITIAL[6]
+        } else {
+            BLAKE2B_INITIAL[6]
+        },
+        BLAKE2B_INITIAL[7],
+    ];
+    macro_rules! run_round {
+        ($r:expr) => {{
+            let s = &SIGMA[$r];
+            mix_pair(
+                &mut a0,
+                &mut b0,
+                &mut c0,
+                &mut d0,
+                [word(s[0]), word(s[2])],
+                [word(s[1]), word(s[3])],
+            );
+            mix_pair(
+                &mut a1,
+                &mut b1,
+                &mut c1,
+                &mut d1,
+                [word(s[4]), word(s[6])],
+                [word(s[5]), word(s[7])],
+            );
+            (b0, b1) = ([b0[1], b1[0]], [b1[1], b0[0]]);
+            core::mem::swap(&mut c0, &mut c1);
+            (d0, d1) = ([d1[1], d0[0]], [d0[1], d1[0]]);
+            mix_pair(
+                &mut a0,
+                &mut b0,
+                &mut c0,
+                &mut d0,
+                [word(s[8]), word(s[10])],
+                [word(s[9]), word(s[11])],
+            );
+            mix_pair(
+                &mut a1,
+                &mut b1,
+                &mut c1,
+                &mut d1,
+                [word(s[12]), word(s[14])],
+                [word(s[13]), word(s[15])],
+            );
+            (b0, b1) = ([b1[1], b0[0]], [b0[1], b1[0]]);
+            core::mem::swap(&mut c0, &mut c1);
+            (d0, d1) = ([d0[1], d1[0]], [d1[1], d0[0]]);
+        }};
     }
-    let mut work = [0u64; 16];
-    work[..8].copy_from_slice(state);
-    work[8..].copy_from_slice(&BLAKE2B_INITIAL);
-    work[12] ^= counted as u64;
-    work[13] ^= (counted >> 64) as u64;
-    if last {
-        work[14] = !work[14];
-    }
-    round::<0>(&mut work, &words);
-    round::<1>(&mut work, &words);
-    round::<2>(&mut work, &words);
-    round::<3>(&mut work, &words);
-    round::<4>(&mut work, &words);
-    round::<5>(&mut work, &words);
-    round::<6>(&mut work, &words);
-    round::<7>(&mut work, &words);
-    round::<8>(&mut work, &words);
-    round::<9>(&mut work, &words);
-    round::<10>(&mut work, &words);
-    round::<11>(&mut work, &words);
-    for (word, (low, high)) in state.iter_mut().zip(work[..8].iter().zip(&work[8..])) {
-        *word ^= low ^ high;
-    }
+    run_round!(0);
+    run_round!(1);
+    run_round!(2);
+    run_round!(3);
+    run_round!(4);
+    run_round!(5);
+    run_round!(6);
+    run_round!(7);
+    run_round!(8);
+    run_round!(9);
+    run_round!(10);
+    run_round!(11);
+    state[0] ^= a0[0] ^ c0[0];
+    state[1] ^= a0[1] ^ c0[1];
+    state[2] ^= a1[0] ^ c1[0];
+    state[3] ^= a1[1] ^ c1[1];
+    state[4] ^= b0[0] ^ d0[0];
+    state[5] ^= b0[1] ^ d0[1];
+    state[6] ^= b1[0] ^ d1[0];
+    state[7] ^= b1[1] ^ d1[1];
 }
 
-/// Inlined by force, with `mix`: left to the compiler, these rounds hash slower than SHA-256.
+/// RFC 7693, section 3.1, two independent columns interleaved to expose ILP without exceeding GPR budget.
 #[inline(always)]
-fn round<const R: usize>(work: &mut [u64; 16], words: &[u64; 16]) {
-    let s = &SIGMA[R];
-    mix(work, [0, 4, 8, 12], words[s[0]], words[s[1]]);
-    mix(work, [1, 5, 9, 13], words[s[2]], words[s[3]]);
-    mix(work, [2, 6, 10, 14], words[s[4]], words[s[5]]);
-    mix(work, [3, 7, 11, 15], words[s[6]], words[s[7]]);
-    mix(work, [0, 5, 10, 15], words[s[8]], words[s[9]]);
-    mix(work, [1, 6, 11, 12], words[s[10]], words[s[11]]);
-    mix(work, [2, 7, 8, 13], words[s[12]], words[s[13]]);
-    mix(work, [3, 4, 9, 14], words[s[14]], words[s[15]]);
-}
-
-/// RFC 7693, section 3.1.
-#[inline(always)]
-fn mix(work: &mut [u64; 16], [a, b, c, d]: [usize; 4], x: u64, y: u64) {
-    work[a] = work[a].wrapping_add(work[b]).wrapping_add(x);
-    work[d] = (work[d] ^ work[a]).rotate_right(32);
-    work[c] = work[c].wrapping_add(work[d]);
-    work[b] = (work[b] ^ work[c]).rotate_right(24);
-    work[a] = work[a].wrapping_add(work[b]).wrapping_add(y);
-    work[d] = (work[d] ^ work[a]).rotate_right(16);
-    work[c] = work[c].wrapping_add(work[d]);
-    work[b] = (work[b] ^ work[c]).rotate_right(63);
+fn mix_pair(
+    a: &mut [u64; 2],
+    b: &mut [u64; 2],
+    c: &mut [u64; 2],
+    d: &mut [u64; 2],
+    x: [u64; 2],
+    y: [u64; 2],
+) {
+    a[0] = a[0].wrapping_add(b[0]).wrapping_add(x[0]);
+    a[1] = a[1].wrapping_add(b[1]).wrapping_add(x[1]);
+    d[0] = (d[0] ^ a[0]).rotate_right(32);
+    d[1] = (d[1] ^ a[1]).rotate_right(32);
+    c[0] = c[0].wrapping_add(d[0]);
+    c[1] = c[1].wrapping_add(d[1]);
+    b[0] = (b[0] ^ c[0]).rotate_right(24);
+    b[1] = (b[1] ^ c[1]).rotate_right(24);
+    a[0] = a[0].wrapping_add(b[0]).wrapping_add(y[0]);
+    a[1] = a[1].wrapping_add(b[1]).wrapping_add(y[1]);
+    d[0] = (d[0] ^ a[0]).rotate_right(16);
+    d[1] = (d[1] ^ a[1]).rotate_right(16);
+    c[0] = c[0].wrapping_add(d[0]);
+    c[1] = c[1].wrapping_add(d[1]);
+    b[0] = (b[0] ^ c[0]).rotate_right(63);
+    b[1] = (b[1] ^ c[1]).rotate_right(63);
 }
 
 /// `Seal` written straight into a hash, for an identity too large to buffer each step. Each impl writes the bytes the
@@ -332,6 +414,11 @@ pub(crate) mod stream {
     pub(crate) trait Sink {
         fn number(&mut self, number: u64);
         fn raw(&mut self, bytes: &[u8]);
+        #[inline(always)]
+        fn pair(&mut self, first: u64, second: u64) {
+            self.number(first);
+            self.number(second);
+        }
         fn length(&mut self, length: usize) {
             self.number(length as u64);
         }
@@ -353,6 +440,10 @@ pub(crate) mod stream {
         #[inline(always)]
         fn number(&mut self, number: u64) {
             self.write_number(number);
+        }
+        #[inline(always)]
+        fn pair(&mut self, first: u64, second: u64) {
+            self.write_pair(first, second);
         }
         fn raw(&mut self, bytes: &[u8]) {
             self.write(bytes);
@@ -564,12 +655,12 @@ mod tests {
         let before_last = message.len().saturating_sub(1) / 128;
         let (blocks, _) = message.as_chunks::<128>();
         for (at, block) in blocks[..before_last].iter().enumerate() {
-            blake2b_block(&mut state, block, 128 * (at as u128 + 1), false);
+            blake2b_block::<false>(&mut state, block, 128 * (at as u128 + 1));
         }
         let tail = &message[128 * before_last..];
         let mut last = [0u8; 128];
         last[..tail.len()].copy_from_slice(tail);
-        blake2b_block(&mut state, &last, message.len() as u128, true);
+        blake2b_block::<true>(&mut state, &last, message.len() as u128);
         let mut out = [0u8; 32];
         for (bytes, word) in out.as_chunks_mut::<8>().0.iter_mut().zip(state) {
             *bytes = word.to_le_bytes();
@@ -652,5 +743,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn blake2b_write_number_and_pair_match_oneshot_at_every_buffer_offset() {
+        for prefix_len in 0..=128 {
+            let prefix: Vec<u8> = (0..prefix_len).map(|i| (i * 19 + 5) as u8).collect();
+            let a = 0x0123_4567_89ab_cdef_u64;
+            let b = 0xfedc_ba98_7654_3210_u64;
+            let c = 0x1122_3344_5566_7788_u64;
+            let mut full = prefix.clone();
+            full.extend_from_slice(&a.to_be_bytes());
+            full.extend_from_slice(&b.to_be_bytes());
+            full.extend_from_slice(&c.to_be_bytes());
+            let expected = oneshot_blake2b(&full);
+
+            let mut h1 = Blake2b::new();
+            h1.write(&prefix);
+            h1.write_pair(a, b);
+            h1.write_number(c);
+            assert_eq!(h1.finish(), expected, "pair+number prefix={prefix_len}");
+
+            let mut h2 = Blake2b::new();
+            h2.write(&prefix);
+            h2.write_number(a);
+            h2.write_pair(b, c);
+            assert_eq!(h2.finish(), expected, "number+pair prefix={prefix_len}");
+        }
+        // RFC 7693 / BLAKE2b-256("abc")
+        let expected_abc = [
+            0xbd, 0xdd, 0x81, 0x3c, 0x63, 0x42, 0x39, 0x72, 0x31, 0x71, 0xef, 0x3f, 0xee, 0x98, 0x57, 0x9b,
+            0x94, 0x96, 0x4e, 0x3b, 0xb1, 0xcb, 0x3e, 0x42, 0x72, 0x62, 0xc8, 0xc0, 0x68, 0xd5, 0x23, 0x19,
+        ];
+        assert_eq!(super::blake2b(b"abc"), expected_abc);
     }
 }
