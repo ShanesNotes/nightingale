@@ -65,7 +65,20 @@ TESTED = "target/gate/tested.jsonl"
 TESTED_RESET = "python3 -I tools/gate/gate.py tested --reset"
 # A proof's fresh clone holds these outside its commit when 10-rust writes the record, and no test reads them. Only
 # the sweep's cargo would read a Cargo config under target/, so the writer refuses one there.
-CLONE_BUILD_OUTPUTS = frozenset({"target/", "tools/__pycache__/", "docs/architecture/solver-contract-sketch/target/"})
+CLONE_BUILD_OUTPUTS = frozenset(
+    {
+        "target/",
+        "tools/__pycache__/",
+        "tools/gate/__pycache__/",
+        "tools/bench/__pycache__/",
+        "tools/bench/target/",
+        "tools/generative-physiology/__pycache__/",
+        "tools/generative-physiology/driver/target/",
+        "docs/architecture/solver-contract-sketch/target/",
+        "clinical-workspace/node_modules/",
+        "clinical-workspace/dist/",
+    }
+)
 UNEXTRACTED = ("status", "--porcelain", "-z", "--ignored=matching", "--untracked-files=all")
 SCRUB = "tools/gate/scrub.sh"
 STEPS = "tools/verify.d"
@@ -1174,7 +1187,7 @@ def one_clippy_conf(ws: Workspace) -> list[Violation]:
 @rule("seam.cargo-config", "seam", append(".cargo/config.toml", "[build]\nrustflags = []\n"))
 def no_cargo_config(ws: Workspace) -> list[Violation]:
     found = {f for f in ws.files if re.fullmatch(r"(?:.*/)?\.cargo/config(?:\.toml)?", f)}
-    places = (".cargo", *mutate_py().CARGO_CONFIGS)
+    places = (".cargo", *mutate_py().cargo_configs_in(ws.root))
     found |= {f"{d}/{n}" for d in places for n in ("config", "config.toml") if (ws.root / d / n).exists()}
     return [
         Violation(
@@ -3009,13 +3022,13 @@ def mutants(part: str | None) -> int:
     if part != "rest":
         named = f"{len(parts.first)} rows: {' '.join(parts.first)}" if parts.first else "no row"
         print(f"40-mutants: first part, {named}", flush=True)
-        if parts.first and sweep([*command, "--only", *parts.first], parts.first, len(parts.rest)):
+        if parts.first and sweep([*command, "--stop-on-fail", "--only", *parts.first], parts.first, len(parts.rest)):
             return 1
     if part != "first" and mode != "changed":
         print(f"40-mutants: rest part, {len(parts.rest)} rows", flush=True)
         only = [] if len(parts.rest) == len(rows) else ["--only", *parts.rest]
         tested = ["--tested", str(ROOT / TESTED)] if part == "rest" and mode != "full" else []
-        if parts.rest and sweep([*command, *tested, *only], parts.rest, 0):
+        if parts.rest and sweep([*command, "--stop-on-fail", *tested, *only], parts.rest, 0):
             return 1
     return 0
 
@@ -3436,6 +3449,8 @@ WRITER_CASES: tuple[tuple[str, Callable[[pathlib.Path], object], bool], ...] = (
     ("a changed file marked skip-worktree", lambda r: _hidden(r, "--skip-worktree"), False),
     ("a Cargo config under target/", lambda r: _touch(r, "target/.cargo/config.toml"), False),
     ("a Cargo config beside the sweep's tree", lambda r: _touch(r, "target/mutate/.cargo/config.toml"), False),
+    ("a Cargo config beside the sweep's lanes", lambda r: _touch(r, "target/mutate/lanes/.cargo/config.toml"), False),
+    ("a Cargo config inside a sweep lane", lambda r: _touch(r, "target/mutate/lanes/lane-1/.cargo/config.toml"), False),
     ("a path git archive leaves out", lambda r: _commit(r, ".gitattributes", "/mutants.toml export-ignore\n"), False),
     ("a file git archive rewrites", lambda r: _commit(r, ".gitattributes", "/mutants.toml export-subst\n"), False),
 )
@@ -3480,6 +3495,14 @@ SWEEP_CALLS: tuple[tuple[str, Callable[[pathlib.Path], object], Callable[[pathli
         "a tracked file changed after the record",
         lambda r: None,
         lambda r: _touch(r, "crates/ng-a/src/one.rs"),
+        PASSES,
+        (*ROWS_RUN, *ROWS_RUN),
+        "",
+    ),
+    (
+        "a tracked file marked assume-unchanged after the record",
+        lambda r: None,
+        lambda r: _hidden(r, "--assume-unchanged"),
         PASSES,
         (*ROWS_RUN, *ROWS_RUN),
         "",
@@ -3680,6 +3703,31 @@ def limit_case() -> list[Violation]:
                 tested(["-p", "ng-b"], root)
             argv = [sys.executable, "-I", MUTATE, "mutants.toml", "--budget", "1", "--tested", str(root / TESTED)]
             run = subprocess.run(argv, cwd=root, capture_output=True, text=True, env=dict(os.environ))
+            budget_toml = (
+                '[[mutant]]\nname = "sized"\npath = "crates/ng-a/src/one.rs"\n'
+                'old = "a"\nnew = "d"\ntest = "-p ng-b --test beta"\nbudget = 5\n'
+            )
+            sized_path = pathlib.Path(tmp) / "sized.toml"
+            sized_path.write_text(budget_toml, encoding="utf-8")
+            sized = subprocess.run(
+                [sys.executable, "-I", MUTATE, str(sized_path), "--budget", "1", "--tested", str(root / TESTED)],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                env=dict(os.environ),
+            )
+            for bad in ("0", "-5", "true", '"5"'):
+                bad_path = pathlib.Path(tmp) / "bad.toml"
+                bad_path.write_text(
+                    '[[mutant]]\nname = "bad"\npath = "crates/ng-a/src/one.rs"\n'
+                    f'old = "a"\nnew = "b"\ntest = "-p ng-a --test alpha"\nbudget = {bad}\n',
+                    encoding="utf-8",
+                )
+                try:
+                    mutate_py().load_rows(bad_path, [])
+                    out.append(Violation("sweep", f"bad budget {bad}", "load_rows accepted invalid budget"))
+                except SystemExit:
+                    pass
     lines = run.stdout.splitlines()
     for name, verdict in LIMITS.items():
         said = [line for line in lines if (m := VERDICT_LINE.match(line)) and m[2] == name]
@@ -3690,13 +3738,21 @@ def limit_case() -> list[Violation]:
             )
     if run.returncode != 1:
         out.append(Violation("sweep", "a row over twice its baseline", f"exit {run.returncode}; it fails the sweep"))
+    if sized.returncode != 0 or "limit 5 s" not in sized.stdout or "over " in sized.stdout or "baseline  " in sized.stdout:
+        out.append(
+            Violation(
+                "sweep",
+                "a row naming its own budget",
+                f"exit {sized.returncode}, stdout={sized.stdout!r}; expected CAUGHT at limit 5 s without running skipped baseline",
+            )
+        )
     return out
 
 
 def cargo_config_case() -> list[Violation]:
     out = []
     with _scratch_git():
-        for place in ("target/.cargo", "target/mutate/.cargo"):
+        for place in (*mutate_py().CARGO_CONFIGS, "target/mutate/lanes/lane-1/.cargo"):
             with tempfile.TemporaryDirectory(prefix="gate-config-") as tmp:
                 root = _fixture(pathlib.Path(tmp))
                 _touch(root, f"{place}/config.toml")
@@ -3873,14 +3929,344 @@ def mutants_dir_case() -> list[Violation]:
     return out
 
 
+def touched_cases() -> list[Violation]:
+    out = []
+    mutate = mutate_py()
+    with tempfile.TemporaryDirectory(prefix="gate-touched-") as tmp:
+        root = pathlib.Path(tmp)
+        for rel in (
+            "crates/ng-v/src/lib.rs",
+            "crates/ng-v/src/day/tests.rs",
+            "crates/ng-v/src/window.rs",
+            "crates/ng-v/src/other.rs",
+            "crates/ng-c/src/lib.rs",
+            "crates/ng-c/src/evaluate/terms.rs",
+            "crates/ng-c/src/scope.rs",
+        ):
+            p = root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("", encoding="utf-8")
+        cases = (
+            (
+                "lib test in separate src/mod/tests.rs",
+                {"path": "crates/ng-v/src/day/judge.rs", "test": "-p ng-v --lib day::tests::slow_stay"},
+                {"crates/ng-v/src/day/tests.rs"},
+                True,
+            ),
+            (
+                "lib test in unrelated src module",
+                {"path": "crates/ng-v/src/day/judge.rs", "test": "-p ng-v --lib day::tests::slow_stay"},
+                {"crates/ng-v/src/window.rs"},
+                False,
+            ),
+            (
+                "lib test when crate lib.rs changes",
+                {"path": "crates/ng-v/src/day/judge.rs", "test": "-p ng-v --lib day::tests::slow_stay"},
+                {"crates/ng-v/src/lib.rs"},
+                True,
+            ),
+            (
+                "lib bare-name filter fails closed to any src file",
+                {"path": "crates/ng-c/src/anatomy.rs", "test": "-p ng-c --lib a_bare_test_name"},
+                {"crates/ng-c/src/scope.rs"},
+                True,
+            ),
+            (
+                "lib unknown substring module fails closed to any src file",
+                {"path": "crates/ng-c/src/law.rs", "test": "-p ng-c --lib terms::a_refusal"},
+                {"crates/ng-c/src/evaluate/terms.rs"},
+                True,
+            ),
+            (
+                "test binary hit by its own file",
+                {"path": "crates/ng-c/src/heat.rs", "test": "-p ng-v --test body_run a_test"},
+                {"crates/ng-v/tests/body_run.rs"},
+                True,
+            ),
+            (
+                "test binary untouched by sibling test binary",
+                {"path": "crates/ng-v/src/arena.rs", "test": "-p ng-v --test arena a_test"},
+                {"crates/ng-v/tests/body_run.rs"},
+                False,
+            ),
+            (
+                "lib test untouched by integration test file",
+                {"path": "crates/ng-v/src/window.rs", "test": "-p ng-v --lib window::tests::honest"},
+                {"crates/ng-v/tests/body_run.rs"},
+                False,
+            ),
+            (
+                "test binary hit by shared helper subdir under tests/",
+                {"path": "crates/ng-v/src/cert.rs", "test": "-p ng-v --test rhythm_certificate a_test"},
+                {"crates/ng-v/tests/certificate_oracle/mod.rs"},
+                True,
+            ),
+            (
+                "whole test binary without filter",
+                {"path": "crates/ng-v/src/closure.rs", "test": "-p ng-v --test closure_rounding"},
+                {"crates/ng-v/tests/closure_rounding.rs"},
+                True,
+            ),
+            (
+                "whole test binary untouched by sibling",
+                {"path": "crates/ng-v/src/closure.rs", "test": "-p ng-v --test closure_rounding"},
+                {"crates/ng-v/tests/body_run.rs"},
+                False,
+            ),
+            (
+                "release test binary scoped to its own file",
+                {"path": "crates/ng-c/src/a.rs", "test": "--release -p ng-v --test arena_body a_test"},
+                {"crates/ng-v/tests/arena_body.rs"},
+                True,
+            ),
+            (
+                "release test binary untouched by sibling",
+                {"path": "crates/ng-c/src/a.rs", "test": "--release -p ng-v --test arena_body a_test"},
+                {"crates/ng-v/tests/body_run.rs"},
+                False,
+            ),
+            (
+                "doctest hit by any crate src file",
+                {"path": "crates/ng-c/src/law.rs", "test": "--doc -p ng-c"},
+                {"crates/ng-c/src/scope.rs"},
+                True,
+            ),
+            (
+                "doctest untouched by crate integration test",
+                {"path": "crates/ng-c/src/law.rs", "test": "--doc -p ng-c"},
+                {"crates/ng-c/tests/scopes.rs"},
+                False,
+            ),
+            (
+                "crate Cargo.toml edit fails closed",
+                {"path": "crates/ng-c/src/law.rs", "test": "-p ng-v --test arena a_test"},
+                {"crates/ng-v/Cargo.toml"},
+                True,
+            ),
+            (
+                "unknown target flag fails closed",
+                {"path": "crates/ng-c/src/law.rs", "test": "-p ng-v --tests a_test"},
+                {"crates/ng-v/tests/body_run.rs"},
+                True,
+            ),
+            (
+                "mutated path always touched",
+                {"path": "crates/ng-c/src/law.rs", "test": "-p ng-v --test arena a_test"},
+                {"crates/ng-c/src/law.rs"},
+                True,
+            ),
+        )
+        for what, row, changed, want in cases:
+            got = mutate.touched(row, changed, root=root)
+            if got != want:
+                out.append(Violation("sweep", f"touched: {what}", f"returned {got}; want {want}"))
+    return out
+
+
+PARALLEL_TABLE = """\
+[[mutant]]
+name = "r0"
+path = "crates/ng-a/src/one.rs"
+old = "a"
+new = "b"
+test = "-p ng-a --test alpha"
+
+[[mutant]]
+name = "r1"
+path = "crates/ng-a/src/one.rs"
+old = "a"
+new = "c"
+test = "-p ng-a --test alpha"
+
+[[mutant]]
+name = "r2"
+path = "crates/ng-a/src/one.rs"
+old = "a"
+new = "d"
+test = "-p ng-b --test beta"
+
+[[mutant]]
+name = "r3"
+path = "crates/ng-a/src/one.rs"
+old = "a"
+new = "e"
+test = "-p ng-b --test beta"
+"""
+
+
+def parallel_case() -> list[Violation]:
+    out = []
+    real_cargo = shutil.which("cargo") or "cargo"
+    with _scratch_git(), tempfile.TemporaryDirectory(prefix="gate-parallel-") as tmp:
+        root = _fixture(pathlib.Path(tmp))
+        _commit(root, "parallel.toml", PARALLEL_TABLE)
+        stub = pathlib.Path(tmp) / "bin"
+        stub.mkdir()
+        meta_log = pathlib.Path(tmp) / "meta.log"
+        parity_script = (
+            f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n"
+            f"case \"$*\" in *--no-run*) exit 0 ;; esac\n"
+            f"v=$(cat crates/ng-a/src/one.rs)\n"
+            f"if [ \"$v\" != a ]; then printf '%s|%s|%s\\n' \"$v\" \"$CARGO_TARGET_DIR\" \"${{CARGO_BUILD_JOBS:-}}\" >>'{meta_log}'; fi\n"
+            "case \"$v\" in\n"
+            "  a) echo 'test t ... ok'; exit 0 ;;\n"
+            "  b) sleep 0.4; echo 'test alpha::t ... FAILED'; exit 101 ;;\n"
+            "  c) echo 'error[E0308]: mismatched types'; exit 101 ;;\n"
+            "  d) echo 'test beta::t ... FAILED'; exit 101 ;;\n"
+            "  e) echo 'test beta::t2 ... FAILED'; exit 101 ;;\n"
+            "esac\n"
+        )
+        (stub / "cargo").write_text(parity_script, encoding="utf-8")
+        (stub / "cargo").chmod(0o755)
+        env = {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}"}
+        env.pop("CARGO_BUILD_JOBS", None)
+        serial = subprocess.run(
+            [sys.executable, "-I", MUTATE, "parallel.toml", "--jobs", "1"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        meta_log.unlink(missing_ok=True)
+        parallel = subprocess.run(
+            [sys.executable, "-I", MUTATE, "parallel.toml", "--jobs", "2", "--build-jobs", "2"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        def verdicts_of(text: str) -> list[tuple[str, str]]:
+            return [
+                (m[1].rstrip(), m[2])
+                for line in text.splitlines()
+                if (m := VERDICT_LINE.match(line)) and m[1].rstrip() in VERDICTS
+            ]
+
+        if serial.returncode != 0 or parallel.returncode != 0:
+            out.append(Violation("sweep", "parallel parity", f"serial {serial.returncode}, parallel {parallel.returncode}"))
+        elif verdicts_of(serial.stdout) != verdicts_of(parallel.stdout):
+            out.append(
+                Violation(
+                    "sweep",
+                    "parallel parity",
+                    f"serial {verdicts_of(serial.stdout)} != parallel {verdicts_of(parallel.stdout)}",
+                )
+            )
+        recorded = [line.split("|") for line in (_read(meta_log).splitlines() if meta_log.exists() else [])]
+        targets = {entry[1] for entry in recorded if len(entry) == 3}
+        jobs = {entry[2] for entry in recorded if len(entry) == 3}
+        if len(targets) < 2 or jobs != {"2"}:
+            out.append(Violation("sweep", "parallel isolation", f"targets={sorted(targets)}, build_jobs={sorted(jobs)}"))
+        if (root / "target/mutate/lanes").exists():
+            out.append(Violation("sweep", "parallel cleanup", "target/mutate/lanes remained after exit"))
+
+        pids_file = pathlib.Path(tmp) / "stop.pids"
+        stop_script = (
+            f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n"
+            f"case \"$*\" in *--no-run*) exit 0 ;; esac\n"
+            "v=$(cat crates/ng-a/src/one.rs)\n"
+            "case \"$v\" in\n"
+            "  a) echo 'test t ... ok'; exit 0 ;;\n"
+            "  b) sleep 0.4; echo 'test alpha::t ... FAILED'; exit 101 ;;\n"
+            "  c) echo 'test alpha::t ... ok'; exit 0 ;;\n"
+            f"  d) echo $$ >>'{pids_file}'; sleep 60 ;;\n"
+            f"  e) echo $$ >>'{pids_file}'; sleep 60 ;;\n"
+            "esac\n"
+        )
+        (stub / "cargo").write_text(stop_script, encoding="utf-8")
+        (stub / "cargo").chmod(0o755)
+        log = io.StringIO()
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(log):
+            cmd = [sys.executable, "-I", str(root / MUTATE), str(root / "parallel.toml"), "--jobs", "2", "--stop-on-fail"]
+            code = sweep(cmd, ("r0", "r1", "r2", "r3"), 0)
+        if code != 1 or "40-mutants: the sweep stops at r1, SURVIVED. Rows not run: 2" not in log.getvalue().splitlines():
+            out.append(Violation("sweep", "parallel first-stop", f"exit {code}, log tail {log.getvalue().splitlines()[-3:]}"))
+        if pids_file.exists():
+            time.sleep(0.1)
+            for raw_pid in _read(pids_file).splitlines():
+                if raw_pid.isdigit():
+                    with contextlib.suppress(ProcessLookupError):
+                        os.kill(int(raw_pid), 0)
+                        out.append(Violation("sweep", "parallel orphan process", f"stub pid {raw_pid} stayed alive after stop"))
+
+        cancel_pids = pathlib.Path(tmp) / "cancel.pids"
+        cancel_script = (
+            f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n"
+            f"case \"$*\" in *--no-run*) exit 0 ;; esac\n"
+            "v=$(cat crates/ng-a/src/one.rs)\n"
+            "case \"$v\" in\n"
+            "  a) echo 'test t ... ok'; exit 0 ;;\n"
+            "  b) echo 'test alpha::t ... FAILED'; exit 101 ;;\n"
+            "  c) sleep 0.3; echo 'test alpha::t ... ok'; exit 0 ;;\n"
+            f"  d) echo $$ >>'{cancel_pids}'; sleep 60 ;;\n"
+            f"  e) echo $$ >>'{cancel_pids}'; sleep 60 ;;\n"
+            "esac\n"
+        )
+        (stub / "cargo").write_text(cancel_script, encoding="utf-8")
+        (stub / "cargo").chmod(0o755)
+        direct_stop = subprocess.run(
+            [sys.executable, "-I", MUTATE, "parallel.toml", "--jobs", "2", "--stop-on-fail"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+        if (
+            direct_stop.returncode != 1
+            or verdicts_of(direct_stop.stdout) != [("CAUGHT", "r0"), ("SURVIVED", "r1")]
+            or (root / "target/mutate/lanes").exists()
+        ):
+            out.append(
+                Violation(
+                    "sweep",
+                    "parallel direct stop-on-fail",
+                    f"exit {direct_stop.returncode}, verdicts={verdicts_of(direct_stop.stdout)}, lanes={(root / 'target/mutate/lanes').exists()}",
+                )
+            )
+        if cancel_pids.exists():
+            time.sleep(0.1)
+            for raw_pid in _read(cancel_pids).splitlines():
+                if raw_pid.isdigit():
+                    with contextlib.suppress(ProcessLookupError):
+                        os.kill(int(raw_pid), 0)
+                        out.append(Violation("sweep", "parallel cancel orphan", f"stub pid {raw_pid} stayed alive after cancel"))
+
+        base_hits = pathlib.Path(tmp) / "base.hits"
+        build_script = (
+            f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n"
+            f"case \"$*\" in *--no-run*) exit 0 ;; esac\n"
+            "v=$(cat crates/ng-a/src/one.rs)\n"
+            f"if [ \"$v\" = a ]; then echo 1 >>'{base_hits}'; echo 'test t ... ok'; exit 0; fi\n"
+            "echo 'error[E0308]: mismatched types'; exit 101\n"
+        )
+        (stub / "cargo").write_text(build_script, encoding="utf-8")
+        (stub / "cargo").chmod(0o755)
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
+            tested(["-p", "ng-a", "-p", "ng-b"], root)
+        dedup = subprocess.run(
+            [sys.executable, "-I", MUTATE, "parallel.toml", "--jobs", "2", "--tested", str(root / TESTED)],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        hits = len(_read(base_hits).splitlines()) if base_hits.exists() else 0
+        if dedup.returncode != 0 or hits != 2:
+            out.append(Violation("sweep", "parallel skipped baseline dedup", f"exit {dedup.returncode}, base_hits={hits} (want 2: one per test)"))
+    return out
+
+
 DRIVER_CASES: tuple[Callable[[], list[Violation]], ...] = (
     survivor_case,
     failed_sweep_case,
     check_case,
+    touched_cases,
     tested_cases,
     argv_cases,
     writer_cases,
     sweep_case,
+    parallel_case,
     disabled_target_case,
     mutants_dir_case,
     limit_case,

@@ -1,12 +1,13 @@
 """Breaks one rule at a time on a commit and reports whether a test notices.
 
     python3 -I tools/mutate.py TABLE [--rev REV] [--only NAME ...] [--since REV] [--budget SECONDS] [--check]
-                                     [--tested RECORD]
+                                     [--tested RECORD] [--jobs N|auto] [--build-jobs N] [--stop-on-fail]
 
 Python 3.11 stdlib only. TABLE is either a TOML file or a directory of `*.toml` files read in sorted filename order,
 with one [[mutant]] per rule, aimed at the test that holds it. `old` must match exactly once. `test` is what follows
 `cargo test`, and a row's own `test` replaces its file's top-level `test`. It may not pass --manifest-path,
---target-dir or --config.
+--target-dir or --config. A row may also state an optional positive integer `budget` in seconds as its own minimum
+limit (and four times that for its baseline).
 
     test = "--release -p ng-contract --test map_reads"
 
@@ -17,7 +18,7 @@ with one [[mutant]] per rule, aimed at the test that holds it. `old` must match 
     new = '''if false && !anatomy.unsupplied(site) =>'''
 
 A sweep extracts REV, default HEAD, to target/mutate/ in this checkout, so it never edits your files. Each `test` must
-pass there before any row runs. Each row prints as it ends, so a killed sweep keeps its lines:
+pass there before any row runs. Each row prints in table order as it ends, so a killed sweep keeps its lines:
 
     CAUGHT           a test failed, named on the line, or a test binary crashed
     CAUGHT at build  rustc refused the mutant with a coded error; read it, because a mistyped mutant proves nothing
@@ -27,17 +28,25 @@ pass there before any row runs. Each row prints as it ends, so a killed sweep ke
                      catch nor a survivor
 
 A row's limit is twice its test's baseline time in this sweep, so a loaded worker slows both alike, and never under
---budget, 420 s by default. A row's rebuild rides on its test's time: the slowest measured took 1.4 times its
-baseline. A baseline, and the build that stands in for a skipped one, gets four times --budget: the unmutated test is
-known to finish, so that limit only stops a hung build. Each verdict line names the row's limit.
+--budget (420 s by default) or the row's own `budget`. A row's rebuild rides on its test's time: the slowest measured
+took 1.4 times its baseline. A baseline, and the build that stands in for a skipped one, gets four times its budget:
+the unmutated test is known to finish, so that limit only stops a hung build. Each verdict line names the row's limit.
+
+When --jobs is `auto` (the default), at least 4 rows run, and the filesystem supports reflinks, the sweep builds once
+in lane 0, clones the extract and target into K = min(4, max(1, cpus // 3)) isolated lanes under target/mutate/lanes/
+with `cp -a --reflink=auto` and bounded CARGO_BUILD_JOBS per lane, runs unskipped baselines and rows across lanes,
+flushes verdicts in exact table order, and removes target/mutate/lanes/ on exit.
 
 Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. --since keeps the
-rows whose path, or any file under their test crate's tests/, changed after REV. Each command runs in its own process
-group, and that group dies with the command and with this script, however this script dies.
+rows whose path, crate Cargo.toml, or test target's source or test file changed after REV (--test <bin> matches its own
+file and shared helper subdirs under tests/, --lib matches its module or lib.rs and fails closed to src/, --doc matches
+src/). Each command runs in its own process group, and that group dies with the command and with this script, however
+this script dies.
 
 tools/verify's 40-mutants step runs this script through `gate.py mutants`. Before 10-rust it replays the rows a change
-adds or edits, or whose path it changes, and after 10-rust the rest. It stops each sweep at the first row that is not
-CAUGHT, so a red run reports only its first failure. A hand run reports every row.
+adds or edits, or whose path it changes, and after 10-rust the rest. It passes --stop-on-fail and stops each sweep at
+the first row in table order that is not CAUGHT, so a red run reports only its first failure. A hand run reports every
+row.
 
 --tested names the record 10-rust writes of the test calls it passed, with the libtest targets cargo ran for each
 package. The rest part of a merge run passes it, and the sweep then skips each baseline whose package and target appear
@@ -48,9 +57,10 @@ every test, or every test with the ignored ones. A `--release`, `--doc` or other
 test, a record lacking recorded targets, and a record from another commit or other settings run the baseline. A full
 run and a hand run run every baseline. The record counts only while the checkout holds no changed or untracked file and
 no tracked file marked assume-unchanged or skip-worktree.
-A row caught at build runs its skipped baseline, so a filter that names no test still fails, and a row over --budget
-runs it and then runs again with its limit. The sweep refuses a Cargo config in target/.cargo or target/mutate/.cargo,
-which its cargo reads and 10-rust's does not, and an extract that lacks a tracked path.
+A row caught at build runs its skipped baseline, so a filter that names no test still fails, and a row over its limit
+runs it and then runs again with its limit. The sweep refuses a Cargo config in target/.cargo, target/mutate/.cargo,
+target/mutate/lanes/.cargo or any lane under target/mutate/lanes/, which its cargo reads and 10-rust's does not, and an
+extract that lacks a tracked path.
 """
 import argparse
 import collections
@@ -64,12 +74,14 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 WORK = ROOT / "target" / "mutate"
 TREE = WORK / "tree"
+LANES = WORK / "lanes"
 PASSED = re.compile(r"^test .+ \.\.\. ok$", re.M)
 FAILED = re.compile(r"^test (.+) \.\.\. FAILED$", re.M)
 CODED_ERROR = re.compile(r"^.*\berror\[E\d{4}\].*$", re.M)
@@ -78,10 +90,13 @@ FAULTS = {signal.SIGABRT, signal.SIGILL, signal.SIGSEGV, signal.SIGBUS, signal.S
 SHOWN = 3
 ROW_TIMES = 2
 BASELINE_TIMES = 4
+MIN_PARALLEL_ROWS = 4
+MAX_AUTO_LANES = 4
 ROW_KEYS = {"name", "path", "old", "new", "test"}
+OPTIONAL_KEYS = {"budget"}
 MOVES = {"--manifest-path", "--target-dir", "--config"}
 SET_HERE = {"CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR", "CARGO_TERM_COLOR", "CARGO_NET_OFFLINE"}
-CARGO_CONFIGS = ("target/.cargo", "target/mutate/.cargo")
+CARGO_CONFIGS = ("target/.cargo", "target/mutate/.cargo", "target/mutate/lanes/.cargo")
 
 
 def refuse(why):
@@ -111,8 +126,13 @@ def load_rows(path, only):
             refuse(f"{file_path} has no [[mutant]] row")
         for row in part:
             row.setdefault("test", table.get("test"))
-            if set(row) != ROW_KEYS or not row["test"]:
-                refuse(f"row {row.get('name')} needs exactly {sorted(ROW_KEYS)}")
+            keys = set(row)
+            if not ROW_KEYS <= keys or not keys <= (ROW_KEYS | OPTIONAL_KEYS) or not row["test"]:
+                refuse(f"row {row.get('name')} needs {sorted(ROW_KEYS)} and optional {sorted(OPTIONAL_KEYS)}")
+            if "budget" in row:
+                budget = row["budget"]
+                if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
+                    refuse(f"row {row['name']} budget must be a positive integer, got {budget!r}")
             if moved := MOVES & {arg.split("=")[0] for arg in shlex.split(row["test"])}:
                 refuse(f"row {row['name']} passes {sorted(moved)}, which can point cargo outside the sweep's tree")
         rows.extend(part)
@@ -124,13 +144,110 @@ def load_rows(path, only):
     return [row for row in rows if not only or row["name"] in only]
 
 
-def touched(row, changed):
-    args = shlex.split(row["test"])
-    crates = [b for a, b in zip(args, args[1:]) if a in ("-p", "--package")]
-    crates += [a.removeprefix("--package=") for a in args if a.startswith("--package=")]
-    crates += [a[2:] for a in args if a.startswith("-p") and len(a) > 2]
-    tests = [f"crates/{crate}/tests/" for crate in crates] or ["crates/"]
-    return row["path"] in changed or any(path.startswith(t) and "/tests/" in path for t in tests for path in changed)
+_NO_VAL_FLAGS = frozenset(
+    {
+        "--release",
+        "--no-fail-fast",
+        "--no-default-features",
+        "--all-features",
+        "--offline",
+        "--locked",
+        "--frozen",
+        "-q",
+        "--quiet",
+        "-v",
+        "--verbose",
+    }
+)
+_VAL_FLAGS = frozenset({"--features", "-F", "--profile", "--target", "-j", "--jobs"})
+
+
+def parse_test_command(test):
+    tokens = shlex.split(test)
+    if "--" in tokens:
+        tokens = tokens[: tokens.index("--")]
+    crates, targets, filters, broad = [], set(), [], False
+    it = iter(tokens)
+    for arg in it:
+        if arg in ("-p", "--package"):
+            crates.append(next(it, ""))
+        elif arg.startswith("--package="):
+            crates.append(arg.removeprefix("--package="))
+        elif arg.startswith("-p") and not arg.startswith("--"):
+            crates.append(arg[2:])
+        elif arg == "--lib":
+            targets.add(("lib", None))
+        elif arg == "--doc":
+            targets.add(("doc", None))
+        elif arg == "--test":
+            targets.add(("test", next(it, "")))
+        elif arg.startswith("--test="):
+            targets.add(("test", arg.removeprefix("--test=")))
+        elif arg in _NO_VAL_FLAGS:
+            continue
+        elif arg in _VAL_FLAGS:
+            next(it, None)
+        elif any(arg.startswith(f"{flag}=") for flag in _VAL_FLAGS if flag.startswith("--")):
+            continue
+        elif arg.startswith("-"):
+            broad = True
+        else:
+            filters.append(arg)
+    return crates, targets, filters, broad
+
+
+def _lib_module(crate, filters, root):
+    if len(filters) != 1 or "::" not in filters[0]:
+        return None
+    mod0 = filters[0].split("::", 1)[0]
+    if not mod0 or mod0 in ("test", "tests"):
+        return None
+    src = pathlib.Path(root) / "crates" / crate / "src"
+    if (src / f"{mod0}.rs").is_file() or (src / mod0).is_dir():
+        return mod0
+    return None
+
+
+def touched(row, changed, root=ROOT):
+    if row["path"] in changed:
+        return True
+    crates, targets, filters, broad = parse_test_command(row["test"])
+    if not crates or any(not crate for crate in crates):
+        return any(path.startswith("crates/") for path in changed)
+    for crate in crates:
+        prefix = f"crates/{crate}/"
+        if f"{prefix}Cargo.toml" in changed:
+            return True
+        if broad or not targets or any(kind == "test" and not name for kind, name in targets):
+            if any(path.startswith((f"{prefix}src/", f"{prefix}tests/")) for path in changed):
+                return True
+            continue
+        for kind, name in targets:
+            if kind == "test":
+                tests_prefix = f"{prefix}tests/"
+                exact = f"{tests_prefix}{name}.rs"
+                nested = f"{tests_prefix}{name}/"
+                for path in changed:
+                    if path == exact or path.startswith(nested):
+                        return True
+                    if path.startswith(tests_prefix) and "/" in path[len(tests_prefix) :]:
+                        return True
+            elif kind == "lib":
+                src_prefix = f"{prefix}src/"
+                mod0 = _lib_module(crate, filters, root)
+                if mod0 is None:
+                    if any(path.startswith(src_prefix) for path in changed):
+                        return True
+                else:
+                    mod_file = f"{src_prefix}{mod0}.rs"
+                    mod_dir = f"{src_prefix}{mod0}/"
+                    lib_rs = f"{src_prefix}lib.rs"
+                    if any(path == mod_file or path.startswith(mod_dir) or path == lib_rs for path in changed):
+                        return True
+            elif kind == "doc":
+                if any(path.startswith(f"{prefix}src/") for path in changed):
+                    return True
+    return False
 
 
 def build_settings(env):
@@ -157,11 +274,6 @@ def selection(args, filters):
         elif arg.startswith("-") or not filters:
             return None
     return (crates, targets or {"all"}) if crates else None
-
-
-def built(test):
-    crates, targets = selection(shlex.split(test), filters=True)
-    return " ".join([*(f"-p {crate}" for crate in crates), *(f"--{t}" for t in sorted(targets - {"all"}))])
 
 
 def passed_calls(record, sha, settings):
@@ -199,13 +311,25 @@ def covered(test, calls):
     )
 
 
+def cargo_configs_in(root):
+    root = pathlib.Path(root)
+    found = [place for place in CARGO_CONFIGS if os.path.lexists(root / place)]
+    lanes = root / "target" / "mutate" / "lanes"
+    if lanes.is_dir():
+        for child in sorted(lanes.iterdir(), key=lambda p: p.name):
+            cfg = child / ".cargo"
+            if os.path.lexists(cfg):
+                found.append(cfg.relative_to(root).as_posix())
+    return found
+
+
 def unseen(root):
     listed = subprocess.run(["git", "ls-files", "-z", "-v"], cwd=root, capture_output=True, check=True).stdout
     hidden = [entry for entry in listed.decode().split("\0") if entry and not entry.startswith("H ")]
-    return [*hidden, *(place for place in CARGO_CONFIGS if os.path.lexists(os.path.join(root, place)))]
+    return [*hidden, *cargo_configs_in(root)]
 
 
-def run_tethered(argv, limit=None, **popen):
+def run_tethered(argv, limit=None, track=None, **popen):
     read_end, write_end = os.pipe()
     keeper = subprocess.Popen(
         ["sh", "-c", "read line; kill -KILL 0"],
@@ -223,12 +347,16 @@ def run_tethered(argv, limit=None, **popen):
         process_group=keeper.pid,
         **popen,
     )
+    if track is not None:
+        track[0](keeper.pid)
     try:
         output, _ = child.communicate(timeout=limit)
         return child.returncode, output
     except subprocess.TimeoutExpired:
         return None, b""
     finally:
+        if track is not None:
+            track[1](keeper.pid)
         os.close(write_end)
         keeper.wait()
         child.wait()
@@ -257,9 +385,86 @@ def matches(sha, row):
     return blob.count(row["old"].encode()) if code == 0 else 0
 
 
-def cargo_test(test, env, limit):
-    argv = ["cargo", "test", "--manifest-path", TREE / "Cargo.toml", *shlex.split(test)]
-    code, output = run_tethered(argv, limit, cwd=TREE, env=env)
+def built_batches(tests):
+    groups = {}
+    for test in tests:
+        tokens = shlex.split(test)
+        release = "--release" in tokens
+        sel = selection([tok for tok in tokens if tok != "--release"], filters=True)
+        if sel is None or "doc" in sel[1]:
+            continue
+        crates, targets = sel
+        key = (release, tuple(crates))
+        groups.setdefault(key, set()).update(targets)
+    batches = []
+    for (release, crates), targets in groups.items():
+        parts = ["--release"] if release else []
+        parts.extend(f"-p {crate}" for crate in crates)
+        if "all" not in targets:
+            parts.extend(f"--{t}" for t in sorted(targets))
+        batches.append(" ".join(parts))
+    return batches
+
+
+def reflink_supported(directory):
+    src = directory / f".reflink-src-{os.getpid()}"
+    dst = directory / f".reflink-dst-{os.getpid()}"
+    try:
+        src.write_bytes(b"x")
+        code, _ = run_tethered(["cp", "--reflink=always", src, dst], cwd=directory)
+        return code == 0
+    finally:
+        src.unlink(missing_ok=True)
+        dst.unlink(missing_ok=True)
+
+
+def parse_jobs(value):
+    if value == "auto":
+        return None
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected 'auto' or positive integer, got {value!r}") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"jobs must be >= 1, got {n}")
+    return n
+
+
+def choose_lanes(jobs_arg, row_count, work_dir):
+    if row_count <= 1:
+        return 1
+    if jobs_arg is not None:
+        return min(jobs_arg, row_count)
+    if row_count < MIN_PARALLEL_ROWS or not reflink_supported(work_dir):
+        return 1
+    cpus = os.cpu_count() or 1
+    return max(1, min(MAX_AUTO_LANES, cpus // 3, row_count))
+
+
+def clone_lane(lane_idx, seed_tree, seed_target):
+    lane_dir = LANES / f"lane-{lane_idx}"
+    lane_tree = lane_dir / "tree"
+    lane_target = lane_dir / "target"
+    lane_dir.mkdir(parents=True, exist_ok=True)
+    for src, dst in ((seed_tree, lane_tree), (seed_target, lane_target)):
+        if not src.exists():
+            continue
+        code, output = run_tethered(["cp", "-a", "--reflink=auto", src, dst], cwd=ROOT)
+        if code != 0:
+            refuse(f"cp failed cloning lane {lane_idx}:\n{output.decode(errors='replace')}")
+    return lane_tree, lane_target
+
+
+def lane_env(base_env, target_dir, build_jobs, force_build_jobs=False):
+    out = dict(base_env, CARGO_TARGET_DIR=str(target_dir), CARGO_BUILD_BUILD_DIR=str(target_dir))
+    if build_jobs is not None and (force_build_jobs or "CARGO_BUILD_JOBS" not in base_env):
+        out["CARGO_BUILD_JOBS"] = str(build_jobs)
+    return out
+
+
+def cargo_test(test, env, limit, tree=TREE, track=None):
+    argv = ["cargo", "test", "--manifest-path", tree / "Cargo.toml", *shlex.split(test)]
+    code, output = run_tethered(argv, limit, track=track, cwd=tree, env=env)
     return code, output.decode(errors="replace")
 
 
@@ -289,6 +494,9 @@ def main():
     parser.add_argument("--since", metavar="REV", help="only rows whose path or test crate's tests/ changed after REV")
     parser.add_argument("--check", action="store_true", help="stop before any build")
     parser.add_argument("--tested", metavar="RECORD", help="skip the baselines 10-rust's passed test calls cover")
+    parser.add_argument("--jobs", type=parse_jobs, default=None, metavar="N|auto", help="parallel seed-shape lanes")
+    parser.add_argument("--build-jobs", type=int, default=None, metavar="N", help="CARGO_BUILD_JOBS per parallel lane")
+    parser.add_argument("--stop-on-fail", action="store_true", help="stop dispatching rows past the first non-CAUGHT row")
     args = parser.parse_args()
 
     rows = load_rows(args.table, args.only)
@@ -333,7 +541,7 @@ def main():
         print(f"{len(applied)} of {len(rows)} rows apply")
         sys.exit(0 if len(applied) == len(rows) else 1)
 
-    if configs := [place for place in CARGO_CONFIGS if os.path.lexists(ROOT / place)]:
+    if configs := cargo_configs_in(ROOT):
         refuse(f"cargo in the sweep's tree reads {configs} and the checkout's cargo does not; delete them")
     WORK.mkdir(parents=True, exist_ok=True)
     lock = open(WORK / "lock", "w")
@@ -341,8 +549,11 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         refuse(f"another sweep is running in {ROOT}")
+    if LANES.exists():
+        shutil.rmtree(LANES)
     extract(sha)
-    target = str(WORK / "target")
+    seed_target = WORK / "target"
+    target = str(seed_target)
     # An inherited target or build dir links another checkout's crates.
     env = dict(
         os.environ,
@@ -363,53 +574,232 @@ def main():
         calls = []
 
     took = {}
+    io_lock = threading.Lock()
+    test_budget = {}
+    for row in applied:
+        test_budget[row["test"]] = max(test_budget.get(row["test"], args.budget), row.get("budget", 0))
 
-    def baseline(test):
+    def run_baseline(test, tree=TREE, run_env=env, track=None):
+        base_limit = max(held, test_budget.get(test, args.budget) * BASELINE_TIMES)
         began = time.monotonic()
-        code, output = cargo_test(test, env, held)
+        code, output = cargo_test(test, run_env, base_limit, tree=tree, track=track)
         if code != 0 or not PASSED.search(output):
-            gave = output[-2000:] or f"nothing in {held} s"
-            refuse(f"`cargo test {test}` must pass some test on the unmutated tree, and it gave:\n{gave}\n")
-        took[test] = time.monotonic() - began
-        print(f"baseline  {took[test]:.0f} s  cargo test {test}", flush=True)
+            gave = output[-2000:] or f"nothing in {base_limit} s"
+            return f"`cargo test {test}` must pass some test on the unmutated tree, and it gave:\n{gave}\n"
+        elapsed = time.monotonic() - began
+        with io_lock:
+            took[test] = elapsed
+            print(f"baseline  {elapsed:.0f} s  cargo test {test}", flush=True)
+        return None
 
-    skipped = []
-    for test in dict.fromkeys(row["test"] for row in applied):
-        if covered(test, calls):
-            skipped.append(test)
-        else:
-            baseline(test)
-    if skipped:
-        print(f"baselines skipped: {len(skipped)}, whose tests 10-rust passed on this commit", flush=True)
-    for build in dict.fromkeys(built(test) for test in skipped):
-        began = time.monotonic()
-        code, output = cargo_test(f"--no-run {build}", env, held)
-        if code != 0:
-            gave = output[-2000:] or f"nothing in {held} s"
-            refuse(f"`cargo test --no-run {build}` must build on the unmutated tree, and it gave:\n{gave}\n")
-        print(f"build     {time.monotonic() - began:.0f} s  cargo test --no-run {build}", flush=True)
+    all_tests = list(dict.fromkeys(row["test"] for row in applied))
+    skipped = [test for test in all_tests if covered(test, calls)]
+    unskipped = [test for test in all_tests if not covered(test, calls)]
+    lanes_n = choose_lanes(args.jobs, len(applied), WORK)
+    build_limit = max(held, max(test_budget.values(), default=args.budget) * BASELINE_TIMES)
 
-    def mutated(row):
-        limit = max(args.budget, ROW_TIMES * took.get(row["test"], 0))
-        file = TREE / row["path"]
+    def mutated_in(row, tree, run_env, track=None):
+        with io_lock:
+            base_s = took.get(row["test"], 0)
+        limit = max(args.budget, row.get("budget", 0), ROW_TIMES * base_s)
+        file = tree / row["path"]
         original = file.read_bytes()
         file.write_bytes(original.replace(row["old"].encode(), row["new"].encode()))
-        began = time.monotonic()
-        code, output = cargo_test(row["test"], env, limit)
-        file.write_bytes(original)
-        return code, *judge(code, output, limit), time.monotonic() - began, limit
+        try:
+            began = time.monotonic()
+            code, output = cargo_test(row["test"], run_env, limit, tree=tree, track=track)
+            seconds = time.monotonic() - began
+        finally:
+            file.write_bytes(original)
+        return code, *judge(code, output, limit), seconds, limit, base_s > 0
 
-    for row in applied:
-        code, verdict, detail, seconds, limit = mutated(row)
-        if verdict == "CAUGHT at build" and row["test"] in skipped:
-            skipped.remove(row["test"])
-            baseline(row["test"])
-        if code is None and row["test"] in skipped:
-            print(f"over      {limit:.0f} s  {row['name']} runs again after its skipped baseline", flush=True)
-            skipped.remove(row["test"])
-            baseline(row["test"])
-            code, verdict, detail, seconds, limit = mutated(row)
-        report(verdict, row["name"], seconds, detail, limit)
+    if lanes_n == 1:
+        for test in unskipped:
+            if err := run_baseline(test):
+                refuse(err)
+        if skipped:
+            print(f"baselines skipped: {len(skipped)}, whose tests 10-rust passed on this commit", flush=True)
+        for build in built_batches(skipped):
+            began = time.monotonic()
+            code, output = cargo_test(f"--no-run {build}", env, build_limit)
+            if code != 0:
+                gave = output[-2000:] or f"nothing in {build_limit} s"
+                refuse(f"`cargo test --no-run {build}` must build on the unmutated tree, and it gave:\n{gave}\n")
+            print(f"build     {time.monotonic() - began:.0f} s  cargo test --no-run {build}", flush=True)
+        for row in applied:
+            code, verdict, detail, seconds, limit, _ = mutated_in(row, TREE, env)
+            if verdict == "CAUGHT at build" and row["test"] in skipped:
+                skipped.remove(row["test"])
+                if err := run_baseline(row["test"]):
+                    refuse(err)
+            if code is None and row["test"] in skipped:
+                print(f"over      {limit:.0f} s  {row['name']} runs again after its skipped baseline", flush=True)
+                skipped.remove(row["test"])
+                if err := run_baseline(row["test"]):
+                    refuse(err)
+                code, verdict, detail, seconds, limit, _ = mutated_in(row, TREE, env)
+            report(verdict, row["name"], seconds, detail, limit)
+            if args.stop_on_fail and verdict not in ("CAUGHT", "CAUGHT at build"):
+                break
+    else:
+        build_jobs = args.build_jobs if args.build_jobs is not None else max(1, (os.cpu_count() or 1) // lanes_n)
+        if skipped:
+            print(f"baselines skipped: {len(skipped)}, whose tests 10-rust passed on this commit", flush=True)
+        for build in built_batches(all_tests):
+            began = time.monotonic()
+            code, output = cargo_test(f"--no-run {build}", env, build_limit)
+            if code != 0:
+                gave = output[-2000:] or f"nothing in {build_limit} s"
+                refuse(f"`cargo test --no-run {build}` must build on the unmutated tree, and it gave:\n{gave}\n")
+            print(f"build     {time.monotonic() - began:.0f} s  cargo test --no-run {build}", flush=True)
+        print(f"lanes: {lanes_n}, cargo build jobs per lane: {build_jobs}", flush=True)
+        try:
+            force_bj = args.build_jobs is not None
+            lane_specs = [(TREE, lane_env(env, seed_target, build_jobs, force_bj))]
+            for i in range(1, lanes_n):
+                ltree, ltarget = clone_lane(i, TREE, seed_target)
+                lane_specs.append((ltree, lane_env(env, ltarget, build_jobs, force_bj)))
+
+            state_lock = threading.Lock()
+            abort_error = None
+            stop_at = None
+            active_pgs = {}
+
+            def cancel_pgs(above=None):
+                for pgid, rank in list(active_pgs.items()):
+                    if above is None or (rank is not None and rank > above):
+                        try:
+                            os.killpg(pgid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+
+            def track_for(rank):
+                def start(pgid):
+                    with state_lock:
+                        if abort_error is not None or (
+                            args.stop_on_fail and stop_at is not None and rank is not None and rank > stop_at
+                        ):
+                            try:
+                                os.killpg(pgid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                        else:
+                            active_pgs[pgid] = rank
+
+                def end(pgid):
+                    with state_lock:
+                        active_pgs.pop(pgid, None)
+
+                return start, end
+
+            if unskipped:
+                base_cursor = 0
+
+                def baseline_worker(ltree, lenv):
+                    nonlocal base_cursor, abort_error
+                    while True:
+                        with state_lock:
+                            if abort_error is not None or base_cursor >= len(unskipped):
+                                return
+                            test = unskipped[base_cursor]
+                            base_cursor += 1
+                        err = run_baseline(test, tree=ltree, run_env=lenv, track=track_for(None))
+                        if err is not None:
+                            with state_lock:
+                                if abort_error is None:
+                                    abort_error = err
+                                    cancel_pgs(None)
+                            return
+
+                bthreads = [threading.Thread(target=baseline_worker, args=(ltree, lenv)) for ltree, lenv in lane_specs]
+                for thread in bthreads:
+                    thread.start()
+                for thread in bthreads:
+                    thread.join()
+                if abort_error is not None:
+                    refuse(abort_error)
+
+            test_locks = collections.defaultdict(threading.Lock)
+            initial_skipped = frozenset(skipped)
+            skipped_set = set(skipped)
+            cursor = 0
+            next_print = 0
+            results = {}
+
+            def ensure_baseline(test, tree, run_env):
+                nonlocal abort_error
+                with test_locks[test]:
+                    with state_lock:
+                        if abort_error is not None:
+                            return False
+                        still_skipped = test in skipped_set
+                    if not still_skipped:
+                        return True
+                    err = run_baseline(test, tree=tree, run_env=run_env, track=track_for(None))
+                    with state_lock:
+                        if err is not None:
+                            if abort_error is None:
+                                abort_error = err
+                                cancel_pgs(None)
+                            return False
+                        skipped_set.discard(test)
+                    return True
+
+            def worker(ltree, lenv):
+                nonlocal cursor, next_print, stop_at
+                while True:
+                    with state_lock:
+                        if abort_error is not None or cursor >= len(applied):
+                            return
+                        if args.stop_on_fail and stop_at is not None and cursor >= stop_at:
+                            return
+                        idx = cursor
+                        cursor += 1
+                    row = applied[idx]
+                    track = track_for(idx)
+                    code, verdict, detail, seconds, limit, had_base = mutated_in(row, ltree, lenv, track=track)
+                    with state_lock:
+                        if abort_error is not None or (args.stop_on_fail and stop_at is not None and idx > stop_at):
+                            return
+                    if verdict == "CAUGHT at build":
+                        with state_lock:
+                            need = row["test"] in skipped_set
+                        if need and not ensure_baseline(row["test"], ltree, lenv):
+                            return
+                    if code is None and not had_base and row["test"] in initial_skipped:
+                        with io_lock:
+                            print(f"over      {limit:.0f} s  {row['name']} runs again after its skipped baseline", flush=True)
+                        if not ensure_baseline(row["test"], ltree, lenv):
+                            return
+                        code, verdict, detail, seconds, limit, _ = mutated_in(row, ltree, lenv, track=track)
+                        with state_lock:
+                            if abort_error is not None or (args.stop_on_fail and stop_at is not None and idx > stop_at):
+                                return
+                    with state_lock:
+                        if abort_error is not None or (args.stop_on_fail and stop_at is not None and idx > stop_at):
+                            return
+                        results[idx] = (verdict, row["name"], seconds, detail, limit)
+                        if args.stop_on_fail and verdict not in ("CAUGHT", "CAUGHT at build"):
+                            stop_at = idx if stop_at is None else min(stop_at, idx)
+                            cancel_pgs(stop_at)
+                        while next_print in results:
+                            if args.stop_on_fail and stop_at is not None and next_print > stop_at:
+                                break
+                            v, n, s, d, lim = results.pop(next_print)
+                            with io_lock:
+                                report(v, n, s, d, lim)
+                            next_print += 1
+
+            threads = [threading.Thread(target=worker, args=(ltree, lenv)) for ltree, lenv in lane_specs]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            if abort_error is not None:
+                refuse(abort_error)
+        finally:
+            if LANES.exists():
+                shutil.rmtree(LANES, ignore_errors=True)
 
     counts = ", ".join(f"{count} {verdict}" for verdict, count in tally.items())
     print(f"summary: {counts}, of {len(rows)} rows at {sha}")
