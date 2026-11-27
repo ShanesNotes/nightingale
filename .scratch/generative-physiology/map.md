@@ -53,6 +53,12 @@ Adopted as the working base for upcoming `pstack` passes ([ticket 16](issues/16-
 
 - **Four seams and draft rules `L1` to `L14`.** Learned models meet the engine at one of four seams in order of trust (proposal, reading, inference, standing in), governed by two provenance rules (a checked proposal needs no provenance; an unchecked output carries a label and names what taught it) and draft rules `L1` to `L14`, with the build order set by the teacher's measured cost. Individual forks (section 8) and human gates (section 10) remain open.
 
+Bound specification and `pstack` research passes:
+
+- **Bound seams, `L1` to `L14`, and manifests ([spec.md](spec.md)).** Binds the four seams and two provenance rules to engine types, dispositions all 14 rules (`2` kept, `12` scoped/changed with positive and must-fail tests), and specifies sorted-key SHA-256 `L9`/`L10` dataset and artifact manifests.
+- **558-row constant audit and Stage A ranking ([ticket 17](issues/17-emulator-sensitivity-ranking.md)).** Partitions [research 16](../research/issues/16-constants-and-what-binds-them.md) (`409` sourced, `32` derived, `2` admission-pinned `CV-066`/`RN-016`, `115` candidate; `52` active candidate degrees, `44` compilable Bucket 4 axes) and specifies Stage A sensitivity ranking separated from blocked Stage B fitting.
+- **Blueprints for `5.1`, `5.2`, and `5.4` pre-check ([ticket 18](issues/18-teacher-library-and-start-proposals.md)).** Specifies `5.1` teacher library with disk-bounded overlay stores, `5.2` start proposals decoupled from `native-contract 86`'s Fork 1 routes plus multi-rest detection, and the `5.4` structural-mask empirical measurement protocol.
+
 ## Not yet specified
 
 - **The fluid-delivery experiment.** A deferred line ([ticket 13](issues/13-fluids-line-deferred.md)); one of its prerequisites is a question for the engine's process: where varied packet values come from. Hour-scale runs no longer wait on the engine, because a run's memory stays flat since native-contract ticket 11.
