@@ -33,6 +33,10 @@ const DEAD_SPACE_ELASTANCE: f64 = 1e-2;
 const WATER_VOLUME: f64 = 10.0;
 const HUMIDITY: f64 = 0.5;
 const ROOM_VAPOUR: f64 = 20.0;
+/// The room's air, where the vapour form's exponent `a - b / (T + c)` is zero, so the room's saturated vapour pressure
+/// is `rs.vapour-reference` exactly.
+const AIR: f64 = 300.0;
+const VAPOUR_B: f64 = 1.0;
 const INTERSTITIUM_WATER_SET: f64 = 1_000.0;
 const UPRIGHT_WALL_REST_RISE: f64 = 2_000.0;
 const CAROTID_ABOVE_VESSEL: f64 = 0.3;
@@ -614,8 +618,10 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Rate<Volume>>(p, "rs.airway-mixing", m)?;
     set::<Quotient<Volume, Water>>(p, "rs.water-volume", WATER_VOLUME)?;
     set::<Rate<Volume>>(p, "rs.alveolar-ventilation", m / 2.0)?;
-    set::<Dimensionless>(p, "rs.room-humidity", HUMIDITY)?;
-    set::<Pressure>(p, "rs.room-vapour-pressure", ROOM_VAPOUR)?;
+    set::<Pressure>(p, "rs.vapour-reference", ROOM_VAPOUR)?;
+    set::<Dimensionless>(p, "rs.vapour-a", VAPOUR_B / AIR)?;
+    set::<Temperature>(p, "rs.vapour-b", VAPOUR_B)?;
+    set::<Temperature>(p, "rs.vapour-c", 0.0)?;
     set::<Water>(p, "fixture.water-set", INTERSTITIUM_WATER_SET)?;
     set::<Rate<Dimensionless>>(p, "fixture.water-speed", 1.0)?;
     for (gas, key) in [(0, "rs.oxygen-inspired"), (1, "rs.carbon-dioxide-inspired")] {
@@ -687,7 +693,21 @@ fn switched(unit: Case) -> Vec<BoundaryEvent> {
     };
     let gate = |id: &[u8], seconds: u64, gate: Gate| event(id, seconds, BoundaryInput::Void(gate));
     let sleep = |id: &[u8], seconds: u64, sleep: Sleep| event(id, seconds, BoundaryInput::Sleep(sleep));
+    fn finite<U>(value: f64) -> Measure<U> {
+        Measure::new(value).unwrap_or_else(|_| unreachable!("a finite room"))
+    }
+    let room = Room {
+        air: finite(AIR),
+        radiant: finite(AIR),
+        humidity: finite(HUMIDITY),
+        air_speed: finite(1.0),
+        pressure: finite(ROOM),
+        oxygen: finite(INSPIRED[0]),
+        carbon_dioxide: finite(INSPIRED[1]),
+        clothing: finite(0.0),
+    };
     let mut events = vec![
+        event(b"the room", 0, BoundaryInput::Room(room)),
         gate(b"shut", 0, Gate::Shut),
         gate(b"open", unit.opens, Gate::Open),
     ];

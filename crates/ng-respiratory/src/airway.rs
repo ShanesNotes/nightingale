@@ -396,21 +396,19 @@ impl<'b> Ventilation<'b> {
     /// room's (research 11, Guyton p. 285). It reads no gas row and no water pool, which keeps the gas's water out of
     /// the elimination's largest block (native-contract 89). The room takes the dead space's water out and gives back
     /// its own at `i = h P_r / (P_B - h P_r)` of the dry gas, with `h` the room's humidity and `P_r` its saturated
-    /// vapour pressure.
+    /// vapour pressure at its air temperature, both read from the room.
     pub fn water(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,
         ports: &RespiratoryPorts<'b>,
     ) -> Result<(), AdmissionError> {
         let class = class()?;
-        let key = ParameterKey::new;
-        let per = laws.parameter::<Quotient<Volume, Water>>(key("rs.water-volume"), Admissible::positive());
-        let ventilated =
-            laws.parameter::<Rate<Volume>>(key("rs.alveolar-ventilation"), Admissible::nonnegative());
-        let humidity = laws.parameter::<Dimensionless>(key("rs.room-humidity"), Admissible::unit_interval());
-        let saturating =
-            laws.parameter::<Pressure>(key("rs.room-vapour-pressure"), Admissible::nonnegative());
-        let room = (&humidity, &saturating);
+        let per = water_volume(laws);
+        let ventilated = laws.parameter::<Rate<Volume>>(
+            ParameterKey::new("rs.alveolar-ventilation"),
+            Admissible::nonnegative(),
+        );
+        let room = Room::declare(laws);
 
         let lining = ports.lining(laws);
         let rate = laws.site_kernel(|mut k| {
@@ -418,7 +416,7 @@ impl<'b> Ventilation<'b> {
             let vapour = k.parameter(&self.vapour);
             let saturated = k.divide(vapour, dry);
             let saturated = k.as_dimension(saturated);
-            let given = self.stated_room_water(&mut k, room);
+            let given = self.room_water(&mut k, &room);
             let gap = k.subtract(saturated, given);
             let ventilation = k.parameter(&ventilated);
             let flow = k.scale(ventilation, gap);
@@ -458,21 +456,9 @@ impl<'b> Ventilation<'b> {
         laws.transfer_along(&route, rate);
 
         let out = ports.boundary::<Expired<Water>>()?.route;
-        let held = (
-            out.amount::<Oxygen>(),
-            out.amount::<CarbonDioxide>(),
-            out.amount::<NitrogenGas>(),
-            out.amount::<Water>(),
-        );
+        let held = held_by(&out);
         let rate = laws.kernel(|mut k| {
-            let airway = (k.read(&held.0), k.read(&held.1), k.read(&held.2));
-            let water = k.read(&held.3);
-            let share = self.share_of(&mut k, &per, water, airway);
-            let head = self.dead_space_head(&mut k, airway);
-            let [inward, outward] = self.parts(&mut k, head);
-            let leaving = self.at_the_room(&mut k, outward, share, &per);
-            let room_share = self.stated_room_water(&mut k, room);
-            let entering = self.at_the_room(&mut k, inward, room_share, &per);
+            let [leaving, entering] = self.exhaled(&mut k, &held, &per, &room);
             let value = k.subtract(leaving, entering);
             k.finish(value, laws.every_mode(), class)
         });
@@ -523,19 +509,6 @@ impl<'b> Ventilation<'b> {
         let room_share = self.room_water(k, room);
         let entering = self.at_the_room(k, inward, room_share, per);
         [leaving, entering]
-    }
-
-    fn stated_room_water<'k, C>(
-        &self,
-        k: &mut Kernel<'b, 'k, Respiratory, C>,
-        (humidity, saturating): (&Bound<'b, Dimensionless>, &Bound<'b, Pressure>),
-    ) -> Expr<'b, 'k, Respiratory, Dimensionless> {
-        let (h, saturated) = (k.parameter(humidity), k.parameter(saturating));
-        let vapour = k.scale(saturated, h);
-        let room = k.parameter(&self.room);
-        let dry = k.subtract(room, vapour);
-        let share = k.divide(vapour, dry);
-        k.as_dimension(share)
     }
 
     fn room_water<'k, C>(

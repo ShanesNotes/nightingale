@@ -2735,10 +2735,18 @@ fn the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_th
 /// Research 11's airway water, `V' (rho_sat - rho_insp)` with the expired gas at its vapour limit, at the packet's
 /// values: `V'` the mixing exchange's alveolar ventilation, `M / 2` for two mixed exchanges in series, and each density
 /// a share of the dry gas over water's vapour volume, `P_H2O / (P_B - P_H2O)` at the limit and `h P_r / (P_B - h P_r)`
-/// from the room. The lining moves exactly that.
+/// from the room, `P_r` the vapour form at the room's air temperature. The lining moves exactly that.
 const MIXING: f64 = 3_240.0;
 const WATER_VOLUME: f64 = 24_000.0;
-const ROOM_WATER: f64 = 0.5 * 20.0 / (700.0 - 0.5 * 20.0);
+
+/// The room's water share of its dry gas, `h P_r / (P_B - h P_r)`, with `P_r = P_ref exp(a - b / (T + c))` read at
+/// the room's air from the respiratory card's own vapour keys.
+fn room_water(start: &Start, room: &Weather) -> f64 {
+    let value = |name| lead(parameter(start, name));
+    let exponent = value("rs.vapour-a") - value("rs.vapour-b") / (room.air + value("rs.vapour-c"));
+    let vapour = value("rs.vapour-reference") * exp(exponent) * room.humidity;
+    vapour / (lead(parameter(start, "rs.room-pressure")) - vapour)
+}
 
 fn the_lining_moves_research_11s_form_over_the_first_minute(start: &Start, minute: &Session<'_, Running>) {
     let body = &start.body;
@@ -2754,7 +2762,7 @@ fn the_lining_moves_research_11s_form_over_the_first_minute(start: &Start, minut
     let to = minute.record().accepted().time().nanoseconds();
     let moved = extents(minute, &columns, to)[lining.index()];
     let seconds = (to - anchor_moment().nanoseconds()) as f64 / SECOND as f64;
-    let form = MIXING / 2.0 * ((700.0 - DRY) / DRY - ROOM_WATER) / WATER_VOLUME * seconds;
+    let form = MIXING / 2.0 * ((700.0 - DRY) / DRY - room_water(start, &RESTING)) / WATER_VOLUME * seconds;
     assert!(
         (moved - form).abs() <= 1e-9 * form,
         "over {seconds} s the lining moved {moved} water, research 11's form {form}"
