@@ -217,8 +217,9 @@ impl<'r> CoupledProblem<'r> {
         evaluation.residuals = residuals;
         Ok(())
     }
-    /// Evaluates `point` into an existing `StageEvaluation`, swapping stage buffers with `scratch` so repeated
-    /// Newton updates allocate nothing. On error `evaluation` stays unchanged.
+    /// Evaluates `point` into an existing `StageEvaluation`, swapping stage buffers with `scratch` to avoid
+    /// reallocating stage vectors across repeated Newton updates (forcing evaluation may still allocate when
+    /// forcings are active). On error `evaluation` stays unchanged.
     pub fn reevaluate_in(
         &self,
         point: &StagePoint<'_, '_>,
@@ -850,7 +851,7 @@ mod tests {
         let head = AcceptedHead::admitted(origin, RecordHash::Blake2b);
         let base = Digest::of_canonical(b"base");
         let span_ns = 10_000_000;
-        let _ = head.attempt(
+        let Err(failure) = head.attempt(
             &body,
             &identity,
             base,
@@ -891,6 +892,12 @@ mod tests {
                 Err(ticket.refuse(NumericalRefusal::IterationLimit))
             },
             |_| Ok(()),
+        ) else {
+            panic!("probe refuses after verifying reevaluate_in");
+        };
+        assert!(
+            matches!(failure, TrialFailure::Refused(refused) if refused.reason() == NumericalRefusal::IterationLimit),
+            "unexpected failure: {failure:?}"
         );
     }
 }

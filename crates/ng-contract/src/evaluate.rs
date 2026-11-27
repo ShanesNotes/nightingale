@@ -202,6 +202,7 @@ enum FastInstr {
     Subtract([u8; 2]),
     Multiply([u8; 2]),
     Divide([u8; 2]),
+    Copy([u8; 1]),
     SmoothMax([u8; 3]),
     SmoothMin([u8; 3]),
     Exp([u8; 1]),
@@ -263,6 +264,7 @@ struct FastGeneral {
     other_end: u32,
     program: u16,
     output: u8,
+    jac_output: u8,
     bwd_max_slot: u8,
     hoist_finite: bool,
 }
@@ -363,6 +365,7 @@ struct FastQuad {
     targets: [FastTarget; 4],
     jac_slope_offsets: [u32; 4],
     output: u8,
+    jac_output: u8,
     bwd_max_slot: u8,
     pub_safe: bool,
     jac_safe: bool,
@@ -393,6 +396,7 @@ struct FastTape {
     col_term_ranges: Vec<Range<u32>>,
     generals: Vec<FastGeneral>,
     steps: Vec<(u8, FastInstr)>,
+    jac_steps: Vec<(u8, FastInstr)>,
     hoisted_steps: Vec<(u8, HoistedOp)>,
     bwd_steps: Vec<(u32, Instr)>,
     bwd_fast_steps: Vec<(u8, FastInstr)>,
@@ -599,6 +603,7 @@ impl Tape {
             return None;
         }
         let mut steps = Vec::new();
+        let mut jac_steps = Vec::new();
         let mut hoisted_steps = Vec::new();
         let mut program_fast = Vec::with_capacity(layout.programs.len());
         let mut program_alias = Vec::with_capacity(layout.programs.len());
@@ -640,6 +645,96 @@ impl Tape {
                     }
                 }
             }
+            let mut raw_max_use = vec![0_usize; ops.len()];
+            raw_max_use[ops.len() - 1] = ops.len();
+            for (at, op) in ops.iter().enumerate() {
+                match *op {
+                    Op::Input(_) | Op::Zero(_) => {}
+                    Op::AsDimension([x])
+                    | Op::Exp([x])
+                    | Op::Expm1([x])
+                    | Op::Logistic([x])
+                    | Op::Ln([x])
+                    | Op::Volume([x]) => raw_max_use[x] = at,
+                    Op::Add([a, b])
+                    | Op::Subtract([a, b])
+                    | Op::Deviation([a, b])
+                    | Op::Multiply([a, b])
+                    | Op::Scale([a, b])
+                    | Op::ConductanceFlow([a, b])
+                    | Op::Divide([a, b]) => {
+                        raw_max_use[a] = at;
+                        raw_max_use[b] = at;
+                    }
+                    Op::SmoothMax([a, b, c]) | Op::SmoothMin([a, b, c]) | Op::Relax([a, b, c]) => {
+                        raw_max_use[a] = at;
+                        raw_max_use[b] = at;
+                        raw_max_use[c] = at;
+                    }
+                    Op::Upwind(u) => {
+                        for x in u {
+                            raw_max_use[x] = at;
+                        }
+                    }
+                }
+            }
+            let mut max_use = raw_max_use.clone();
+            let mut jac_alias = Vec::with_capacity(ops.len());
+            let jac_start = jac_steps.len();
+            for (at, op) in ops.iter().enumerate() {
+                let at_u8 = at as u8;
+                match *op {
+                    Op::Input(_) => jac_alias.push(at_u8),
+                    Op::AsDimension([x]) => {
+                        let target = jac_alias[x];
+                        if max_use[usize::from(target)] == at && raw_max_use[at] > 0 {
+                            jac_alias.push(target);
+                            max_use[usize::from(target)] = raw_max_use[at];
+                        } else {
+                            jac_alias.push(at_u8);
+                            jac_steps.push((at_u8, FastInstr::Copy([target])));
+                        }
+                    }
+                    _ => {
+                        jac_alias.push(at_u8);
+                        let instr = match *op {
+                            Op::Zero(_) => FastInstr::Zero,
+                            Op::Add([a, b]) => FastInstr::Add([jac_alias[a], jac_alias[b]]),
+                            Op::Subtract([a, b]) | Op::Deviation([a, b]) => {
+                                FastInstr::Subtract([jac_alias[a], jac_alias[b]])
+                            }
+                            Op::Multiply([a, b]) | Op::Scale([a, b]) | Op::ConductanceFlow([a, b]) => {
+                                FastInstr::Multiply([jac_alias[a], jac_alias[b]])
+                            }
+                            Op::Divide([a, b]) => FastInstr::Divide([jac_alias[a], jac_alias[b]]),
+                            Op::SmoothMax([a, b, w]) => {
+                                FastInstr::SmoothMax([jac_alias[a], jac_alias[b], jac_alias[w]])
+                            }
+                            Op::SmoothMin([a, b, w]) => {
+                                FastInstr::SmoothMin([jac_alias[a], jac_alias[b], jac_alias[w]])
+                            }
+                            Op::Exp([x]) => FastInstr::Exp([jac_alias[x]]),
+                            Op::Logistic([x]) => FastInstr::Logistic([jac_alias[x]]),
+                            Op::Ln([x]) => FastInstr::Ln([jac_alias[x]]),
+                            Op::Relax([a, b, c]) => {
+                                FastInstr::Relax([jac_alias[a], jac_alias[b], jac_alias[c]])
+                            }
+                            Op::Volume([x]) => FastInstr::Volume([jac_alias[x]]),
+                            Op::Upwind([a, b, c, d, e]) => FastInstr::Upwind([
+                                jac_alias[a],
+                                jac_alias[b],
+                                jac_alias[c],
+                                jac_alias[d],
+                                jac_alias[e],
+                            ]),
+                            Op::Expm1([x]) => FastInstr::Expm1([jac_alias[x]]),
+                            Op::Input(_) | Op::AsDimension(_) => unreachable!(),
+                        };
+                        jac_steps.push((at_u8, instr));
+                    }
+                }
+            }
+            let jac_output = *jac_alias.last().expect("a program has an output");
             let output = *alias.last().expect("a program has an output");
             let p_steps = &steps[start..steps.len()];
             let mut live = [false; STACK_SLOTS];
@@ -665,7 +760,8 @@ impl Tape {
                         live[usize::from(b)] = true;
                         live[usize::from(w)] = true;
                     }
-                    FastInstr::Exp([x])
+                    FastInstr::Copy([x])
+                    | FastInstr::Exp([x])
                     | FastInstr::Expm1([x])
                     | FastInstr::Logistic([x])
                     | FastInstr::Ln([x])
@@ -681,9 +777,13 @@ impl Tape {
             let (hoisted_start, hoisted_end) = if hoist_finite {
                 let h_start = hoisted_steps.len() as u32;
                 let mut uses = [0_u16; STACK_SLOTS];
-                uses[usize::from(output)] += 1;
+                let mut bump = |slot: u8| {
+                    let entry = &mut uses[usize::from(slot)];
+                    *entry = entry.saturating_add(1);
+                };
+                bump(output);
                 for &(op, ..) in &program.code.judged {
-                    uses[usize::from(alias[op])] += 1;
+                    bump(alias[op]);
                 }
                 for &(_, instr) in p_steps {
                     match instr {
@@ -692,22 +792,23 @@ impl Tape {
                         | FastInstr::Subtract([a, b])
                         | FastInstr::Multiply([a, b])
                         | FastInstr::Divide([a, b]) => {
-                            uses[usize::from(a)] += 1;
-                            uses[usize::from(b)] += 1;
+                            bump(a);
+                            bump(b);
                         }
                         FastInstr::SmoothMax([a, b, w])
                         | FastInstr::SmoothMin([a, b, w])
                         | FastInstr::Relax([a, b, w]) => {
-                            uses[usize::from(a)] += 1;
-                            uses[usize::from(b)] += 1;
-                            uses[usize::from(w)] += 1;
+                            bump(a);
+                            bump(b);
+                            bump(w);
                         }
-                        FastInstr::Exp([x])
+                        FastInstr::Copy([x])
+                        | FastInstr::Exp([x])
                         | FastInstr::Expm1([x])
                         | FastInstr::Logistic([x])
                         | FastInstr::Ln([x])
                         | FastInstr::Volume([x]) => {
-                            uses[usize::from(x)] += 1;
+                            bump(x);
                         }
                         FastInstr::Upwind(_) => unreachable!(),
                     }
@@ -829,7 +930,7 @@ impl Tape {
                         FastInstr::Ln(v) => HoistedOp::Ln(v),
                         FastInstr::Relax(v) => HoistedOp::Relax(v),
                         FastInstr::Volume(v) => HoistedOp::Volume(v),
-                        FastInstr::Upwind(_) => unreachable!(),
+                        FastInstr::Copy(_) | FastInstr::Upwind(_) => unreachable!(),
                     };
                     hoisted_steps.push((s0, op));
                     i += 1;
@@ -841,9 +942,12 @@ impl Tape {
             program_fast.push((
                 start as u32,
                 steps.len() as u32,
+                jac_start as u32,
+                jac_steps.len() as u32,
                 hoisted_start,
                 hoisted_end,
                 output,
+                jac_output,
                 hoist_finite,
             ));
             program_alias.push(alias);
@@ -871,7 +975,17 @@ impl Tape {
                 return None;
             }
             let pid = instance.program.index();
-            let (raw_start, raw_end, run_start, run_end, output, hoist_finite) = program_fast[pid];
+            let (
+                fwd_start,
+                fwd_end,
+                jac_start,
+                jac_end,
+                run_start,
+                run_end,
+                output,
+                jac_output,
+                hoist_finite,
+            ) = program_fast[pid];
             let alias = &program_alias[pid];
             let judged_start = judged_ops.len() as u32;
             for &(op, ..) in &layout.programs[pid].code.judged {
@@ -882,7 +996,8 @@ impl Tape {
                 judged_ranges.push(judged_start..judged_end);
             }
             let reads = self.instance(at);
-            let p_steps = &steps[raw_start as usize..raw_end as usize];
+            let p_steps = &steps[fwd_start as usize..fwd_end as usize];
+            let j_steps = &jac_steps[jac_start as usize..jac_end as usize];
             let kind = if judged_start == judged_end
                 && reads.parameters.is_empty()
                 && reads.unknowns.is_empty()
@@ -942,17 +1057,17 @@ impl Tape {
                 let (bwd_start, bwd_end, bwd_fast_start, bwd_fast_end, bwd_max_slot) =
                     *bwd_cache.entry((pid, u_slots.clone())).or_insert_with(|| {
                         let mut dep = [false; STACK_SLOTS];
-                        let mut max_slot = output;
+                        let mut max_slot = jac_output;
                         for &u in &u_slots {
                             dep[usize::from(u)] = true;
                             max_slot = max_slot.max(u);
                         }
-                        for &(slot, instr) in p_steps {
+                        for &(slot, instr) in j_steps {
                             dep[usize::from(slot)] = fast_instr_depends(instr, &dep);
                         }
                         let mut live = [false; STACK_SLOTS];
-                        live[usize::from(output)] = true;
-                        for &(slot, instr) in p_steps.iter().rev() {
+                        live[usize::from(jac_output)] = true;
+                        for &(slot, instr) in j_steps.iter().rev() {
                             if !live[usize::from(slot)] || !dep[usize::from(slot)] {
                                 continue;
                             }
@@ -960,7 +1075,7 @@ impl Tape {
                         }
                         let bs = bwd_steps.len() as u32;
                         let bfs = bwd_fast_steps.len() as u32;
-                        for &(slot, instr) in p_steps {
+                        for &(slot, instr) in j_steps {
                             if live[usize::from(slot)] && dep[usize::from(slot)] {
                                 max_slot = max_slot.max(slot).max(fast_instr_max_operand(instr));
                                 bwd_steps.push((u32::from(slot), fast_to_instr(instr)));
@@ -980,8 +1095,8 @@ impl Tape {
                 generals.push(FastGeneral {
                     steps_start: run_start,
                     steps_end: run_end,
-                    raw_steps_start: raw_start,
-                    raw_steps_end: raw_end,
+                    raw_steps_start: jac_start,
+                    raw_steps_end: jac_end,
                     bwd_start,
                     bwd_end,
                     bwd_fast_start,
@@ -994,6 +1109,7 @@ impl Tape {
                     other_end: other_range.end,
                     program: pid as u16,
                     output,
+                    jac_output,
                     bwd_max_slot,
                     hoist_finite,
                 });
@@ -1370,6 +1486,7 @@ impl Tape {
                     targets: q_targets,
                     jac_slope_offsets,
                     output: gs[0].output,
+                    jac_output: gs[0].jac_output,
                     bwd_max_slot: gs[0].bwd_max_slot,
                     pub_safe,
                     jac_safe,
@@ -1436,6 +1553,7 @@ impl Tape {
             col_term_ranges,
             generals,
             steps,
+            jac_steps,
             hoisted_steps,
             bwd_steps,
             bwd_fast_steps,
@@ -1711,6 +1829,7 @@ fn apply_fast(
             }
             at(a) / divisor
         }
+        FastInstr::Copy([x]) => at(x),
         FastInstr::SmoothMax([a, b, width]) => smooth_value(at(a), at(b), at(width), 1.0),
         FastInstr::SmoothMin([a, b, width]) => smooth_value(at(a), at(b), at(width), -1.0),
         FastInstr::Exp([x]) => pinned::exp(at(x)),
@@ -2289,7 +2408,8 @@ fn fast_instr_depends(instr: FastInstr, dep: &[bool; STACK_SLOTS]) -> bool {
         FastInstr::SmoothMax([a, b, w]) | FastInstr::SmoothMin([a, b, w]) | FastInstr::Relax([a, b, w]) => {
             dep[usize::from(a)] || dep[usize::from(b)] || dep[usize::from(w)]
         }
-        FastInstr::Exp([x])
+        FastInstr::Copy([x])
+        | FastInstr::Exp([x])
         | FastInstr::Expm1([x])
         | FastInstr::Logistic([x])
         | FastInstr::Ln([x])
@@ -2313,7 +2433,8 @@ fn mark_fast_operands(instr: FastInstr, live: &mut [bool; STACK_SLOTS]) {
             live[usize::from(b)] = true;
             live[usize::from(w)] = true;
         }
-        FastInstr::Exp([x])
+        FastInstr::Copy([x])
+        | FastInstr::Exp([x])
         | FastInstr::Expm1([x])
         | FastInstr::Logistic([x])
         | FastInstr::Ln([x])
@@ -2338,7 +2459,8 @@ fn fast_instr_max_operand(instr: FastInstr) -> u8 {
         FastInstr::SmoothMax([a, b, w]) | FastInstr::SmoothMin([a, b, w]) | FastInstr::Relax([a, b, w]) => {
             a.max(b).max(w)
         }
-        FastInstr::Exp([x])
+        FastInstr::Copy([x])
+        | FastInstr::Exp([x])
         | FastInstr::Expm1([x])
         | FastInstr::Logistic([x])
         | FastInstr::Ln([x])
@@ -2354,6 +2476,7 @@ fn fast_to_instr(instr: FastInstr) -> Instr {
         FastInstr::Subtract([a, b]) => Instr::Subtract([u32::from(a), u32::from(b)]),
         FastInstr::Multiply([a, b]) => Instr::Multiply([u32::from(a), u32::from(b)]),
         FastInstr::Divide([a, b]) => Instr::Divide([u32::from(a), u32::from(b)]),
+        FastInstr::Copy([x]) => Instr::Copy([u32::from(x)]),
         FastInstr::SmoothMax([a, b, w]) => Instr::SmoothMax([u32::from(a), u32::from(b), u32::from(w)]),
         FastInstr::SmoothMin([a, b, w]) => Instr::SmoothMin([u32::from(a), u32::from(b), u32::from(w)]),
         FastInstr::Exp([x]) => Instr::Exp([u32::from(x)]),
@@ -2391,6 +2514,7 @@ fn forward_fast_unfused_hoisted(
                 }
                 values[usize::from(a)] / divisor
             }
+            FastInstr::Copy([x]) => values[usize::from(x)],
             FastInstr::SmoothMax([a, b, width]) => smooth_value(
                 values[usize::from(a)],
                 values[usize::from(b)],
@@ -2470,6 +2594,7 @@ fn forward_fast_unfused_hoisted_4(
                 }
                 [x[0] / d[0], x[1] / d[1], x[2] / d[2], x[3] / d[3]]
             }
+            FastInstr::Copy([x]) => values[usize::from(x)],
             FastInstr::SmoothMax([a, b, w]) => {
                 let (x, y, z) = (
                     values[usize::from(a)],
@@ -2629,6 +2754,12 @@ fn backward_4(
                 let sb = &mut slopes[usize::from(b)];
                 for k in 0..4 {
                     sb[k] -= s[k] * va[k] / (d[k] * d[k]);
+                }
+            }
+            FastInstr::Copy([x]) => {
+                let sx = &mut slopes[usize::from(x)];
+                for k in 0..4 {
+                    sx[k] += s[k];
                 }
             }
             FastInstr::SmoothMax([a, b, w]) | FastInstr::SmoothMin([a, b, w]) => {
@@ -3408,11 +3539,11 @@ impl CompiledBody {
             }
             Self::load_quad_inputs(fast, quad, inputs, &mut values)?;
             forward_fast_unfused_hoisted_4(
-                &fast.steps[quad.raw_steps_start as usize..quad.raw_steps_end as usize],
+                &fast.jac_steps[quad.raw_steps_start as usize..quad.raw_steps_end as usize],
                 partial_volume,
                 &mut values,
             )?;
-            let out = values[usize::from(quad.output)];
+            let out = values[usize::from(quad.jac_output)];
             if !all_finite_4(out) {
                 return Err(());
             }
@@ -3431,7 +3562,7 @@ impl CompiledBody {
                 continue;
             }
             slopes[..=usize::from(quad.bwd_max_slot)].fill([0.0; 4]);
-            slopes[usize::from(quad.output)] = [
+            slopes[usize::from(quad.jac_output)] = [
                 if flat[0] { 0.0 } else { 1.0 },
                 if flat[1] { 0.0 } else { 1.0 },
                 if flat[2] { 0.0 } else { 1.0 },
@@ -4287,14 +4418,14 @@ impl CompiledBody {
                                     let value = if read_clean {
                                         if g.hoist_finite {
                                             if forward_fast_unfused_hoisted(
-                                                &fast.steps
+                                                &fast.jac_steps
                                                     [g.raw_steps_start as usize..g.raw_steps_end as usize],
                                                 partial_volume,
                                                 &mut scratch.values,
                                             )
                                             .is_ok()
                                             {
-                                                let out = scratch.values[usize::from(g.output)];
+                                                let out = scratch.values[usize::from(g.jac_output)];
                                                 if is_finite_fp(out) {
                                                     used_fast_raw = true;
                                                     out
@@ -4339,7 +4470,7 @@ impl CompiledBody {
                                     let run_backward = |scratch: &mut SlopeScratch| {
                                         if used_fast_raw {
                                             scratch.slopes[..=usize::from(g.bwd_max_slot)].fill(0.0);
-                                            scratch.slopes[usize::from(g.output)] = 1.0;
+                                            scratch.slopes[usize::from(g.jac_output)] = 1.0;
                                             backward_in(
                                                 &fast.bwd_steps[g.bwd_start as usize..g.bwd_end as usize],
                                                 StackSlots(&scratch.values),
@@ -5965,6 +6096,19 @@ mod tests {
                 ParameterKey::new("cv.w"),
                 Admissible::positive(),
             );
+            let bias = cv.site_parameter::<VesselSegment, Dimensionless>(
+                ParameterKey::new("cv.bias"),
+                Admissible::positive(),
+            );
+            let (tone_out, _) = cv.site_field::<VesselSegment, Dimensionless>("tone", Admissible::finite());
+            let tone = cv.site_kernel(|mut k| {
+                let b = k.site_parameter(&bias);
+                let z = k.zero();
+                let sm = k.smooth_max(b, z, b);
+                let val = k.exp(sm);
+                k.finish(val, cv.every_mode(), class)
+            });
+            cv.define_at(&tone_out, tone);
             let circulation = ports.circulation(&mut cv);
             let from_water = circulation.from_amount::<Water>();
             let to_water = circulation.to_amount::<Water>();
@@ -5992,12 +6136,19 @@ mod tests {
         })
         .expect("compiled");
         let fast = body.tape.fast.as_ref().expect("fast tape");
-        assert_eq!(fast.stage_quads.len(), 1);
-        assert!(fast.stage_quads[0].jac_safe);
-        assert!(fast.stage_quads[0].pub_safe);
+        assert_eq!(fast.stage_quads.len(), 2);
+        assert!(fast.stage_quads.iter().all(|q| q.jac_safe && q.pub_safe));
+        let first_algebraic = body
+            .rows()
+            .iter()
+            .position(|row| matches!(row.kind(), RowKind::Algebraic(_)))
+            .expect("algebraic rows");
+        assert_eq!(body.rows().len() - first_algebraic, 6);
         let params: Vec<f64> = (0..body.parameters().len())
             .map(|i| 0.5 + 0.13 * i as f64)
             .collect();
+        let mut slow_params = params.clone();
+        slow_params.push(f64::NAN);
         let unknowns: Vec<f64> = (0..body.rows().len()).map(|i| 1.0 + 0.27 * i as f64).collect();
         let deriv: Vec<f64> = (0..body.rows().len()).map(|i| -0.05 * i as f64).collect();
         let frame = DriveFrame::default();
@@ -6009,25 +6160,31 @@ mod tests {
             draws: &[],
             factors: &[],
         };
+        let slow_inputs = Inputs {
+            parameters: &slow_params,
+            ..inputs
+        };
         let fast_stage = body
             .evaluate_stage_checked(&inputs, &deriv, true)
             .expect("fast stage");
         let slow_stage = body
-            .evaluate_stage_checked(&inputs, &deriv, false)
+            .evaluate_stage_checked(&slow_inputs, &deriv, false)
             .expect("slow stage");
         let bits = |xs: &[f64]| xs.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&fast_stage.columns), bits(&slow_stage.columns));
         assert_eq!(bits(&fast_stage.rows), bits(&slow_stage.rows));
         assert_eq!(bits(&fast_stage.residuals), bits(&slow_stage.residuals));
         let fast_jac = body.jacobian_checked(&inputs, 3.5, true).expect("fast jac");
-        let slow_jac = body.jacobian_checked(&inputs, 3.5, false).expect("slow jac");
+        let slow_jac = body.jacobian_checked(&slow_inputs, 3.5, false).expect("slow jac");
         assert_eq!(bits(&fast_jac), bits(&slow_jac));
         let fast_pub = body
-            .evaluate_published_checked(&inputs, body.rows().len(), SimTime::from_ns(0), true)
+            .evaluate_published_checked(&inputs, first_algebraic, SimTime::from_ns(0), true)
             .expect("fast pub");
         let slow_pub = body
-            .evaluate_published_checked(&inputs, body.rows().len(), SimTime::from_ns(0), false)
+            .evaluate_published_checked(&slow_inputs, first_algebraic, SimTime::from_ns(0), false)
             .expect("slow pub");
+        assert_eq!(fast_pub.algebraic.len(), 6);
+        assert!(fast_pub.algebraic.iter().all(|&v| v != 0.0));
         assert_eq!(bits(&fast_pub.algebraic), bits(&slow_pub.algebraic));
 
         let mut bad_unknowns = unknowns.clone();
@@ -6036,11 +6193,15 @@ mod tests {
             unknowns: &bad_unknowns,
             ..inputs
         };
+        let bad_slow_inputs = Inputs {
+            parameters: &slow_params,
+            ..bad_inputs
+        };
         let fast_err = body
             .evaluate_stage_checked(&bad_inputs, &deriv, true)
             .expect_err("zero divisor refused");
         let slow_err = body
-            .evaluate_stage_checked(&bad_inputs, &deriv, false)
+            .evaluate_stage_checked(&bad_slow_inputs, &deriv, false)
             .expect_err("zero divisor refused");
         assert_eq!(fast_err.law, slow_err.law);
         assert_eq!(format!("{:?}", fast_err.domain), format!("{:?}", slow_err.domain));
@@ -6048,7 +6209,7 @@ mod tests {
             .jacobian_checked(&bad_inputs, 3.5, true)
             .expect_err("zero divisor jac refused");
         let slow_jerr = body
-            .jacobian_checked(&bad_inputs, 3.5, false)
+            .jacobian_checked(&bad_slow_inputs, 3.5, false)
             .expect_err("zero divisor jac refused");
         assert_eq!(fast_jerr.law, slow_jerr.law);
         assert_eq!(
@@ -6056,15 +6217,124 @@ mod tests {
             format!("{:?}", slow_jerr.domain)
         );
         let fast_perr = body
-            .evaluate_published_checked(&bad_inputs, body.rows().len(), SimTime::from_ns(0), true)
+            .evaluate_published_checked(&bad_inputs, first_algebraic, SimTime::from_ns(0), true)
             .expect_err("zero divisor pub refused");
         let slow_perr = body
-            .evaluate_published_checked(&bad_inputs, body.rows().len(), SimTime::from_ns(0), false)
+            .evaluate_published_checked(&bad_slow_inputs, first_algebraic, SimTime::from_ns(0), false)
             .expect_err("zero divisor pub refused");
         assert_eq!(fast_perr.law, slow_perr.law);
         assert_eq!(
             format!("{:?}", fast_perr.domain),
             format!("{:?}", slow_perr.domain)
         );
+    }
+
+    #[test]
+    fn fast_jacobian_preserves_copy_accumulation_order() {
+        let at = |z: f64| Position::new(measure(0.0), measure(0.0), measure(z));
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at(0.0));
+        let names = ["v0", "v1", "v2", "v3", "v4", "v5"];
+        let sites: Vec<_> = names
+            .iter()
+            .enumerate()
+            .map(|(i, &name)| {
+                let s = map.site::<VesselSegment>(name, at(i as f64 * 0.1));
+                map.contain(root.id(), s.id());
+                s
+            })
+            .collect();
+        let ids: Vec<_> = sites.iter().map(|s| s.id()).collect();
+        map.unsupplied(&ids);
+        for i in 0..5 {
+            map.connect(Network::Vascular, ids[i], ids[i + 1]);
+        }
+        let mut schema = Schema::new(map.finish().expect("anatomy")).expect("schema");
+        schema
+            .partial_volume(Measure::new(0.018).expect("pv"))
+            .expect("pv");
+        for space in [Space::Cells, Space::Interstitium] {
+            schema.leave_out(space, "copy ad order test");
+        }
+        let body = assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Minutes, 1_000_000_000)?;
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let p_big = cv.parameter::<Rate<Water>>(ParameterKey::new("cv.big"), Admissible::finite());
+            let p_neg_big =
+                cv.parameter::<Rate<Water>>(ParameterKey::new("cv.neg_big"), Admissible::finite());
+            let p_unit = cv.parameter::<Rate<Water>>(ParameterKey::new("cv.unit"), Admissible::finite());
+            let p_small = cv.parameter::<Dimensionless>(ParameterKey::new("cv.small"), Admissible::finite());
+            let circulation = ports.circulation(&mut cv);
+            let from_water = circulation.from_amount::<Water>();
+            let to_water = circulation.to_amount::<Water>();
+            let law = cv.edge_kernel(|mut k| {
+                let a = k.at_edge(&from_water);
+                let b = k.at_edge(&to_water);
+                let va = k.volume(a);
+                let vb = k.volume(b);
+                let q = k.divide(va, vb);
+                let c = k.as_dimension::<_, Dimensionless>(q);
+                let big = k.parameter(&p_big);
+                let neg_big = k.parameter(&p_neg_big);
+                let unit = k.parameter(&p_unit);
+                let small = k.parameter(&p_small);
+                let t1 = k.scale(big, c);
+                let t2 = k.scale(neg_big, c);
+                let cancel = k.add(t1, t2);
+                let direct = k.scale(q, small);
+                let direct_d = k.as_dimension::<_, Dimensionless>(direct);
+                let direct_r = k.scale(unit, direct_d);
+                let rate = k.add(cancel, direct_r);
+                k.finish(rate, cv.every_mode(), class)
+            });
+            cv.transfer_along(&circulation, law);
+            body.add(cv.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let fast = body.tape.fast.as_ref().expect("fast tape");
+        assert_eq!(fast.stage_quads.len(), 1);
+        assert!(fast.stage_quads[0].jac_safe);
+        let small = -0.62000124000248_f64;
+        let params: Vec<f64> = body
+            .parameters()
+            .iter()
+            .map(|p| {
+                if p.key() == ParameterKey::new("cv.big") {
+                    1e20
+                } else if p.key() == ParameterKey::new("cv.neg_big") {
+                    -1e20
+                } else if p.key() == ParameterKey::new("cv.unit") {
+                    1.0
+                } else if p.key() == ParameterKey::new("cv.small") {
+                    small
+                } else {
+                    panic!("unexpected parameter {:?}", p.key())
+                }
+            })
+            .collect();
+        let mut slow_params = params.clone();
+        slow_params.push(f64::NAN);
+        let unknowns: Vec<f64> = (0..body.rows().len()).map(|i| 1.0 + 0.1 * i as f64).collect();
+        let frame = DriveFrame::default();
+        let inputs = Inputs {
+            parameters: &params,
+            frame: &frame,
+            unknowns: &unknowns,
+            modes: &[],
+            draws: &[],
+            factors: &[],
+        };
+        let slow_inputs = Inputs {
+            parameters: &slow_params,
+            ..inputs
+        };
+        let fast_jac = body.jacobian_checked(&inputs, 0.0, true).expect("fast jac");
+        let slow_jac = body.jacobian_checked(&slow_inputs, 0.0, false).expect("slow jac");
+        let bits = |xs: &[f64]| xs.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&fast_jac), bits(&slow_jac));
+        assert_eq!(fast_jac.len(), 16);
+        assert!(fast_jac.iter().all(|&v| v != 0.0));
+        assert_eq!(fast_jac[0].to_bits(), (small / unknowns[1]).to_bits());
     }
 }
