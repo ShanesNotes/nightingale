@@ -449,8 +449,8 @@ pub use slice::{
 pub use split::{SplitFailure, draw_split_trace, split_gate};
 pub use trim::{
     FlightRecorderSpan, FlightRecorderTrigger, Regenerated, RegenerationError, RegenerationFinding,
-    RegenerationSource, RollingConfig, RollingError, RollingOutcome, RollingStatus, RollingStore,
-    SavedCheckpoint, StepEvent, StoreListing, WitnessEntry, regenerate, replay_to_revision, run_rolling,
+    RegenerationSource, ReplayStore, RollingConfig, RollingError, RollingOutcome, RollingStatus,
+    RollingStore, SavedCheckpoint, StepEvent, StoreListing, WitnessEntry, regenerate, run_rolling,
 };
 pub use window::{Compared, SliceWindow, WindowPolicy};
 

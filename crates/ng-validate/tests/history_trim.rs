@@ -955,6 +955,10 @@ fn the_flight_recorder_latches_on_engine_fault_store_failure_and_replay_divergen
         store_fr.trigger,
         FlightRecorderTrigger::StoreFailure { .. }
     ));
+    assert!(
+        store_fr.from_checkpoint_time <= at(16 * SECOND),
+        "a store failure keeps from the checkpoint before the window open when it failed: {store_fr:?}"
+    );
     let second_latch = fail_store
         .latch_flight_recorder(
             FlightRecorderTrigger::ReplayDivergence,
@@ -1062,33 +1066,69 @@ fn a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_
         .expect("prior ckpt");
     assert!(prior_ckpt.revision < target_rev);
     let fresh = ReferenceIntegrator::new(3 * SECOND);
-    let at_target = replay_to_revision(
-        &prior_ckpt.checkpoint,
-        target_rev,
-        &identity,
+    let witnesses_before = store.listing().witness_count;
+    let between_sink = MemoryStore::default();
+    let between = ReplayStore::new(&store, &between_sink);
+    let from = prior_ckpt.revision as usize;
+    let at_target = regenerate(
         case.body(),
         &fresh,
-        &store,
+        &between,
+        RegenerationSource {
+            build: "nightingale-nc95-test",
+            from_checkpoint: &prior_ckpt.checkpoint,
+            expected: &identity,
+            expected_seals: &seals[from..target_rev as usize],
+        },
     )
-    .expect("replayed between checkpoints");
-    assert_eq!(at_target.record().revision(), target_rev);
+    .expect("replayed between checkpoints from the checkpoint before it");
+    assert_eq!(at_target.steps_verified, target_rev - prior_ckpt.revision);
+    assert_eq!(at_target.session.record().revision(), target_rev);
     assert_eq!(
-        at_target.record().seal().digest(),
+        at_target.session.record().seal().digest(),
         seals[(target_rev - 1) as usize]
+    );
+
+    let diverging = PerturbedCore {
+        inner: ReferenceIntegrator::new(3 * SECOND),
+        perturb_after_s: 0,
+    };
+    let diverging_sink = MemoryStore::default();
+    let diverging_replay = ReplayStore::new(&store, &diverging_sink);
+    let refused = regenerate(
+        case.body(),
+        &diverging,
+        &diverging_replay,
+        RegenerationSource {
+            build: "nightingale-nc95-drifted",
+            from_checkpoint: &prior_ckpt.checkpoint,
+            expected: &identity,
+            expected_seals: &seals[from..target_rev as usize],
+        },
+    )
+    .err();
+    assert!(
+        matches!(&refused, Some(RegenerationError::Diverged(finding)) if finding.revision == prior_ckpt.revision + 1),
+        "a replay between checkpoints on a core that leaves the chain is a finding at its first step: {refused:?}"
+    );
+    assert_eq!(
+        store.listing().witness_count,
+        witnesses_before,
+        "a replay keeps nothing in the store it is checked against"
     );
 
     let rev0 = store.checkpoint_at_revision(0).expect("rev 0");
     let regen_store = MemoryStore::default();
     let regen_core = ReferenceIntegrator::new(3 * SECOND);
+    let regen_replay = ReplayStore::new(&store, &regen_store);
     let regenerated = regenerate(
         case.body(),
         &regen_core,
-        &regen_store,
+        &regen_replay,
         RegenerationSource {
             build: "nightingale-nc95-test",
             from_checkpoint: &rev0.checkpoint,
             expected: &identity,
-            witnesses: &store,
             expected_seals: &seals,
         },
     )
@@ -1116,15 +1156,15 @@ fn a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_
         perturb_after_s: 30,
     };
     let bad_store = MemoryStore::default();
+    let bad_replay = ReplayStore::new(&store, &bad_store);
     let err = regenerate(
         case.body(),
         &bad_core,
-        &bad_store,
+        &bad_replay,
         RegenerationSource {
             build: "nightingale-nc95-drifted",
             from_checkpoint: &rev0.checkpoint,
             expected: &identity,
-            witnesses: &store,
             expected_seals: &seals,
         },
     )
@@ -1145,21 +1185,119 @@ fn a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_
         altered: None,
         missing: Some(seals[4]),
     };
+    let missing_sink = MemoryStore::default();
+    let missing_replay = ReplayStore::new(&missing_witnesses, &missing_sink);
     assert_eq!(
         regenerate(
             case.body(),
             &regen_core,
-            &MemoryStore::default(),
+            &missing_replay,
             RegenerationSource {
                 build: "nightingale-nc95-test",
                 from_checkpoint: &rev0.checkpoint,
                 expected: &identity,
-                witnesses: &missing_witnesses,
                 expected_seals: &seals,
             },
         )
         .err(),
         Some(RegenerationError::WitnessMissing { revision: 5 })
+    );
+}
+
+#[test]
+fn a_shared_rolling_store_serves_each_session_its_own_link_for_a_seal() {
+    let case = TwoReservoirs::delivering(
+        [measure(500.0), measure(500.0)],
+        vec![delivery(b"sip", 4, 30, 0.5)],
+    )
+    .expect("case");
+    let core = ReferenceIntegrator::new(2 * SECOND);
+    let other = PerturbedCore {
+        inner: ReferenceIntegrator::new(2 * SECOND),
+        perturb_after_s: 0,
+    };
+    let store = RollingStore::new();
+    let mut a = case.admit(&core, &store).expect("admitted");
+    let mut seals = Vec::new();
+    let mut at_five = None;
+    for _ in 0..10 {
+        a = step_accepted(a);
+        seals.push(a.record().seal().digest());
+        if a.record().revision() == 5 {
+            at_five = Some(a.checkpoint().expect("ckpt"));
+        }
+    }
+    let identity = a.record().identity().clone();
+    let b =
+        Session::resume(&at_five.expect("rev 5"), &identity, case.body(), &other, &store).expect("resumed");
+    let b = step_accepted(b);
+    assert_ne!(b.record().seal().digest(), seals[5], "b's revision 6 is not a's");
+    assert_eq!(
+        a.conservation()
+            .newest_first()
+            .collect::<Result<Vec<_>, _>>()
+            .err(),
+        None,
+        "a's walk reads a's own links after b keeps its revision 6 in the same store"
+    );
+    assert_eq!(
+        b.conservation()
+            .newest_first()
+            .collect::<Result<Vec<_>, _>>()
+            .err(),
+        None,
+        "and b's walk reads b's"
+    );
+    store.trim_before(None, Some(7));
+    assert_eq!(
+        store.listing().complete_link_revisions,
+        vec![7, 8, 9, 10],
+        "a trim drops every session's links below its floor and only those"
+    );
+}
+
+#[test]
+fn an_engine_fault_keeps_the_links_of_the_window_open_at_the_fault() {
+    let case = TwoReservoirs::delivering([measure(500.0), measure(500.0)], Vec::new()).expect("case");
+    let policy = policy_for(case.body().conserved_basis(), 20, 100, 1e-9, 1e-12, 100.0);
+    let fault_core = FaultingCore {
+        inner: ReferenceIntegrator::new(2 * SECOND),
+        fault_after_s: 50,
+    };
+    let store = RollingStore::new();
+    let session = case.admit(&fault_core, &store).expect("admitted");
+    let identity = session.record().identity().clone();
+    let out = run_rolling(
+        session,
+        at(100 * SECOND),
+        &policy,
+        &store,
+        RollingConfig {
+            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("positive"),
+        },
+    )
+    .expect("rolling");
+    assert!(matches!(out.status, RollingStatus::Faulted(_)));
+    let fr = out.listing.flight_recorder.clone().expect("latched");
+    assert!(
+        fr.from_checkpoint_revision < fr.last_head_revision,
+        "the span reaches back past the head: {fr:?}"
+    );
+    assert!(
+        fr.from_checkpoint_time.nanoseconds() <= 30 * SECOND,
+        "the span starts at the checkpoint before the window open at the fault: {fr:?}"
+    );
+    assert_eq!(
+        out.listing.complete_link_revisions,
+        (fr.from_checkpoint_revision + 1..=fr.last_head_revision).collect::<Vec<_>>()
+    );
+    let retained = store
+        .retained_flight_recorder(case.body(), &identity)
+        .expect("valid")
+        .expect("present");
+    assert!(
+        certify_flight_recorder(&retained, &policy).is_ok(),
+        "the kept span holds whole windows that pass"
     );
 }
 
@@ -1208,16 +1346,17 @@ fn a_complete_closure_passing_run_rechecks_loosened_drift_from_worst_drift_and_r
     let rev0 = store.checkpoint_at_revision(0).expect("rev 0");
     let regen_store = MemoryStore::default();
     let regen_core = ReferenceIntegrator::new(2 * SECOND);
+    let regen_replay = ReplayStore::new(&store, &regen_store);
+    let all_seals = store.witness_seals();
     let regen = regenerate(
         case.body(),
         &regen_core,
-        &regen_store,
+        &regen_replay,
         RegenerationSource {
             build: "nc95-test",
             from_checkpoint: &rev0.checkpoint,
             expected: finished.record().identity(),
-            witnesses: &store,
-            expected_seals: &store.witness_seals(),
+            expected_seals: &all_seals,
         },
     )
     .expect("regenerated");

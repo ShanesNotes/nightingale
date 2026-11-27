@@ -78,10 +78,11 @@ struct RollingState {
     witness_index: BTreeMap<Digest, usize>,
     fork_previous: BTreeMap<usize, Digest>,
     seal_to_rev: BTreeMap<Digest, u64>,
-    links: BTreeMap<u64, (Digest, Vec<u8>)>,
+    links: BTreeMap<(u64, Digest), Vec<u8>>,
     link_by_seal: BTreeMap<Digest, u64>,
     checkpoints: Vec<SavedCheckpoint>,
     flight_recorder: Option<FlightRecorderSpan>,
+    open_from: Option<SimTime>,
     fail_next_keep: bool,
     resolve_calls: usize,
 }
@@ -97,6 +98,7 @@ impl RollingState {
             link_by_seal: BTreeMap::new(),
             checkpoints: Vec::new(),
             flight_recorder: None,
+            open_from: None,
             fail_next_keep: false,
             resolve_calls: 0,
         }
@@ -123,7 +125,7 @@ impl RollingState {
             }
             return Some(span.clone());
         }
-        let base = self.checkpoint_for(window_start)?;
+        let base = self.checkpoint_for(window_start.or(self.open_from))?;
         let span = FlightRecorderSpan {
             trigger,
             from_checkpoint_revision: base.revision,
@@ -136,7 +138,7 @@ impl RollingState {
         Some(span)
     }
     fn latest_kept(&self) -> (u64, Digest) {
-        if let Some((&rev, &(seal, _))) = self.links.iter().next_back() {
+        if let Some((&(rev, seal), _)) = self.links.iter().next_back() {
             return (rev, seal);
         }
         if let Some(ckpt) = self.checkpoints.last() {
@@ -144,6 +146,10 @@ impl RollingState {
         }
         (0, self.origin.unwrap_or_else(|| Digest::of_canonical(b"")))
     }
+}
+
+fn first_at(revision: u64) -> (u64, Digest) {
+    (revision, Digest::from_bytes([0; 32]))
 }
 
 /// A trimming history store that keeps 96-byte witnesses for every step, periodic checkpoints with their
@@ -227,6 +233,7 @@ impl RollingStore {
         oldest_retained_revision: Option<u64>,
     ) {
         let mut state = self.state.borrow_mut();
+        state.open_from = oldest_open_window_start;
         let window_floor = oldest_open_window_start.map(|start| {
             state
                 .checkpoint_for(Some(start))
@@ -243,28 +250,27 @@ impl RollingStore {
         let Some(floor) = floor else {
             return;
         };
-        let drop_revs: Vec<u64> = state.links.range(..floor).map(|(&rev, _)| rev).collect();
-        for rev in drop_revs {
-            if let Some((seal, _)) = state.links.remove(&rev) {
-                state.link_by_seal.remove(&seal);
-            }
+        let kept = state.links.split_off(&first_at(floor));
+        let dropped = core::mem::replace(&mut state.links, kept);
+        for (_, seal) in dropped.into_keys() {
+            state.link_by_seal.remove(&seal);
         }
     }
     /// Drops all complete links outside any latched flight recorder span, leaving witnesses and checkpoints.
     pub fn finish(&self) {
         let mut state = self.state.borrow_mut();
         if let Some(span) = state.flight_recorder.clone() {
-            let keep_from = span.from_checkpoint_revision + 1;
-            let keep_to = span.last_head_revision;
-            let drop_revs: Vec<u64> = (state.links.keys())
-                .copied()
-                .filter(|&rev| rev < keep_from || rev > keep_to)
-                .collect();
-            for rev in drop_revs {
-                if let Some((seal, _)) = state.links.remove(&rev) {
-                    state.link_by_seal.remove(&seal);
+            let keep = span.from_checkpoint_revision + 1..=span.last_head_revision;
+            let RollingState {
+                links, link_by_seal, ..
+            } = &mut *state;
+            links.retain(|&(rev, seal), _| {
+                let kept = keep.contains(&rev);
+                if !kept {
+                    link_by_seal.remove(&seal);
                 }
-            }
+                kept
+            });
         } else {
             state.links.clear();
             state.link_by_seal.clear();
@@ -280,8 +286,8 @@ impl RollingStore {
             .iter()
             .map(|saved| saved.checkpoint.as_bytes().len())
             .sum();
-        let complete_link_revisions = state.links.keys().copied().collect();
-        let complete_link_bytes = state.links.values().map(|(_, bytes)| bytes.len()).sum();
+        let complete_link_revisions = state.links.keys().map(|&(rev, _)| rev).collect();
+        let complete_link_bytes = state.links.values().map(Vec::len).sum();
         StoreListing {
             witness_count,
             witness_bytes,
@@ -341,7 +347,7 @@ impl HistoryStore for RollingStore {
         let mut state = self.state.borrow_mut();
         state.resolve_calls += 1;
         let rev = *state.link_by_seal.get(seal)?;
-        state.links.get(&rev).map(|(_, bytes)| bytes.clone())
+        state.links.get(&(rev, *seal)).cloned()
     }
     fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
         let witness =
@@ -374,7 +380,9 @@ impl HistoryStore for RollingStore {
             );
             return Err(CheckpointError::StoreFailed { seal });
         }
-        if state.witness_index.contains_key(&seal) {
+        if let Some(&rev) = state.seal_to_rev.get(&seal) {
+            state.links.entry((rev, seal)).or_insert_with(|| link.to_vec());
+            state.link_by_seal.insert(seal, rev);
             return Ok(());
         }
         if state.origin.is_none() {
@@ -403,7 +411,7 @@ impl HistoryStore for RollingStore {
         });
         state.witness_index.insert(seal, idx);
         state.seal_to_rev.insert(seal, rev);
-        state.links.insert(rev, (seal, link.to_vec()));
+        state.links.insert((rev, seal), link.to_vec());
         state.link_by_seal.insert(seal, rev);
         if let Some(span) = &mut state.flight_recorder
             && rev >= span.last_head_revision
@@ -488,7 +496,12 @@ pub fn run_rolling<'m>(
                     let rev = faulted.record().revision();
                     let seal = faulted.record().seal().digest();
                     let report = faulted.export().map_err(RollingError::Checkpoint)?;
-                    store.latch_flight_recorder(FlightRecorderTrigger::EngineFault(fault), None, rev, seal);
+                    store.latch_flight_recorder(
+                        FlightRecorderTrigger::EngineFault(fault),
+                        fold.oldest_open_window_start(),
+                        rev,
+                        seal,
+                    );
                     store.finish();
                     return Ok(RollingOutcome {
                         status: RollingStatus::Faulted(report),
@@ -532,7 +545,7 @@ pub fn run_rolling<'m>(
                 Err(CheckpointError::StoreFailed { seal: failed }) => {
                     store.latch_flight_recorder(
                         FlightRecorderTrigger::StoreFailure { seal: failed },
-                        None,
+                        fold.oldest_open_window_start(),
                         rev,
                         seal,
                     );
@@ -592,79 +605,69 @@ pub struct Regenerated<'m> {
     pub steps_verified: u64,
 }
 
-/// Replays forward from a checkpoint at or before `target_revision` on a fresh core, checking each stepped
-/// revision against any stored witness.
-pub fn replay_to_revision<'m>(
-    from_checkpoint: &Checkpoint,
-    target_revision: u64,
-    expected: &RunIdentity,
-    body: &'m CompiledBody,
-    core: &'m dyn CoupledSolver,
-    store: &'m dyn HistoryStore,
-) -> Result<Session<'m, Running>, RegenerationError> {
-    let mut session = Session::resume(from_checkpoint, expected, body, core, store)
-        .map_err(RegenerationError::Checkpoint)?;
-    if session.record().revision() > target_revision {
-        return Err(RegenerationError::Checkpoint(CheckpointError::NotOnThisBranch));
+/// The store a regeneration steps on: it reads ancestors' witnesses and links from `source`, the run's own
+/// store, and keeps every regenerated link in `sink` only, so the chain it is checked against never moves.
+pub struct ReplayStore<'a> {
+    source: &'a dyn HistoryStore,
+    sink: &'a dyn HistoryStore,
+}
+impl<'a> ReplayStore<'a> {
+    pub fn new(source: &'a dyn HistoryStore, sink: &'a dyn HistoryStore) -> Self {
+        Self { source, sink }
     }
-    let hash = session.record().record_hash();
-    while session.record().revision() < target_revision {
-        let next_rev = session.record().revision() + 1;
-        let mut step = session.step();
-        session = loop {
-            match step {
-                Step::Accepted(next, _) => break next,
-                Step::Refused(retrying) => step = retrying.retry(),
-                Step::Faulted(faulted) => {
-                    return Err(RegenerationError::Fault {
-                        revision: next_rev,
-                        fault: *faulted.fault(),
-                    });
-                }
-            }
-        };
-        let actual_seal = session.record().seal().digest();
-        if let Some(witness) = store.resolve_witness(&actual_seal)
-            && witness.seal(hash, next_rev) != actual_seal
-        {
-            return Err(RegenerationError::Checkpoint(CheckpointError::HistoryAltered {
-                seal: actual_seal,
-            }));
-        }
+    pub fn source(&self) -> &'a dyn HistoryStore {
+        self.source
     }
-    Ok(session)
+    pub fn sink(&self) -> &'a dyn HistoryStore {
+        self.sink
+    }
+}
+impl HistoryStore for ReplayStore<'_> {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        self.sink.resolve(seal).or_else(|| self.source.resolve(seal))
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        self.sink.keep(seal, link)
+    }
+    fn resolve_witness(&self, seal: &Digest) -> Option<Witness> {
+        (self.source.resolve_witness(seal)).or_else(|| self.sink.resolve_witness(seal))
+    }
+    fn keep_with_witness(&self, seal: Digest, link: &[u8], witness: Witness) -> Result<(), CheckpointError> {
+        self.sink.keep_with_witness(seal, link, witness)
+    }
 }
 
 pub struct RegenerationSource<'a> {
     pub build: &'static str,
     pub from_checkpoint: &'a Checkpoint,
     pub expected: &'a RunIdentity,
-    pub witnesses: &'a dyn HistoryStore,
     pub expected_seals: &'a [Digest],
 }
 
-/// Replays `source.expected_seals` step by step from `source.from_checkpoint` on the pinned build and
-/// `core`, writing complete regenerated links to `target_store` and verifying every step's seal and
-/// witness against `source.witnesses`. Reports the first diverging step as `RegenerationError::Diverged`.
+/// Resumes `source.from_checkpoint`, at admission or at any later checkpoint, on the pinned build and a fresh
+/// `core`, and steps once for each of `source.expected_seals`, the seals of the revisions after the
+/// checkpoint. Each step's seal and witness are checked against the witness `store.source()` holds for that
+/// seal; the regenerated links go to `store.sink()`. Reports the first diverging step as
+/// `RegenerationError::Diverged`, so a revision between checkpoints replays forward from the checkpoint
+/// before it and is checked on the way.
 pub fn regenerate<'m>(
     body: &'m CompiledBody,
     core: &'m dyn CoupledSolver,
-    target_store: &'m dyn HistoryStore,
+    store: &'m ReplayStore<'m>,
     source: RegenerationSource<'_>,
 ) -> Result<Regenerated<'m>, RegenerationError> {
     let RegenerationSource {
         build,
         from_checkpoint,
         expected,
-        witnesses,
         expected_seals,
     } = source;
-    let mut session = Session::resume(from_checkpoint, expected, body, core, target_store)
+    let mut session = Session::resume(from_checkpoint, expected, body, core, store)
         .map_err(RegenerationError::Checkpoint)?;
     let hash = session.record().record_hash();
     for &expected_seal in expected_seals {
         let next_rev = session.record().revision() + 1;
-        let expected_witness = witnesses
+        let expected_witness = (store.source())
             .resolve_witness(&expected_seal)
             .ok_or(RegenerationError::WitnessMissing { revision: next_rev })?;
         if expected_witness.seal(hash, next_rev) != expected_seal {
@@ -686,7 +689,7 @@ pub fn regenerate<'m>(
             }
         };
         let actual_seal = session.record().seal().digest();
-        let link = target_store
+        let link = (store.sink())
             .resolve(&actual_seal)
             .ok_or(RegenerationError::Checkpoint(CheckpointError::HistoryMissing {
                 seal: actual_seal,

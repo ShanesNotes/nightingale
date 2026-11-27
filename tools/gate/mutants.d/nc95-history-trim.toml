@@ -186,3 +186,32 @@ path = "crates/ng-validate/src/trim.rs"
 old = '''        if actual_seal != expected_seal || actual_witness != expected_witness {'''
 new = '''        if false && (actual_seal != expected_seal || actual_witness != expected_witness) {'''
 test = "-p ng-validate --test history_trim a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_witness"
+
+[[mutant]]
+name = "trim-shared-store-keeps-one-link-a-revision"
+path = "crates/ng-validate/src/trim.rs"
+old = '''        state.links.insert((rev, seal), link.to_vec());'''
+new = '''        state.links.retain(|&(held, _), _| held != rev);
+        state.links.insert((rev, seal), link.to_vec());'''
+test = "-p ng-validate --test history_trim a_shared_rolling_store_serves_each_session_its_own_link_for_a_seal"
+
+[[mutant]]
+name = "trim-replay-keeps-into-the-source"
+path = "crates/ng-validate/src/trim.rs"
+old = '''        self.sink.keep_with_witness(seal, link, witness)'''
+new = '''        self.source.keep_with_witness(seal, link, witness)'''
+test = "-p ng-validate --test history_trim a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_witness"
+
+[[mutant]]
+name = "trim-replay-reads-no-source-witness"
+path = "crates/ng-validate/src/trim.rs"
+old = '''        (self.source.resolve_witness(seal)).or_else(|| self.sink.resolve_witness(seal))'''
+new = '''        self.sink.resolve_witness(seal)'''
+test = "-p ng-validate --test history_trim a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_witness"
+
+[[mutant]]
+name = "trim-store-failure-latches-from-the-last-checkpoint"
+path = "crates/ng-validate/src/trim.rs"
+old = '''        let base = self.checkpoint_for(window_start.or(self.open_from))?;'''
+new = '''        let base = self.checkpoint_for(window_start)?;'''
+test = "-p ng-validate --test history_trim the_flight_recorder_latches_on_engine_fault_store_failure_and_replay_divergence"
