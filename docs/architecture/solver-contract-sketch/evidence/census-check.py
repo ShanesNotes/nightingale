@@ -1,20 +1,34 @@
 """Compare the crate's coupling catalog with the "Direct couplings" graph of
-docs/atlas/coupling-map.md, row by row, and hold the sketch's copy of the table to the crate's,
-byte for byte. Compare the crate's speciation readers with the map's "Speciation's readers" table, row by row, and
-the crate's projected fields and effect readers with the map's "Read grants" table, row by row.
+docs/atlas/coupling-map.md, row by row, hold the sketch's copy of the table to the crate's,
+byte for byte, and verify every row of section 2's census table in docs/architecture/solver-contract.md
+against the crate's catalog. Compare the crate's speciation readers with the map's "Speciation's readers"
+table, row by row, and the crate's projected fields and effect readers with the map's "Read grants" table,
+row by row.
 
 Run from solver-contract-sketch/:  python3 -I evidence/census-check.py
 tools/verify (verify.d/20-sketch.sh) runs this as a gate. A change to the crate's catalog or owner
-table runs everything (tools/gate/paths.toml), so a change to either file alone reaches this script.
+table runs everything, and a change to docs/architecture/solver-contract.md runs 20-sketch
+(tools/gate/paths.toml), so a change to either side reaches this script.
 """
 import re
 import sys
 
 MAP = "../../atlas/coupling-map.md"
+CONTRACT = "../solver-contract.md"
 CATALOG = "../../../crates/ng-contract/src/catalog.rs"
 SKETCH_CATALOG = "src/ng_contract/catalog.rs"
 OWNERS = "../../../crates/ng-contract/src/system.rs"
 SPECIATION = "../../../crates/ng-contract/src/scope/blood_chemistry.rs"
+CONTRACT_HEADER = ["Disposition", "Slice", "Count", "Whole body", "Count"]
+CONTRACT_DISPOSITIONS = {
+    "Live": "live",
+    "Input": "input",
+    "Anatomy relation": "relation",
+    "Sink": "sink",
+    "Held": "held",
+    "Outside": "outside",
+    "Unresolved": "unresolved",
+}
 MAPPED = {"live", "input", "sink", "relation"}
 SLICE_KINDS = {"live", "input", "sink"}
 SLICE_REASONED = {"relation", "outside", "unresolved"}
@@ -403,16 +417,257 @@ for reader, source, field, place, ticket in crate_grants:
     if ticket not in BODY_TICKETS:
         failures.append(f"read grant {reader} of {field}: names no body ticket from 06 to 25")
 
+def parse_table_cells(line):
+    stripped = line.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return None
+    return [cell.strip() for cell in stripped[1:-1].split("|")]
+
+
+def parse_arrow_cell(cell, endpoints, label):
+    text = cell.strip()
+    if text == "none":
+        return [], []
+    lines, errs = [], []
+    for raw in text.split(","):
+        part = raw.strip()
+        if not part:
+            errs.append(f"{label}: empty entry in {cell!r}")
+            continue
+        span = re.fullmatch(r"([1-9]\d*)\s+to\s+([1-9]\d*)", part)
+        if span:
+            lo, hi = int(span.group(1)), int(span.group(2))
+            if lo >= hi:
+                errs.append(f"{label}: invalid range {part!r}")
+                continue
+            lines.extend(range(lo, hi + 1))
+            continue
+        single = re.fullmatch(r"([1-9]\d*)(?:\s+([A-Z]{2})→([A-Z]{2}))?", part)
+        if single:
+            line = int(single.group(1))
+            lines.append(line)
+            if single.group(2) is not None:
+                want = endpoints.get(line)
+                if want != (single.group(2), single.group(3)):
+                    errs.append(
+                        f"{label}: line {line} endpoints {single.group(2)}→{single.group(3)}, catalog has {want}"
+                    )
+            continue
+        errs.append(f"{label}: unparsed arrow token {part!r}")
+    if not errs and lines != sorted(set(lines)):
+        errs.append(f"{label}: arrows not strictly ascending without duplicates: {lines}")
+    return lines, errs
+
+
+def find_contract_census_table(contract_text):
+    all_lines = contract_text.splitlines()
+    section_starts = [i for i, line in enumerate(all_lines)
+                      if line.strip() == "### 2. Coupling and conservation at incidence"]
+    if len(section_starts) != 1:
+        return None, [f"contract census: expected 1 section 2 heading, found {len(section_starts)}"]
+    start = section_starts[0] + 1
+    end = len(all_lines)
+    in_fence = False
+    for i in range(start, len(all_lines)):
+        if all_lines[i].startswith(("```", "~~~")):
+            in_fence = not in_fence
+            continue
+        if not in_fence and all_lines[i].startswith(("## ", "### ")):
+            end = i
+            break
+    tables = []
+    in_fence = False
+    i = start
+    while i < end:
+        if all_lines[i].startswith(("```", "~~~")):
+            in_fence = not in_fence
+            i += 1
+            continue
+        if not in_fence and parse_table_cells(all_lines[i]) == CONTRACT_HEADER:
+            if i + 1 >= end:
+                return None, ["contract census: table header lacks separator row"]
+            sep = parse_table_cells(all_lines[i + 1])
+            if sep is None or len(sep) != 5 or not all(re.fullmatch(r":?-{3,}:?", c) for c in sep):
+                return None, [f"contract census: malformed table separator on line {i + 2}"]
+            data_rows = []
+            j = i + 2
+            while j < end and all_lines[j].strip().startswith("|"):
+                cells = parse_table_cells(all_lines[j])
+                if cells is None or len(cells) != 5:
+                    return None, [f"contract census: expected 5 cells on line {j + 1}"]
+                data_rows.append((j, cells))
+                j += 1
+            tables.append(data_rows)
+            i = j
+            continue
+        i += 1
+    if len(tables) != 1:
+        return None, [f"contract census: expected 1 census table in section 2, found {len(tables)}"]
+    return tables[0], []
+
+
+def check_contract_census(contract_text, catalog_rows):
+    table_rows, errs = find_contract_census_table(contract_text)
+    if errs:
+        return errs, {}
+    endpoints = {r["line"]: (r["from"], r["to"]) for r in catalog_rows}
+    parsed = {"slice": {}, "whole body": {}}
+    row_map = {}
+    for line_idx, cells in table_rows:
+        head = cells[0].split(":", 1)[0].strip()
+        kind = CONTRACT_DISPOSITIONS.get(head)
+        if kind is None:
+            errs.append(f"contract census: unknown disposition {head!r} on line {line_idx + 1}")
+            continue
+        if kind in row_map:
+            errs.append(f"contract census: duplicate disposition {head!r} on line {line_idx + 1}")
+            continue
+        row_map[kind] = (line_idx, cells)
+        for assembly, arrows_cell, count_cell in (("slice", cells[1], cells[2]), ("whole body", cells[3], cells[4])):
+            label = f"contract census ({assembly} {head})"
+            if not re.fullmatch(r"0|[1-9]\d*", count_cell):
+                errs.append(f"{label}: count {count_cell!r} is not a whole number")
+                count = None
+            else:
+                count = int(count_cell)
+            arrow_lines, arrow_errs = parse_arrow_cell(arrows_cell, endpoints, label)
+            errs.extend(arrow_errs)
+            if count is not None and not arrow_errs and len(arrow_lines) != count:
+                errs.append(f"{label}: count {count} != listed arrows {len(arrow_lines)}")
+            parsed[assembly][kind] = (arrow_lines, count)
+    missing = sorted(set(CONTRACT_DISPOSITIONS.values()) - set(row_map))
+    if missing:
+        errs.append(f"contract census: missing dispositions {missing}")
+        return errs, row_map
+    expected = {
+        "slice": {
+            "live": [r["line"] for r in catalog_rows if r["slice"] == "live"],
+            "input": [r["line"] for r in catalog_rows if r["slice"] == "input"],
+            "relation": [r["line"] for r in catalog_rows if r["slice"] == "relation"],
+            "sink": [r["line"] for r in catalog_rows if r["slice"] == "sink"],
+            "held": [],
+            "outside": [r["line"] for r in catalog_rows if r["slice"] == "outside"],
+            "unresolved": [r["line"] for r in catalog_rows if r["slice"] == "unresolved"],
+        },
+        "whole body": {
+            "live": [r["line"] for r in catalog_rows if r["wired"]],
+            "input": [],
+            "relation": [r["line"] for r in catalog_rows if r["relation"] is not None],
+            "sink": [],
+            "held": [r["line"] for r in catalog_rows if r["held"] and not r["wired"]],
+            "outside": [],
+            "unresolved": [],
+        },
+    }
+    for assembly in ("slice", "whole body"):
+        for kind in CONTRACT_DISPOSITIONS.values():
+            got_lines, got_count = parsed[assembly][kind]
+            want_lines = expected[assembly][kind]
+            if got_lines != want_lines:
+                errs.append(f"contract census ({assembly} {kind}): arrows {got_lines}, catalog has {want_lines}")
+            if got_count != len(want_lines):
+                errs.append(f"contract census ({assembly} {kind}): count {got_count}, catalog has {len(want_lines)}")
+    return errs, row_map
+
+
+def format_md_row(cells):
+    return "| " + " | ".join(cells) + " |"
+
+
+def format_arrows(lines):
+    return "none" if not lines else ", ".join(str(n) for n in lines)
+
+
+def run_contract_probes(contract_text, catalog_rows, row_map):
+    base_lines = contract_text.splitlines()
+    endpoints = {r["line"]: (r["from"], r["to"]) for r in catalog_rows}
+
+    def edit_rows(updates, drop=()):
+        out = list(base_lines)
+        for kind, col_edits in updates.items():
+            line_idx, cells = row_map[kind]
+            mutated = list(cells)
+            for col, value in col_edits.items():
+                mutated[col] = value
+            out[line_idx] = format_md_row(mutated)
+        for kind in sorted(drop, key=lambda k: row_map[k][0], reverse=True):
+            del out[row_map[kind][0]]
+        return "\n".join(out) + ("\n" if contract_text.endswith("\n") else "")
+
+    wb_live, _ = parse_arrow_cell(row_map["live"][1][3], endpoints, "probe")
+    wb_held, _ = parse_arrow_cell(row_map["held"][1][3], endpoints, "probe")
+    wb_rel, _ = parse_arrow_cell(row_map["relation"][1][3], endpoints, "probe")
+    sl_input, _ = parse_arrow_cell(row_map["input"][1][1], endpoints, "probe")
+    flipped_slice_live = re.sub(r"([A-Z]{2})→([A-Z]{2})", r"\2→\1", row_map["live"][1][1], count=1)
+
+    probes = [
+        ("whole-body live count cell", edit_rows({"live": {4: str(len(wb_live) + 1)}})),
+        ("whole-body live arrows cell", edit_rows({"live": {3: format_arrows(wb_live[:-1])}})),
+        ("whole-body relation cell", edit_rows({
+            "relation": {3: format_arrows(wb_rel[:-1]), 4: str(len(wb_rel) - 1)},
+        })),
+        ("whole-body zero row populated", edit_rows({"input": {3: str(wb_live[0]), 4: "1"}})),
+        ("whole-body reversed range", edit_rows({"live": {3: f"{wb_live[1]} to {wb_live[0]}"}})),
+        ("whole-body duplicate arrow", edit_rows({"live": {3: f"{wb_live[0]}, {format_arrows(wb_live)}"}})),
+        ("slice live count cell", edit_rows({"live": {2: str(int(row_map["live"][1][2]) + 1)}})),
+        ("slice live endpoint annotation", edit_rows({"live": {1: flipped_slice_live}})),
+        ("slice input arrows and count", edit_rows({
+            "input": {1: format_arrows(sl_input[:-1]), 2: str(len(sl_input) - 1)},
+        })),
+        ("missing census row", edit_rows({}, drop=("unresolved",))),
+    ]
+    if wb_held:
+        moved = wb_held[0]
+        swapped_live = sorted(wb_live + [moved])
+        swapped_held = [n for n in wb_held if n != moved]
+        probes.extend([
+            ("whole-body held count cell", edit_rows({"held": {4: str(len(wb_held) - 1)}})),
+            ("whole-body held arrows cell", edit_rows({"held": {3: format_arrows(wb_held[:-1])}})),
+            ("whole-body live/held swap with matching counts", edit_rows({
+                "live": {3: format_arrows(swapped_live), 4: str(len(swapped_live))},
+                "held": {3: format_arrows(swapped_held), 4: str(len(swapped_held))},
+            })),
+        ])
+    probe_failures = []
+    for name, mutated in probes:
+        if mutated == contract_text:
+            probe_failures.append(f"contract census probe {name!r} made no edit")
+            continue
+        errs, _ = check_contract_census(mutated, catalog_rows)
+        if not errs:
+            probe_failures.append(f"contract census probe {name!r} was not refused")
+    return probe_failures, len(probes)
+
+
+contract_path = CONTRACT
+run_probes = True
+if len(sys.argv) == 3 and sys.argv[1] == "--contract":
+    contract_path = sys.argv[2]
+    run_probes = False
+elif len(sys.argv) != 1:
+    sys.stderr.write(f"usage: {sys.argv[0]} [--contract PATH]\n")
+    sys.exit(2)
+
+contract_text = open(contract_path, encoding="utf-8").read()
+contract_failures, contract_row_map = check_contract_census(contract_text, rows)
+failures.extend(contract_failures)
+probe_count = 0
+if run_probes and not contract_failures:
+    probe_failures, probe_count = run_contract_probes(contract_text, rows, contract_row_map)
+    failures.extend(probe_failures)
+
 print(f"map source: {MAP} (Direct couplings, lines {arrows[0][0]}-{arrows[-1][0]})")
 print(f"map edges = {len(arrows)}; catalog rows = {len(rows)}")
 print("slice census: " + "; ".join(f"{k} = {v}" for k, v in slice_census.items()))
 for kind in SLICE_LINES:
     print(f"  {kind:<10} {[r['line'] for r in rows if r['slice'] == kind]}")
 print("whole body census: " + "; ".join(f"{k} = {v}" for k, v in body_census.items()))
+print(f"contract census table: {contract_path} ({len(contract_row_map)} rows"
+      + (f", {probe_count} probes)" if run_probes else ")"))
 print(f"speciation's readers: map rows = {len(map_readers)}; catalog rows = {len(crate_readers)}")
 print(f"read grants: map rows = {len(map_grants)}; catalog rows = {len(crate_grants)}")
 print("parse, line, endpoints and label equality, order, uniqueness, reasons, holders, tickets, both censuses, "
-      "speciation's readers and the read grants:",
+      "contract census table, speciation's readers and the read grants:",
       "PASS" if not failures else "FAIL")
 for failure in failures:
     print("  " + failure)
