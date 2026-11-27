@@ -12,3 +12,28 @@ old = '''        if let Err(rank_failure) = self.check_ring_rank(workspace) {
         }'''
 new = '''        let _ = (workspace, values);'''
 test = "-p ng-validate --test admission a_free_direction_on_the_ring_names_the_unknown_and_stage_not_the_recheck_row"
+
+[[mutant]]
+name = "panel-partial-tile-order-swapped"
+path = "crates/ng-contract/src/ring.rs"
+old = '''                                for &(k, factor) in &active.factors[..active.count] {
+                                    if (tmask & (1_u16 << k)) != 0 {'''
+new = '''                                for &(k, factor) in active.factors[..active.count].iter().rev() {
+                                    if (tmask & (1_u16 << k)) != 0 {'''
+test = "-p ng-contract --lib ring::tests::a_positive_zero_panel_keeps_every_bit_across_partial_tiles"
+
+[[mutant]]
+name = "wide-reach-walks-every-row"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''        let fwd_marks = &mut fwd_marks[..size];
+        let back_marks = &mut back_marks[..size];
+        let live = &mut live[..size];
+        let stack = &mut stack[..size];
+        for (block_idx, block) in self.plan.blocks.windows(2).enumerate() {'''
+new = '''        let fwd_marks = &mut fwd_marks[..size];
+        fwd_marks.fill(true);
+        let back_marks = &mut back_marks[..size];
+        let live = &mut live[..size];
+        let stack = &mut stack[..size];
+        for (block_idx, block) in self.plan.blocks.windows(2).enumerate() {'''
+test = "-p ng-contract --lib elimination::tests::a_group_walks_only_the_rows_its_sides_reach"
