@@ -402,6 +402,7 @@ mod run;
 mod score;
 mod slice;
 mod split;
+mod trim;
 mod window;
 
 pub use accuracy::{
@@ -417,9 +418,9 @@ pub use body::{
 };
 pub use burning::BurningBeds;
 pub use certificate::{
-    Certificate, CertificateCheck, CertificateFailure, CertificateFold, CertificatePolicy, EdgeRate,
-    EdgeResult, EdgeWindows, ExpectedDrift, HeldSupport, QuantityPolicy, QuantityResult, RhythmResult,
-    SlidingWindows, certify,
+    Certificate, CertificateCheck, CertificateFailure, CertificateFold, CertificatePolicy, DriftRecheck,
+    DriftTally, EdgeRate, EdgeResult, EdgeWindows, ExpectedDrift, HeldSupport, QuantityPolicy,
+    QuantityResult, RhythmResult, SlidingWindows, certify, certify_flight_recorder,
 };
 pub use day::{
     DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict, day_checks,
@@ -446,6 +447,11 @@ pub use slice::{
     hold_outside_slice,
 };
 pub use split::{SplitFailure, draw_split_trace, split_gate};
+pub use trim::{
+    FlightRecorderSpan, FlightRecorderTrigger, Regenerated, RegenerationError, RegenerationFinding,
+    RegenerationSource, RollingConfig, RollingError, RollingOutcome, RollingStatus, RollingStore,
+    SavedCheckpoint, StepEvent, StoreListing, WitnessEntry, regenerate, replay_to_revision, run_rolling,
+};
 pub use window::{Compared, SliceWindow, WindowPolicy};
 
 pub(crate) const HEART_PHASE: ng_contract::RowKind = ng_contract::RowKind::Memory(ng_contract::Slot {
