@@ -43,7 +43,10 @@ fn joining_rows_to_the_largest_block_stays_within_the_factoring_price() {
              dead space's water"
         );
     }
-    assert_eq!(base.largest_block, 671, "the largest block the whole body compiles to");
+    assert_eq!(
+        base.largest_block, 671,
+        "the largest block the whole body compiles to"
+    );
 
     let interstitium_water = amount_row(&body, "pulmonary bed", Space::Interstitium, Species::Water);
 
