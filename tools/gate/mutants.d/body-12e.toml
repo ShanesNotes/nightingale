@@ -1,0 +1,39 @@
+[[mutant]]
+name = "the-rooms-water-reads-no-humidity"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''        let vapour = k.scale(saturated, h);'''
+new = '''        let _ = h;
+        let vapour = saturated;'''
+test = "-p ng-validate --test body_run the_airway_loses_the_latent_heat_of_its_net_water_and_the_lining_reads_the_room_in_two_rooms"
+
+[[mutant]]
+name = "the-rooms-vapour-reads-the-radiant-temperature"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''        let air = k.room_air();'''
+new = '''        let air = k.room_radiant();'''
+test = "-p ng-validate --test body_run the_airway_loses_the_latent_heat_of_its_net_water_and_the_lining_reads_the_room_in_two_rooms"
+
+[[mutant]]
+name = "the-rooms-vapour-turns-its-exponent-over"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''        let exponent = k.subtract(a, ratio);'''
+new = '''        let exponent = k.subtract(ratio, a);'''
+test = "-p ng-validate --test body_run the_airway_loses_the_latent_heat_of_its_net_water_and_the_lining_reads_the_room_in_two_rooms"
+
+[[mutant]]
+name = "airway-heat-ignores-the-rooms-water"
+path = "crates/ng-respiratory/src/airway.rs"
+old = '''            let water = k.subtract(leaving, entering);'''
+new = '''            let _ = entering;
+            let water = leaving;'''
+test = "-p ng-validate --test body_run the_airway_loses_the_latent_heat_of_its_net_water_and_the_lining_reads_the_room_in_two_rooms"
+
+[[mutant]]
+name = "the-airways-vapour-form-parts-from-the-skins"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''    for key in ["mt.vapour-a", "rs.vapour-a"] {
+        set::<Dimensionless>(packet, key, body, 16.6536)?;
+    }'''
+new = '''    set::<Dimensionless>(packet, "mt.vapour-a", body, 16.6536)?;
+    set::<Dimensionless>(packet, "rs.vapour-a", body, 16.6537)?;'''
+test = "-p ng-validate --test body_run the_airway_loses_the_latent_heat_of_its_net_water_and_the_lining_reads_the_room_in_two_rooms"

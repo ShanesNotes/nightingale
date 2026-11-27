@@ -3840,6 +3840,150 @@ fn each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_wate
     .assert_eq(&report);
 }
 
+/// The respiratory card's keys that share a design value with the metabolism card's, each with its twin.
+const TWINS: [(&str, &str); 5] = [
+    ("rs.latent-heat", "mt.latent-heat"),
+    ("rs.vapour-reference", "mt.vapour-reference"),
+    ("rs.vapour-a", "mt.vapour-a"),
+    ("rs.vapour-b", "mt.vapour-b"),
+    ("rs.vapour-c", "mt.vapour-c"),
+];
+
+/// The lining's rate by research 11's form in a room, `V'_A (σ - i) / v_w`, with `σ = P_H2O / (P_B - P_H2O)`. It reads
+/// no state.
+fn lining_form(start: &Start, room: &Weather) -> f64 {
+    let value = |name| lead(parameter(start, name));
+    let vapour = value("rs.water-vapour-pressure");
+    let saturated = vapour / (value("rs.room-pressure") - vapour);
+    value("rs.alveolar-ventilation") * (saturated - room_water(start, room)) / value("rs.water-volume")
+}
+
+/// The airway's heat by its form at a session's state in a room, `lambda (W_out - W_in)`: the dead space's water carried
+/// out at `(g h- + M s) s_w / v_w` and the room's carried in at `(g h+ + M s) i / v_w`, with `h+` and `h-` the smoothed
+/// parts of the dead space's head, `s` the mixing share and `s_w` the dead space's water share of its dry gas.
+fn airway_heat_form(start: &Start, session: &Session<'_, Running>, room: &Weather) -> f64 {
+    let value = |name| lead(parameter(start, name));
+    let view = session.record().accepted();
+    let held = |species| {
+        let row = (start.body.rows().iter())
+            .find(|row| {
+                matches!(row.kind(), RowKind::Amount { site, species: here, space: Space::Gas }
+                    if site.key() == "conducting airway" && here == species)
+            })
+            .expect("a dead space pool");
+        lead(view.value(row.id()))
+    };
+    let dry = value("rs.oxygen-volume") * held(Species::Oxygen)
+        + value("rs.carbon-dioxide-volume") * held(Species::CarbonDioxide)
+        + value("rs.nitrogen-volume") * held(Species::NitrogenGas);
+    let per = value("rs.water-volume");
+    let carried = per * held(Species::Water) / dry;
+    let head = value("rs.dead-space-elastance") * (value("rs.dead-space-volume") - dry);
+    let width = value("rs.head-width");
+    let (inward, outward) = (smooth_max(head, 0.0, width), smooth_max(-head, 0.0, width));
+    let conductance = value("rs.airway-conductance");
+    let mixing = value("rs.airway-mixing") * lead(view.value(named(start, "NS", "mixing share")));
+    let leaving = (conductance * outward + mixing) * carried / per;
+    let entering = (conductance * inward + mixing) * room_water(start, room) / per;
+    value("rs.latent-heat") * (leaving - entering)
+}
+
+/// The lining's, the expired water's and the airway heat's mean rates over the millisecond from `at`.
+fn airway_rates(start: &Start, session: &Session<'_, Running>, at: u64) -> [f64; 3] {
+    let body = &start.body;
+    let columns = every_column(body);
+    let from = anchor_moment().nanoseconds() + at;
+    let (early, late) = (
+        extents(session, &columns, from),
+        extents(session, &columns, from + HEAT_WINDOW),
+    );
+    let lung = site::<CapillaryBed>("pulmonary bed");
+    let water = |space| move |site, species, held| site == lung && species == Species::Water && held == space;
+    let lining = (columns.iter().copied())
+        .find(|column| {
+            count(body, *column, water(Space::Interstitium)) == -1.0
+                && count(body, *column, water(Space::Gas)) == 1.0
+        })
+        .expect("the lining")
+        .index();
+    let route = |local: &str| {
+        (body.columns().iter())
+            .position(|column| column.origin().owner == "RS" && column.origin().local == local)
+            .unwrap_or_else(|| panic!("no column {local}"))
+    };
+    let rate = |column: usize| (late[column] - early[column]) / (HEAT_WINDOW as f64 / SECOND as f64);
+    [
+        rate(lining),
+        rate(route("expired water")),
+        rate(route("airway heat")),
+    ]
+}
+
+/// Ticket 12's first box for the airway: the lining's room share and the airway's latent heat match their forms at
+/// stated points, the body's room at 1 s and a warmer, drier room from 1.001 s, each a mean over a millisecond, and the
+/// airway's heat is the net water the breath carries out times the latent heat, held against the heat's magnitude,
+/// since the net water may change sign within a breath. The lining reads no state, so its mean is its form; the
+/// airway's heat reads the dead space's gas, so its mean is held between its form's values at the window's two ends.
+/// The respiratory card's latent heat and vapour keys equal their metabolism twins bit for bit, so one room gives the
+/// skin and the airway one vapour pressure.
+#[test]
+fn the_airway_loses_the_latent_heat_of_its_net_water_and_the_lining_reads_the_room_in_two_rooms() {
+    let start = Start::admitted();
+    for (own, twin) in TWINS {
+        let (mine, theirs) = (lead(parameter(&start, own)), lead(parameter(&start, twin)));
+        assert_eq!(
+            mine.to_bits(),
+            theirs.to_bits(),
+            "{own} is {mine:e}, its twin {twin} {theirs:e}"
+        );
+    }
+    let latent = lead(parameter(&start, "rs.latent-heat"));
+    let mut report = String::new();
+    let mut session = start.session();
+    let windy = AuthorizedInput::from_command_receipt(
+        Digest::of_canonical(b"a windy room"),
+        weather(SECOND + HEAT_WINDOW, &WINDY),
+    );
+    session.enqueue(windy).expect("enqueued");
+    session = until(session, SECOND);
+    for (from, room) in [(SECOND, &RESTING), (SECOND + HEAT_WINDOW, &WINDY)] {
+        let first = airway_heat_form(&start, &session, room);
+        session = until(session, from + HEAT_WINDOW);
+        let last = airway_heat_form(&start, &session, room);
+        let [lining, water, heat] = airway_rates(&start, &session, from);
+        let at = seconds(anchor_moment().nanoseconds() + from);
+        assert!(
+            (water * latent - heat).abs() <= 1e-12 * heat.abs(),
+            "at {at} s the expired water {water:e} a second against the airway's heat {heat:e} over the latent heat {latent:e}"
+        );
+        let form = lining_form(&start, room);
+        assert!(
+            (lining - form).abs() <= 1e-9 * form.abs(),
+            "at {at} s the lining moves {lining:e} a second, its form {form:e}"
+        );
+        let (low, high) = if first < last {
+            (first, last)
+        } else {
+            (last, first)
+        };
+        let slack = 1e-5 * (first.abs() + last.abs());
+        assert!(
+            low - slack <= heat && heat <= high + slack,
+            "at {at} s the airway's heat is {heat:e} a second, its form {first:e} to {last:e}"
+        );
+        writeln!(
+            report,
+            "at {at:.3} s: the lining {lining:.6e} a second, the airway's heat {heat:.6e} a second"
+        )
+        .expect("a string takes it");
+    }
+    expect![[r#"
+        at 1.000 s: the lining 4.027103e-3 a second, the airway's heat -5.292702e4 a second
+        at 1.001 s: the lining 4.258835e-3 a second, the airway's heat -3.598223e4 a second
+    "#]]
+    .assert_eq(&report);
+}
+
 /// Each tissue heat store's tolerance over admission's cycle: admission's recheck on that store at main before ticket
 /// 12, `1e-9` of its size plus `1e-10` of its amount, when the core store held 1.3144115e9 and the skin and airway
 /// stores 2e7 each. The thermal zero raises the amounts and so the recheck's own tolerance, and this one stays.
