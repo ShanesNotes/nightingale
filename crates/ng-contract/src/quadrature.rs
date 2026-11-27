@@ -205,8 +205,9 @@ impl StageWitness {
             Estimate::Difference { fine, coarse } => {
                 let (fine, coarse) = (&self.stages[fine].unknowns, &self.stages[coarse].unknowns);
                 for at in 0..count {
-                    error.note_at(
-                        (fine[at] - coarse[at]).abs() / scales.at(fine[at], sizes[at]),
+                    error.note_ratio(
+                        (fine[at] - coarse[at]).abs(),
+                        scales.at(fine[at], sizes[at]),
                         at,
                         rows,
                     );
@@ -220,7 +221,7 @@ impl StageWitness {
                 for at in 0..count {
                     let (from, middle, to) = (start[at], early.unknowns[at], late.unknowns[at]);
                     let curvature = reach * ((to - middle) / rest - (middle - from) / first);
-                    error.note_at(curvature.abs() / scales.at(to, sizes[at]), at, rows);
+                    error.note_ratio(curvature.abs(), scales.at(to, sizes[at]), at, rows);
                 }
             }
         }
@@ -305,21 +306,33 @@ fn seconds(ns: u64) -> f64 {
     ns as f64 / NANOSECONDS_PER_SECOND
 }
 
+const SKIP_MARGIN: f64 = 1.0 - 1e-12;
+
 #[derive(Clone, Copy)]
 struct Worst {
     normalized: f64,
+    limit: f64,
     row: Option<RowId>,
 }
 impl Worst {
     const NONE: Self = Self {
         normalized: 0.0,
+        limit: 0.0,
         row: None,
     };
+    /// Skips the division whenever `numerator < (normalized * (1 - 1e-12)) * scale` is finite, which
+    /// guarantees `numerator / scale < normalized` with room for rounding while keeping `normalized` exact.
     #[inline(always)]
-    fn note_at(&mut self, normalized: f64, at: usize, rows: &[Row]) {
+    fn note_ratio(&mut self, numerator: f64, scale: f64, at: usize, rows: &[Row]) {
+        let bound = self.limit * scale;
+        if numerator < bound && bound < f64::INFINITY {
+            return;
+        }
+        let normalized = numerator / scale;
         if normalized > self.normalized {
             *self = Self {
                 normalized,
+                limit: normalized * SKIP_MARGIN,
                 row: Some(rows[at].id()),
             };
         }
@@ -457,9 +470,12 @@ impl StepProposal {
             for slot in 0..algebraic_rows {
                 let at = first_algebraic + slot;
                 let judge = body.judged_at(at);
-                let normalized =
-                    published.algebraic[slot].abs() / scales.at(coordinates[judge], sizes[judge]);
-                algebraic_defect.note_at(normalized, at, rows);
+                algebraic_defect.note_ratio(
+                    published.algebraic[slot].abs(),
+                    scales.at(coordinates[judge], sizes[judge]),
+                    at,
+                    rows,
+                );
             }
             if let Some(row) = algebraic_defect.above_one() {
                 return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
@@ -519,7 +535,7 @@ fn note_stage_defect(
         } else {
             scales.at(unknowns[judge], sizes[judge])
         };
-        stage_defect.note_at(defect / scale, at, rows);
+        stage_defect.note_ratio(defect, scale, at, rows);
     }
     for at in first_algebraic..rows.len() {
         let defect = residuals[at].abs();
@@ -529,7 +545,7 @@ fn note_stage_defect(
         } else {
             scales.at(unknowns[judge], sizes[judge])
         };
-        stage_defect.note_at(defect / scale, at, rows);
+        stage_defect.note_ratio(defect, scale, at, rows);
     }
 }
 
