@@ -19,6 +19,25 @@ pub(crate) struct StageValues {
     pub(crate) rows: Vec<f64>,
     pub(crate) residuals: Vec<f64>,
 }
+impl StageValues {
+    pub(crate) fn with_capacity(columns: usize, rows: usize) -> Self {
+        Self {
+            columns: Vec::with_capacity(columns),
+            rows: Vec::with_capacity(rows),
+            residuals: Vec::with_capacity(rows),
+        }
+    }
+}
+
+#[inline]
+fn reset_zeros(buf: &mut Vec<f64>, len: usize) {
+    if buf.len() == len {
+        buf.fill(0.0);
+    } else {
+        buf.clear();
+        buf.resize(len, 0.0);
+    }
+}
 
 struct SlopeScratch {
     values: [f64; STACK_SLOTS],
@@ -62,11 +81,14 @@ fn smooth_value(a: f64, b: f64, width: f64, sign: f64) -> f64 {
     0.5 * (a + b + sign * root)
 }
 
+#[inline(always)]
+fn is_finite_fp(value: f64) -> bool {
+    value.abs() < f64::INFINITY
+}
+
 #[inline]
 pub(crate) fn all_finite(values: &[f64]) -> bool {
-    values
-        .iter()
-        .fold(true, |ok, value| ok & (value.abs() < f64::INFINITY))
+    values.iter().fold(true, |ok, value| ok & is_finite_fp(*value))
 }
 
 const STACK_SLOTS: usize = 256;
@@ -1436,21 +1458,21 @@ fn forward_fast_hoisted(
             }
             HoistedOp::Exp([x]) => {
                 let x = values[usize::from(x)];
-                if !(x.abs() < f64::INFINITY) {
+                if !is_finite_fp(x) {
                     return Err(());
                 }
                 pinned::exp(x)
             }
             HoistedOp::Expm1([x]) => {
                 let x = values[usize::from(x)];
-                if !(x.abs() < f64::INFINITY) {
+                if !is_finite_fp(x) {
                     return Err(());
                 }
                 pinned::expm1(x)
             }
             HoistedOp::Logistic([x]) => {
                 let x = values[usize::from(x)];
-                if !(x.abs() < f64::INFINITY) {
+                if !is_finite_fp(x) {
                     return Err(());
                 }
                 1.0 / (1.0 + pinned::exp(-x))
@@ -1561,21 +1583,21 @@ fn forward_stack_hoisted(
             }
             Instr::Exp([x]) => {
                 let x = at(values, x);
-                if !(x.abs() < f64::INFINITY) {
+                if !is_finite_fp(x) {
                     return Err(());
                 }
                 pinned::exp(x)
             }
             Instr::Expm1([x]) => {
                 let x = at(values, x);
-                if !(x.abs() < f64::INFINITY) {
+                if !is_finite_fp(x) {
                     return Err(());
                 }
                 pinned::expm1(x)
             }
             Instr::Logistic([x]) => {
                 let x = at(values, x);
-                if !(x.abs() < f64::INFINITY) {
+                if !is_finite_fp(x) {
                     return Err(());
                 }
                 1.0 / (1.0 + pinned::exp(-x))
@@ -2183,32 +2205,49 @@ impl CompiledBody {
         derivative: &[f64],
         clean: bool,
     ) -> Result<StageValues, Undefined> {
+        let mut out = StageValues {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            residuals: Vec::new(),
+        };
+        self.evaluate_stage_into(inputs, derivative, clean, &mut out)?;
+        Ok(out)
+    }
+    pub(crate) fn evaluate_stage_into(
+        &self,
+        inputs: &Inputs<'_>,
+        derivative: &[f64],
+        clean: bool,
+        out: &mut StageValues,
+    ) -> Result<(), Undefined> {
         let partial_volume = self.partial_volume();
         if let Some(fast) = &self.tape.fast
             && clean
             && derivative.len() == self.layout.rows.len()
         {
-            return self.evaluate_stage_fast(fast, inputs, derivative, partial_volume);
+            return self.evaluate_stage_fast_into(fast, inputs, derivative, partial_volume, out);
         }
         let values = self.instance_values(inputs)?;
         let (columns, rows) = self.targets(&values);
-        let residuals = self.residuals(&columns, &rows, derivative);
-        Ok(StageValues {
-            columns,
-            rows,
-            residuals,
-        })
+        self.residuals_into(&columns, &rows, derivative, &mut out.residuals);
+        out.columns = columns;
+        out.rows = rows;
+        Ok(())
     }
-    fn evaluate_stage_fast(
+    fn evaluate_stage_fast_into(
         &self,
         fast: &FastTape,
         inputs: &Inputs<'_>,
         derivative: &[f64],
         partial_volume: f64,
-    ) -> Result<StageValues, Undefined> {
+        out: &mut StageValues,
+    ) -> Result<(), Undefined> {
         let mut values = [0.0; STACK_SLOTS];
-        let mut columns = vec![0.0; self.layout.columns.len()];
-        let mut rows = vec![0.0; self.layout.rows.len()];
+        let columns = &mut out.columns;
+        let rows = &mut out.rows;
+        let residuals = &mut out.residuals;
+        reset_zeros(columns, self.layout.columns.len());
+        reset_zeros(rows, self.layout.rows.len());
         let unknowns = inputs.unknowns;
         if fast.fused_stage {
             for &op in &fast.ops[..fast.fused_start_op] {
@@ -2219,9 +2258,10 @@ impl CompiledBody {
                     continue;
                 }
                 let value = self.eval_single_fast(fast, at, inst, inputs, partial_volume, &mut values)?;
-                self.store_target(fast.targets[at], value, &mut columns, &mut rows);
+                self.store_target(fast.targets[at], value, columns, rows);
             }
-            let mut residuals = Vec::with_capacity(rows.len());
+            residuals.clear();
+            residuals.reserve(rows.len());
             residuals.extend_from_slice(&derivative[..self.tape.amounts_end]);
             for (&value, &tangent) in rows[self.tape.amounts_end..self.tape.memory_end]
                 .iter()
@@ -2265,7 +2305,7 @@ impl CompiledBody {
                                 residuals[usize::from(s.from_amt)] -= -rate;
                                 residuals[usize::from(s.to_amt)] -= rate;
                             }
-                            if !(check.abs() < f64::INFINITY) {
+                            if !is_finite_fp(check) {
                                 for s in solutes {
                                     if !columns[s.col as usize].is_finite() {
                                         return Err(self.undefined(
@@ -2293,7 +2333,7 @@ impl CompiledBody {
                                 residuals[usize::from(s.from_amt)] -= -rate;
                                 residuals[usize::from(s.to_amt)] -= rate;
                             }
-                            if !(check.abs() < f64::INFINITY) {
+                            if !is_finite_fp(check) {
                                 for s in solutes {
                                     if !columns[s.col as usize].is_finite() {
                                         return Err(self.undefined(
@@ -2323,7 +2363,7 @@ impl CompiledBody {
                                 col as usize
                             }
                             FastTarget::ColumnScaled(col) => {
-                                self.write_scaled_column(&mut columns, col, value);
+                                self.write_scaled_column(columns, col, value);
                                 col.index()
                             }
                             FastTarget::Row(_, _) => unreachable!(),
@@ -2337,11 +2377,7 @@ impl CompiledBody {
                     }
                 }
             }
-            return Ok(StageValues {
-                columns,
-                rows,
-                residuals,
-            });
+            return Ok(());
         }
         for &op in &fast.ops {
             match op {
@@ -2352,7 +2388,7 @@ impl CompiledBody {
                         continue;
                     }
                     let value = self.eval_single_fast(fast, at, inst, inputs, partial_volume, &mut values)?;
-                    self.store_target(fast.targets[at], value, &mut columns, &mut rows);
+                    self.store_target(fast.targets[at], value, columns, rows);
                 }
                 FastOp::Batch(batch_at) => {
                     let batch = fast.batches[batch_at as usize];
@@ -2375,7 +2411,7 @@ impl CompiledBody {
                             check += rate;
                             columns[s.col as usize] = rate;
                         }
-                        if !(check.abs() < f64::INFINITY) {
+                        if !is_finite_fp(check) {
                             for s in solutes {
                                 if !columns[s.col as usize].is_finite() {
                                     return Err(self.undefined(
@@ -2401,7 +2437,7 @@ impl CompiledBody {
                             check += rate;
                             columns[s.col as usize] = rate;
                         }
-                        if !(check.abs() < f64::INFINITY) {
+                        if !is_finite_fp(check) {
                             for s in solutes {
                                 if !columns[s.col as usize].is_finite() {
                                     return Err(self.undefined(
@@ -2416,12 +2452,8 @@ impl CompiledBody {
                 }
             }
         }
-        let residuals = self.residuals(&columns, &rows, derivative);
-        Ok(StageValues {
-            columns,
-            rows,
-            residuals,
-        })
+        self.residuals_into(columns, rows, derivative, residuals);
+        Ok(())
     }
     fn slopes(
         &self,
@@ -2659,7 +2691,7 @@ impl CompiledBody {
                 values[s.j_from_from_water as usize] -= -d_water;
                 values[s.j_to_from_water as usize] -= d_water;
             }
-            if !(check.abs() < f64::INFINITY) {
+            if !is_finite_fp(check) {
                 for s in solutes {
                     let share = unknowns[usize::from(s.from_amt)] / water;
                     let value = flow * share;
@@ -2702,7 +2734,7 @@ impl CompiledBody {
                 values[s.j_from_to_water as usize] -= -d_water;
                 values[s.j_to_to_water as usize] -= d_water;
             }
-            if !(check.abs() < f64::INFINITY) {
+            if !is_finite_fp(check) {
                 for s in solutes {
                     let share = unknowns[usize::from(s.to_amt)] / water;
                     let value = flow * share;
@@ -2865,8 +2897,15 @@ impl CompiledBody {
         }
         (columns, rows)
     }
+    #[cfg(test)]
     pub(crate) fn residuals(&self, columns: &[f64], rows: &[f64], derivative: &[f64]) -> Vec<f64> {
         let mut residuals = Vec::with_capacity(rows.len());
+        self.residuals_into(columns, rows, derivative, &mut residuals);
+        residuals
+    }
+    fn residuals_into(&self, columns: &[f64], rows: &[f64], derivative: &[f64], residuals: &mut Vec<f64>) {
+        residuals.clear();
+        residuals.reserve(rows.len());
         if self.tape.contiguous_rows && rows.len() == self.layout.rows.len() && derivative.len() == rows.len()
         {
             residuals.extend_from_slice(&derivative[..self.tape.amounts_end]);
@@ -2902,7 +2941,6 @@ impl CompiledBody {
                 }
             }
         }
-        residuals
     }
     fn push_validity(
         &self,
@@ -2988,7 +3026,7 @@ impl CompiledBody {
                             for s in solutes {
                                 check += flow * (unknowns[usize::from(s.from_amt)] / water);
                             }
-                            if !(check.abs() < f64::INFINITY) {
+                            if !is_finite_fp(check) {
                                 for s in solutes {
                                     let rate = flow * (unknowns[usize::from(s.from_amt)] / water);
                                     if !rate.is_finite() {
@@ -3013,7 +3051,7 @@ impl CompiledBody {
                             for s in solutes {
                                 check += flow * (unknowns[usize::from(s.to_amt)] / water);
                             }
-                            if !(check.abs() < f64::INFINITY) {
+                            if !is_finite_fp(check) {
                                 for s in solutes {
                                     let rate = flow * (unknowns[usize::from(s.to_amt)] / water);
                                     if !rate.is_finite() {

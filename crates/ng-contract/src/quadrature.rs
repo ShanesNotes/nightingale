@@ -56,6 +56,9 @@ impl Quadrature {
         weight: Ratio,
     ) -> Result<(), EngineFault> {
         self.total = self.total.plus(weight).ok_or(self.mismatch)?;
+        if weight == Ratio::ZERO && !self.accumulated {
+            return Ok(());
+        }
         let seconds = weight.seconds_of(self.length_ns);
         let first = !self.accumulated;
         self.accumulated = true;

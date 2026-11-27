@@ -1,9 +1,9 @@
 use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, ArithmeticProfile, CoupledProblem, CoupledSolver, DeclaredResolution, Digest,
-    EngineFaultKind, ErrorScales, Factors, Increment, Measure, MethodHistory, NumericalRefusal, Ratio,
-    RowKind, SolveWorkspace, SparseView, StageEvaluation, StageJacobian, StageScheme, StageSet, StageTime,
-    StepProposal, StepTicket, TrialFailure, eliminate,
+    EngineFaultKind, ErrorScales, EvaluationScratch, Factors, Increment, Measure, MethodHistory,
+    NumericalRefusal, Ratio, RowKind, SolveWorkspace, SparseView, StageEvaluation, StageJacobian,
+    StageScheme, StageSet, StageTime, StepProposal, StepTicket, TrialFailure, eliminate,
 };
 
 const ABSOLUTE: f64 = 0.1;
@@ -324,13 +324,15 @@ struct Scratch {
     guess: Vec<f64>,
     before: Vec<f64>,
     correction: Vec<f64>,
+    eval: EvaluationScratch,
 }
 impl Scratch {
-    fn new(rows: usize) -> Self {
+    fn new(problem: &CoupledProblem<'_>, rows: usize) -> Self {
         Self {
             guess: vec![0.0; rows],
             before: vec![0.0; rows],
             correction: vec![0.0; rows],
+            eval: problem.evaluation_scratch(),
         }
     }
 }
@@ -358,7 +360,7 @@ impl<'a, 'p> Stages<'a, 'p> {
         let mut workspace = problem.workspace();
         let start = workspace.unknowns_mut().to_vec();
         let trend = Trend::of(problem, ticket, midpoint);
-        let mut scratch = Scratch::new(start.len());
+        let mut scratch = Scratch::new(problem, start.len());
         let mut quadrature = problem.quadrature(ticket);
         let mut linear = None;
         let midpoint = match set {
@@ -673,7 +675,10 @@ impl<'a, 'p> Stages<'a, 'p> {
             {
                 *tangent = ((was - share * change) - then) * per_second;
             }
-            match self.problem.reevaluate(&workspace.point(time), evaluation) {
+            match self
+                .problem
+                .reevaluate_in(&workspace.point(time), evaluation, &mut scratch.eval)
+            {
                 Err(failure) if share > 0.2 && in_domain(&failure) => share *= 0.5,
                 outcome => return outcome,
             }
