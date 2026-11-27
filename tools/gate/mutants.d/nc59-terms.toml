@@ -37,3 +37,10 @@ old = '''                if (fragment.laws.iter())
                 {'''
 new = '''                if (fragment.laws.iter()).any(|law| law.kernel.placing.is_some()) {'''
 test = "-p ng-contract --lib evaluate::terms::forms::an_unread_forcing_beside_a_second_defect_names_the_forcing_when_no_site_is_in_the_terms_set"
+
+[[mutant]]
+name = "water-reflection-emits-address"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                    let reflection = match (species != Species::Water, reach.context) {'''
+new = '''                    let reflection = match (true, reach.context) {'''
+test = "-p ng-contract --test starling a_water_reflection_on_a_starling_route_compiles_without_an_extra_address"

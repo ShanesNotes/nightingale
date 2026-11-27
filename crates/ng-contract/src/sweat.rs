@@ -107,9 +107,10 @@ fn map(nerve: Nerve) -> Result<(Anatomy, Sites), AdmissionError> {
     Ok((map.finish()?, sites))
 }
 
-fn publish<'b>(
+fn publish_temperatures<'b>(
     mt: &mut FragmentBuilder<'b, Metabolism>,
     ports: &MetabolismPorts<'b>,
+    conduct: bool,
 ) -> StoreTemperatures<'b> {
     let stores = ports.temperatures(mt);
     let still = mt.kernel(|mut k| {
@@ -122,13 +123,22 @@ fn publish<'b>(
         k.finish(value, mt.every_mode(), class())
     });
     mt.define_at(&stores.other, still);
-    let route = ports.conduction(mt);
-    let still = mt.site_kernel(|mut k| {
-        let zero = k.zero::<Rate<Energy>>();
-        k.finish(zero, mt.every_mode(), class())
-    });
-    mt.transfer_at(&route, still);
+    if conduct {
+        let route = ports.conduction(mt);
+        let still = mt.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, mt.every_mode(), class())
+        });
+        mt.transfer_at(&route, still);
+    }
     stores.published()
+}
+
+fn publish<'b>(
+    mt: &mut FragmentBuilder<'b, Metabolism>,
+    ports: &MetabolismPorts<'b>,
+) -> StoreTemperatures<'b> {
+    publish_temperatures(mt, ports, true)
 }
 
 fn secrete<'b>(
@@ -764,7 +774,7 @@ fn a_placed_carriage_tissue_read_requires_the_core_store() {
         schema.carry::<Acetylcholine, Junction>(Space::Bound);
         assemble(schema, |mut body| {
             let (mut mt, ports) = body.metabolism(None)?.parts();
-            let published = publish(&mut mt, &ports);
+            let published = publish_temperatures(&mut mt, &ports, with_core);
             let effect = ports.sweat_effect();
             let evaporative = ports.boundary::<SkinEvaporativeHeat>()?;
             secrete(
@@ -779,12 +789,14 @@ fn a_placed_carriage_tissue_read_requires_the_core_store() {
             body.add(mt.finish());
             bind(&mut body)?;
             let (mut cv, ports) = body.cardiovascular()?.parts();
-            let carriage = ports.heat_carried(&mut cv);
-            let still = cv.site_kernel(|mut k| {
-                let zero = k.zero::<Rate<Energy>>();
-                k.finish(zero, cv.every_mode(), class())
-            });
-            carriage.post(&mut cv, still);
+            if with_core {
+                let carriage = ports.heat_carried(&mut cv);
+                let still = cv.site_kernel(|mut k| {
+                    let zero = k.zero::<Rate<Energy>>();
+                    k.finish(zero, cv.every_mode(), class())
+                });
+                carriage.post(&mut cv, still);
+            }
             let temperatures: PerfusionTemperatures = cv.receive();
             let (out, _) = cv.site_field::<Beds<Skin>, Temperature>(law.local, Admissible::finite());
             let value = cv.site_kernel(|mut k| {

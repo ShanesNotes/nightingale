@@ -1,8 +1,12 @@
 [[mutant]]
 name = "reach-missing-pool-dropped"
 path = "crates/ng-contract/src/compile.rs"
-old = '''                if family.allows_absent_pool() {'''
-new = '''                if true {'''
+old = '''                MissingPool::Refuse => {
+                    refuse_missing(&reaches)?;
+                }'''
+new = '''                MissingPool::Refuse => {
+                    reaches.retain(|reach| reach.ends.iter().all(|&end| has(end)));
+                }'''
 test = "-p ng-contract --test routes every_required_family_refuses_a_missing_endpoint_pool"
 
 [[mutant]]
@@ -26,3 +30,30 @@ new = '''    let require_store = |space: Space| {
         }))
     };'''
 test = "-p ng-contract --test routes body_energy_families_refuse_a_map_without_a_tissue_root"
+
+[[mutant]]
+name = "reach-selector-drops-missing-partner"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                MissingPool::SelectBy(selector) => {
+                    reaches.retain(|reach| has(reach.ends[selector as usize]));
+                    refuse_missing(&reaches)?;
+                }'''
+new = '''                MissingPool::SelectBy(_) => {
+                    reaches.retain(|reach| reach.ends.iter().all(|&end| has(end)));
+                }'''
+test = "-p ng-contract --test routes selector_families_refuse_a_missing_partner_when_selected"
+
+[[mutant]]
+name = "reach-iron-exemption-not-scoped-to-hematology"
+path = "crates/ng-contract/src/law.rs"
+old = '''            Family::Across(Wall::Cell, Sites::Class(crate::Class::CapillaryBed), Species::Iron)
+                if owner == crate::Hematology::CARD =>'''
+new = '''            Family::Across(Wall::Cell, Sites::Class(crate::Class::CapillaryBed), Species::Iron) =>'''
+test = "-p ng-contract --test routes fluids_cell_membrane_iron_refuses_a_missing_endpoint_pool"
+
+[[mutant]]
+name = "reach-endpoint-declaration-order"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        requested.sort_unstable();'''
+new = '''        let _ = &mut requested;'''
+test = "-p ng-contract --test routes route_endpoint_refusal_is_invariant_to_port_declaration_order"

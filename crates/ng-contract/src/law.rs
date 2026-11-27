@@ -292,13 +292,17 @@ impl Family {
             | Family::Heat(_) => None,
         }
     }
-    pub(crate) fn allows_absent_pool(self) -> bool {
+    pub(crate) fn missing_pool(self, owner: &'static str) -> MissingPool {
         match self {
-            Family::Release(_)
-            | Family::Reuptake(_)
-            | Family::Binding(..)
-            | Family::Across(Wall::Cell, Sites::Class(crate::Class::CapillaryBed), Species::Iron)
-            | Family::Heat(HeatRoute::Conduction | HeatRoute::CarriedByBlood) => true,
+            Family::Release(_) | Family::Reuptake(_) => MissingPool::DropEither,
+            Family::Across(Wall::Cell, Sites::Class(crate::Class::CapillaryBed), Species::Iron)
+                if owner == crate::Hematology::CARD =>
+            {
+                MissingPool::DropEither
+            }
+            Family::Binding(..) | Family::Heat(HeatRoute::Conduction | HeatRoute::CarriedByBlood) => {
+                MissingPool::SelectBy(End::To)
+            }
             Family::Circulation
             | Family::Valves
             | Family::Sinusoids
@@ -322,9 +326,15 @@ impl Family {
                 | Passage::Secretion,
                 _,
             )
-            | Family::Heat(HeatRoute::FromBeds | HeatRoute::Pumps) => false,
+            | Family::Heat(HeatRoute::FromBeds | HeatRoute::Pumps) => MissingPool::Refuse,
         }
     }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MissingPool {
+    Refuse,
+    DropEither,
+    SelectBy(End),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Crossed {

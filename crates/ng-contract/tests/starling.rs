@@ -546,6 +546,8 @@ enum Declared {
     Reflected,
     Membrane,
     Unreflected,
+    WaterReflected,
+    WaterMembrane,
 }
 
 fn albumin_wall(declared: Declared) -> Result<ModelHash, AdmissionError> {
@@ -577,6 +579,14 @@ fn albumin_wall(declared: Declared) -> Result<ModelHash, AdmissionError> {
                 laws.site_parameter::<CapillaryBed, Conductance<Water>>(kf, Admissible::positive()),
                 laws.site_parameter::<CapillaryBed, Dimensionless>(sigma, Admissible::unit_interval()),
             ),
+            Declared::WaterReflected => (
+                laws.site_parameter::<CapillaryBed, Conductance<Water>>(kf, Admissible::positive()),
+                laws.reflect::<Water>(&route, sigma),
+            ),
+            Declared::WaterMembrane => {
+                let wall = laws.membrane::<_, _, Water, Conductance<Water>>(&route, kf, sigma);
+                (wall.conductance, wall.reflection)
+            }
         };
         let e =
             laws.site_parameter::<CapillaryBed, Elastance>(ParameterKey::new("fl.e"), Admissible::positive());
@@ -609,5 +619,13 @@ fn a_membrane_and_a_reflected_route_lower_to_one_model() -> Result<(), Admission
     let reflected = albumin_wall(Declared::Reflected)?;
     assert_eq!(albumin_wall(Declared::Membrane)?, reflected);
     assert_ne!(albumin_wall(Declared::Unreflected)?, reflected);
+    Ok(())
+}
+
+#[test]
+fn a_water_reflection_on_a_starling_route_compiles_without_an_extra_address() -> Result<(), AdmissionError> {
+    let unreflected = albumin_wall(Declared::Unreflected)?;
+    assert_eq!(albumin_wall(Declared::WaterReflected)?, unreflected);
+    assert_eq!(albumin_wall(Declared::WaterMembrane)?, unreflected);
     Ok(())
 }
