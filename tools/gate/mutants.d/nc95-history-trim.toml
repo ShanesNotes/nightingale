@@ -1,0 +1,188 @@
+[[mutant]]
+name = "trim-witness-seal-unchecked-on-restore"
+path = "crates/ng-record/src/history.rs"
+old = '''    if let Some(witness) = store.resolve_witness(&at) {
+        if witness.seal(hash, revision) != at {
+            return Err(CheckpointError::HistoryAltered { seal: at });
+        }
+        return Ok((witness.previous(), None));
+    }'''
+new = '''    if let Some(witness) = store.resolve_witness(&at) {
+        return Ok((witness.previous(), None));
+    }'''
+test = "-p ng-validate --test history_trim a_trimmed_restore_checks_every_seal_head_link_and_opening_without_reparsing_discarded_ledgers"
+
+[[mutant]]
+name = "trim-walk-collapses-trimmed-to-missing"
+path = "crates/ng-record/src/history.rs"
+old = '''            if let Some(witness) = self.store.resolve_witness(&at) {
+                return if witness.seal(self.format.hash(), self.revision) == at {
+                    Err(CheckpointError::HistoryTrimmed { seal: at })
+                } else {
+                    Err(CheckpointError::HistoryAltered { seal: at })
+                };
+            }'''
+new = '''            if let Some(witness) = self.store.resolve_witness(&at) {
+                let _ = witness;
+                return Err(CheckpointError::HistoryMissing { seal: at });
+            }'''
+test = "-p ng-validate --test history_trim a_rolling_run_trims_during_execution_and_keeps_only_witnesses_and_checkpoints_after_passing"
+
+[[mutant]]
+name = "trim-restore-skips-opened-past-head-check"
+path = "crates/ng-record/src/history.rs"
+old = '''            if opened > newest.chunk.interval.start() {
+                return Err(CheckpointError::Malformed);
+            }'''
+new = '''            if false && opened > newest.chunk.interval.start() {
+                return Err(CheckpointError::Malformed);
+            }'''
+test = "-p ng-validate --test history_trim a_trimmed_restore_checks_every_seal_head_link_and_opening_without_reparsing_discarded_ledgers"
+
+[[mutant]]
+name = "trim-rewind-skips-opened-parent-check"
+path = "crates/ng-record/src/checkpoint.rs"
+old = '''        if let (Some(parent_opened), Some(trailer)) = (parent.opened(), &trailer)
+            && trailer.opened != parent_opened
+        {
+            return Err(CheckpointError::Malformed);
+        }'''
+new = '''        if false
+            && let (Some(parent_opened), Some(trailer)) = (parent.opened(), &trailer)
+            && trailer.opened != parent_opened
+        {
+            return Err(CheckpointError::Malformed);
+        }'''
+test = "-p ng-validate --test history_trim a_trimmed_restore_checks_every_seal_head_link_and_opening_without_reparsing_discarded_ledgers"
+
+[[mutant]]
+name = "trim-trailer-accepts-rev0-or-empty-head-link"
+path = "crates/ng-record/src/checkpoint.rs"
+old = '''    if revision == 0 || head_link.is_empty() {
+        return Err(CheckpointError::Malformed);
+    }'''
+new = '''    if false && (revision == 0 || head_link.is_empty()) {
+        return Err(CheckpointError::Malformed);
+    }'''
+test = "-p ng-validate --test history_trim a_trimmed_restore_checks_every_seal_head_link_and_opening_without_reparsing_discarded_ledgers"
+
+[[mutant]]
+name = "trim-checkpoint-omits-v2-head-link"
+path = "crates/ng-record/src/checkpoint.rs"
+old = '''    if history.format() == RecordFormat::V2
+        && let Some(link) = history.head_link_bytes()
+    {'''
+new = '''    if false
+        && history.format() == RecordFormat::V2
+        && let Some(link) = history.head_link_bytes()
+    {'''
+test = "-p ng-validate --test history_trim a_trimmed_restore_checks_every_seal_head_link_and_opening_without_reparsing_discarded_ledgers"
+
+[[mutant]]
+name = "trim-feed-oldest-retained-ignores-page-floor"
+path = "crates/ng-record/src/history.rs"
+old = '''        if let Some(mark) = self.pages.front() {
+            return Some(mark.revision - mark.links + 1);
+        }'''
+new = '''        if let Some(mark) = self.pages.front() {
+            return Some(mark.revision);
+        }'''
+test = "-p ng-validate --test history_trim a_rolling_run_trims_during_execution_and_keeps_only_witnesses_and_checkpoints_after_passing"
+
+[[mutant]]
+name = "trim-retained-span-accepts-earlier-head"
+path = "crates/ng-record/src/history.rs"
+old = '''    if head_revision < base_revision {
+        return Err(CheckpointError::NotOnThisBranch);
+    }'''
+new = '''    if false && head_revision < base_revision {
+        return Err(CheckpointError::NotOnThisBranch);
+    }'''
+test = "-p ng-validate --test history_trim a_retained_span_refuses_tampered_prefix_witnesses_trimmed_span_links_and_reproduces_stopped_rhythm"
+
+[[mutant]]
+name = "trim-rolling-trim-drops-flight-recorder-span"
+path = "crates/ng-validate/src/trim.rs"
+old = '''        if let Some(span) = &state.flight_recorder {
+            let fr_floor = span.from_checkpoint_revision + 1;
+            floor = Some(floor.map_or(fr_floor, |current| current.min(fr_floor)));
+        }'''
+new = '''        if false && state.flight_recorder.is_some() {
+            let _ = floor;
+        }'''
+test = "-p ng-validate --test history_trim the_flight_recorder_keeps_the_failing_span_on_closure_drift_and_rhythm_failures_and_checks_it_locally"
+
+[[mutant]]
+name = "trim-finish-keeps-complete-links-on-pass"
+path = "crates/ng-validate/src/trim.rs"
+old = '''        } else {
+            state.links.clear();
+            state.link_by_seal.clear();
+        }'''
+new = '''        } else {
+            let _ = &state.links;
+        }'''
+test = "-p ng-validate --test history_trim a_rolling_run_trims_during_execution_and_keeps_only_witnesses_and_checkpoints_after_passing"
+
+[[mutant]]
+name = "trim-flight-recorder-overwrites-first-trigger"
+path = "crates/ng-validate/src/trim.rs"
+old = '''        if let Some(span) = &mut self.flight_recorder {
+            if last_head_revision >= span.last_head_revision {
+                span.last_head_revision = last_head_revision;
+                span.last_head_seal = last_head_seal;
+            }
+            return Some(span.clone());
+        }'''
+new = '''        if false && self.flight_recorder.is_some() {
+            return None;
+        }'''
+test = "-p ng-validate --test history_trim the_flight_recorder_latches_on_engine_fault_store_failure_and_replay_divergence"
+
+[[mutant]]
+name = "trim-fold-failure-ignores-drift-before-coverage"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''        if let Some(failure) = self.windows.failed.or(self.windows.drifted) {
+            return Some(failure);
+        }'''
+new = '''        if let Some(failure) = self.windows.failed {
+            return Some(failure);
+        }'''
+test = "-p ng-validate --test history_trim the_flight_recorder_keeps_the_failing_span_on_closure_drift_and_rhythm_failures_and_checks_it_locally"
+
+[[mutant]]
+name = "trim-drift-tally-exposed-after-closure-failure"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''            || self.windows.failed.is_some()'''
+new = '''            || false && self.windows.failed.is_some()'''
+test = "-p ng-validate --test history_trim the_flight_recorder_keeps_the_failing_span_on_closure_drift_and_rhythm_failures_and_checks_it_locally"
+
+[[mutant]]
+name = "trim-drift-recheck-skips-closure-limit-check"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''                || before.absolute.bits() != after.absolute.bits()'''
+new = '''                || false && before.absolute.bits() != after.absolute.bits()'''
+test = "-p ng-validate --test history_trim a_complete_closure_passing_run_rechecks_loosened_drift_from_worst_drift_and_requires_rerun_on_failure"
+
+[[mutant]]
+name = "trim-drift-recheck-passes-failing-bound"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''            if let Some(bound) = after.drift
+                && !worst.at_most(bound)
+            {
+                return DriftRecheck::NeedsRerun { quantity };
+            }'''
+new = '''            if false
+                && let Some(bound) = after.drift
+                && !worst.at_most(bound)
+            {
+                return DriftRecheck::NeedsRerun { quantity };
+            }'''
+test = "-p ng-validate --test history_trim a_complete_closure_passing_run_rechecks_loosened_drift_from_worst_drift_and_requires_rerun_on_failure"
+
+[[mutant]]
+name = "trim-regenerate-skips-witness-comparison"
+path = "crates/ng-validate/src/trim.rs"
+old = '''        if actual_seal != expected_seal || actual_witness != expected_witness {'''
+new = '''        if false && (actual_seal != expected_seal || actual_witness != expected_witness) {'''
+test = "-p ng-validate --test history_trim a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_witness"
