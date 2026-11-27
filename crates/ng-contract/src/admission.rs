@@ -7,11 +7,12 @@ use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::packet::{BoundAnchor, Fit, Owed};
 use crate::problem::Jacobian;
+use crate::ring::eliminate_flat;
 use crate::{
     AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Compensated,
     CompiledBody, ConservedRowId, DenseSegment, Digest, ErrorScales, ImageParts, InitializationProvenance,
     Lasting, LawName, Measure, MethodHistory, ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId,
-    RowKind, SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord, eliminate,
+    RowKind, SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord,
 };
 use core::ops::Range;
 
@@ -1194,11 +1195,13 @@ impl InitializationSystem<'_> {
             factors.solve(&mut update);
             return Ok(update);
         }
-        let mut matrix = self.dense(block);
-        for (row, &residual) in matrix.iter_mut().zip(residuals) {
-            row[residuals.len()] = residual;
+        let size = residuals.len();
+        let stride = size + 1;
+        let mut flat = self.dense_flat(block);
+        for (row, &residual) in residuals.iter().enumerate() {
+            flat[row * stride + size] = residual;
         }
-        eliminate(matrix)
+        eliminate_flat(&mut flat, size)
     }
     pub fn stage(
         &self,
@@ -1379,27 +1382,31 @@ impl InitializationSystem<'_> {
     ) -> Result<Option<RowId>, InitializationFailure> {
         let size = self.width();
         let lines = self.leg_lines(workspace, values, 0, Reach::Leg)?;
-        let mut matrix = vec![vec![0.0; size + 1]; size];
-        for (cells, line) in matrix.iter_mut().zip(&lines) {
+        let stride = size + 1;
+        let mut flat = vec![0.0; size * stride];
+        for (row, line) in lines.iter().enumerate() {
+            let cells = &mut flat[row * stride..row * stride + stride];
             for &(column, value) in line.iter().filter(|(column, _)| *column < size) {
                 cells[column] += value;
             }
         }
-        Ok(eliminate(matrix)
+        Ok(eliminate_flat(&mut flat, size)
             .err()
             .map(|slot| RowId::at(slot % self.body.rows().len())))
     }
-    /// A system small enough to read whole: each row with a zero right side, as `eliminate` takes it.
-    fn dense(&self, lines: &Jacobian) -> Vec<Vec<f64>> {
+    /// A system small enough to read whole: each row with a zero right side, as `eliminate_flat` takes it.
+    fn dense_flat(&self, lines: &Jacobian) -> Vec<f64> {
         let view = lines.view();
         let size = view.row_offsets().len() - 1;
-        let mut matrix = vec![vec![0.0; size + 1]; size];
-        for (row, cells) in matrix.iter_mut().enumerate() {
+        let stride = size + 1;
+        let mut flat = vec![0.0; size * stride];
+        for row in 0..size {
+            let cells = &mut flat[row * stride..row * stride + stride];
             for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
                 cells[view.columns()[entry].index()] += view.values()[entry];
             }
         }
-        matrix
+        flat
     }
     /// One defect over its scale, `None` when the tolerance refuses it. What overflowed is refused, because `<=` is
     /// false on a NaN but true of two infinities, and a defect of zero holds even where an overflow leaves no scale.

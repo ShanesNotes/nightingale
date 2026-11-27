@@ -130,10 +130,15 @@ pub fn eliminate(matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
     for row in matrix {
         flat.extend_from_slice(&row[..stride]);
     }
-    reduced_flat(&mut flat, size, 1)
+    eliminate_flat(&mut flat, size)
+}
+
+pub(crate) fn eliminate_flat(flat: &mut [f64], size: usize) -> Result<Vec<f64>, usize> {
+    reduced_flat(flat, size, 1)
 }
 
 /// Each row holds its entries and then any number of right sides, and each row of the answer one value per side.
+#[cfg(test)]
 fn reduced(matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
     let size = matrix.len();
     let sides = matrix.first().map_or(0, |row| row.len() - size);
@@ -378,6 +383,7 @@ impl Block<'_> {
     fn solve_group(
         &self,
         group: &mut [[f64; RING_LANES]],
+        active_lanes: usize,
         reach: Option<&Reach>,
         (at_row, at_unknown): (&[usize], &[usize]),
         spare: &mut [[f64; RING_LANES]],
@@ -386,14 +392,14 @@ impl Block<'_> {
         match self {
             Block::Fixed(factors) => factors.solve_pivoted_wide(group, reach, spare, marks),
             Block::Whole(_) => {
-                let mut sides: Vec<Vec<f64>> = (0..RING_LANES)
+                let mut sides: Vec<Vec<f64>> = (0..active_lanes)
                     .map(|lane| at_row.iter().map(|&at| group[at][lane]).collect())
                     .collect();
                 for side in &mut sides {
                     self.solve(side);
                 }
                 for (unknown, &at) in at_unknown.iter().enumerate() {
-                    for (cell, side) in group[at].iter_mut().zip(&sides) {
+                    for (cell, side) in group[at][..active_lanes].iter_mut().zip(&sides) {
                         *cell = side[unknown];
                     }
                 }
@@ -403,7 +409,7 @@ impl Block<'_> {
     }
     fn solve_group_seeded_no_neg_zero(
         &self,
-        group: &mut [[f64; RING_LANES]],
+        (group, active_lanes): (&mut [[f64; RING_LANES]], usize),
         reach: Option<&Reach>,
         places: (&[usize], &[usize]),
         marks: &mut Marks,
@@ -426,7 +432,7 @@ impl Block<'_> {
             }
             (Block::Whole(_), _) => {
                 let mut unused = Vec::new();
-                self.solve_group(group, reach, places, &mut unused, marks)
+                self.solve_group(group, active_lanes, reach, places, &mut unused, marks)
             }
         }
     }
@@ -448,14 +454,17 @@ impl Block<'_> {
 fn inverse(block: &Jacobian) -> Result<Vec<Vec<f64>>, usize> {
     let view = block.view();
     let size = view.row_offsets().len() - 1;
-    let mut matrix = vec![vec![0.0; 2 * size]; size];
-    for (row, cells) in matrix.iter_mut().enumerate() {
+    let stride = 2 * size;
+    let mut flat = vec![0.0; size * stride];
+    for row in 0..size {
+        let cells = &mut flat[row * stride..row * stride + stride];
         for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
             cells[view.columns()[entry].index()] += view.values()[entry];
         }
         cells[size + row] = 1.0;
     }
-    reduced(matrix)
+    let flat_answers = reduced_flat(&mut flat, size, size)?;
+    Ok(flat_answers.chunks(size).map(|row| row.to_vec()).collect())
 }
 
 impl InitializationSystem<'_> {
@@ -498,7 +507,7 @@ impl InitializationSystem<'_> {
                 }
                 cells[n] = right[row];
             }
-            return reduced_flat(&mut matrix, n, 1);
+            return eliminate_flat(&mut matrix, n);
         };
         let border = points * size;
         let fits = right.len() - border;
@@ -794,6 +803,7 @@ impl InitializationSystem<'_> {
                     }
                     lu.solve_group(
                         &mut cells,
+                        lanes.len(),
                         reach.as_ref(),
                         (&at_row, &at_unknown),
                         &mut spare,
@@ -807,7 +817,7 @@ impl InitializationSystem<'_> {
                         touched.push(r as u32);
                     }
                     lu.solve_group_seeded_no_neg_zero(
-                        &mut cells,
+                        (&mut cells, lanes.len()),
                         reach.as_ref(),
                         (&at_row, &at_unknown),
                         &mut marks,
@@ -856,7 +866,7 @@ impl InitializationSystem<'_> {
                         }
                     }
                     lu.solve_group_seeded_no_neg_zero(
-                        &mut cells,
+                        (&mut cells, lanes_len),
                         reach.as_ref(),
                         (&at_row, &at_unknown),
                         &mut marks,
@@ -919,6 +929,7 @@ impl InitializationSystem<'_> {
                     }
                     lu.solve_group(
                         &mut cells,
+                        lanes.len(),
                         reach.as_ref(),
                         (&at_row, &at_unknown),
                         &mut spare,
@@ -1190,6 +1201,58 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_positive_zero_panel_keeps_every_bit_across_partial_tiles() {
+        let mut state = 0xD1B5_4A32_D192_ED03_u64;
+        let half = super::PANEL / 2;
+        for (size, sides, swap_half) in [(96, 3, false), (145, 5, false), (145, 3, true)] {
+            let mut matrix = vec![vec![0.0; size + sides]; size];
+            for (row_idx, row) in matrix.iter_mut().enumerate() {
+                for (col_idx, cell) in row.iter_mut().enumerate() {
+                    if row_idx < super::PANEL {
+                        let in_first_half = row_idx < half;
+                        if col_idx < super::PANEL {
+                            if (col_idx < half) != in_first_half {
+                                continue;
+                            }
+                        } else {
+                            let tile = (col_idx - super::PANEL) / super::TILE_W;
+                            if (in_first_half && tile == 0) || (!in_first_half && tile == 1) {
+                                continue;
+                            }
+                        }
+                    } else if next(&mut state) < 0.2 {
+                        continue;
+                    }
+                    let scale = match (row_idx + col_idx) % 3 {
+                        0 => 1e-4,
+                        1 => 1.0,
+                        _ => 1e4,
+                    };
+                    let v = (next(&mut state) - 0.5) * scale;
+                    *cell = if v == 0.0 { 0.0 } else { v };
+                }
+                let diag = if swap_half && row_idx < half {
+                    half - 1 - row_idx
+                } else if swap_half && row_idx < super::PANEL {
+                    super::PANEL + half - 1 - row_idx
+                } else {
+                    row_idx
+                };
+                row[diag] = 2e4 + next(&mut state) * 1e4;
+            }
+            let one = reduced_by_pivot(matrix.clone()).expect("rank");
+            let panel = reduced(matrix).expect("rank");
+            for (a, b) in one.iter().flatten().zip(panel.iter().flatten()) {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "size {size}, sides {sides}, swap_half {swap_half}"
+                );
+            }
+        }
+    }
+
     fn next(state: &mut u64) -> f64 {
         *state ^= *state << 13;
         *state ^= *state >> 7;
@@ -1433,7 +1496,17 @@ mod tests {
             }
         }
         let (mut spare, mut marks) = (vec![[0.0; RING_LANES]; size], Marks::new(size));
-        whole.solve_group(&mut group, None, (&at_row, &at_unknown), &mut spare, &mut marks);
+        group[at_row[0]][width] = 7.0;
+        whole.solve_group(
+            &mut group,
+            width,
+            None,
+            (&at_row, &at_unknown),
+            &mut spare,
+            &mut marks,
+        );
+        assert_eq!(group[at_unknown[0]][width].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(group[at_row[0]][width].to_bits(), 7.0_f64.to_bits());
         for (lane, mut alone) in sides.into_iter().enumerate() {
             whole.solve(&mut alone);
             for (unknown, value) in alone.iter().enumerate() {

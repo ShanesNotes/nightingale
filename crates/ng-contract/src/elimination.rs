@@ -2128,7 +2128,7 @@ impl Marks {
 
 #[cfg(test)]
 mod tests {
-    use super::{Elimination, Factors, LANES, Marks};
+    use super::{Elimination, Factors, LANES, Marks, RING_LANES};
     use crate::body::{RowId, UnknownId};
 
     fn next(state: &mut u64) -> f64 {
@@ -2345,6 +2345,65 @@ mod tests {
                 .zip(&walked)
                 .all(|(one, other)| one.to_bits() == other.to_bits());
             assert!(same, "a short walk keeps every bit");
+        }
+        let (at_row, at_unknown) = factors.plan.places();
+        let reach = factors.reach().expect("reach");
+        let wide_sides: Vec<Vec<f64>> = (0..RING_LANES)
+            .map(|lane| {
+                (0..2 * part)
+                    .map(|row| {
+                        if row < part && row % 3 == lane % 3 {
+                            1.0 + lane as f64 * 0.125
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut slab = vec![[0.0; RING_LANES]; 2 * part];
+        let mut touched = Vec::new();
+        for (lane, side) in wide_sides.iter().enumerate() {
+            for (row, &value) in side.iter().enumerate() {
+                if value != 0.0 {
+                    let at = at_row[row];
+                    slab[at][lane] = value;
+                    touched.push(at as u32);
+                }
+            }
+        }
+        let mut spare = vec![[0.0; RING_LANES]; 2 * part];
+        let mut wide_slab = slab.clone();
+        assert!(
+            factors.solve_pivoted_wide(&mut wide_slab, Some(&reach), &mut spare, &mut marks),
+            "wide group takes the sparse reach walk"
+        );
+        assert_eq!(marks.walked(), part, "wide group walks only its own part's rows");
+        let mut seeded_slab = slab;
+        assert!(
+            factors.solve_pivoted_seeded_no_neg_zero(&mut seeded_slab, &reach, &mut marks, &touched),
+            "seeded wide group takes the sparse reach walk"
+        );
+        assert_eq!(
+            marks.walked(),
+            part,
+            "seeded wide group walks only its own part's rows"
+        );
+        for (lane, mut side) in wide_sides.into_iter().enumerate() {
+            factors.solve(&mut side);
+            for (unknown, &expected) in side.iter().enumerate() {
+                let at = at_unknown[unknown];
+                assert_eq!(
+                    expected.to_bits(),
+                    wide_slab[at][lane].to_bits(),
+                    "wide walk keeps every bit"
+                );
+                assert_eq!(
+                    expected.to_bits(),
+                    seeded_slab[at][lane].to_bits(),
+                    "seeded wide walk keeps every bit"
+                );
+            }
         }
     }
 
