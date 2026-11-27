@@ -58,3 +58,5 @@ Build the first slice in the spec below, starting with the `ng-contract` anatomy
 ## Comments
 
 Triage, 2026-10-29 (developer reviewer's call, delegated): ready. Its items (C3, C9, C16, the lens's clinical numbers, the day and the healthy-range set) are contract changes the first milestone needs (SRS I19, records 0003 to 0005). Sourcing the packet and the healthy-range set is not part of it.
+
+Input to C16 from [generative-physiology 16](../../generative-physiology/issues/16-architecture-foundations.md) (section 7): when C16 designs the boundary parameter-shift payload for scope stage 2, a scripted shift in the event log can stand in for an unmodeled disease-progression mechanism, declare what mechanism it stands in for (as record 0002 does for a grouped region), and retire once a damage-integral law lands, with no learned model inside the engine.

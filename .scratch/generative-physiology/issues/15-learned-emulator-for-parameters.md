@@ -38,3 +38,11 @@ The engine's process decides this, through a decision record, and this line woul
 
 - Building or training an emulator, and any engine change.
 - Fitting any value.
+
+## Comments
+
+From [ticket 16](16-architecture-foundations.md) (sections 2, 5.3, 6 and 7):
+
+- **Order of use:** run sensitivity ranking first (which constants move which readings and responses over their population ranges) to prioritize [research 05](../../research/issues/05-parameters.md) sourcing and guide trait conditioning, before fitting any value. Ranking produces no packet value and needs no provenance record.
+- **Provenance input (section 2 rule 1):** because the engine runs every proposal, the emulator is no part of what a fitted value rests on; the decision record settles provenance for a value verified by an engine run against a sourced dynamic response (with method and window, rule 17) plus the selection rule among values not ruled out.
+- **Precedent:** cardiac history matching (Coveney and Clayton 2018; Longobardi and colleagues 2020; Rodero and colleagues 2023) backs Gaussian-process emulators with implausibility waves as the baseline; switch to a neural estimator only if the count of fitted constants or summaries outgrows a Gaussian process.
