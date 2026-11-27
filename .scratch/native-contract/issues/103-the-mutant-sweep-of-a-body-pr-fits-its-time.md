@@ -45,9 +45,41 @@ Foundation tickets 13 (parked), 14 and 17, in `.scratch/foundation/issues/`, hol
 
 The rule each option keeps is the repo's: a test that once missed a mistake keeps seeing it.
 
-- [ ] A table of one full sweep's time by row, grouped by test file and by what each row's test spends its time on, beside the same sweep timed on each build worker, from a warm and from a fresh target, and a proof timed beside another on the same build worker. Beside each row's rebuild and test run, the table holds the costs a row's own run leaves out: each baseline, each distinct build the tests whose baselines were skipped need, counted once where tests share a target, as the tests of the rows `body-settling-time-apart-from-rule` and `held-packet-keeps-the-rhythms-breath-rate` share `-p ng-validate --test body_run`, the skipped baseline a row caught at build then runs, and the skipped baseline and second run of a row that passes its limit, run again with the limit that baseline measures. This box may restate the 5,400 s of the third box, with its reason
-- [ ] The pick, by that table and by two or three cheap prototypes where a fork remains
+- [x] A table of one full sweep's time by row, grouped by test file and by what each row's test spends its time on, beside the same sweep timed on each build worker, from a warm and from a fresh target, and a proof timed beside another on the same build worker. Beside each row's rebuild and test run, the table holds the costs a row's own run leaves out: each baseline, each distinct build the tests whose baselines were skipped need, counted once where tests share a target, as the tests of the rows `body-settling-time-apart-from-rule` and `held-packet-keeps-the-rhythms-breath-rate` share `-p ng-validate --test body_run`, the skipped baseline a row caught at build then runs, and the skipped baseline and second run of a row that passes its limit, run again with the limit that baseline measures. This box may restate the 5,400 s of the third box, with its reason
+- [x] The pick, by that table and by two or three cheap prototypes where a fork remains
 - [ ] The built change, done when a replay of the proof whose `40-mutants` took 10,585 s above, the same head, nightingale#224's `f03600a12b83e96a74115dec5d6b9687ae086caf`, on the same base, main `dfc9cf0501e9ba55ff8bef25df7feedfbc5b6e41`, as the proof script ran it, from a fresh target with nothing else running on the build workers it uses, replays every row in at most 5,400 s of wall time, with every row still replayed whenever its code or its test changes. It closes the gap above before any choice of rows by what changed is relied on. The 5,400 s stays a target, which the first box may restate
 - [ ] The nightly run's time limit and the proof scripts' walls restated from the new time
 
 **Non-goals:** which rows the gate keeps, and a row's limit ([native-contract 84](84-a-mutant-rows-budget-follows-its-tests-own-time.md)).
+
+## Comments
+
+### Full-sweep breakdown (`ffcd1a7a` nightly on `beelink`, warm target, 727 rows)
+
+Measured from `20261127T033246Z-ffcd1a7a3f72.log` (`verify: OK`, total `11,345 s`, `10-rust` `1,518 s`, `40-mutants` `9,688 s` = `first` `3 s` + `rest` `9,685 s`):
+
+- **Baselines (`519` runs = `2,298 s`, `23.7%` of `rest`):** tripped because `CLONE_BUILD_OUTPUTS` omitted `clinical-workspace/node_modules/` and `tools/generative-physiology/__pycache__/`. Top baseline targets: `ng-validate --test body_run` (`8` tests = `1,735 s` / `75.5%`), `--test arena` (`2` = `115 s`), `ng-validate --lib` (`52` = `68 s`), `--test window` (`2` = `38 s`), `--test arena_body` (`4` dev `29 s` + `1` rel `27 s`), `ng-contract --lib` (`131` = `23 s`).
+- **Mutant rows (`727` rows = `7,348 s`, `75.9%` of `rest`; `8` caught at build; `~39 s` harness overhead):**
+
+| Target group | Rows | Total (s) | Share | Dominant cost |
+|---|---:|---:|---:|---|
+| `ng-validate --test body_run` | 16 | 2,141 | 29.1% | 10 whole-body admission rows (`148-259 s`, `2,110 s` sum) |
+| `ng-contract --lib` | 182 | 2,106 | 28.7% | ~98% incremental rustc + link (`med 12 s`) |
+| `ng-contract --test scopes` | 51 | 386 | 5.3% | incremental rustc + link (`avg 7.6 s`) |
+| `ng-validate --lib` | 74 | 330 | 4.5% | incremental rebuild + day/window tests |
+| `ng-contract --test routes` | 13 | 115 | 1.6% | incremental rustc + link |
+| `ng-validate --test rhythm_certificate` | 27 | 114 | 1.6% | incremental rebuild + cert test |
+| `ng-validate --test arena` | 2 | 111 | 1.5% | `timed-run-knows-no-input` (`80 s`) + `day-waits` (`31 s`) |
+| `ng-validate --test window` | 6 | 101 | 1.4% | 3 window rows (`31 s` each) |
+| Other targets (all remaining crates/tests) | 356 | 1,944 | 26.5% | `ng-contract` tests/doctests + leaf crates (`1-15 s/row`) |
+
+By mutated crate: `ng-contract` `404` rows (`3,833 s`, `52.2%`), `ng-validate` `223` (`2,067 s`, `28.1%`), `ng-metabolism` `22` (`971 s`, `13.2%`), `ng-fluids` `5` (`229 s`, `3.1%`), all other 9 crates `73` (`248 s`, `3.4%`). Cross-worker reference (`ryzen` proof worker, fresh target, 706 rows on `d42f905e`, [foundation 17](../../foundation/issues/17-the-parallel-sweep-is-measured-on-ryzen.md)): serial `11,695 s`, 4 lanes at `420 s` `7,394-7,504 s` (6-8 retries), 4 lanes at `1,000 s` `5,075-5,128 s` (0 retries).
+
+### Prototypes (`beelink`, `5cf9fac2`, load 14-21) and landed pick
+
+1. **`[profile.test] debug = 0` in `Cargo.toml`:** 8 `ng-contract` rows (`K = 1`): cold `273.8 s -> 125.1 s` (-54.3%), warm `177.6 s -> 109.6 s` (`18.25 -> 12.00 s/row`, -34.2%), crate target `1,079 -> 481 MB` (`708 MB` full workspace vs `7.48 GB` at `debug = 2`).
+2. **Warm-clone baseline skip (`CLONE_BUILD_OUTPUTS` in `tools/gate/gate.py`):** adds `tools/{gate,bench}/__pycache__/`, `tools/bench/target/`, `tools/generative-physiology/{__pycache__,driver/target}/`, and `clinical-workspace/{node_modules,dist}/` so `10-rust` writes `tested.jsonl` cleanly and `40-mutants rest` skips covered baselines (saving `2,298 s` on warm/merge sweeps).
+3. **Exact `touched()` in `tools/mutate.py`:** closes the separate-file `src/day/tests.rs` gap (`0 -> 11` rows, covering all 10 separate `src/` test files), handles `--test <bin>` + shared helper subdirs, `--lib` module prefixes (fail-closed to `src/`), `--doc`, `--release`, and `Cargo.toml`, and cuts `body_run.rs` scope from `356 -> 16` rows (18 cases in `gate.py`'s `touched_cases`).
+4. **Seed-shape parallel lanes + per-row `budget` ([foundation 13](../../foundation/issues/13-mutant-rows-in-parallel.md) & [foundation 14](../../foundation/issues/14-slow-mutant-rows-run-long-tests.md) Box 6):** `K = min(4, max(1, cpus // 3))`, batched per-crate `--no-run`, bounded `CARGO_BUILD_JOBS`, ordered verdict flush + `--stop-on-fail`, `budget = 1000` on the 10 slow `body_run` rows (`SLOW_4` at `K = 4, bj = 4, debug = 0`: `443.9 s` wall for `1,398 s` row-sum, `3.15x` speedup), and `day-merge-drops-the-last-event` moved to `ng-contract` (`32 -> 17 s` row).
+
+Boxes 3 (historical `nightingale#224` replay on an idle proof worker) and 4 (restating `machine-state` nightly/proof walls) stay open.
