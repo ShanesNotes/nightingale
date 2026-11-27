@@ -241,6 +241,7 @@ struct FastGeneral {
     unknown_end: u32,
     other_start: u32,
     other_end: u32,
+    program: u16,
     output: u8,
     hoist_finite: bool,
 }
@@ -271,7 +272,11 @@ impl FastInstance {
 enum FastTarget {
     ColumnUnit(u32),
     ColumnScaled(ColumnId),
-    Row(u32, bool),
+    Row {
+        index: u32,
+        rectified: bool,
+        algebraic: bool,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -522,6 +527,7 @@ impl Tape {
         if self.longest > STACK_SLOTS
             || self.parameters_needed > usize::from(u16::MAX) + 1
             || self.unknowns_needed > usize::from(u16::MAX) + 1
+            || layout.programs.len() > usize::from(u16::MAX) + 1
         {
             return None;
         }
@@ -870,6 +876,7 @@ impl Tape {
                     unknown_end,
                     other_start: other_range.start,
                     other_end: other_range.end,
+                    program: pid as u16,
                     output,
                     hoist_finite,
                 });
@@ -885,13 +892,17 @@ impl Tape {
         for instance in &layout.instances {
             let target = match instance.target {
                 Target::Column(col) => {
-                    if layout.columns[col.index()].reference_count == NonZeroU32::MIN {
+                    if !instance.rectified && layout.columns[col.index()].reference_count == NonZeroU32::MIN {
                         FastTarget::ColumnUnit(col.index() as u32)
                     } else {
                         FastTarget::ColumnScaled(col)
                     }
                 }
-                Target::Row(row) => FastTarget::Row(row.index() as u32, instance.rectified),
+                Target::Row(row) => FastTarget::Row {
+                    index: row.index() as u32,
+                    rectified: instance.rectified,
+                    algebraic: matches!(layout.rows[row.index()].kind, RowKind::Algebraic(_)),
+                },
             };
             targets.push(target);
         }
@@ -2186,7 +2197,11 @@ impl CompiledBody {
         match target {
             FastTarget::ColumnUnit(col) => columns[col as usize] = value,
             FastTarget::ColumnScaled(col) => self.write_scaled_column(columns, col, value),
-            FastTarget::Row(row, rectified) => {
+            FastTarget::Row {
+                index: row,
+                rectified,
+                ..
+            } => {
                 rows[row as usize] += if rectified && value <= 0.0 { 0.0 } else { value };
             }
         }
@@ -2366,7 +2381,7 @@ impl CompiledBody {
                                 self.write_scaled_column(columns, col, value);
                                 col.index()
                             }
-                            FastTarget::Row(_, _) => unreachable!(),
+                            FastTarget::Row { .. } => unreachable!(),
                         };
                         let rate = columns[col];
                         for &ColumnTerm { row, coefficient, .. } in
@@ -2837,12 +2852,262 @@ impl CompiledBody {
                     }
                     FastOp::Single(at) => {
                         let at = at as usize;
-                        if !fast.instances[at].holds(inputs.modes) {
+                        let inst = fast.instances[at];
+                        if !inst.holds(inputs.modes) {
                             continue;
                         }
-                        self.slope_single_fast(fast, at, inputs, partial_volume, &mut scratch, |swept| {
-                            scatter(swept, &mut values)
-                        })?;
+                        match inst.kind {
+                            FastKind::Zero | FastKind::ReadParameter(_) => {}
+                            FastKind::ReadUnknown(u) => match fast.targets[at] {
+                                FastTarget::Row {
+                                    rectified, algebraic, ..
+                                } => {
+                                    let value = inputs.unknowns[usize::from(u)];
+                                    let slope = if rectified && value < 0.0 { 0.0 } else { 1.0 };
+                                    let sign = if algebraic { 1.0 } else { -1.0 };
+                                    values[self.tape.entries(at)[0] as usize] += sign * slope;
+                                }
+                                FastTarget::ColumnUnit(col) => {
+                                    let terms = &self.tape.column_terms
+                                        [slice_range(&fast.col_term_ranges[col as usize])];
+                                    let entries = self.tape.entries(at);
+                                    for (&ColumnTerm { coefficient, .. }, &entry) in terms.iter().zip(entries)
+                                    {
+                                        values[entry as usize] -= coefficient;
+                                    }
+                                }
+                                FastTarget::ColumnScaled(_) => {
+                                    self.slope_single_fast(
+                                        fast,
+                                        at,
+                                        inputs,
+                                        partial_volume,
+                                        &mut scratch,
+                                        |swept| scatter(swept, &mut values),
+                                    )?;
+                                }
+                            },
+                            FastKind::General(general_at) => {
+                                let g = fast.generals[general_at as usize];
+                                let unk = &fast.unknowns[g.unknown_start as usize..g.unknown_end as usize];
+                                if unk.is_empty() {
+                                    self.eval_single_fast(
+                                        fast,
+                                        at,
+                                        inst,
+                                        inputs,
+                                        partial_volume,
+                                        &mut scratch.values,
+                                    )?;
+                                    continue;
+                                }
+                                let arithmetic =
+                                    self.tape.arithmetic(&self.tape.programs[usize::from(g.program)]);
+                                for &(slot, index) in
+                                    &fast.parameters[g.param_start as usize..g.param_end as usize]
+                                {
+                                    scratch.values[usize::from(slot)] = inputs.parameters[usize::from(index)];
+                                }
+                                for &(slot, index) in unk {
+                                    scratch.values[usize::from(slot)] = inputs.unknowns[usize::from(index)];
+                                }
+                                let mut read_clean = true;
+                                if g.other_start != g.other_end {
+                                    for &(slot, bound) in
+                                        &self.tape.others[g.other_start as usize..g.other_end as usize]
+                                    {
+                                        match read(&bound, inputs) {
+                                            Some(v) if v.is_finite() => scratch.values[slot as usize] = v,
+                                            _ => read_clean = false,
+                                        }
+                                    }
+                                }
+                                let value = if read_clean {
+                                    if g.hoist_finite {
+                                        if forward_stack_hoisted(
+                                            arithmetic.steps,
+                                            partial_volume,
+                                            &mut scratch.values,
+                                        )
+                                        .is_ok()
+                                        {
+                                            let out =
+                                                scratch.values[usize::from((arithmetic.length - 1) as u8)];
+                                            if is_finite_fp(out) {
+                                                out
+                                            } else {
+                                                forward(
+                                                    arithmetic,
+                                                    self.tape.instance(at),
+                                                    inputs,
+                                                    partial_volume,
+                                                    &mut scratch.values,
+                                                )
+                                                .map_err(|domain| self.undefined(at, inputs, domain))?
+                                            }
+                                        } else {
+                                            forward(
+                                                arithmetic,
+                                                self.tape.instance(at),
+                                                inputs,
+                                                partial_volume,
+                                                &mut scratch.values,
+                                            )
+                                            .map_err(|domain| self.undefined(at, inputs, domain))?
+                                        }
+                                    } else {
+                                        for &(slot, instr) in arithmetic.steps {
+                                            let val = apply(instr, &scratch.values, partial_volume)
+                                                .map_err(|domain| self.undefined(at, inputs, domain))?;
+                                            scratch.values[usize::from(slot as u8)] = val;
+                                        }
+                                        scratch.values[usize::from((arithmetic.length - 1) as u8)]
+                                    }
+                                } else {
+                                    forward(
+                                        arithmetic,
+                                        self.tape.instance(at),
+                                        inputs,
+                                        partial_volume,
+                                        &mut scratch.values,
+                                    )
+                                    .map_err(|domain| self.undefined(at, inputs, domain))?
+                                };
+                                match fast.targets[at] {
+                                    FastTarget::Row {
+                                        rectified, algebraic, ..
+                                    } => {
+                                        let sign = if algebraic { 1.0 } else { -1.0 };
+                                        let entries = self.tape.entries(at);
+                                        if rectified && value < 0.0 {
+                                            let zero = sign * 0.0;
+                                            for &entry in entries {
+                                                values[entry as usize] += zero;
+                                            }
+                                        } else {
+                                            backward_stack(
+                                                arithmetic,
+                                                &scratch.values,
+                                                partial_volume,
+                                                &mut scratch.slopes,
+                                            );
+                                            let mut finite = true;
+                                            for &(slot, _) in unk {
+                                                finite &= is_finite_fp(scratch.slopes[usize::from(slot)]);
+                                            }
+                                            if finite {
+                                                for (&(slot, _), &entry) in unk.iter().zip(entries) {
+                                                    values[entry as usize] +=
+                                                        sign * scratch.slopes[usize::from(slot)];
+                                                }
+                                            } else {
+                                                scatter(
+                                                    &Swept {
+                                                        at,
+                                                        instance: &self.layout.instances[at],
+                                                        reads: self.tape.instance(at),
+                                                        slopes: &scratch.slopes,
+                                                        flat: false,
+                                                    },
+                                                    &mut values,
+                                                )?;
+                                            }
+                                        }
+                                    }
+                                    FastTarget::ColumnUnit(col) => {
+                                        backward_stack(
+                                            arithmetic,
+                                            &scratch.values,
+                                            partial_volume,
+                                            &mut scratch.slopes,
+                                        );
+                                        let mut finite = true;
+                                        for &(slot, _) in unk {
+                                            finite &= is_finite_fp(scratch.slopes[usize::from(slot)]);
+                                        }
+                                        if finite {
+                                            let terms = &self.tape.column_terms
+                                                [slice_range(&fast.col_term_ranges[col as usize])];
+                                            let entries = self.tape.entries(at);
+                                            match terms {
+                                                [a, b] => {
+                                                    let (ca, cb) = (a.coefficient, b.coefficient);
+                                                    for (&(slot, _), &[e0, e1]) in
+                                                        unk.iter().zip(entries.as_chunks::<2>().0)
+                                                    {
+                                                        let slope = scratch.slopes[usize::from(slot)];
+                                                        values[e0 as usize] -= ca * slope;
+                                                        values[e1 as usize] -= cb * slope;
+                                                    }
+                                                }
+                                                [a] => {
+                                                    let ca = a.coefficient;
+                                                    for (&(slot, _), &entry) in unk.iter().zip(entries) {
+                                                        values[entry as usize] -=
+                                                            ca * scratch.slopes[usize::from(slot)];
+                                                    }
+                                                }
+                                                _ => {
+                                                    let mut e = entries.iter();
+                                                    for &(slot, _) in unk {
+                                                        let slope = scratch.slopes[usize::from(slot)];
+                                                        for &ColumnTerm { coefficient, .. } in terms {
+                                                            let entry = *e
+                                                                .next()
+                                                                .expect("an entry per unknown read and term");
+                                                            values[entry as usize] -= coefficient * slope;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            scatter(
+                                                &Swept {
+                                                    at,
+                                                    instance: &self.layout.instances[at],
+                                                    reads: self.tape.instance(at),
+                                                    slopes: &scratch.slopes,
+                                                    flat: false,
+                                                },
+                                                &mut values,
+                                            )?;
+                                        }
+                                    }
+                                    FastTarget::ColumnScaled(_) => {
+                                        let instance = &self.layout.instances[at];
+                                        let flat = positive_part(instance, value) != value;
+                                        if !flat {
+                                            backward_stack(
+                                                arithmetic,
+                                                &scratch.values,
+                                                partial_volume,
+                                                &mut scratch.slopes,
+                                            );
+                                        }
+                                        scatter(
+                                            &Swept {
+                                                at,
+                                                instance,
+                                                reads: self.tape.instance(at),
+                                                slopes: &scratch.slopes,
+                                                flat,
+                                            },
+                                            &mut values,
+                                        )?;
+                                    }
+                                }
+                            }
+                            FastKind::Upwind5(_) => {
+                                self.slope_single_fast(
+                                    fast,
+                                    at,
+                                    inputs,
+                                    partial_volume,
+                                    &mut scratch,
+                                    |swept| scatter(swept, &mut values),
+                                )?;
+                            }
+                        }
                     }
                 }
             }
@@ -3009,6 +3274,8 @@ impl CompiledBody {
             for &op in &fast.ops {
                 match op {
                     FastOp::Batch(batch_at) => {
+                        const SAFE_BOUND: f64 = 1e100;
+                        const SAFE_WATER: f64 = 1e-100;
                         let batch = fast.batches[batch_at as usize];
                         let solutes =
                             &fast.batch_solutes[batch.solutes_start as usize..batch.solutes_end as usize];
@@ -3022,11 +3289,13 @@ impl CompiledBody {
                                     OperatorDomain::Divisor,
                                 ));
                             }
-                            let mut check = 0.0;
-                            for s in solutes {
-                                check += flow * (unknowns[usize::from(s.from_amt)] / water);
+                            let mut safe = water >= SAFE_WATER && flow <= SAFE_BOUND;
+                            if safe {
+                                for s in solutes {
+                                    safe &= unknowns[usize::from(s.from_amt)].abs() <= SAFE_BOUND;
+                                }
                             }
-                            if !is_finite_fp(check) {
+                            if !safe {
                                 for s in solutes {
                                     let rate = flow * (unknowns[usize::from(s.from_amt)] / water);
                                     if !rate.is_finite() {
@@ -3047,11 +3316,13 @@ impl CompiledBody {
                                     OperatorDomain::Divisor,
                                 ));
                             }
-                            let mut check = 0.0;
-                            for s in solutes {
-                                check += flow * (unknowns[usize::from(s.to_amt)] / water);
+                            let mut safe = water >= SAFE_WATER && -flow <= SAFE_BOUND;
+                            if safe {
+                                for s in solutes {
+                                    safe &= unknowns[usize::from(s.to_amt)].abs() <= SAFE_BOUND;
+                                }
                             }
-                            if !is_finite_fp(check) {
+                            if !safe {
                                 for s in solutes {
                                     let rate = flow * (unknowns[usize::from(s.to_amt)] / water);
                                     if !rate.is_finite() {
@@ -3072,7 +3343,11 @@ impl CompiledBody {
                             continue;
                         }
                         let algebraic_slot = match fast.targets[idx] {
-                            FastTarget::Row(row, rectified) => (row as usize)
+                            FastTarget::Row {
+                                index: row,
+                                rectified,
+                                ..
+                            } => (row as usize)
                                 .checked_sub(first_algebraic)
                                 .map(|slot| (slot, rectified)),
                             FastTarget::ColumnUnit(_) | FastTarget::ColumnScaled(_) => None,
