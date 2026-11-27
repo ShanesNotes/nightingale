@@ -44,7 +44,7 @@ The plan's stop condition was met: no shape halves the sweep's wall time on the 
 
 [Ticket 17](17-the-parallel-sweep-is-measured-on-ryzen.md) ran the seed shape on the proof worker over all 706 rows of one head, in the shape of a proof's sweep. Its Answer holds the figures.
 
-- Lanes alone did not halve the sweep at three or four lanes. Four lanes took 7,504 and 7,394 s and three lanes 8,038 s, against a half of 5,847 s, and six to eight rows a sweep went over 420 s and ran again after their skipped baseline.
+- Lanes alone did not halve the sweep at three or four lanes. Four lanes took 7,504 and 7,394 s and three lanes 8,038 s, against the cutoff of 5,847 s. Each 420 s sweep logged six to eight timeouts at that limit. Every affected row in a completed sweep ran again. In the stopped sweep, one row's baseline failed before the retry.
 - Four lanes did halve it, in 5,075 and 5,128 s, when every row had a budget of 1,000 s in place of 420 s. No row ran a second time.
 - Every sweep that finished gave all 706 rows the serial verdict, by name.
 
@@ -53,7 +53,7 @@ So this ticket's PR builds the lanes together with [ticket 14](14-slow-mutant-ro
 ## Hazards the plan found
 
 - `timed-run-knows-no-input` took 149 s alone and 296 to 306 s at K=6 on the beelink, and 280 s serial on ryzen beside a bench. At K=3 on ryzen it would pass 420 s and read UNCLEAR. It fails closed, but load alone would turn proofs red. Measure this row on ryzen at K=2 and 3 beside a bench before setting K.
-- On ryzen the halving is shown only with a 1,000 s budget for every row, and only at one head before nightingale#238.
+- On the proof worker, four lanes met the cutoff in both runs with the 1,000 s budget at `d42f905e`.
 - A Cargo config inside a lane's directory is read by that lane's cargo. The sweep removes the lanes at its start, but the seam check and the writer must name the place.
-- The copy needs a filesystem that shares blocks (btrfs or XFS). On another it copies in full, about 3 GB a lane. Ryzen's is btrfs, and ticket 17 showed a copied target sharing its blocks.
+- The copy needs a filesystem that shares blocks (btrfs or XFS). On another it copies in full, about 3 GB a lane. The proof worker uses btrfs, and ticket 17 showed that the copied target shared blocks.
 - A row's printed seconds would include the other lanes' load, so a row's time would no longer compare across proofs.
