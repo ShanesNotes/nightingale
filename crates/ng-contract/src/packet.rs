@@ -794,7 +794,7 @@ impl CompiledBody {
         let unbacked = |code: &[Op]| {
             let numbers = numbered(code);
             let mut literal = vec![false; code.len()];
-            code.iter().enumerate().any(|(at, op)| {
+            code.iter().enumerate().position(|(at, op)| {
                 literal[at] = match op {
                     Op::Zero(_) => true,
                     Op::Input(_) => false,
@@ -807,9 +807,10 @@ impl CompiledBody {
                 }
             })
         };
-        (self.layout.programs.iter())
-            .find(|program| unbacked(&program.code.ops))
-            .map(|program| program.law)
+        (self.layout.programs.iter()).find_map(|program| {
+            let op = unbacked(&program.code.ops)?;
+            Some(program.code.origin(op).unwrap_or(program.law))
+        })
     }
     pub(crate) fn unheld_period(&self, values: &[f64]) -> Option<ParameterKey> {
         (self.layout.forcings.iter())

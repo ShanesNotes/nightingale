@@ -875,6 +875,11 @@ impl KernelData {
             ..self.clone()
         })
     }
+    pub(crate) fn has_placed_term(&self, has_site: impl Fn(Sites) -> bool) -> bool {
+        self.placing
+            .as_ref()
+            .is_some_and(|placing| placing.any_inside(&has_site))
+    }
     /// `value`, negated, so one body row's laws add to `row - sum`.
     fn summing(mut self) -> Self {
         let value = self.code.len() - 1;

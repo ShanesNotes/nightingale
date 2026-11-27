@@ -1,0 +1,39 @@
+[[mutant]]
+name = "unscaled-input-compiles-in-variant"
+path = "crates/ng-contract/src/compile.rs"
+old = '''    reads.contains(&false) && !reads.contains(&true)'''
+new = '''    false && reads.contains(&false) && !reads.contains(&true)'''
+test = "-p ng-contract --lib evaluate::terms::a_read_main_refuses_by_hand_is_refused_through_a_term"
+
+[[mutant]]
+name = "unemitted-field-names-the-term"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                checked(
+                    field,
+                    row.ok_or(CompileDefect::UnemittedField { law: reader, field })?,
+                )?
+            }
+            Source::TissueHeat(store) => {'''
+new = '''                checked(
+                    field,
+                    row.ok_or(CompileDefect::UnemittedField { law, field })?,
+                )?
+            }
+            Source::TissueHeat(store) => {'''
+test = "-p ng-contract --lib evaluate::terms::a_terms_unused_invalid_read_is_still_refused"
+
+[[mutant]]
+name = "unbacked-constant-names-the-term"
+path = "crates/ng-contract/src/packet.rs"
+old = '''            Some(program.code.origin(op).unwrap_or(program.law))'''
+new = '''            Some(program.law)'''
+test = "-p ng-contract --lib evaluate::terms::forms::a_terms_used_unbacked_constant_names_the_term"
+
+[[mutant]]
+name = "unread-forcing-defers-with-empty-term-set"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                if (fragment.laws.iter())
+                    .any(|law| law.kernel.has_placed_term(|set| !anatomy.in_set(set).is_empty()))
+                {'''
+new = '''                if (fragment.laws.iter()).any(|law| law.kernel.placing.is_some()) {'''
+test = "-p ng-contract --lib evaluate::terms::forms::an_unread_forcing_beside_a_second_defect_names_the_forcing_when_no_site_is_in_the_terms_set"

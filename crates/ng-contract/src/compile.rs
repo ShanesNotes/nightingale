@@ -45,7 +45,7 @@ pub(crate) fn compile(
     let unissued = FragmentData::empty(Boundary::CARD);
     let owed = obligations(&fragments, &schema, &held, &unissued)?;
     check_guards(&fragments)?;
-    let unread = check_chance(&fragments)?;
+    let unread = check_chance(&fragments, &schema.anatomy)?;
     check_volume(&schema, &owed, &fragments)?;
 
     let reaches = Reaches::of(&schema, &fragments);
@@ -970,9 +970,9 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     Ok(())
 }
 
-/// The forcings no law's own program reads, in a fragment where a law adds a term: a variant may read one, and
-/// `place` answers once the variants are written.
-fn check_chance(fragments: &[FragmentData]) -> Result<Vec<LawName>, CompileDefect> {
+/// The forcings no law's own program reads, in a fragment where a law adds a term whose set has a site in the map:
+/// a variant may read one, and `place` answers once the variants are written.
+fn check_chance(fragments: &[FragmentData], anatomy: &Anatomy) -> Result<Vec<LawName>, CompileDefect> {
     let mut unread = Vec::new();
     for fragment in fragments {
         let named = |local| LawName {
@@ -1019,7 +1019,9 @@ fn check_chance(fragments: &[FragmentData]) -> Result<Vec<LawName>, CompileDefec
         for &forcing in &forcings {
             let read = Op::Input(Input::Forcing(forcing));
             if !(fragment.laws.iter()).any(|law| law.kernel.code.contains(&read)) {
-                if (fragment.laws.iter()).any(|law| law.kernel.placing.is_some()) {
+                if (fragment.laws.iter())
+                    .any(|law| law.kernel.has_placed_term(|set| !anatomy.in_set(set).is_empty()))
+                {
                     unread.push(named(forcing));
                     continue;
                 }
@@ -1854,7 +1856,7 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
                     _ => None,
                 })
                 .collect();
-            if reads.contains(&false) && !reads.contains(&true) {
+            if unscaled(&reads) {
                 return Err(CompileDefect::UnscaledInput { law: law.name });
             }
             let contexts: Vec<Context> = targets.iter().map(|&(context, _)| context).collect();
@@ -1877,7 +1879,7 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
                             _ => None,
                         });
                         let reads: Vec<bool> = inputs.filter_map(read).collect();
-                        if !reads.contains(&true) && reads.contains(&false) {
+                        if unscaled(&reads) {
                             return Err(CompileDefect::UnscaledInput { law: law.name });
                         }
                         let volume = variant.code.iter().any(|op| matches!(op, Op::Volume(_)));
@@ -1936,7 +1938,24 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
         program.id = ProgramId::at(first + index);
         placement.programs.push(program);
     }
+    for placed in &placement.instances {
+        let expected = placement.programs[placed.program.index()]
+            .code
+            .ops
+            .iter()
+            .filter(|op| matches!(op, Op::Input(_)))
+            .count();
+        assert_eq!(
+            placed.addresses.len(),
+            expected,
+            "placed instance addresses match its program's inputs"
+        );
+    }
     Ok(placement)
+}
+
+fn unscaled(reads: &[bool]) -> bool {
+    reads.contains(&false) && !reads.contains(&true)
 }
 
 const VARIANT: usize = usize::MAX / 2;
@@ -2728,7 +2747,10 @@ fn addresses(
                     TISSUE_TEMPERATURE if store_temperature(field) => rows.exactly(field, at),
                     _ => rows.defined(field, at),
                 };
-                checked(field, row.ok_or(CompileDefect::UnemittedField { law, field })?)?
+                checked(
+                    field,
+                    row.ok_or(CompileDefect::UnemittedField { law: reader, field })?,
+                )?
             }
             Source::TissueHeat(store) => {
                 let site = match (store, context) {
@@ -2751,7 +2773,10 @@ fn addresses(
                     store_read(schema, read, context, landed).ok_or(CompileDefect::NoSuchRead { law })?;
                 let (field, at) = temperature_at(schema, store);
                 let row = rows.exactly(field, at);
-                checked(field, row.ok_or(CompileDefect::UnemittedField { law, field })?)?
+                checked(
+                    field,
+                    row.ok_or(CompileDefect::UnemittedField { law: reader, field })?,
+                )?
             }
             Source::Flow(family) => {
                 let flow = LawName {

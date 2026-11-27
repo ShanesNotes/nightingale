@@ -2446,8 +2446,8 @@ test = "-p ng-contract --lib boundary::tests::a_clock_whose_minute_turns_between
 [[mutant]]
 name = "unscaled-input-compiles"
 path = "crates/ng-contract/src/compile.rs"
-old = '''if reads.contains(&false) && !reads.contains(&true) {'''
-new = '''if false && reads.contains(&false) && !reads.contains(&true) {'''
+old = '''    reads.contains(&false) && !reads.contains(&true)'''
+new = '''    false && reads.contains(&false) && !reads.contains(&true)'''
 test = "-p ng-contract --test day_inputs compile_refuses_a_law_that_sets_its_row_to_an_input_and_takes_one_that_scales_a_parameter_by_it"
 
 [[mutant]]
