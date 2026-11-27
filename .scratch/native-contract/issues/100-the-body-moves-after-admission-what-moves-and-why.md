@@ -313,3 +313,7 @@ The screen removes a fitted slope, so it cannot show that an item has settled. I
 Admission over whole breaths is not scheduled: the plasma's drift has a fix by a law's form, and the gases' shortfall may have one by a law or a packet value, which body ticket 38's box owns. It reopens on a pool or flow whose mean under breathing stands off its admitted value and that no law's form or packet value brings back. If it reopens, it is a design round of its own.
 
 This ticket stays open for the box on the admitted beat, and it still blocks body ticket 17.
+
+## Comments
+
+Body ticket 30's section [What the reference showed](../../body/issues/30-step-plans-on-the-whole-body.md#what-the-reference-showed) now holds three awake passes of the contract's reference integrator over part 5's five windows, for each salt, with part 5's awake passes a1 to a3 beside them window by window. The breath-held condition has no reference pass there, so part 5's held rates have none to be compared with.
