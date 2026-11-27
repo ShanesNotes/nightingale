@@ -491,7 +491,7 @@ The water share a gas holds where its water vapour pressure is its limit at body
 _Avoid_: saturation, for water vapour
 
 **Lining**:
-The transfer of water from a lung bed's interstitium into its gas. At rung 0 it reads parameters only: the alveolar ventilation the breath is fitted to, times the saturated vapour share less the room's water share, over the vapour volume.
+The transfer of water from a lung bed's interstitium into its gas. At rung 0 it reads no state, only parameters and the room's humidity and air temperature: the alveolar ventilation the breath is fitted to, times the saturated vapour share less the room's water share, over the vapour volume.
 
 **Shunt**:
 A vascular edge from the pulmonary artery to the pulmonary vein beside the pulmonary bed, so a share of the blood reaches the left heart with no alveolar exchange.
