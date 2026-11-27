@@ -1,5 +1,5 @@
 use crate::conservation::AdmissionTotal;
-use crate::elimination::{Elimination, Factors};
+use crate::elimination::{Elimination, EliminationMetrics, Factors};
 use crate::evaluate::Tape;
 use crate::identity::{Canonical, Seal};
 use crate::law::{Op, Validity};
@@ -158,9 +158,46 @@ impl CompiledBody {
     pub fn factor(&self, jacobian: &Jacobian) -> Result<Factors<'_>, usize> {
         self.elimination.factor(&jacobian.values)
     }
+    /// Stored pattern and operation counts of this body's compiled elimination plan.
+    pub fn elimination_metrics(&self) -> EliminationMetrics {
+        self.elimination.metrics()
+    }
+    /// Re-plans elimination with `extra` structural `(row, unknown)` reads added to this body's sparsity, keeping the
+    /// same pivots. Returns `None` if any id is out of bounds.
+    pub fn elimination_metrics_with_reads(&self, extra: &[(RowId, UnknownId)]) -> Option<EliminationMetrics> {
+        let sparsity = &self.layout.sparsity;
+        let size = sparsity.offsets.len() - 1;
+        if extra
+            .iter()
+            .any(|&(row, unknown)| row.index() >= size || unknown.index() >= size)
+        {
+            return None;
+        }
+        let mut offsets = Vec::with_capacity(size + 1);
+        let mut unknowns = Vec::with_capacity(sparsity.unknowns.len() + extra.len());
+        let mut line = Vec::new();
+        offsets.push(0);
+        for row in 0..size {
+            line.clear();
+            line.extend_from_slice(&sparsity.unknowns[sparsity.offsets[row]..sparsity.offsets[row + 1]]);
+            for &(r, u) in extra {
+                if r.index() == row {
+                    line.push(u);
+                }
+            }
+            line.sort_unstable_by_key(|u| u.index());
+            line.dedup_by_key(|u| u.index());
+            unknowns.extend_from_slice(&line);
+            offsets.push(unknowns.len());
+        }
+        Some(Elimination::plan(&offsets, &unknowns, &self.pivots()).metrics())
+    }
     /// The row each unknown's pivot takes in `factor`: its own, or across a closed row and the store that holds it.
     pub(crate) fn pivots(&self) -> Vec<RowId> {
         self.elimination.solved_by()
+    }
+    pub(crate) fn specialized_masks(&self) -> impl Iterator<Item = (&[u32], &[u32])> + '_ {
+        self.elimination.specialized_masks()
     }
     /// The cards held, in card order.
     pub fn held(&self) -> impl Iterator<Item = &'static str> + '_ {

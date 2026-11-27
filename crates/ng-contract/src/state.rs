@@ -1,6 +1,6 @@
 use crate::body::RowKind;
-use crate::identity::{Canonical, Seal};
-use crate::{Compensated, CompiledBody, Digest, Interval, RowId, SimTime};
+use crate::identity::stream::{self, Seal, Sink};
+use crate::{Compensated, CompiledBody, Digest, Interval, RecordHash, RowId, SimTime};
 
 /// A full state in one compiled layout. `fired` says this head ended at a firing, so a run resumed here
 /// issues the ticket the running one would. No public constructor: admission makes the first, `verify`
@@ -66,11 +66,11 @@ impl Candidate {
             algebraic,
             ..
         } = self;
-        let coordinates = memory
-            .iter()
-            .chain(algebraic)
-            .map(|&value| Compensated::exact(value));
-        amounts.iter().copied().chain(coordinates).collect()
+        let mut out = Vec::with_capacity(amounts.len() + memory.len() + algebraic.len());
+        out.extend_from_slice(amounts);
+        out.extend(memory.iter().map(|&value| Compensated::exact(value)));
+        out.extend(algebraic.iter().map(|&value| Compensated::exact(value)));
+        out
     }
     pub(crate) fn coordinates(&self) -> Vec<f64> {
         let Self {
@@ -79,15 +79,31 @@ impl Candidate {
             algebraic,
             ..
         } = self;
-        (amounts.iter().map(|amount| amount.rounded()))
-            .chain(memory.iter().copied())
-            .chain(algebraic.iter().copied())
-            .collect()
+        let mut out = Vec::with_capacity(amounts.len() + memory.len() + algebraic.len());
+        out.extend(amounts.iter().map(|amount| amount.rounded()));
+        out.extend_from_slice(memory);
+        out.extend_from_slice(algebraic);
+        out
     }
     pub fn digest(&self) -> Digest {
-        self.canonical().digest()
+        self.record_digest(RecordHash::Sha256)
     }
-    pub(crate) fn canonical(&self) -> Canonical {
+    pub(crate) fn record_digest(&self, hash: RecordHash) -> Digest {
+        stream::digest("ng-contract state 1", hash, self)
+    }
+    pub fn modes_digest(&self) -> Digest {
+        stream::digest("ng-contract modes 1", RecordHash::Sha256, self.modes.as_slice())
+    }
+    pub fn streams_digest(&self) -> Digest {
+        stream::digest(
+            "ng-contract streams 1",
+            RecordHash::Sha256,
+            self.ordinals.as_slice(),
+        )
+    }
+}
+impl Seal for Candidate {
+    fn seal<S: Sink>(&self, out: &mut S) {
         let Self {
             amounts,
             memory,
@@ -96,24 +112,12 @@ impl Candidate {
             ordinals,
             fired,
         } = self;
-        let mut out = Canonical::new("ng-contract state 1");
-        amounts.seal(&mut out);
-        memory.seal(&mut out);
-        algebraic.seal(&mut out);
-        modes.seal(&mut out);
-        ordinals.seal(&mut out);
+        amounts.seal(out);
+        memory.seal(out);
+        algebraic.seal(out);
+        modes.seal(out);
+        ordinals.seal(out);
         out.number(u64::from(*fired));
-        out
-    }
-    pub fn modes_digest(&self) -> Digest {
-        let mut out = Canonical::new("ng-contract modes 1");
-        self.modes.seal(&mut out);
-        out.digest()
-    }
-    pub fn streams_digest(&self) -> Digest {
-        let mut out = Canonical::new("ng-contract streams 1");
-        self.ordinals.seal(&mut out);
-        out.digest()
     }
 }
 
@@ -150,16 +154,19 @@ impl DenseSegment {
         ))
     }
     pub fn digest(&self) -> Digest {
-        self.canonical().digest()
+        self.record_digest(RecordHash::Sha256)
     }
-    pub(crate) fn canonical(&self) -> Canonical {
+    pub(crate) fn record_digest(&self, hash: RecordHash) -> Digest {
+        stream::digest("ng-contract dense segment 1", hash, self)
+    }
+}
+impl Seal for DenseSegment {
+    fn seal<S: Sink>(&self, out: &mut S) {
         let Self { interval, start, end } = self;
-        let mut out = Canonical::new("ng-contract dense segment 1");
         let ends = interval.map(|interval| (interval.start(), interval.end()));
-        ends.seal(&mut out);
-        start.seal(&mut out);
-        end.seal(&mut out);
-        out
+        ends.seal(out);
+        start.seal(out);
+        end.seal(out);
     }
 }
 
@@ -214,19 +221,22 @@ impl MethodHistory {
         &self.counters
     }
     pub fn digest(&self) -> Digest {
-        self.canonical().digest()
+        self.record_digest(RecordHash::Sha256)
     }
-    pub(crate) fn canonical(&self) -> Canonical {
+    pub(crate) fn record_digest(&self, hash: RecordHash) -> Digest {
+        stream::digest("ng-contract method history 1", hash, self)
+    }
+}
+impl Seal for MethodHistory {
+    fn seal<S: Sink>(&self, out: &mut S) {
         let Self {
             schema,
             started_at,
             counters,
         } = self;
-        let mut out = Canonical::new("ng-contract method history 1");
-        schema.seal(&mut out);
-        started_at.seal(&mut out);
-        counters.seal(&mut out);
-        out
+        schema.seal(out);
+        started_at.seal(out);
+        counters.seal(out);
     }
 }
 

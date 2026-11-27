@@ -7,7 +7,7 @@ use ng_validate::*;
 const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
 const SLICES_LONGEST_STEP: u64 = 10 * MILLISECOND;
-const PAST_THE_SLICES_LONGEST_STEP: u64 = 16 * SECOND;
+const PAST_THE_SLICES_LONGEST_STEP: u64 = 500 * MILLISECOND;
 const UNDER_THE_SLICES_LONGEST_STEP: u64 = SLICES_LONGEST_STEP / 2;
 const A_DAY_EARLY: u64 = 86_400 * SECOND;
 
@@ -77,7 +77,7 @@ fn holds_every_part_apart_and_of_one_run(score: &ArenaScore) {
 
     let accuracy = score.accuracy().expect("within the arena's policy");
     assert_eq!(accuracy.resolution(), evidence.resolution().digest());
-    assert_eq!((accuracy.worst().len(), accuracy.windows().len()), (6, 1));
+    assert_eq!((accuracy.worst().len(), accuracy.windows().len()), (7, 1));
 
     let replay = score.replay().expect("every replay gate");
     assert_eq!(replay.run(), evidence.run());

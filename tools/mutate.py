@@ -3,9 +3,10 @@
     python3 -I tools/mutate.py TABLE [--rev REV] [--only NAME ...] [--since REV] [--budget SECONDS] [--check]
                                      [--tested RECORD]
 
-Python 3.11 stdlib only. TABLE is TOML with one [[mutant]] per rule, aimed at the test that holds it. `old` must match
-exactly once. `test` is what follows `cargo test`, and a row's own `test` replaces the table's. It may not pass
---manifest-path, --target-dir or --config.
+Python 3.11 stdlib only. TABLE is either a TOML file or a directory of `*.toml` files read in sorted filename order,
+with one [[mutant]] per rule, aimed at the test that holds it. `old` must match exactly once. `test` is what follows
+`cargo test`, and a row's own `test` replaces its file's top-level `test`. It may not pass --manifest-path,
+--target-dir or --config.
 
     test = "--release -p ng-contract --test map_reads"
 
@@ -38,12 +39,15 @@ tools/verify's 40-mutants step runs this script through `gate.py mutants`. Befor
 adds or edits, or whose path it changes, and after 10-rust the rest. It stops each sweep at the first row that is not
 CAUGHT, so a red run reports only its first failure. A hand run reports every row.
 
---tested names the record 10-rust writes of the test calls it passed. The rest part of a merge run passes it, and the
-sweep then skips each baseline that a passed call covers on this commit with these build settings, and builds its test
-instead, so a tree that does not build still stops the sweep. A call covers only when it ran every test, or every test
-with the ignored ones. A `--release`, `--doc` or other flagged test, a crate 10-rust did not test, and a record from
-another commit or other settings run the baseline. A full run and a hand run run every baseline. The record counts
-only while the checkout holds no changed or untracked file and no tracked file marked assume-unchanged or skip-worktree.
+--tested names the record 10-rust writes of the test calls it passed, with the libtest targets cargo ran for each
+package. The rest part of a merge run passes it, and the sweep then skips each baseline whose package and target appear
+in that record on this commit with these build settings, and builds its test instead, so a tree that does not build
+still stops the sweep. A target omitted from a default call (test = false, required-features, autotests = false) or
+without libtest (harness = false) is left out of the record and keeps its baseline. A call covers only when it ran
+every test, or every test with the ignored ones. A `--release`, `--doc` or other flagged test, a crate 10-rust did not
+test, a record lacking recorded targets, and a record from another commit or other settings run the baseline. A full
+run and a hand run run every baseline. The record counts only while the checkout holds no changed or untracked file and
+no tracked file marked assume-unchanged or skip-worktree.
 A row caught at build runs its skipped baseline, so a filter that names no test still fails, and a row over --budget
 runs it and then runs again with its limit. The sweep refuses a Cargo config in target/.cargo or target/mutate/.cargo,
 which its cargo reads and 10-rust's does not, and an extract that lacks a tracked path.
@@ -84,18 +88,34 @@ def refuse(why):
     sys.exit(f"mutate: {why}; no sweep")
 
 
+def table_files(path):
+    p = pathlib.Path(path)
+    if p.is_dir():
+        entries = sorted(p.iterdir(), key=lambda child: child.name)
+        bad = [child.name for child in entries if child.is_symlink() or not child.is_file() or child.suffix != ".toml"]
+        if bad:
+            refuse(f"{path} holds non-TOML entries: {bad[:3]}")
+        if not entries:
+            refuse(f"{path} has no .toml file")
+        return entries
+    return [p]
+
+
 def load_rows(path, only):
-    with open(path, "rb") as file:
-        table = tomllib.load(file)
-    rows = table.get("mutant", [])
-    if not rows:
-        refuse(f"{path} has no [[mutant]] row")
-    for row in rows:
-        row.setdefault("test", table.get("test"))
-        if set(row) != ROW_KEYS or not row["test"]:
-            refuse(f"row {row.get('name')} needs exactly {sorted(ROW_KEYS)}")
-        if moved := MOVES & {arg.split("=")[0] for arg in shlex.split(row["test"])}:
-            refuse(f"row {row['name']} passes {sorted(moved)}, which can point cargo outside the sweep's tree")
+    rows = []
+    for file_path in table_files(path):
+        with open(file_path, "rb") as file:
+            table = tomllib.load(file)
+        part = table.get("mutant", [])
+        if not part:
+            refuse(f"{file_path} has no [[mutant]] row")
+        for row in part:
+            row.setdefault("test", table.get("test"))
+            if set(row) != ROW_KEYS or not row["test"]:
+                refuse(f"row {row.get('name')} needs exactly {sorted(ROW_KEYS)}")
+            if moved := MOVES & {arg.split("=")[0] for arg in shlex.split(row["test"])}:
+                refuse(f"row {row['name']} passes {sorted(moved)}, which can point cargo outside the sweep's tree")
+        rows.extend(part)
     names = [row["name"] for row in rows]
     if len(set(names)) != len(names):
         refuse("two rows share a name")
@@ -159,17 +179,21 @@ def passed_calls(record, sha, settings):
             args = entry["args"]
             if "--" in args and args[args.index("--") + 1 :] != ["--include-ignored"]:
                 continue
-            calls.append(selection(args[: args.index("--")] if "--" in args else args, filters=False))
-    return [call for call in calls if call]
+            if selection(args[: args.index("--")] if "--" in args else args, filters=False) is None:
+                continue
+            targets = entry.get("targets")
+            if isinstance(targets, dict):
+                calls.append({crate: frozenset(kinds) for crate, kinds in targets.items()})
+    return calls
 
 
 def covered(test, calls):
     wanted = selection(shlex.split(test), filters=True)
-    if wanted is None or "doc" in wanted[1]:
+    if wanted is None or "doc" in wanted[1] or "all" in wanted[1]:
         return False
     crates, targets = wanted
     return all(
-        any(crate in done and ("all" in kinds or target in kinds) for done, kinds in calls)
+        any(target in done.get(crate, ()) for done in calls)
         for crate in crates
         for target in targets
     )

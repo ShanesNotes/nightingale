@@ -1,4 +1,4 @@
-use crate::identity::{Canonical, Seal};
+use crate::identity::{Canonical, Seal, stream};
 use crate::{Dimensionless, Measure};
 
 /// A value as a compensated pair: `hi` the rounded sum and `lo` what rounding left out, normalized so
@@ -52,11 +52,13 @@ impl Compensated {
     }
     /// Whether this is no more than `limit`, and false when either side is not finite. It is the type's
     /// only order: `<` and `>` read false on a NaN, so a check written with them passes what overflowed.
+    #[inline]
     pub fn at_most(self, limit: Self) -> bool {
         self.is_finite()
             && limit.is_finite()
             && (self.hi < limit.hi || (self.hi == limit.hi && self.lo <= limit.lo))
     }
+    #[inline]
     pub fn plus(self, other: Self) -> Self {
         let (sum, error) = two_sum(self.hi, other.hi);
         let (low, low_error) = two_sum(self.lo, other.lo);
@@ -64,12 +66,14 @@ impl Compensated {
         let (hi, lo) = two_sum(sum, error + low_error);
         Self { hi, lo }
     }
+    #[inline]
     pub fn minus(self, other: Self) -> Self {
         self.plus(Self {
             hi: -other.hi,
             lo: -other.lo,
         })
     }
+    #[inline]
     pub fn abs(self) -> Self {
         if self.hi < 0.0 || (self.hi == 0.0 && self.lo < 0.0) {
             Self::ZERO.minus(self)
@@ -77,7 +81,26 @@ impl Compensated {
             self
         }
     }
+    #[inline]
     pub fn scaled(self, coefficient: i64) -> Self {
+        if matches!(coefficient, 1 | -1) && self.hi.abs() <= SPLIT_LIMIT {
+            if self.hi == 0.0 && self.lo == 0.0 {
+                return Self::ZERO;
+            }
+            if self.hi != 0.0 && self.hi + self.lo == self.hi {
+                let lo = if self.lo == 0.0 {
+                    0.0
+                } else if coefficient == 1 {
+                    self.lo
+                } else {
+                    -self.lo
+                };
+                return Self {
+                    hi: if coefficient == 1 { self.hi } else { -self.hi },
+                    lo,
+                };
+            }
+        }
         self.product(coefficient as f64)
     }
     pub fn times(self, factor: &Measure<Dimensionless>) -> Self {
@@ -107,18 +130,22 @@ impl Compensated {
         let change = end.minus(start).product(numerator as f64);
         start.plus(change.quotient(denominator as f64))
     }
+    #[inline]
     pub fn bits(self) -> [u64; 2] {
         [self.hi.to_bits(), self.lo.to_bits()]
     }
     /// `None` unless `hi + lo` rounds to `hi`: `at_most` reads `hi` first, so `lo` must round away against
     /// it. An infinite `hi` with a finite `lo` passes.
+    #[inline]
     pub fn from_bits(bits: [u64; 2]) -> Option<Self> {
         let [hi, lo] = bits.map(f64::from_bits);
         (hi + lo == hi).then_some(Self { hi, lo })
     }
+    #[inline]
     pub(crate) fn rounded(self) -> f64 {
         self.hi + self.lo
     }
+    #[inline]
     pub(crate) fn is_finite(self) -> bool {
         self.hi.is_finite() && self.lo.is_finite()
     }
@@ -129,6 +156,13 @@ impl Seal for Compensated {
         let Self { hi, lo } = self;
         hi.seal(out);
         lo.seal(out);
+    }
+}
+impl stream::Seal for Compensated {
+    fn seal<S: stream::Sink>(&self, out: &mut S) {
+        let Self { hi, lo } = self;
+        stream::Seal::seal(hi, out);
+        stream::Seal::seal(lo, out);
     }
 }
 
@@ -245,5 +279,36 @@ mod tests {
         assert!(exact(1.0).is_finite());
         assert!(!exact(f64::INFINITY).is_finite());
         assert!(!exact(f64::MAX).plus(exact(f64::MAX)).is_finite());
+    }
+
+    #[test]
+    fn scaled_by_unit_matches_product_bits_including_signed_zero() {
+        let cases = [
+            Compensated::ZERO,
+            Compensated { hi: -0.0, lo: 0.0 },
+            Compensated { hi: 0.0, lo: -0.0 },
+            Compensated { hi: -0.0, lo: -0.0 },
+            exact(5.0),
+            exact(-5.0),
+            Compensated { hi: 5.0, lo: -0.0 },
+            exact(1.0).quotient(3.0),
+            exact(-1.0).quotient(3.0),
+            exact(f64::from_bits(1)),
+            exact(-f64::from_bits(1)),
+            exact(1e301),
+            exact(f64::MAX),
+            exact(f64::INFINITY),
+        ];
+        for value in cases {
+            for factor in [1_i64, -1_i64] {
+                assert_eq!(
+                    value.scaled(factor).bits(),
+                    value.product(factor as f64).bits(),
+                    "scaled({factor}) differed on {value:?}"
+                );
+            }
+        }
+        assert!(exact(f64::NAN).scaled(1).hi.is_nan());
+        assert!(exact(f64::NAN).scaled(-1).hi.is_nan());
     }
 }

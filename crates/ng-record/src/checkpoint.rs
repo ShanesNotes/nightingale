@@ -54,7 +54,9 @@ pub enum CheckpointError {
 
 /// Durable storage for the chain's links, addressed by seal. It is host code and trusted for nothing: a
 /// walk chains what comes back to the seal it asked for. A session hands it each link as its step is
-/// accepted, and a store that loses a link fails the next walk that needs it, by that link's seal.
+/// accepted, and a store that loses a link fails the next walk that needs it, by that link's seal. During a
+/// time-order walk, a link lost after the initial chain check fails only if a cursor later reads its page,
+/// and when links on several pages are lost mid-walk the oldest damaged page's newest lost link is reported.
 pub trait HistoryStore {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>>;
     /// Keeping a seal it holds changes nothing, so every session of a run may share one store.

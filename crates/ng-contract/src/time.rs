@@ -1,4 +1,4 @@
-use crate::identity::{Canonical, Seal};
+use crate::identity::{Canonical, Seal, stream};
 
 /// Simulated time, in integer nanoseconds from the clock's zero, which need not be when the run starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,6 +19,12 @@ impl SimTime {
 
 impl Seal for SimTime {
     fn seal(&self, out: &mut Canonical) {
+        let Self { ns } = self;
+        out.number(*ns);
+    }
+}
+impl stream::Seal for SimTime {
+    fn seal<S: stream::Sink>(&self, out: &mut S) {
         let Self { ns } = self;
         out.number(*ns);
     }

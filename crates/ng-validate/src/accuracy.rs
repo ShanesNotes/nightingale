@@ -1,17 +1,18 @@
 use crate::run::advance;
-use crate::{Compared, MemoryStore, ReplayCase, SliceWindow, TwoReservoirs, WindowPolicy};
+use crate::{Compared, MemoryStore, Oscillation, ReplayCase, SliceWindow, TwoReservoirs, WindowPolicy};
 use core::cell::RefCell;
 use ng_contract::{
     AcceptedStateView, AdmissionError, Attempt, BoundParameters, ColumnId, Compensated, CoupledProblem,
     CoupledSolver, DeclaredResolution, Digest, Dimensionless, EngineFault, InitializationFailure, Interval,
     Measure, NumericalRefusal, RunIdentity, SimTime, StepProposal, StepTicket, TrialFailure, Water,
 };
-use ng_record::{Curve, Faulted, HistorySegment, PatientRecord, Session};
+use ng_record::{CheckpointError, Curve, Faulted, HistorySegment, HistoryStore, PatientRecord, Session};
 
 const SECOND: u64 = 1_000_000_000;
 
-/// A manufactured case is a two-reservoir body with a closed form, and for some an exact identity beside it. A
-/// slice window has no closed form and is judged against the reference integrator.
+/// A manufactured case is a two-reservoir body or a self-sustained oscillation with a closed form, and for
+/// some an exact identity beside it. A slice window has no closed form and is judged against the reference
+/// integrator.
 pub enum AccuracyCase {
     TwoReservoir(Box<TwoReservoirs>),
     /// `a` drained to within one percent of empty and refilled from `b`: a core keeps publishing down to the
@@ -25,6 +26,9 @@ pub enum AccuracyCase {
     /// After evaluations the contract refused, the same core on the same head publishes the same bits, and one
     /// stage there gives the same residual and Jacobian bits.
     EvaluationIndependence,
+    /// A self-sustained oscillation whose amplitude has a closed form: a core whose step damps it fails here
+    /// while every step passes `verify` and every ledger closes.
+    SelfSustainedOscillation,
     SliceWindow(Box<SliceWindow>),
 }
 impl AccuracyCase {
@@ -36,6 +40,7 @@ impl AccuracyCase {
             Self::ZeroFlowRestore,
             Self::ControlledRemoval,
             Self::EvaluationIndependence,
+            Self::SelfSustainedOscillation,
         ])
     }
 }
@@ -52,9 +57,11 @@ struct Manufactured {
 }
 
 const WINDOW: u8 = 5;
+const OSCILLATION: u8 = 6;
 
 enum Judged {
     Manufactured(Manufactured),
+    Oscillation(Oscillation),
     Window(SliceWindow),
 }
 impl Judged {
@@ -81,6 +88,7 @@ impl Judged {
                     fixture,
                 })
             }
+            AccuracyCase::SelfSustainedOscillation => Self::Oscillation(Oscillation::self_sustained()?),
             AccuracyCase::SliceWindow(window) => Self::Window(*window),
         })
     }
@@ -105,6 +113,7 @@ impl AccuracyPolicy {
         let cases = cases.into_iter().map(Judged::of).collect::<Result<Vec<_>, _>>()?;
         let never_steps = |case: &Judged| match case {
             Judged::Manufactured(case) => case.fixture.end() == SimTime::from_ns(0),
+            Judged::Oscillation(case) => case.end() == SimTime::from_ns(0),
             Judged::Window(_) => false,
         };
         if grid_ns == 0 || cases.is_empty() || cases.iter().any(never_steps) {
@@ -154,6 +163,7 @@ impl AccuracyPolicy {
                     fixture,
                     check: _,
                 }) => (*kind, fixture.digest()),
+                Judged::Oscillation(oscillation) => (OSCILLATION, oscillation.digest()),
                 Judged::Window(window) => (WINDOW, window.digest()),
             };
             bytes.push(kind);
@@ -170,6 +180,7 @@ pub struct AccuracyEvidence {
     absolute: Compensated,
     relative: Compensated,
     grid_ns: u64,
+    amplitude_tolerance: Option<Compensated>,
     windows: Vec<WindowPolicy>,
     worst: Vec<Compensated>,
 }
@@ -188,6 +199,10 @@ impl AccuracyEvidence {
     }
     pub fn grid_ns(&self) -> u64 {
         self.grid_ns
+    }
+    /// The declared amplitude tolerance of the self-sustained oscillation case, when present in the policy.
+    pub fn amplitude_tolerance(&self) -> Option<Compensated> {
+        self.amplitude_tolerance
     }
     /// The policy of each slice window it ran, in case order.
     pub fn windows(&self) -> &[WindowPolicy] {
@@ -273,6 +288,16 @@ fn water(value: f64) -> Compensated {
     Compensated::of(&Measure::<Water>::new(value).expect("the closed form of finite constants is finite"))
 }
 
+fn dimensionless(value: f64) -> Compensated {
+    Compensated::of(
+        &Measure::<Dimensionless>::new(value).expect("the closed form of finite constants is finite"),
+    )
+}
+
+fn high(value: Compensated) -> f64 {
+    f64::from_bits(value.bits()[0])
+}
+
 pub(crate) fn net_at(segment: &HistorySegment, column: ColumnId, at: SimTime) -> Compensated {
     let piece = Interval::new(segment.interval().start(), at).expect("a compared instant is after the start");
     let reached = |curve: Curve<'_>| {
@@ -334,18 +359,24 @@ pub fn accuracy(
                 }
                 closed_form(solver, &case.fixture, policy, index)?
             }
+            Judged::Oscillation(case) => oscillation_amplitude(solver, case, policy, index)?,
             Judged::Window(window) => window.judge(solver, index)?,
         });
     }
+    let amplitude_tolerance = policy.cases.iter().find_map(|case| match case {
+        Judged::Oscillation(oscillation) => Some(oscillation.tolerance_compensated()),
+        Judged::Manufactured(_) | Judged::Window(_) => None,
+    });
     Ok(AccuracyEvidence {
         policy: policy.digest(),
         resolution: solver.resolution().digest(),
         absolute: policy.absolute,
         relative: Compensated::of(&policy.relative),
         grid_ns: policy.grid_ns,
+        amplitude_tolerance,
         windows: (policy.cases.iter())
             .filter_map(|case| match case {
-                Judged::Manufactured(_) => None,
+                Judged::Manufactured(_) | Judged::Oscillation(_) => None,
                 Judged::Window(window) => Some(*window.policy()),
             })
             .collect(),
@@ -355,6 +386,68 @@ pub fn accuracy(
 
 pub(crate) fn faulted(stopped: Session<'_, Faulted>) -> AccuracyFailure {
     AccuracyFailure::Faulted(*stopped.fault())
+}
+
+struct KeepsNothing;
+impl HistoryStore for KeepsNothing {
+    fn resolve(&self, _: &Digest) -> Option<Vec<u8>> {
+        None
+    }
+    fn keep(&self, _: Digest, _: &[u8]) -> Result<(), CheckpointError> {
+        Ok(())
+    }
+}
+
+fn oscillation_amplitude(
+    solver: &dyn CoupledSolver,
+    case: &Oscillation,
+    policy: &AccuracyPolicy,
+    index: usize,
+) -> Result<Compensated, AccuracyFailure> {
+    let store = KeepsNothing;
+    let mut session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
+    let [x_row, y_row] = case.rows();
+    let tolerance = case.tolerance_compensated();
+    let mut largest = Compensated::ZERO;
+    while session.record().accepted().time() < case.end() {
+        session = advance(session).map_err(faulted)?;
+        let dense = session.record().accepted().last_segment();
+        let Some(interval) = dense.interval() else {
+            continue;
+        };
+        let end = if interval.end() > case.end() {
+            case.end()
+        } else {
+            interval.end()
+        };
+        let compared = Interval::new(interval.start(), end).expect("a step starts before the case ends");
+        for at in compared_instants(compared, policy.grid_ns) {
+            let x = high(
+                dense
+                    .sample(x_row, at)
+                    .expect("a compared instant is inside the segment"),
+            );
+            let y = high(
+                dense
+                    .sample(y_row, at)
+                    .expect("a compared instant is inside the segment"),
+            );
+            let reached = dimensionless((x * x + y * y).sqrt());
+            let exact = dimensionless(case.exact_amplitude_f64(at));
+            let error = reached.minus(exact).abs();
+            if !error.at_most(tolerance) {
+                return Err(AccuracyFailure::Exceeded {
+                    case: index,
+                    at,
+                    error,
+                });
+            }
+            if !error.at_most(largest) {
+                largest = error;
+            }
+        }
+    }
+    Ok(largest)
 }
 
 fn closed_form(

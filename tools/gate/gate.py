@@ -58,7 +58,8 @@ Phase = Literal["registration", "seam"]
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PATHS = "tools/gate/paths.toml"
 MUST_FAIL = "tools/gate/must-fail.toml"
-MUTANTS = "tools/gate/mutants.toml"
+MUTANTS = "tools/gate/mutants.d"
+LEGACY_MUTANTS = "tools/gate/mutants.toml"
 MUTATE = "tools/mutate.py"
 TESTED = "target/gate/tested.jsonl"
 TESTED_RESET = "python3 -I tools/gate/gate.py tested --reset"
@@ -1384,8 +1385,23 @@ def parse_must_fail(text: str) -> list[MustFailRow]:
 
 
 def mutant_tests(root: pathlib.Path) -> dict[str, str]:
-    table = _toml(root / MUTANTS)
-    return {m["name"]: m.get("test", table.get("test")) for m in table.get("mutant", [])}
+    folder = root / MUTANTS
+    if not folder.is_dir():
+        raise GateError(f"{folder}: expected a directory of *.toml mutant tables")
+    entries = sorted(folder.iterdir(), key=lambda child: child.name)
+    if bad := [child.name for child in entries if child.is_symlink() or not child.is_file() or child.suffix != ".toml"]:
+        raise GateError(f"{folder}: non-regular or non-TOML entries: {bad[:3]}")
+    if not entries:
+        raise GateError(f"{folder}: has no .toml file")
+    out: dict[str, str] = {}
+    for path in entries:
+        table = _toml(path)
+        for m in table.get("mutant", []):
+            name = m["name"]
+            if name in out:
+                raise GateError(f"{path}: duplicate mutant row {name!r}")
+            out[name] = m.get("test", table.get("test"))
+    return out
 
 
 def declares_test(src: Source, name: str) -> bool:
@@ -1498,12 +1514,11 @@ PROBE_COPY = (
     PATHS,
     CONTRACT,
     MUST_FAIL,
-    MUTANTS,
 )
 
 
 def _copy(ws: Workspace, dest: pathlib.Path) -> None:
-    for f in sorted(set(PROBE_COPY) | {f for f in ws.files if f.startswith("crates/")}):
+    for f in sorted(set(PROBE_COPY) | {f for f in ws.files if f.startswith(("crates/", f"{MUTANTS}/"))}):
         if os.path.lexists(ws.root / f):
             (dest / f).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ws.root / f, dest / f, follow_symlinks=False)
@@ -1714,6 +1729,7 @@ class PlanCase:
     crates: frozenset[str] | None = None
     reaches: frozenset[str] = frozenset()
     steps: frozenset[str] = frozenset()
+    forbids: frozenset[str] = frozenset()
     modes: Modes = (REGULAR, REGULAR)
     first: tuple[str, ...] = ()
 
@@ -1724,6 +1740,32 @@ PLAN_CASES = (
     PlanCase("merge", ".scratch/foundation/map.md", "docs-only", frozenset(), steps=frozenset({"30-data"})),
     PlanCase("merge", "data/closure.jsonl", "affected", frozenset(), steps=frozenset({"30-data"})),
     PlanCase("merge", "clinical-workspace/src/chart.ts", "affected", frozenset(), steps=frozenset({"50-workspace"})),
+    PlanCase(
+        "merge",
+        "tools/generative-physiology/gp.py",
+        "affected",
+        frozenset(),
+        steps=frozenset({"10-docs", "10-rust"}),
+        forbids=frozenset({"40-mutants"}),
+    ),
+    PlanCase(
+        "merge",
+        "tools/generative-physiology/driver/src/main.rs",
+        "affected",
+        frozenset(),
+        steps=frozenset({"10-docs", "10-rust"}),
+        forbids=frozenset({"40-mutants"}),
+    ),
+    PlanCase(
+        "merge",
+        "tools/generative-physiology/notes.md",
+        "affected",
+        frozenset(),
+        steps=frozenset({"10-docs", "10-rust"}),
+        forbids=frozenset({"40-mutants"}),
+    ),
+    PlanCase("merge", "tools/generative-physiology/.cargo/config.toml", "everything"),
+    PlanCase("merge", "tools/generative-physiology/driver/clippy.toml", "everything"),
     PlanCase("merge", "AGENTS.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
     PlanCase("merge", CONTRACT, "docs-only", frozenset(), steps=frozenset({"05-seam", "10-docs", "20-sketch"})),
     PlanCase(
@@ -1764,6 +1806,8 @@ def plan_cases(ws: Workspace) -> list[Violation]:
             out.append(Violation("plan", subject, f"does not reach {' '.join(sorted(missing))}"))
         if missing := (ws.steps if c.scope == "everything" else c.steps) - steps:
             out.append(Violation("plan", subject, f"does not select {' '.join(sorted(missing))}"))
+        if forbidden := c.forbids & steps:
+            out.append(Violation("plan", subject, f"selects {' '.join(sorted(forbidden))}"))
         if c.scope == "docs-only" and steps & set(ws.registry.crate_steps) - c.steps:
             out.append(Violation("plan", subject, "a docs-only plan selects a crate step"))
         if p.first != c.first:
@@ -2894,14 +2938,23 @@ def sweep_parts(
     )
 
 
-def rows_at(rev: str) -> list[dict]:
-    if not _git_z(ROOT, "ls-tree", "-z", "--name-only", rev, "--", MUTANTS):
-        return []
+def _rows_from_toml(text: str, where: str) -> list[dict]:
     try:
-        table = tomllib.loads(_blob(rev, MUTANTS))
+        table = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
-        raise GateError(f"{rev}:{MUTANTS}: {e}") from None
+        raise GateError(f"{where}: {e}") from None
     return [{**row, "test": row.get("test", table.get("test"))} for row in table.get("mutant", [])]
+
+
+def rows_at(rev: str) -> list[dict]:
+    files = sorted(
+        p for p in _git_z(ROOT, "ls-tree", "-r", "-z", "--name-only", rev, "--", MUTANTS) if p.endswith(".toml")
+    )
+    if files:
+        return [row for path in files for row in _rows_from_toml(_blob(rev, path), f"{rev}:{path}")]
+    if _git_z(ROOT, "ls-tree", "-z", "--name-only", rev, "--", LEGACY_MUTANTS):
+        return _rows_from_toml(_blob(rev, LEGACY_MUTANTS), f"{rev}:{LEGACY_MUTANTS}")
+    return []
 
 
 VERDICTS = frozenset({"CAUGHT", "CAUGHT at build", "SURVIVED", "NOT APPLIED", "UNCLEAR"})
@@ -2967,6 +3020,63 @@ def mutants(part: str | None) -> int:
     return 0
 
 
+LIB_KINDS = frozenset({"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"})
+
+
+def _harness_off(manifest: Mapping[str, object]) -> tuple[bool, frozenset[str]]:
+    lib = manifest.get("lib")
+    lib_off = isinstance(lib, dict) and lib.get("harness") is False
+    tests = manifest.get("test", [])
+    tests_off = frozenset(
+        entry["name"]
+        for entry in (tests if isinstance(tests, list) else [])
+        if isinstance(entry, dict) and entry.get("harness") is False and isinstance(entry.get("name"), str)
+    )
+    return lib_off, tests_off
+
+
+def _ran_targets(root: pathlib.Path, args: list[str]) -> dict[str, list[str]]:
+    if "--" in args and args[args.index("--") + 1 :] != ["--include-ignored"]:
+        return {}
+    selected = mutate_py().selection(args[: args.index("--")] if "--" in args else args, filters=False)
+    if selected is None or not (root / "Cargo.toml").is_file():
+        return {}
+    crates, kinds = selected
+    r = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--no-deps", "--offline", "--locked"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        raise GateError(f"cargo metadata: {r.stderr.strip()}")
+    meta = json.loads(r.stdout)
+    ids = set(meta["workspace_members"])
+    packages = {p["name"]: p for p in meta["packages"] if p["id"] in ids}
+    ran: dict[str, list[str]] = {}
+    for crate in crates:
+        pkg = packages.get(crate)
+        if pkg is None:
+            continue
+        manifest = _toml(pathlib.Path(pkg["manifest_path"]))
+        lib_off, tests_off = _harness_off(manifest)
+        found: list[str] = []
+        for t in pkg["targets"]:
+            if t.get("required-features"):
+                continue
+            target_kinds = set(t["kind"])
+            if target_kinds & LIB_KINDS:
+                if not lib_off and ("lib" in kinds or ("all" in kinds and t["test"])):
+                    found.append("lib")
+            elif target_kinds == {"test"}:
+                named = f"test {t['name']}"
+                if t["name"] not in tests_off and (named in kinds or ("all" in kinds and t["test"])):
+                    found.append(named)
+        if found:
+            ran[crate] = sorted(set(found))
+    return ran
+
+
 def tested(args: list[str], root: pathlib.Path = ROOT) -> int:
     record = root / TESTED
     if args == ["--reset"]:
@@ -2979,7 +3089,12 @@ def tested(args: list[str], root: pathlib.Path = ROOT) -> int:
     ]:
         print(f"10-rust: the sweep's extract would lack {unextracted[:3]}, so the sweep runs every baseline")
         return 0
-    entry = {"commit": git(root, "rev-parse", "HEAD"), "settings": mutate_py().build_settings(os.environ), "args": args}
+    entry = {
+        "commit": git(root, "rev-parse", "HEAD"),
+        "settings": mutate_py().build_settings(os.environ),
+        "args": args,
+        "targets": _ran_targets(root, args),
+    }
     record.parent.mkdir(parents=True, exist_ok=True)
     with record.open("a", encoding="utf-8") as file:
         file.write(json.dumps(entry) + "\n")
@@ -3135,23 +3250,34 @@ def check_case() -> list[Violation]:
 
 SHA, OTHER_SHA = "1" * 40, "2" * 40
 SETTINGS = {"RUSTFLAGS": ""}
-TESTED_RECORD = (
-    (SHA, SETTINGS, ["-p", "ng-a", "-p", "ng-b", "--", "--include-ignored"]),
-    (SHA, SETTINGS, ["-p", "ng-c", "--lib", "--test", "beta"]),
-    (SHA, SETTINGS, ["-p", "ng-f", "--test", "alpha", "only_this_one"]),
-    (OTHER_SHA, SETTINGS, ["-p", "ng-d"]),
-    (SHA, {"RUSTFLAGS": "-Cdebug-assertions=off"}, ["-p", "ng-e"]),
-    (SHA, SETTINGS, ["-p", "ng-g", "--", "--ignored"]),
-    (SHA, SETTINGS, ["-p", "ng-h", "--", "--skip", "slow"]),
-    (SHA, SETTINGS, ["-p", "ng-i", "--", "only_this_one"]),
-    (SHA, SETTINGS, ["-p", "ng-j", "--", "--include-ignored", "--skip", "slow"]),
+TESTED_RECORD: tuple[tuple[str, dict[str, str], list[str], dict[str, list[str]] | None], ...] = (
+    (
+        SHA,
+        SETTINGS,
+        ["-p", "ng-a", "-p", "ng-b", "--", "--include-ignored"],
+        {"ng-a": ["lib", "test alpha"], "ng-b": ["lib", "test alpha"]},
+    ),
+    (SHA, SETTINGS, ["-p", "ng-c", "--lib", "--test", "beta"], {"ng-c": ["lib", "test beta"]}),
+    (SHA, SETTINGS, ["-p", "ng-f", "--test", "alpha", "only_this_one"], {"ng-f": ["test alpha"]}),
+    (OTHER_SHA, SETTINGS, ["-p", "ng-d"], {"ng-d": ["lib", "test alpha"]}),
+    (SHA, {"RUSTFLAGS": "-Cdebug-assertions=off"}, ["-p", "ng-e"], {"ng-e": ["lib", "test alpha"]}),
+    (SHA, SETTINGS, ["-p", "ng-g", "--", "--ignored"], {"ng-g": ["lib", "test alpha"]}),
+    (SHA, SETTINGS, ["-p", "ng-h", "--", "--skip", "slow"], {"ng-h": ["lib", "test alpha"]}),
+    (SHA, SETTINGS, ["-p", "ng-i", "--", "only_this_one"], {"ng-i": ["lib", "test alpha"]}),
+    (SHA, SETTINGS, ["-p", "ng-j", "--", "--include-ignored", "--skip", "slow"], {"ng-j": ["lib", "test alpha"]}),
+    (SHA, SETTINGS, ["-p", "ng-k"], {"ng-k": ["test alpha"]}),
+    (SHA, SETTINGS, ["-p", "ng-l"], None),
 )
 TESTED_CASES: tuple[tuple[str, bool, str], ...] = (
-    ("-p ng-a --test alpha a_filter", True, "a crate 10-rust tested whole"),
-    ("-p ng-b --lib a_filter", True, "the library of a crate 10-rust tested whole"),
+    ("-p ng-a --test alpha a_filter", True, "a target 10-rust ran in a default call"),
+    ("-p ng-b --lib a_filter", True, "the library 10-rust ran in a default call"),
     ("--package=ng-a -png-b --test=alpha", True, "two crates spelled the other ways"),
     ("-p ng-c --test beta a_filter", True, "a test target 10-rust named"),
     ("-p ng-c --lib", True, "the library 10-rust named"),
+    ("-p ng-a --test disabled a_filter", False, "a target omitted from a default call's recorded targets"),
+    ("-p ng-k --lib a_filter", False, "a library omitted from a default call's recorded targets"),
+    ("-p ng-l --test alpha", False, "a record entry with no recorded targets"),
+    ("-p ng-a a_filter", False, "a mutant row that names no target"),
     ("--release -p ng-a --test alpha", False, "a --release baseline"),
     ("--doc -p ng-a Thing", False, "a doctest, which only a run builds"),
     ("-p ng-a --test alpha -- --ignored", False, "a test's own runner flags"),
@@ -3174,7 +3300,10 @@ def tested_cases() -> list[Violation]:
     with tempfile.TemporaryDirectory(prefix="gate-tested-") as tmp:
         record = pathlib.Path(tmp) / "tested.jsonl"
         missing = mutate.passed_calls(str(record), SHA, SETTINGS)
-        lines = [json.dumps({"commit": c, "settings": s, "args": a}) for c, s, a in TESTED_RECORD]
+        lines = [
+            json.dumps({"commit": c, "settings": s, "args": a, **({"targets": t} if t is not None else {})})
+            for c, s, a, t in TESTED_RECORD
+        ]
         record.write_text("\n".join(lines) + "\n", encoding="utf-8")
         calls = mutate.passed_calls(str(record), SHA, SETTINGS)
     for test, skips, what in TESTED_CASES:
@@ -3250,12 +3379,29 @@ def _scratch_git() -> Iterable[None]:
         yield
 
 
+FIXTURE_LOCK = (
+    PROBE_LOCK
+    + '\n[[package]]\nname = "ng-a"\nversion = "0.0.0"\n'
+    + '\n[[package]]\nname = "ng-b"\nversion = "0.0.0"\n'
+)
+
+
 def _fixture(tmp: pathlib.Path) -> pathlib.Path:
     root = tmp / "repo"
     (root / "tools").mkdir(parents=True)
     shutil.copyfile(ROOT / MUTATE, root / MUTATE)
     shutil.copyfile(ROOT / ".gitignore", root / ".gitignore")
-    (root / "crates/ng-a/src").mkdir(parents=True)
+    shutil.copyfile(ROOT / "rust-toolchain.toml", root / "rust-toolchain.toml")
+    (root / "Cargo.toml").write_text('[workspace]\nmembers = ["crates/ng-a", "crates/ng-b"]\nresolver = "3"\n', encoding="utf-8")
+    (root / "Cargo.lock").write_text(FIXTURE_LOCK, encoding="utf-8")
+    for crate, test_name in (("ng-a", "alpha"), ("ng-b", "beta")):
+        (root / f"crates/{crate}/src").mkdir(parents=True)
+        (root / f"crates/{crate}/tests").mkdir(parents=True)
+        (root / f"crates/{crate}/Cargo.toml").write_text(
+            f'[package]\nname = "{crate}"\nversion = "0.0.0"\nedition = "2024"\n', encoding="utf-8"
+        )
+        (root / f"crates/{crate}/src/lib.rs").write_text("pub fn v() -> u32 { 1 }\n", encoding="utf-8")
+        (root / f"crates/{crate}/tests/{test_name}.rs").write_text("#[test] fn ok() {}\n", encoding="utf-8")
     (root / "crates/ng-a/src/one.rs").write_text("a\n", encoding="utf-8")
     (root / "mutants.toml").write_text(SWEEP_TABLE, encoding="utf-8")
     _git_z(root, "init", "-q")
@@ -3359,13 +3505,18 @@ SWEEP_CALLS: tuple[tuple[str, Callable[[pathlib.Path], object], Callable[[pathli
 
 def sweep_case() -> list[Violation]:
     out = []
+    real_cargo = shutil.which("cargo") or "cargo"
     with _scratch_git():
         for what, before, after, behaves, want, refusal in SWEEP_CALLS:
             with tempfile.TemporaryDirectory(prefix="gate-sweep-") as tmp:
                 root = _fixture(pathlib.Path(tmp))
                 calls, stub = pathlib.Path(tmp) / "calls", pathlib.Path(tmp) / "bin"
                 stub.mkdir()
-                (stub / "cargo").write_text(f"#!/bin/sh\necho \"$*\" >>'{calls}'\n{behaves}", encoding="utf-8")
+                (stub / "cargo").write_text(
+                    f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n"
+                    f"echo \"$*\" >>'{calls}'\n{behaves}",
+                    encoding="utf-8",
+                )
                 (stub / "cargo").chmod(0o755)
                 before(root)
                 with mock.patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}"}):
@@ -3381,6 +3532,99 @@ def sweep_case() -> list[Violation]:
                     out.append(Violation("baseline", f"a sweep after {what}", f"ran cargo test {ran}; want {want}"))
                 if refusal and (run.returncode == 0 or refusal not in run.stderr):
                     out.append(Violation("baseline", f"a sweep after {what}", f"exit {run.returncode}; want {refusal!r}"))
+    return out
+
+
+def disabled_target_case() -> list[Violation]:
+    out = []
+    with _scratch_git(), tempfile.TemporaryDirectory(prefix="gate-f16-") as tmp:
+        root = _fixture(pathlib.Path(tmp))
+        (root / "crates/ng-a/Cargo.toml").write_text(
+            '[package]\nname = "ng-a"\nversion = "0.0.0"\nedition = "2024"\n\n'
+            "[lib]\ntest = false\n\n"
+            '[[test]]\nname = "beta"\ntest = false\n\n'
+            '[[test]]\nname = "custom"\nharness = false\n\n'
+            '[[test]]\nname = "req"\nrequired-features = ["extra"]\n',
+            encoding="utf-8",
+        )
+        (root / "crates/ng-a/src/lib.rs").write_text(
+            "pub fn val() -> u32 { 7 }\n#[test] fn lib_fail() { assert_eq!(0, 1); }\n", encoding="utf-8"
+        )
+        (root / "crates/ng-a/tests/alpha.rs").write_text(
+            "#[test] fn alpha_ok() { assert_eq!(ng_a::val(), 7); }\n", encoding="utf-8"
+        )
+        (root / "crates/ng-a/tests/beta.rs").write_text("#[test] fn beta_fail() { assert_eq!(0, 1); }\n", encoding="utf-8")
+        (root / "crates/ng-a/tests/custom.rs").write_text(
+            "fn main() { if std::env::args().len() > 1 { std::process::abort(); } }\n", encoding="utf-8"
+        )
+        (root / "crates/ng-a/tests/req.rs").write_text("#[test] fn req_fail() { assert_eq!(0, 1); }\n", encoding="utf-8")
+        (root / "crates/ng-b/Cargo.toml").write_text(
+            '[package]\nname = "ng-b"\nversion = "0.0.0"\nedition = "2024"\nautotests = false\n', encoding="utf-8"
+        )
+        (root / "crates/ng-b/tests/auto_off.rs").write_text(
+            "#[test] fn auto_fail() { assert_eq!(0, 1); }\n", encoding="utf-8"
+        )
+        tables = {
+            "pass_alpha.toml": "-p ng-a --test alpha",
+            "fail_test_false.toml": "-p ng-a --test beta",
+            "fail_lib_false.toml": "-p ng-a --lib",
+            "fail_harness_false.toml": "-p ng-a --test custom some_filter",
+            "fail_req_features.toml": "-p ng-a --test req",
+            "fail_autotests_false.toml": "-p ng-b --test auto_off",
+        }
+        for fname, test_arg in tables.items():
+            (root / fname).write_text(
+                f'[[mutant]]\nname = "row"\npath = "crates/ng-a/src/lib.rs"\nold = "7"\nnew = "9"\ntest = "{test_arg}"\n',
+                encoding="utf-8",
+            )
+        _git_z(root, "add", "-A")
+        _git_z(root, *COMMIT, "disabled targets")
+        env = dict(os.environ)
+        env.pop("UPDATE_EXPECT", None)
+        target = str(pathlib.Path(tmp) / "target")
+        env["CARGO_TARGET_DIR"] = target
+        env["CARGO_BUILD_BUILD_DIR"] = target
+        r = subprocess.run(["cargo", "test", "--locked", "-p", "ng-a", "-p", "ng-b"], cwd=root, capture_output=True, text=True, env=env)
+        if r.returncode != 0:
+            return [Violation("baseline", "f16 fixture", f"default cargo test failed ({r.returncode}): {r.stderr[-300:]}")]
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
+            tested(["-p", "ng-a", "-p", "ng-b"], root)
+        entries = [json.loads(line) for line in _read(root / TESTED).splitlines()]
+        got_targets = entries[0].get("targets") if entries else None
+        want_targets = {"ng-a": ["test alpha"], "ng-b": ["lib"]}
+        if got_targets != want_targets:
+            out.append(Violation("baseline", "f16 recorded targets", f"recorded {got_targets}; want {want_targets}"))
+        pos = subprocess.run(
+            [sys.executable, "-I", MUTATE, "pass_alpha.toml", "--tested", str(root / TESTED)],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if pos.returncode != 0 or "baselines skipped: 1" not in pos.stdout:
+            out.append(Violation("baseline", "f16 passing target", f"exit {pos.returncode}; expected skipped baseline + CAUGHT"))
+        for fname in (
+            "fail_test_false.toml",
+            "fail_lib_false.toml",
+            "fail_harness_false.toml",
+            "fail_req_features.toml",
+            "fail_autotests_false.toml",
+        ):
+            neg = subprocess.run(
+                [sys.executable, "-I", MUTATE, fname, "--tested", str(root / TESTED)],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            if neg.returncode == 0 or "baselines skipped:" in neg.stdout:
+                out.append(
+                    Violation(
+                        "baseline",
+                        f"f16 {fname}",
+                        f"exit {neg.returncode}, stdout={neg.stdout.strip()!r}; must run and refuse baseline",
+                    )
+                )
     return out
 
 
@@ -3419,12 +3663,16 @@ LIMITS = {"slow": "CAUGHT", "stuck": "UNCLEAR", "unseen": "CAUGHT"}
 
 def limit_case() -> list[Violation]:
     out = []
+    real_cargo = shutil.which("cargo") or "cargo"
     with _scratch_git(), tempfile.TemporaryDirectory(prefix="gate-limit-") as tmp:
         root = _fixture(pathlib.Path(tmp))
         _commit(root, "mutants.toml", LIMIT_TABLE)
         stub = pathlib.Path(tmp) / "bin"
         stub.mkdir()
-        (stub / "cargo").write_text(f"#!/bin/sh\n{TAKES}", encoding="utf-8")
+        (stub / "cargo").write_text(
+            f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n{TAKES}",
+            encoding="utf-8",
+        )
         (stub / "cargo").chmod(0o755)
         with mock.patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}"}):
             os.environ.pop("UPDATE_EXPECT", None)
@@ -3532,6 +3780,99 @@ def step_cases() -> list[Violation]:
     return out
 
 
+def mutants_dir_case() -> list[Violation]:
+    out = []
+    mutate = mutate_py()
+    with _scratch_git(), tempfile.TemporaryDirectory(prefix="gate-mutants-dir-") as tmp:
+        root = _fixture(pathlib.Path(tmp))
+        folder = root / "tools/gate/mutants.d"
+        folder.mkdir(parents=True)
+        (folder / "00-base.toml").write_text(
+            'test = "-p ng-a --test alpha"\n\n'
+            '[[mutant]]\nname = "base-row"\npath = "crates/ng-a/src/one.rs"\nold = "a"\nnew = "b"\n',
+            encoding="utf-8",
+        )
+        _git_z(root, "add", "tools/gate/mutants.d/00-base.toml")
+        _git_z(root, *COMMIT, "base mutants dir")
+        base_branch = git(root, "rev-parse", "--abbrev-ref", "HEAD") or "main"
+        _git_z(root, "checkout", "-q", "-b", "branch-a")
+        _commit(
+            root,
+            "tools/gate/mutants.d/branch-a.toml",
+            '[[mutant]]\nname = "from-a"\npath = "crates/ng-a/src/one.rs"\nold = "a"\nnew = "c"\ntest = "-p ng-a --test alpha"\n',
+        )
+        _git_z(root, "checkout", "-q", base_branch)
+        _git_z(root, "checkout", "-q", "-b", "branch-b")
+        _commit(
+            root,
+            "tools/gate/mutants.d/branch-b.toml",
+            '[[mutant]]\nname = "from-b"\npath = "crates/ng-a/src/one.rs"\nold = "a"\nnew = "d"\ntest = "-p ng-b --test beta"\n',
+        )
+        merged = subprocess.run(
+            ["git", "-C", str(root), "-c", "user.name=gate", "-c", "user.email=gate@invalid", "-c", "commit.gpgsign=false",
+             "merge", "--no-edit", "branch-a"],
+            capture_output=True,
+            text=True,
+        )
+        if merged.returncode != 0:
+            return [Violation("sweep", "mutants.d merge", f"two branches conflicted: {merged.stdout + merged.stderr}")]
+        rows = mutate.load_rows(folder, [])
+        got_names = [r["name"] for r in rows]
+        if got_names != ["base-row", "from-a", "from-b"]:
+            out.append(Violation("sweep", "mutants.d order", f"loaded {got_names}; want ['base-row', 'from-a', 'from-b']"))
+        checked = subprocess.run(
+            [sys.executable, "-I", MUTATE, "tools/gate/mutants.d", "--check"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        if checked.returncode != 0 or "3 of 3 rows apply" not in checked.stdout:
+            out.append(Violation("sweep", "mutants.d --check", f"exit {checked.returncode}: {checked.stdout + checked.stderr}"))
+        dup = pathlib.Path(tmp) / "dup"
+        dup.mkdir()
+        (dup / "00.toml").write_text(
+            '[[mutant]]\nname = "same"\npath = "a"\nold = "x"\nnew = "y"\ntest = "-p ng-a --test alpha"\n', encoding="utf-8"
+        )
+        (dup / "01.toml").write_text(
+            '[[mutant]]\nname = "same"\npath = "b"\nold = "x"\nnew = "y"\ntest = "-p ng-a --test alpha"\n', encoding="utf-8"
+        )
+        try:
+            mutate.load_rows(dup, [])
+            out.append(Violation("sweep", "mutants.d duplicate", "accepted duplicate row name across files"))
+        except SystemExit:
+            pass
+        junk = pathlib.Path(tmp) / "junk"
+        junk.mkdir()
+        (junk / "notes.txt").write_text("hi\n", encoding="utf-8")
+        try:
+            mutate.load_rows(junk, [])
+            out.append(Violation("sweep", "mutants.d non-TOML", "accepted non-.toml entry in directory"))
+        except SystemExit:
+            pass
+        link_root = pathlib.Path(tmp) / "link_repo"
+        link_dir = link_root / MUTANTS
+        link_dir.mkdir(parents=True)
+        (link_dir / "link.toml").symlink_to(folder / "00-base.toml")
+        try:
+            mutate.load_rows(link_dir, [])
+            out.append(Violation("sweep", "mutants.d symlink", "load_rows accepted a symlinked .toml entry"))
+        except SystemExit:
+            pass
+        try:
+            mutant_tests(link_root)
+            out.append(Violation("sweep", "mutants.d symlink", "mutant_tests accepted a symlinked .toml entry"))
+        except GateError:
+            pass
+        empty = pathlib.Path(tmp) / "empty"
+        empty.mkdir()
+        try:
+            mutate.load_rows(empty, [])
+            out.append(Violation("sweep", "mutants.d empty", "accepted empty directory"))
+        except SystemExit:
+            pass
+    return out
+
+
 DRIVER_CASES: tuple[Callable[[], list[Violation]], ...] = (
     survivor_case,
     failed_sweep_case,
@@ -3540,6 +3881,8 @@ DRIVER_CASES: tuple[Callable[[], list[Violation]], ...] = (
     argv_cases,
     writer_cases,
     sweep_case,
+    disabled_target_case,
+    mutants_dir_case,
     limit_case,
     cargo_config_case,
     hook_env_case,

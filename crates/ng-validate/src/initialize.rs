@@ -8,10 +8,8 @@ const NOISE: f64 = 1e-11;
 const FLOOR: f64 = 0.1;
 const HALVINGS: u32 = 12;
 const MARCH_BEATS: u32 = 40;
-/// Newton stops when no unknown moved by more than this share of itself, or in `initialize` of its slot's
-/// natural size plus itself. Neither reads a tolerance. In `march` a row too small for the tolerance to see
-/// is solved all the same, and an unknown that rounding keeps near zero never gets there, which costs the
-/// updates until the point's state repeats, at most the limit's, and nothing else.
+/// Newton stops when no unknown moved by more than this share of its slot's natural size plus itself.
+/// Neither `march` nor `initialize` reads a tolerance.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 const CONTRACTION: f64 = 0.5;
 
@@ -50,7 +48,7 @@ fn march(
                     return;
                 }
                 system.seed(workspace, leg);
-                if !solve_leg(system, workspace, leg) {
+                if solve_leg(system, workspace, leg).is_none() {
                     return;
                 }
                 if !relocating {
@@ -70,10 +68,21 @@ fn march(
     }
 }
 
+struct LegSolve {
+    #[cfg(test)]
+    updates: u32,
+    #[cfg(test)]
+    settled: bool,
+}
+
 /// Newton on one leg's block alone, holding the block it factored while its updates shrink by `CONTRACTION` or more:
 /// a held block solves for the same rows, and building and factoring one costs many residuals. An update that grew is
-/// not taken, and the block is built again where it stands. `false` where a law has no value or the block no pivot.
-fn solve_leg(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace, leg: LegHandle) -> bool {
+/// not taken, and the block is built again where it stands. `None` where a law has no value or the block no pivot.
+fn solve_leg(
+    system: &InitializationSystem<'_>,
+    workspace: &mut AdmissionWorkspace,
+    leg: LegHandle,
+) -> Option<LegSolve> {
     let slots = workspace.leg_slots(leg);
     let mut held = Vec::with_capacity(NEWTON_LIMIT as usize * slots.len());
     let mut factored: Option<Factors<'_>> = None;
@@ -83,26 +92,19 @@ fn solve_leg(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspa
         let reused = factored.is_some();
         let update = match &factored {
             Some(factors) => {
-                let Ok(mut update) = system.stage_residuals(workspace, leg) else {
-                    return false;
-                };
+                let mut update = system.stage_residuals(workspace, leg).ok()?;
                 factors.solve(&mut update);
                 update
             }
             None => {
-                let Ok((mut residuals, block)) = system.stage(workspace, leg) else {
-                    return false;
-                };
+                let (mut residuals, block) = system.stage(workspace, leg).ok()?;
                 match system.factor(&block) {
                     Ok(factors) => {
                         factors.solve(&mut residuals);
                         factored = Some(factors);
                         residuals
                     }
-                    Err(_) => match system.solve_stage(&block, &residuals) {
-                        Ok(update) => update,
-                        Err(_) => return false,
-                    },
+                    Err(_) => system.solve_stage(&block, &residuals).ok()?,
                 }
             }
         };
@@ -119,21 +121,37 @@ fn solve_leg(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspa
         last = moved;
         taken += 1;
         held.extend_from_slice(&now);
+        let settled = (update.iter().zip(&now).zip(slots.clone())).all(|((change, unknown), slot)| {
+            change.abs() <= NEWTON_STOP * system.size(workspace, slot) + NEWTON_STOP * unknown.abs()
+        });
         let unknowns = &mut workspace.unknowns_mut()[slots.clone()];
-        let settled = (update.iter().zip(unknowns.iter()))
-            .all(|(change, unknown)| change.abs() <= NEWTON_STOP * unknown.abs());
         for (unknown, change) in unknowns.iter_mut().zip(update) {
             *unknown -= change;
         }
         if settled {
-            break;
+            return Some(LegSolve {
+                #[cfg(test)]
+                updates: taken,
+                #[cfg(test)]
+                settled: true,
+            });
         }
         if let Some(state) = state_at_limit(&held, unknowns) {
             unknowns.copy_from_slice(state);
-            break;
+            return Some(LegSolve {
+                #[cfg(test)]
+                updates: taken,
+                #[cfg(test)]
+                settled: false,
+            });
         }
     }
-    true
+    Some(LegSolve {
+        #[cfg(test)]
+        updates: taken,
+        #[cfg(test)]
+        settled: false,
+    })
 }
 
 fn state_at_limit<'h>(held: &'h [f64], now: &[f64]) -> Option<&'h [f64]> {
@@ -416,4 +434,158 @@ pub(crate) fn admit_start<'m>(
 ) -> Result<Session<'m, Running>, InitializationFailure> {
     let identity = RunIdentity::new(body.model_hash(), start.packet_hash(), seed, core.resolution());
     Ok(Session::admit(body, core, start, identity, store)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::num::{NonZeroU32, NonZeroU64};
+
+    #[test]
+    fn march_settles_a_cancellation_row_against_its_natural_size() {
+        fn measure<U>(value: f64) -> Measure<U> {
+            Measure::new(value).expect("finite")
+        }
+        let origin = Position::new(measure(0.0), measure(0.0), measure(0.0));
+        let mut map = AnatomyBuilder::new();
+        map.site::<TissueSite>("body", origin);
+        let schema = Schema::new(map.finish().expect("anatomy")).expect("schema");
+        let base_key = ParameterKey::new("fixture.base");
+        let target_key = ParameterKey::new("fixture.target");
+        let body = assemble(schema, |mut body| {
+            let (mut laws, _) = body.cardiovascular()?.parts();
+            let base = laws.parameter::<Dimensionless>(base_key, Admissible::positive());
+            let target = laws.parameter::<Dimensionless>(target_key, Admissible::positive());
+            let delta = laws.algebraic::<Dimensionless>("delta", Admissible::finite());
+            let beat = RateClass::new(RateBand::Beat, 100_000_000)?;
+            let residual = laws.kernel(|mut k| {
+                let x = k.algebraic(&delta);
+                let b = k.parameter(&base);
+                let t = k.parameter(&target);
+                let sum = k.add(b, x);
+                let sq = k.scale(sum, sum);
+                let diff = k.subtract(sq, t);
+                k.finish(diff, laws.every_mode(), beat)
+            });
+            laws.residual(&delta, residual);
+            body.add(laws.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let period = NonZeroU64::new(1_000_000_000).expect("non-zero");
+        let cycle = Cycle::new(period, NonZeroU32::new(4).expect("non-zero")).expect("cycle");
+        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+        packet.within(admission_tolerance());
+        packet
+            .synthetic(
+                base_key,
+                Binding::Body,
+                measure::<Dimensionless>(1.0),
+                "synthetic",
+            )
+            .expect("once");
+        packet
+            .synthetic(
+                target_key,
+                Binding::Body,
+                measure::<Dimensionless>(1.0 + 1001.0 * f64::EPSILON),
+                "synthetic",
+            )
+            .expect("once");
+        let row = body.rows()[0].kind();
+        packet
+            .start(row, measure::<Dimensionless>(0.0), "synthetic")
+            .expect("once");
+        let lens = body.lens(Vec::new(), period).expect("lens");
+        let port = BoundaryPort::new(Vec::new()).expect("port");
+        let system = system(&body, packet, port, &lens, SimTime::from_ns(0)).expect("system");
+        let mut workspace = system.workspace();
+        let leg = workspace.legs_of(1)[0];
+        system.seed(&mut workspace, leg);
+        let outcome = solve_leg(&system, &mut workspace, leg).expect("solved");
+        assert!(
+            outcome.settled && outcome.updates <= 4,
+            "expected cancellation row to settle within 4 updates against its natural size, got settled={} updates={}",
+            outcome.settled,
+            outcome.updates
+        );
+    }
+
+    #[test]
+    fn march_does_not_overflow_stop_scale_at_large_values() {
+        fn measure<U>(value: f64) -> Measure<U> {
+            Measure::new(value).expect("finite")
+        }
+        let origin = Position::new(measure(0.0), measure(0.0), measure(0.0));
+        let mut map = AnatomyBuilder::new();
+        map.site::<TissueSite>("body", origin);
+        let schema = Schema::new(map.finish().expect("anatomy")).expect("schema");
+        let scale_key = ParameterKey::new("fixture.scale");
+        let target_key = ParameterKey::new("fixture.target");
+        let body = assemble(schema, |mut body| {
+            let (mut laws, _) = body.cardiovascular()?.parts();
+            let scale = laws.parameter::<Dimensionless>(scale_key, Admissible::positive());
+            let target = laws.parameter::<Dimensionless>(target_key, Admissible::positive());
+            let unknown = laws.algebraic::<Dimensionless>("large", Admissible::finite());
+            let beat = RateClass::new(RateBand::Beat, 100_000_000)?;
+            let residual = laws.kernel(|mut k| {
+                let x = k.algebraic(&unknown);
+                let s = k.parameter(&scale);
+                let t = k.parameter(&target);
+                let sx = k.scale(s, x);
+                let sq = k.scale(sx, sx);
+                let diff = k.subtract(sq, t);
+                k.finish(diff, laws.every_mode(), beat)
+            });
+            laws.residual(&unknown, residual);
+            body.add(laws.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let period = NonZeroU64::new(1_000_000_000).expect("non-zero");
+        let cycle = Cycle::new(period, NonZeroU32::new(4).expect("non-zero")).expect("cycle");
+        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+        packet.within(admission_tolerance());
+        packet
+            .synthetic(
+                scale_key,
+                Binding::Body,
+                measure::<Dimensionless>(1e-308),
+                "synthetic",
+            )
+            .expect("once");
+        packet
+            .synthetic(
+                target_key,
+                Binding::Body,
+                measure::<Dimensionless>(0.25),
+                "synthetic",
+            )
+            .expect("once");
+        let row = body.rows()[0].kind();
+        packet
+            .start(row, measure::<Dimensionless>(1e308), "synthetic")
+            .expect("once");
+        packet
+            .row_scale(row, measure::<Dimensionless>(1e308))
+            .expect("once");
+        let lens = body.lens(Vec::new(), period).expect("lens");
+        let port = BoundaryPort::new(Vec::new()).expect("port");
+        let system = system(&body, packet, port, &lens, SimTime::from_ns(0)).expect("system");
+        let mut workspace = system.workspace();
+        let leg = workspace.legs_of(1)[0];
+        system.seed(&mut workspace, leg);
+        let outcome = solve_leg(&system, &mut workspace, leg).expect("solved");
+        let residuals = system.stage_residuals(&workspace, leg).expect("residuals");
+        let worst = residuals
+            .iter()
+            .map(|r| r.abs())
+            .fold(0.0, |a, b| if b > a { b } else { a });
+        assert!(
+            outcome.settled && outcome.updates > 1 && worst < 1e-12,
+            "expected large-scale row to converge past one update without stop overflow, got settled={} updates={} worst={worst:e}",
+            outcome.settled,
+            outcome.updates
+        );
+    }
 }

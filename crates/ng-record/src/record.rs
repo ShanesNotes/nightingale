@@ -2,7 +2,7 @@ use crate::checkpoint::{
     BranchAncestry, BranchFork, Checkpoint, CheckpointError, HistoryStore, RecordFormat, Restored, Sections,
     write,
 };
-use crate::history::{ConservationView, History, HistorySeal, LedgerChunk, Link};
+use crate::history::{ConservationFeed, ConservationView, History, HistorySeal, LedgerChunk, Link};
 use ng_contract::{
     AcceptedHead, AcceptedStateView, AdmissionError, Attempt, BoundaryEvent, CompiledBody, CoupledProblem,
     CoupledSolver, Digest, Fired, InitialRevision, InputId, NextHead, NumericalRefusal, RunIdentity, SimTime,
@@ -195,6 +195,9 @@ impl<'m> PatientRecord<'m> {
                 base: self.history.seal(),
             },
         }
+    }
+    pub(crate) fn conservation_feed(&self, store: &'m dyn HistoryStore) -> ConservationFeed<'m> {
+        ConservationFeed::from_record(self, store)
     }
     /// One digest per part, recomputed from the live fields on every call.
     pub fn digests(&self) -> RecordDigests {

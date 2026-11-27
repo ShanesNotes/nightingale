@@ -1,7 +1,7 @@
 # One [[row]] for each row of the must-fail table in docs/architecture/solver-contract.md §7, and what shows the
 # row's gate rejecting its core or model. 05-seam holds the pairing.
 #   core      the row's first cell, verbatim
-#   mutants   names of tools/gate/mutants.toml rows, each with a test that must fail under it. 40-mutants replays
+#   mutants   names of tools/gate/mutants.d/*.toml rows, each with a test that must fail under it. 40-mutants replays
 #             them.
 #   doctests  compile_fail doctests a crate holds for a core that does not compile, as the file, the error code
 #             gate.py codes proves, and a line only that doctest holds
@@ -9,6 +9,10 @@
 [[row]]
 core = "Forward Euler on the two-reservoir case with h > RC and a nonzero initial difference: every ledger closes, the difference grows"
 mutants = ["forward-euler-inside-rc"]
+
+[[row]]
+core = "Halved backward Euler or the reference scheme on the self-sustained oscillation with a cap past 4 * growth / w^2: every step passes verify and every ledger closes, while the oscillation decays"
+mutants = ["oscillation-cap-below-damping-bound", "oscillation-amplitude-unchecked"]
 
 [[row]]
 core = "Accepts a step whose normalized error exceeds one at its minimum interval (SB network.rs:439–449)"

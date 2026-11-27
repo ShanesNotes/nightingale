@@ -22,6 +22,26 @@
 //!     certify(&session.conservation(), policy)
 //! }
 //! ```
+//! A live fold reads one session through its bound feed and takes no raw segment from a caller.
+//! ```compile_fail,E0599
+//! use ng_record::HistorySegment;
+//! use ng_validate::CertificateFold;
+//! fn injected(fold: &mut CertificateFold<'_, '_>, segment: HistorySegment) {
+//!     fold.push(segment);
+//! }
+//! ```
+//! ```
+//! use ng_record::{ConservationRefusal, Running, Session};
+//! use ng_validate::{CertificateFold, CertificatePolicy};
+//! fn folded<'m, 'p>(session: &Session<'m, Running>, policy: &'p CertificatePolicy)
+//!     -> Result<CertificateFold<'m, 'p>, ng_validate::CertificateFailure> {
+//!     CertificateFold::open(session, policy)
+//! }
+//! fn stepped<'m>(fold: &mut CertificateFold<'m, '_>, session: &Session<'m, Running>)
+//!     -> Result<(), ConservationRefusal> {
+//!     fold.advance(session)
+//! }
+//! ```
 //! Charge's drift holds to its closure bound, so a policy cannot give charge a drift bound of its own.
 //! ```compile_fail,E0277
 //! use ng_contract::*;
@@ -375,6 +395,7 @@ mod day;
 mod fixture;
 mod healthy;
 mod initialize;
+mod oscillation;
 mod reference;
 mod replay;
 mod run;
@@ -396,8 +417,9 @@ pub use body::{
 };
 pub use burning::BurningBeds;
 pub use certificate::{
-    Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, EdgeRate, EdgeResult, EdgeWindows,
-    ExpectedDrift, HeldSupport, QuantityPolicy, QuantityResult, RhythmResult, SlidingWindows, certify,
+    Certificate, CertificateCheck, CertificateFailure, CertificateFold, CertificatePolicy, EdgeRate,
+    EdgeResult, EdgeWindows, ExpectedDrift, HeldSupport, QuantityPolicy, QuantityResult, RhythmResult,
+    SlidingWindows, certify,
 };
 pub use day::{
     DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict, day_checks,
@@ -408,6 +430,7 @@ pub use healthy::{
     ReadingCheckError, ReadingChecks, ReturnGap, ReturnReport,
 };
 pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved, solve_fixture};
+pub use oscillation::Oscillation;
 pub use reference::ReferenceIntegrator;
 pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, MemoryStore, ReplayCase, ReplayEvidence,

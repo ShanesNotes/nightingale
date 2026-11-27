@@ -2234,6 +2234,100 @@ fn a_certificate_over_a_link_the_store_lost_fails_by_that_link() {
     assert_eq!(failure.check(), CertificateCheck::History(missing));
 }
 
+#[derive(Default)]
+struct GivesOnce {
+    kept: MemoryStore,
+    once: RefCell<Vec<Digest>>,
+    gone: RefCell<Vec<Digest>>,
+}
+impl HistoryStore for GivesOnce {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        if self.gone.borrow().contains(seal) {
+            return None;
+        }
+        let link = self.kept.resolve(seal)?;
+        let mut once = self.once.borrow_mut();
+        if let Some(at) = once.iter().position(|marked| marked == seal) {
+            once.remove(at);
+            self.gone.borrow_mut().push(*seal);
+        }
+        Some(link)
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        self.kept.keep(seal, link)
+    }
+}
+
+fn step_recording_seals<'s>(
+    mut session: Session<'s, Running>,
+    steps: u64,
+) -> (Session<'s, Running>, Vec<Digest>) {
+    let mut seals = Vec::with_capacity(steps as usize);
+    for _ in 0..steps {
+        let receipt;
+        (session, receipt) = accepted(session.step());
+        seals.push(receipt.seal().digest());
+    }
+    (session, seals)
+}
+
+#[test]
+fn a_link_lost_after_the_initial_walk_on_an_unread_page_does_not_fail_certify() {
+    let store = GivesOnce::default();
+    let core = reference(SECOND);
+    let case = TwoReservoirs::closed().expect("a body");
+    let (session, seals) = step_recording_seals(case.admit(&core, &store).expect("admitted"), 66);
+    let rev_65 = seals[64];
+    store.once.borrow_mut().push(rev_65);
+    let view = session.conservation();
+    let ledger = Ledger::sliding(view.basis(), SECOND, SECOND, 1e-24, 1e-9, 1.0);
+    let certificate = certify(&view, &ledger.policy).expect("no cursor needs revision 65's page");
+    assert_eq!(certificate.pieces(), 1);
+    assert!(
+        store.gone.borrow().contains(&rev_65),
+        "in_time_order read and checked revision 65 once before it was lost"
+    );
+}
+
+#[test]
+fn a_link_lost_after_the_initial_walk_that_a_cursor_still_needs_fails_by_its_seal() {
+    let store = GivesOnce::default();
+    let core = reference(60 * SECOND);
+    let case = TwoReservoirs::closed().expect("a body");
+    let (session, seals) = step_recording_seals(case.admit(&core, &store).expect("admitted"), 2);
+    let rev_1 = seals[0];
+    store.once.borrow_mut().push(rev_1);
+    let view = session.conservation();
+    let ledger = Ledger::sliding(view.basis(), 120 * SECOND, 120 * SECOND, 1e-24, 1e-9, 1.0);
+    let failure = certify(&view, &ledger.policy).expect_err("the cursor needs revision 1");
+    assert_eq!(
+        failure.check(),
+        CertificateCheck::History(CheckpointError::HistoryMissing { seal: rev_1 })
+    );
+}
+
+#[test]
+fn two_links_lost_across_pages_during_a_walk_report_the_oldest_damaged_page_first() {
+    let store = GivesOnce::default();
+    let core = reference(SECOND);
+    let case = TwoReservoirs::closed().expect("a body");
+    let (session, seals) = step_recording_seals(case.admit(&core, &store).expect("admitted"), 129);
+    let (rev_64, rev_128) = (seals[63], seals[127]);
+    store.once.borrow_mut().extend([rev_64, rev_128]);
+    let view = session.conservation();
+    let ledger = Ledger::sliding(view.basis(), 10 * SECOND, 129 * SECOND, 1e-24, 1e-9, 1.0);
+    let failure = certify(&view, &ledger.policy).expect_err("the earliest damaged page fails");
+    assert_eq!(
+        failure.check(),
+        CertificateCheck::History(CheckpointError::HistoryMissing { seal: rev_64 }),
+        "cursors read oldest page first, so revision 64 is hit before revision 128"
+    );
+    assert!(
+        store.gone.borrow().contains(&rev_64) && store.gone.borrow().contains(&rev_128),
+        "in_time_order read both links once before they were lost"
+    );
+}
+
 #[test]
 fn coverage_under_48_hours_and_a_policy_of_another_basis_fail() {
     let store = MemoryStore::default();

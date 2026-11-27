@@ -1,8 +1,8 @@
 use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, ArithmeticProfile, CoupledProblem, CoupledSolver, DeclaredResolution, Digest,
-    EngineFaultKind, ErrorScales, Factors, Increment, Jacobian, Measure, MethodHistory, NumericalRefusal,
-    Ratio, RowKind, SolveWorkspace, SparseView, StageEvaluation, StageScheme, StageSet, StageTime,
+    EngineFaultKind, ErrorScales, Factors, Increment, Measure, MethodHistory, NumericalRefusal, Ratio,
+    RowKind, SolveWorkspace, SparseView, StageEvaluation, StageJacobian, StageScheme, StageSet, StageTime,
     StepProposal, StepTicket, TrialFailure, eliminate,
 };
 
@@ -51,20 +51,16 @@ struct Carried {
     midpoint: Vec<f64>,
 }
 impl Carried {
-    fn read(history: &MethodHistory) -> Option<Self> {
+    fn read_parts(history: &MethodHistory) -> Option<(u64, f64, &[u64])> {
         let (&[span_ns, estimate], midpoint) = history.counters().split_first_chunk()?;
-        Some(Self {
-            span_ns,
-            estimate: f64::from_bits(estimate),
-            midpoint: midpoint.iter().map(|&bits| f64::from_bits(bits)).collect(),
-        })
+        Some((span_ns, f64::from_bits(estimate), midpoint))
     }
     fn counters(&self) -> Vec<u64> {
-        let midpoint = self.midpoint.iter().map(|value| value.to_bits());
-        [self.span_ns, self.estimate.to_bits()]
-            .into_iter()
-            .chain(midpoint)
-            .collect()
+        let mut out = Vec::with_capacity(2 + self.midpoint.len());
+        out.push(self.span_ns);
+        out.push(self.estimate.to_bits());
+        out.extend(self.midpoint.iter().map(|value| value.to_bits()));
+        out
     }
 }
 
@@ -129,16 +125,16 @@ impl CoupledSolver for Core {
         )
     }
     fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
-        let carried = Carried::read(accepted.method_history());
-        self.bounded(carried.map_or(self.longest_step_ns, |carried| carried.span_ns))
+        let span_ns = Carried::read_parts(accepted.method_history()).map(|(span_ns, _, _)| span_ns);
+        self.bounded(span_ns.unwrap_or(self.longest_step_ns))
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let history = problem.accepted().method_history();
-        let carried = Carried::read(history).filter(|_| !ticket.after_breakpoint());
-        let tolerance = carried.as_ref().map_or(NEWTON_FRESH, |carried| {
-            (NEWTON_SHARE * carried.estimate).clamp(NEWTON_TIGHTEST, NEWTON_LOOSEST)
+        let carried = Carried::read_parts(history).filter(|_| !ticket.after_breakpoint());
+        let tolerance = carried.map_or(NEWTON_FRESH, |(_, estimate, _)| {
+            (NEWTON_SHARE * estimate).clamp(NEWTON_TIGHTEST, NEWTON_LOOSEST)
         });
-        let midpoint = carried.map(|carried| carried.midpoint).unwrap_or_default();
+        let midpoint = carried.map_or(&[][..], |(_, _, midpoint)| midpoint);
         let stages = Stages::new(problem, ticket, tolerance);
         let solved = stages.solve(problem.stage_set(ticket), midpoint)?;
         let committed_ns = self.next_step(problem.accepted());
@@ -159,19 +155,28 @@ impl CoupledSolver for Core {
 
 struct Linear<'b> {
     per_second: f64,
-    jacobian: Jacobian,
+    jacobian: StageJacobian<'b>,
     factors: Option<Factors<'b>>,
 }
 impl Linear<'_> {
-    fn solve(&self, residuals: &[f64]) -> Option<Vec<f64>> {
+    fn solve_into(&self, residuals: &[f64], out: &mut Vec<f64>) -> bool {
         if let Some(factors) = &self.factors {
-            let mut update = residuals.to_vec();
-            factors.solve(&mut update);
-            if update.iter().all(|change| change.is_finite()) {
-                return Some(update);
+            out.clear();
+            out.extend_from_slice(residuals);
+            factors.solve(out);
+            if out.iter().all(|change| change.is_finite()) {
+                return true;
             }
         }
-        dense(self.jacobian.view(), residuals)
+        if let Some(solved) = dense(self.jacobian.view(), residuals) {
+            *out = solved;
+            return true;
+        }
+        false
+    }
+    fn solve(&self, residuals: &[f64]) -> Option<Vec<f64>> {
+        let mut out = Vec::with_capacity(residuals.len());
+        self.solve_into(residuals, &mut out).then_some(out)
     }
     fn fits(&self, per_second: f64) -> bool {
         (self.per_second - per_second).abs() <= SHIFT_MATCH * per_second
@@ -200,52 +205,89 @@ fn in_domain(failure: &TrialFailure) -> bool {
     }
 }
 
-struct Trend {
-    points: Vec<(f64, Vec<f64>)>,
+#[derive(Clone, Copy)]
+enum PointValues<'a> {
+    Floats(&'a [f64]),
+    Bits(&'a [u64]),
 }
-impl Trend {
-    fn of(problem: &CoupledProblem<'_>, ticket: &StepTicket, midpoint: Vec<f64>) -> Self {
+
+struct Trend<'p> {
+    earlier: Option<(f64, Vec<f64>)>,
+    midpoint: Option<(f64, &'p [u64])>,
+}
+impl<'p> Trend<'p> {
+    fn of(problem: &CoupledProblem<'p>, ticket: &StepTicket, midpoint: &'p [u64]) -> Self {
         let segment = problem.accepted().last_segment();
         let Some(interval) = segment.interval().filter(|_| !ticket.after_breakpoint()) else {
-            return Self { points: Vec::new() };
+            return Self {
+                earlier: None,
+                midpoint: None,
+            };
         };
         let length = interval.length_ns();
-        let earlier = (problem.body().rows().iter())
-            .map(|row| {
-                let held = segment.sample(row.id(), interval.start())?;
-                Some(f64::from_bits(held.bits()[0]))
-            })
-            .collect::<Option<Vec<f64>>>();
-        let mut points = Vec::with_capacity(2);
-        if let Some(earlier) = earlier {
-            points.push((-(length as f64), earlier));
+        let rows = problem.body().rows();
+        let mut earlier = Vec::with_capacity(rows.len());
+        let mut complete = true;
+        for row in rows {
+            let Some(held) = segment.sample(row.id(), interval.start()) else {
+                complete = false;
+                break;
+            };
+            earlier.push(f64::from_bits(held.bits()[0]));
         }
-        if midpoint.len() == problem.body().rows().len() && length >= 2 {
-            points.push((-((length - length / 2) as f64), midpoint));
-        }
-        Self { points }
+        let earlier = complete.then_some((-(length as f64), earlier));
+        let midpoint = (midpoint.len() == rows.len() && length >= 2)
+            .then_some((-((length - length / 2) as f64), midpoint));
+        Self { earlier, midpoint }
     }
-    fn reach(&self, known: &[(f64, &[f64])], count: usize, at: f64) -> Vec<f64> {
-        let skip = self.points.len().saturating_sub(count);
-        let earlier = self.points[skip..]
-            .iter()
-            .map(|(time, values)| (*time, values.as_slice()));
-        let points: Vec<(f64, &[f64])> = earlier.chain(known.iter().copied()).collect();
-        let weights: Vec<f64> = (points.iter().enumerate())
-            .map(|(k, (time, _))| {
-                let others = points.iter().enumerate().filter(|(j, _)| *j != k);
-                others.fold(1.0, |weight, (_, (other, _))| {
-                    weight * (at - other) / (time - other)
-                })
-            })
-            .collect();
-        let mut reached = vec![0.0; known[0].1.len()];
-        for (weight, (_, values)) in weights.iter().zip(&points) {
-            for (value, point) in reached.iter_mut().zip(values.iter()) {
-                *value += weight * point;
+    fn reach_into(&self, known: &[(f64, &[f64])], count: usize, at: f64, out: &mut [f64]) {
+        let mut stored = [(0.0, PointValues::Floats(&[])); 2];
+        let mut stored_len = 0;
+        if let Some((time, values)) = &self.earlier {
+            stored[stored_len] = (*time, PointValues::Floats(values));
+            stored_len += 1;
+        }
+        if let Some((time, bits)) = self.midpoint {
+            stored[stored_len] = (time, PointValues::Bits(bits));
+            stored_len += 1;
+        }
+        let skip = stored_len.saturating_sub(count);
+        let mut points = [(0.0, PointValues::Floats(&[])); 4];
+        let mut n = 0;
+        for &point in &stored[skip..stored_len] {
+            points[n] = point;
+            n += 1;
+        }
+        for &(time, values) in known {
+            points[n] = (time, PointValues::Floats(values));
+            n += 1;
+        }
+        let mut weights = [0.0; 4];
+        for (k, weight_out) in weights[..n].iter_mut().enumerate() {
+            let time = points[k].0;
+            let mut weight = 1.0;
+            for (j, &(other, _)) in points[..n].iter().enumerate() {
+                if j != k {
+                    weight = weight * (at - other) / (time - other);
+                }
+            }
+            *weight_out = weight;
+        }
+        out.fill(0.0);
+        for (&weight, &(_, source)) in weights[..n].iter().zip(&points[..n]) {
+            match source {
+                PointValues::Floats(values) => {
+                    for (value, &point) in out.iter_mut().zip(values) {
+                        *value += weight * point;
+                    }
+                }
+                PointValues::Bits(bits) => {
+                    for (value, &word) in out.iter_mut().zip(bits) {
+                        *value += weight * f64::from_bits(word);
+                    }
+                }
             }
         }
-        reached
     }
 }
 
@@ -283,20 +325,25 @@ struct Solved {
     midpoint: Vec<f64>,
 }
 
-struct Halves {
-    early: StageEvaluation,
-    late: StageEvaluation,
-    reached: Vec<f64>,
-    fine: Vec<f64>,
-    end: SolveWorkspace,
+struct Scratch {
+    guess: Vec<f64>,
+    before: Vec<f64>,
+    correction: Vec<f64>,
+}
+impl Scratch {
+    fn new(rows: usize) -> Self {
+        Self {
+            guess: vec![0.0; rows],
+            before: vec![0.0; rows],
+            correction: vec![0.0; rows],
+        }
+    }
 }
 
 struct Stages<'a, 'p> {
     problem: &'a CoupledProblem<'p>,
     ticket: &'a StepTicket,
-    sizes: Vec<f64>,
-    differential: Vec<bool>,
-    own: Vec<usize>,
+    differential_end: usize,
     tolerance: f64,
 }
 impl<'a, 'p> Stages<'a, 'p> {
@@ -305,40 +352,55 @@ impl<'a, 'p> Stages<'a, 'p> {
         Self {
             problem,
             ticket,
-            sizes: (0..rows.len()).map(|slot| problem.row_size(slot)).collect(),
-            differential: (rows.iter())
-                .map(|row| !matches!(row.kind(), RowKind::Algebraic(_)))
-                .collect(),
-            own: rows.iter().map(|row| row.unknown().index()).collect(),
+            differential_end: rows.partition_point(|row| !matches!(row.kind(), RowKind::Algebraic(_))),
             tolerance,
         }
     }
 
-    fn solve(&self, set: StageSet, midpoint: Vec<f64>) -> Result<Solved, TrialFailure> {
+    fn solve(&self, set: StageSet, midpoint: &'p [u64]) -> Result<Solved, TrialFailure> {
         let (problem, ticket) = (self.problem, self.ticket);
         let length = ticket.length_ns();
-        let mut seed = problem.workspace();
-        let start = seed.unknowns_mut().to_vec();
+        let mut workspace = problem.workspace();
+        let start = workspace.unknowns_mut().to_vec();
         let trend = Trend::of(problem, ticket, midpoint);
+        let mut scratch = Scratch::new(start.len());
         let mut quadrature = problem.quadrature(ticket);
         let mut linear = None;
-        let (end, midpoint) = match set {
+        let midpoint = match set {
             StageSet::Whole => {
-                let mut whole = problem.workspace();
-                let guess = trend.reach(&[(0.0, &start)], 2, length as f64);
+                trend.reach_into(&[(0.0, &start)], 2, length as f64, &mut scratch.guess);
                 let leg = Leg::weighted(&start, length, length, self.tolerance);
-                let stage = self.settle(&mut whole, leg, &guess, &mut linear)?;
-                quadrature.add(&stage, Ratio::ONE)?;
-                (whole, Vec::new())
+                let stage = self.settle(&mut workspace, leg, &mut linear, &mut scratch)?;
+                quadrature.add_owned(stage, Ratio::ONE)?;
+                Vec::new()
             }
             StageSet::Doubled | StageSet::Halved => {
-                let halves = self.halves(&trend, &start, &mut linear)?;
+                let (half, rest) = (length / 2, length - length / 2);
+                trend.reach_into(&[(0.0, &start)], 2, half as f64, &mut scratch.guess);
+                let early = self.settle(
+                    &mut workspace,
+                    Leg::weighted(&start, half, half, self.tolerance),
+                    &mut linear,
+                    &mut scratch,
+                )?;
+                let reached = workspace.unknowns_mut().to_vec();
+                trend.reach_into(
+                    &[(0.0, &start), (half as f64, &reached)],
+                    1,
+                    length as f64,
+                    &mut scratch.guess,
+                );
+                let leg = Leg::weighted(&reached, length, rest, self.tolerance);
+                let late = self.settle(&mut workspace, leg, &mut linear, &mut scratch)?;
                 if set == StageSet::Doubled {
-                    quadrature.add(&self.coarse(&start, &halves, &mut linear)?, Ratio::ZERO)?;
+                    let fine = workspace.unknowns_mut().to_vec();
+                    let coarse =
+                        self.coarse(&mut workspace, &start, &reached, &fine, &mut linear, &mut scratch)?;
+                    quadrature.add_owned(coarse, Ratio::ZERO)?;
                 }
-                quadrature.add(&halves.early, ticket.fraction(length / 2))?;
-                quadrature.add(&halves.late, ticket.fraction(length - length / 2))?;
-                (halves.end, halves.reached)
+                quadrature.add_owned(early, ticket.fraction(half))?;
+                quadrature.add_owned(late, ticket.fraction(rest))?;
+                reached
             }
             StageSet::ForwardEuler | StageSet::Heun => return Err(ticket.mismatch().into()),
         };
@@ -346,67 +408,40 @@ impl<'a, 'p> Stages<'a, 'p> {
         let estimate = problem.estimate(ticket, &increment)?;
         Ok(Solved {
             increment,
-            end,
+            end: workspace,
             estimate,
             midpoint,
         })
     }
 
-    fn halves(
-        &self,
-        trend: &Trend,
-        start: &[f64],
-        linear: &mut Option<Linear<'p>>,
-    ) -> Result<Halves, TrialFailure> {
-        let (problem, length) = (self.problem, self.ticket.length_ns());
-        let (half, rest) = (length / 2, length - length / 2);
-        let mut first = problem.workspace();
-        let guess = trend.reach(&[(0.0, start)], 2, half as f64);
-        let early = self.settle(
-            &mut first,
-            Leg::weighted(start, half, half, self.tolerance),
-            &guess,
-            linear,
-        )?;
-        let reached = first.unknowns_mut().to_vec();
-        let guess = trend.reach(&[(0.0, start), (half as f64, &reached)], 1, length as f64);
-        let mut end = problem.workspace();
-        let leg = Leg::weighted(&reached, length, rest, self.tolerance);
-        let late = self.settle(&mut end, leg, &guess, linear)?;
-        let fine = end.unknowns_mut().to_vec();
-        Ok(Halves {
-            early,
-            late,
-            reached,
-            fine,
-            end,
-        })
-    }
-
     fn coarse(
         &self,
+        workspace: &mut SolveWorkspace,
         start: &[f64],
-        halves: &Halves,
+        reached: &[f64],
+        fine: &[f64],
         linear: &mut Option<Linear<'p>>,
+        scratch: &mut Scratch,
     ) -> Result<StageEvaluation, TrialFailure> {
-        let Halves { reached, fine, .. } = halves;
-        let guess: Vec<f64> = (fine.iter().zip(reached).zip(start))
-            .map(|((fine, half), start)| start + 2.0 * (fine - half))
-            .collect();
-        let apart: Vec<f64> = fine
-            .iter()
-            .zip(&guess)
-            .map(|(fine, guess)| fine - guess)
-            .collect();
-        let tolerance = COARSE_SHARE * self.norm(&apart, fine);
+        let mut apart = 0.0;
+        for (at, ((&fine_val, &half), &from)) in fine.iter().zip(reached).zip(start).enumerate() {
+            let guess = from + 2.0 * (fine_val - half);
+            scratch.guess[at] = guess;
+            let normalized = (fine_val - guess).abs() / scale(fine_val, self.problem.row_size(at));
+            if normalized > apart {
+                apart = normalized;
+            }
+        }
+        let tolerance = COARSE_SHARE * apart;
         let tolerance = if tolerance > self.tolerance {
             tolerance
         } else {
             self.tolerance
         };
-        let mut whole = self.problem.workspace();
         let leg = Leg::coarse(start, self.ticket.length_ns(), tolerance);
-        self.settle(&mut whole, leg, &guess, linear)
+        let stage = self.settle(workspace, leg, linear, scratch)?;
+        workspace.unknowns_mut().copy_from_slice(fine);
+        Ok(stage)
     }
 
     /// The record's stage defect, each row judged at its own value: the record judges a row that closes a store
@@ -414,13 +449,14 @@ impl<'a, 'p> Stages<'a, 'p> {
     fn defect(&self, residuals: &[f64], unknowns: &[f64]) -> f64 {
         let seconds = self.ticket.length_ns() as f64 / NANOSECONDS_PER_SECOND;
         let mut worst = 0.0;
-        for (at, (residual, value)) in residuals.iter().zip(unknowns).enumerate() {
-            let defect = if self.differential[at] {
-                seconds * residual.abs()
-            } else {
-                residual.abs()
-            };
-            let normalized = defect / scale(*value, self.sizes[at]);
+        for at in 0..self.differential_end {
+            let normalized = (seconds * residuals[at].abs()) / scale(unknowns[at], self.problem.row_size(at));
+            if normalized > worst {
+                worst = normalized;
+            }
+        }
+        for at in self.differential_end..residuals.len() {
+            let normalized = residuals[at].abs() / scale(unknowns[at], self.problem.row_size(at));
             if normalized > worst {
                 worst = normalized;
             }
@@ -431,7 +467,7 @@ impl<'a, 'p> Stages<'a, 'p> {
     fn norm(&self, correction: &[f64], unknowns: &[f64]) -> f64 {
         let mut worst = 0.0;
         for (at, (change, value)) in correction.iter().zip(unknowns).enumerate() {
-            let normalized = change.abs() / scale(*value, self.sizes[at]);
+            let normalized = change.abs() / scale(*value, self.problem.row_size(at));
             if normalized > worst {
                 worst = normalized;
             }
@@ -439,15 +475,16 @@ impl<'a, 'p> Stages<'a, 'p> {
         worst
     }
 
-    fn evaluate(
+    fn evaluate_with(
         &self,
         workspace: &mut SolveWorkspace,
+        unknowns: &[f64],
         from: &[f64],
         per_second: f64,
         time: StageTime<'_>,
     ) -> Result<StageEvaluation, TrialFailure> {
-        let unknowns = workspace.unknowns_mut().to_vec();
-        for ((tangent, now), then) in workspace.derivative_mut().iter_mut().zip(&unknowns).zip(from) {
+        workspace.unknowns_mut().copy_from_slice(unknowns);
+        for ((tangent, &now), &then) in workspace.derivative_mut().iter_mut().zip(unknowns).zip(from) {
             *tangent = (now - then) * per_second;
         }
         self.problem.evaluate(&workspace.point(time))
@@ -461,8 +498,8 @@ impl<'a, 'p> Stages<'a, 'p> {
     ) -> Result<Linear<'p>, TrialFailure> {
         let jacobian = self
             .problem
-            .linearize(&workspace.point(time), self.ticket.shift(span_ns)?)?;
-        let factors = self.problem.body().factor(&jacobian).ok();
+            .linearize_stage(&workspace.point(time), self.ticket.shift(span_ns)?)?;
+        let factors = jacobian.factor().ok();
         Ok(Linear {
             per_second: NANOSECONDS_PER_SECOND / span_ns as f64,
             jacobian,
@@ -481,12 +518,13 @@ impl<'a, 'p> Stages<'a, 'p> {
         residuals: &[f64],
         unknowns: &[f64],
     ) -> Option<Vec<f64>> {
+        let body_rows = self.problem.body().rows();
         let rows = residuals.len();
         let seconds = self.ticket.length_ns() as f64 / NANOSECONDS_PER_SECOND;
         let weights: Vec<f64> = (0..rows)
             .map(|at| {
-                let weight = 1.0 / scale(unknowns[at], self.sizes[at]);
-                if self.differential[at] {
+                let weight = 1.0 / scale(unknowns[at], self.problem.row_size(at));
+                if at < self.differential_end {
                     seconds * weight
                 } else {
                     weight
@@ -503,8 +541,8 @@ impl<'a, 'p> Stages<'a, 'p> {
                     for entry in entries {
                         sum += view.values()[entry] * direction[view.columns()[entry].index()];
                     }
-                    if self.differential[row] {
-                        sum += shift * direction[self.own[row]];
+                    if row < self.differential_end {
+                        sum += shift * direction[body_rows[row].unknown().index()];
                     }
                     sum * weights[row]
                 })
@@ -594,16 +632,30 @@ impl<'a, 'p> Stages<'a, 'p> {
         from: &[f64],
         per_second: f64,
         time: StageTime<'_>,
-        correction: &[f64],
-    ) -> Result<StageEvaluation, TrialFailure> {
-        let before = workspace.unknowns_mut().to_vec();
+        scratch: &mut Scratch,
+        evaluation: &mut StageEvaluation,
+    ) -> Result<(), TrialFailure> {
+        scratch.before.copy_from_slice(workspace.unknowns_mut());
         let mut share = 1.0;
         loop {
-            let moved = workspace.unknowns_mut().iter_mut().zip(&before).zip(correction);
-            for ((unknown, was), change) in moved {
+            for ((unknown, &was), &change) in workspace
+                .unknowns_mut()
+                .iter_mut()
+                .zip(&scratch.before)
+                .zip(&scratch.correction)
+            {
                 *unknown = was - share * change;
             }
-            match self.evaluate(workspace, from, per_second, time) {
+            for (((tangent, &was), &change), &then) in workspace
+                .derivative_mut()
+                .iter_mut()
+                .zip(&scratch.before)
+                .zip(&scratch.correction)
+                .zip(from)
+            {
+                *tangent = ((was - share * change) - then) * per_second;
+            }
+            match self.problem.reevaluate(&workspace.point(time), evaluation) {
                 Err(failure) if share > 0.2 && in_domain(&failure) => share *= 0.5,
                 outcome => return outcome,
             }
@@ -614,8 +666,8 @@ impl<'a, 'p> Stages<'a, 'p> {
         &self,
         workspace: &mut SolveWorkspace,
         leg: Leg<'_>,
-        guess: &[f64],
         linear: &mut Option<Linear<'p>>,
+        scratch: &mut Scratch,
     ) -> Result<StageEvaluation, TrialFailure> {
         let Leg {
             from,
@@ -626,11 +678,9 @@ impl<'a, 'p> Stages<'a, 'p> {
         } = leg;
         let time = self.ticket.at(offset_ns)?;
         let per_second = NANOSECONDS_PER_SECOND / span_ns as f64;
-        workspace.unknowns_mut().copy_from_slice(guess);
-        let mut evaluation = match self.evaluate(workspace, from, per_second, time) {
-            Err(failure) if in_domain(&failure) && guess != from => {
-                workspace.unknowns_mut().copy_from_slice(from);
-                self.evaluate(workspace, from, per_second, time)?
+        let mut evaluation = match self.evaluate_with(workspace, &scratch.guess, from, per_second, time) {
+            Err(failure) if in_domain(&failure) && scratch.guess.as_slice() != from => {
+                self.evaluate_with(workspace, from, from, per_second, time)?
             }
             outcome => outcome?,
         };
@@ -647,27 +697,33 @@ impl<'a, 'p> Stages<'a, 'p> {
             }
             let held = linear.as_ref().expect("built above");
             let refused = || self.ticket.refuse(NumericalRefusal::IterationLimit);
-            let unknowns = workspace.unknowns_mut().to_vec();
-            let correction = if held.fits(per_second) {
-                held.solve(residuals)
+            let solved = if held.fits(per_second) {
+                held.solve_into(residuals, &mut scratch.correction)
             } else if held.factors.is_some() {
-                self.krylov(held, per_second, residuals, &unknowns)
+                if let Some(correction) = self.krylov(held, per_second, residuals, workspace.unknowns_mut()) {
+                    scratch.correction = correction;
+                    true
+                } else {
+                    false
+                }
             } else {
-                None
+                false
             };
             let rebuild = !built_here && rebuilds < REBUILDS;
-            let Some(correction) = correction else {
+            if !solved {
                 if rebuild {
                     *linear = Some(self.linearized(workspace, time, span_ns)?);
                     (rebuilds, built_here) = (rebuilds + 1, true);
                     continue;
                 }
                 return Err(refused());
-            };
-            let size = self.norm(&correction, &unknowns);
+            }
+            let size = self.norm(&scratch.correction, workspace.unknowns_mut());
             let stalled = size >= 0.5 * last;
             let updated = updates > 0 || !weighted;
-            if updated && size <= tolerance && (stalled || self.defect(residuals, &unknowns) <= DEFECT_LIMIT)
+            if updated
+                && size <= tolerance
+                && (stalled || self.defect(residuals, workspace.unknowns_mut()) <= DEFECT_LIMIT)
             {
                 return Ok(evaluation);
             }
@@ -680,7 +736,7 @@ impl<'a, 'p> Stages<'a, 'p> {
                 return Err(refused());
             }
             (updates, last, built_here) = (updates + 1, size, false);
-            evaluation = self.update(workspace, from, per_second, time, &correction)?;
+            self.update(workspace, from, per_second, time, scratch, &mut evaluation)?;
         }
     }
 }

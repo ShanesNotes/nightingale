@@ -203,9 +203,9 @@ fn score(arguments: &[String]) {
             ArenaProtocol {
                 windows: SlidingWindows::new(
                     window.expect("a window"),
-                    number(4, "a span in s") * 1_000 * MS,
+                    number(4, "coverage in s") * 1_000 * MS,
                 )
-                .expect("a span of at least its window"),
+                .expect("coverage of at least its window"),
                 repeats: repeats.expect("at least one repeat"),
                 ..ArenaProtocol::pick()
             }
@@ -213,7 +213,7 @@ fn score(arguments: &[String]) {
     };
     println!("work core {named} second_policy_ms {second_ms}");
     println!(
-        "work protocol window_ns {} span_ns {} repeats {}",
+        "work protocol window_ns {} coverage_ns {} repeats {}",
         protocol.windows.window_ns(),
         protocol.windows.coverage_ns(),
         protocol.repeats
@@ -358,7 +358,7 @@ fn cost(arguments: &[String]) {
         let given = arguments.get(at).and_then(|given| given.parse().ok());
         given.unwrap_or_else(|| panic!("{what}"))
     };
-    let (span_s, repeats) = (number(1, "simulated seconds"), number(2, "repeats"));
+    let (simulated_s, repeats) = (number(1, "simulated seconds"), number(2, "repeats"));
     assert!(repeats > 0, "at least one repeat");
     let body = if whole { whole_body() } else { arena_body() }.expect("compiled");
     let core = Counted {
@@ -400,7 +400,7 @@ fn cost(arguments: &[String]) {
     );
     let from = admitted.session.record().revision();
     drop(admitted);
-    let end = SimTime::from_ns(anchor_moment().nanoseconds() + span_s * 1_000 * MS);
+    let end = SimTime::from_ns(anchor_moment().nanoseconds() + simulated_s * 1_000 * MS);
     let mut walls = Vec::new();
     let mut work = None;
     for repeat in 0..repeats {
@@ -433,7 +433,7 @@ fn cost(arguments: &[String]) {
     let spread = 100.0 * (walls[walls.len() - 1] - walls[0]) / median;
     let unknowns: std::collections::BTreeSet<_> = body.sparsity().unknowns().iter().collect();
     println!(
-        "cost assembly={} core=ng-solver-10ms span_s={span_s} repeats={repeats} rows={} unknowns={} columns={} \
+        "cost assembly={} core=ng-solver-10ms simulated_s={simulated_s} repeats={repeats} rows={} unknowns={} columns={} \
          jacobian_nonzeros={} steps={steps} solves={solves} steps_a_simulated_s={:.1} solves_a_step={:.3} \
          wall_ms_a_simulated_s={:.1} wall_spread_pct={spread:.1} admission_wall_s={admission_s:.1} seal={seal}",
         if whole { "body" } else { "slice" },
@@ -441,9 +441,9 @@ fn cost(arguments: &[String]) {
         unknowns.len(),
         body.columns().len(),
         body.sparsity().unknowns().len(),
-        steps as f64 / span_s as f64,
+        steps as f64 / simulated_s as f64,
         solves as f64 / steps as f64,
-        1e3 * median / span_s as f64,
+        1e3 * median / simulated_s as f64,
     );
 }
 

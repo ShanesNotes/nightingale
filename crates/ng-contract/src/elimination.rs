@@ -1,28 +1,73 @@
 use crate::body::{RowId, UnknownId};
-use alloc::collections::BTreeSet;
+use crate::graph::Digraph;
+use alloc::collections::BinaryHeap;
+use core::cmp::Reverse;
 
-/// A fixed elimination over one sparsity. Each pivot pairs an unknown with the row the structural matching gave it,
-/// in least-degree order on the symmetric pattern, ties to the least unknown, so a sparse body factors in about its
-/// nonzeros and every run fills the same entries. The pattern is the union over modes, so a mode change moves no entry.
+/// Stored pattern and operation counts of a compiled elimination plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EliminationMetrics {
+    pub nonzeros: usize,
+    pub factor_macs: usize,
+    pub solve_macs: usize,
+    pub blocks: usize,
+    pub largest_block: usize,
+}
+
+/// A fixed block-triangular elimination over one sparsity. Strongly connected components of the structurally matched
+/// dependency graph stand in topological order so no fill crosses block boundaries and every 1x1 block factors with no
+/// elimination loop. Inside each block of more than one unknown, pivots follow exact directed minimum fill (breaking
+/// ties by Markowitz product, then least unknown). The pattern is the union over modes, so a mode change moves no entry.
 ///
-/// `own` stores the entries the rows hold and those their elimination fills, lower and upper apart. `closure` is the
-/// symmetric pattern the order is read from: the extra entries hold zeros, and `ghosts` lists them so a solve keeps
-/// the bits a walk over them gives. A value that is not finite takes `closure` whole, since a zero times it is not zero.
+/// `own` stores off-diagonal reads raw beside each diagonal block's entries and fill, lower and upper apart. `closure`
+/// symmetrizes each diagonal block: its extra entries hold zeros, and `ghosts` lists them so a solve keeps the bits a
+/// walk over them gives. A value that is not finite takes `closure` whole, since a zero times it is not zero.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ZeroMask {
+    pub(crate) probes: Vec<u32>,
+    pub(crate) zeros: Vec<u32>,
+}
+
+#[derive(Debug, PartialEq)]
+struct SpecializedPlan {
+    probes: Vec<u32>,
+    zeros: Vec<u32>,
+    plan: Elimination,
+}
+impl SpecializedPlan {
+    fn matches(&self, values: &[f64]) -> bool {
+        for &entry in &self.probes {
+            if (values[index(entry)].to_bits() << 1) != 0 {
+                return false;
+            }
+        }
+        let mut bits = 0_u64;
+        for &entry in &self.zeros {
+            bits |= values[index(entry)].to_bits() << 1;
+        }
+        bits == 0
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) struct Elimination {
     rows: Vec<u32>,
     unknowns: Vec<u32>,
+    blocks: Vec<u32>,
+    max_block: usize,
     own: Pattern,
     closure: Pattern,
     ghosts: Ghosts,
+    specialized: Vec<SpecializedPlan>,
 }
 
 #[derive(Debug, PartialEq)]
 struct Pattern {
     starts: Vec<u32>,
+    intra_starts: Vec<u32>,
     columns: Vec<u32>,
     diagonals: Vec<u32>,
     places: Vec<u32>,
+    scatter: Vec<(u32, u32)>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -37,6 +82,84 @@ struct Eliminated {
     finite: bool,
 }
 
+const TINY_PIVOT: f64 = 1e-12;
+
+fn scales_of(pattern: &Pattern, values: &[f64]) -> (Vec<f64>, Vec<f64>) {
+    let Pattern {
+        starts,
+        intra_starts,
+        columns,
+        places,
+        scatter,
+        ..
+    } = pattern;
+    let size = starts.len() - 1;
+    let mut raw = vec![0.0; columns.len()];
+    if scatter.is_empty() {
+        for (&place, &value) in places.iter().zip(values) {
+            raw[index(place)] += value;
+        }
+    } else {
+        for &(entry, place) in scatter {
+            raw[index(place)] += values[index(entry)];
+        }
+    }
+    let (mut row_max, mut col_max) = (vec![0.0; size], vec![0.0; size]);
+    for at in 0..size {
+        let range = index(intra_starts[at])..index(starts[at + 1]);
+        let mut rmax = 0.0;
+        for (&cell, &column) in raw[range.clone()].iter().zip(&columns[range]) {
+            let abs = cell.abs();
+            if abs.is_finite() {
+                if abs > rmax {
+                    rmax = abs;
+                }
+                let col = index(column);
+                if abs > col_max[col] {
+                    col_max[col] = abs;
+                }
+            }
+        }
+        row_max[at] = rmax;
+    }
+    (row_max, col_max)
+}
+
+#[cold]
+fn bad_pivot_slow(
+    diagonal: f64,
+    at: usize,
+    pattern: &Pattern,
+    values: &[f64],
+    scales: &mut Option<(Vec<f64>, Vec<f64>)>,
+) -> bool {
+    let (row_max, col_max) = scales.get_or_insert_with(|| scales_of(pattern, values));
+    let reach = if row_max[at] < col_max[at] {
+        row_max[at]
+    } else {
+        col_max[at]
+    };
+    diagonal.abs() <= TINY_PIVOT * reach
+}
+
+#[inline(always)]
+fn bad_pivot(
+    diagonal: f64,
+    at: usize,
+    row_max: f64,
+    pattern: &Pattern,
+    values: &[f64],
+    scales: &mut Option<(Vec<f64>, Vec<f64>)>,
+) -> bool {
+    if diagonal == 0.0 || !diagonal.is_finite() {
+        return true;
+    }
+    if diagonal.abs() > TINY_PIVOT * row_max {
+        return false;
+    }
+    bad_pivot_slow(diagonal, at, pattern, values, scales)
+}
+
 fn index(value: u32) -> usize {
     value as usize
 }
@@ -44,34 +167,70 @@ fn index(value: u32) -> usize {
 impl Pattern {
     fn of(
         lines: &[Vec<u32>],
+        blocks: &[u32],
         rows: &[u32],
         offsets: &[usize],
         unknowns: &[UnknownId],
         position: &[u32],
+        is_zero: Option<&[bool]>,
     ) -> Self {
-        let (mut starts, mut columns, mut diagonals) =
-            (vec![0_u32], Vec::new(), Vec::with_capacity(lines.len()));
-        for (at, line) in lines.iter().enumerate() {
-            diagonals.push(columns.len() as u32 + line.partition_point(|&column| column < at as u32) as u32);
-            columns.extend_from_slice(line);
-            starts.push(columns.len() as u32);
-        }
-        let mut places = vec![0_u32; unknowns.len()];
-        for (at, &row) in rows.iter().enumerate() {
-            let row = index(row);
-            let pattern = &columns[index(starts[at])..index(starts[at + 1])];
-            for entry in offsets[row]..offsets[row + 1] {
-                let column = position[unknowns[entry].index()];
-                let found = pattern.binary_search(&column);
-                let found = found.expect("every entry of a row lies on its pivot's pattern");
-                places[entry] = starts[at] + found as u32;
+        let (mut starts, mut intra_starts, mut columns, mut diagonals) = (
+            vec![0_u32],
+            Vec::with_capacity(lines.len()),
+            Vec::new(),
+            Vec::with_capacity(lines.len()),
+        );
+        for block in blocks.windows(2) {
+            let (lo, hi) = (block[0], block[1]);
+            for (offset, line) in lines[index(lo)..index(hi)].iter().enumerate() {
+                let at = lo + offset as u32;
+                let base = columns.len() as u32;
+                intra_starts.push(base + line.partition_point(|&column| column < lo) as u32);
+                diagonals.push(base + line.partition_point(|&column| column < at) as u32);
+                columns.extend_from_slice(line);
+                starts.push(columns.len() as u32);
             }
         }
+        let (places, scatter) = match is_zero {
+            None => {
+                let mut places = vec![0_u32; unknowns.len()];
+                for (at, &row) in rows.iter().enumerate() {
+                    let row = index(row);
+                    let pattern = &columns[index(starts[at])..index(starts[at + 1])];
+                    for entry in offsets[row]..offsets[row + 1] {
+                        let column = position[unknowns[entry].index()];
+                        let found = pattern.binary_search(&column);
+                        let found = found.expect("every entry of a row lies on its pivot's pattern");
+                        places[entry] = starts[at] + found as u32;
+                    }
+                }
+                (places, Vec::new())
+            }
+            Some(masked) => {
+                let mut scatter = Vec::with_capacity(unknowns.len());
+                for (at, &row) in rows.iter().enumerate() {
+                    let row = index(row);
+                    let pattern = &columns[index(starts[at])..index(starts[at + 1])];
+                    for entry in offsets[row]..offsets[row + 1] {
+                        if masked[entry] {
+                            continue;
+                        }
+                        let column = position[unknowns[entry].index()];
+                        let found = pattern.binary_search(&column);
+                        let found = found.expect("every active entry of a row lies on its pivot's pattern");
+                        scatter.push((entry as u32, starts[at] + found as u32));
+                    }
+                }
+                (Vec::new(), scatter)
+            }
+        };
         Self {
             starts,
+            intra_starts,
             columns,
             diagonals,
             places,
+            scatter,
         }
     }
     fn line(&self, at: usize) -> &[u32] {
@@ -79,91 +238,395 @@ impl Pattern {
     }
 }
 
+fn order_block(members: &[u32], adj: &[Vec<u32>], local_of: &mut [u32], out: &mut Vec<u32>) {
+    let k = members.len();
+    if k <= 1 {
+        out.extend_from_slice(members);
+        return;
+    }
+    for (local, &node) in members.iter().enumerate() {
+        local_of[index(node)] = local as u32;
+    }
+    let mut row_out: Vec<Vec<u32>> = vec![Vec::new(); k];
+    let mut col_in: Vec<Vec<u32>> = vec![Vec::new(); k];
+    let mut directed_edges = 0_usize;
+    for (lu, &u) in members.iter().enumerate() {
+        let lu_u = lu as u32;
+        for &v in &adj[index(u)] {
+            let lv = local_of[index(v)];
+            if lv != u32::MAX && lv != lu_u {
+                row_out[lu].push(lv);
+                col_in[index(lv)].push(lu_u);
+                directed_edges += 1;
+            }
+        }
+    }
+    if directed_edges == k * (k - 1) {
+        out.extend_from_slice(members);
+        for &node in members {
+            local_of[index(node)] = u32::MAX;
+        }
+        return;
+    }
+    let mut mark = vec![0_u32; k];
+    let mut tag = 0_u32;
+    let fill_of = |p: usize,
+                   row_out: &[Vec<u32>],
+                   col_in: &[Vec<u32>],
+                   mark: &mut [u32],
+                   tag: &mut u32|
+     -> (usize, usize) {
+        let rdeg = row_out[p].len();
+        let cdeg = col_in[p].len();
+        let prod = rdeg * cdeg;
+        if prod == 0 {
+            return (0, 0);
+        }
+        if *tag == u32::MAX {
+            mark.fill(0);
+            *tag = 0;
+        }
+        *tag += 1;
+        let t = *tag;
+        for &col in &row_out[p] {
+            mark[index(col)] = t;
+        }
+        let mut fill = 0_usize;
+        for &r in &col_in[p] {
+            let mut already = usize::from(mark[index(r)] == t);
+            for &col in &row_out[index(r)] {
+                already += usize::from(mark[index(col)] == t);
+            }
+            fill += rdeg - already;
+        }
+        (fill, prod)
+    };
+    let mut scores = vec![(0_usize, 0_usize); k];
+    let mut heap: BinaryHeap<Reverse<(usize, usize, u32, u32)>> = BinaryHeap::with_capacity(k * 2);
+    for lu in 0..k {
+        let sc = fill_of(lu, &row_out, &col_in, &mut mark, &mut tag);
+        scores[lu] = sc;
+        heap.push(Reverse((sc.0, sc.1, members[lu], lu as u32)));
+    }
+    let mut eliminated = vec![false; k];
+    let mut remaining = k;
+    let mut touched_mark = vec![0_u32; k];
+    let mut touched_tag = 0_u32;
+    let mut touched: Vec<u32> = Vec::new();
+    let mut added: Vec<(u32, u32)> = Vec::new();
+    while let Some(Reverse((f, m, _, p_u))) = heap.pop() {
+        let p = index(p_u);
+        if eliminated[p] || scores[p] != (f, m) {
+            continue;
+        }
+        eliminated[p] = true;
+        remaining -= 1;
+        out.push(members[p]);
+        let ins = core::mem::take(&mut col_in[p]);
+        let outs = core::mem::take(&mut row_out[p]);
+        if touched_tag == u32::MAX {
+            touched_mark.fill(0);
+            touched_tag = 0;
+        }
+        touched_tag += 1;
+        let ttag = touched_tag;
+        touched.clear();
+        added.clear();
+        for &r in &ins {
+            let ro = &mut row_out[index(r)];
+            if let Some(pos) = ro.iter().position(|&x| x == p_u) {
+                ro.swap_remove(pos);
+            }
+            if touched_mark[index(r)] != ttag {
+                touched_mark[index(r)] = ttag;
+                touched.push(r);
+            }
+        }
+        for &col in &outs {
+            let ci = &mut col_in[index(col)];
+            if let Some(pos) = ci.iter().position(|&x| x == p_u) {
+                ci.swap_remove(pos);
+            }
+            if touched_mark[index(col)] != ttag {
+                touched_mark[index(col)] = ttag;
+                touched.push(col);
+            }
+        }
+        for &r in &ins {
+            if tag == u32::MAX {
+                mark.fill(0);
+                tag = 0;
+            }
+            tag += 1;
+            let t = tag;
+            mark[index(r)] = t;
+            for &col in &row_out[index(r)] {
+                mark[index(col)] = t;
+            }
+            for &col in &outs {
+                if mark[index(col)] != t {
+                    mark[index(col)] = t;
+                    row_out[index(r)].push(col);
+                    col_in[index(col)].push(r);
+                    added.push((r, col));
+                }
+            }
+        }
+        directed_edges = directed_edges - ins.len() - outs.len() + added.len();
+        if remaining > 0 && directed_edges == remaining * (remaining - 1) {
+            for (lu, &node) in members.iter().enumerate() {
+                if !eliminated[lu] {
+                    out.push(node);
+                }
+            }
+            break;
+        }
+        for &(r, col) in &added {
+            let ro = &row_out[index(r)];
+            let ci = &col_in[index(col)];
+            if tag == u32::MAX {
+                mark.fill(0);
+                tag = 0;
+            }
+            tag += 1;
+            let t = tag;
+            let (small, big) = if ro.len() <= ci.len() { (ro, ci) } else { (ci, ro) };
+            for &q in small {
+                mark[index(q)] = t;
+            }
+            for &q in big {
+                if !eliminated[index(q)] && mark[index(q)] == t && touched_mark[index(q)] != ttag {
+                    touched_mark[index(q)] = ttag;
+                    touched.push(q);
+                }
+            }
+        }
+        for &u in &touched {
+            let ui = index(u);
+            if !eliminated[ui] {
+                let ns = fill_of(ui, &row_out, &col_in, &mut mark, &mut tag);
+                if ns != scores[ui] {
+                    scores[ui] = ns;
+                    heap.push(Reverse((ns.0, ns.1, members[ui], u)));
+                }
+            }
+        }
+    }
+    for &node in members {
+        local_of[index(node)] = u32::MAX;
+    }
+}
+
 impl Elimination {
     pub(crate) fn plan(offsets: &[usize], unknowns: &[UnknownId], solved_by: &[RowId]) -> Self {
+        Self::plan_single(offsets, unknowns, solved_by, None)
+    }
+
+    pub(crate) fn plan_with_masks(
+        offsets: &[usize],
+        unknowns: &[UnknownId],
+        solved_by: &[RowId],
+        masks: &[ZeroMask],
+    ) -> Self {
+        let mut base = Self::plan_single(offsets, unknowns, solved_by, None);
+        if masks.is_empty() {
+            return base;
+        }
         let size = offsets.len() - 1;
         let mut node_of_row = vec![0_u32; size];
         for (unknown, row) in solved_by.iter().enumerate() {
             node_of_row[row.index()] = unknown as u32;
         }
-        let mut neighbours: Vec<BTreeSet<u32>> = vec![BTreeSet::new(); size];
+        let mut pivot_entry = vec![false; unknowns.len()];
         for row in 0..size {
             let node = node_of_row[row];
-            for read in &unknowns[offsets[row]..offsets[row + 1]] {
-                let other = read.index() as u32;
-                if other != node {
-                    neighbours[index(node)].insert(other);
-                    neighbours[index(other)].insert(node);
+            for entry in offsets[row]..offsets[row + 1] {
+                if unknowns[entry].index() as u32 == node {
+                    pivot_entry[entry] = true;
                 }
             }
         }
-        let mut position = vec![u32::MAX; size];
-        let mut order = Vec::with_capacity(size);
-        let mut waiting: BTreeSet<(usize, u32)> = (0..size as u32)
-            .map(|node| (neighbours[index(node)].len(), node))
-            .collect();
-        let mut fill: Vec<Vec<u32>> = vec![Vec::new(); size];
-        while let Some((_, node)) = waiting.pop_first() {
-            position[index(node)] = order.len() as u32;
-            order.push(node);
-            let adjacent: Vec<u32> = neighbours[index(node)].iter().copied().collect();
-            fill[index(node)] = adjacent.clone();
-            for &one in &adjacent {
-                waiting.remove(&(neighbours[index(one)].len(), one));
-                neighbours[index(one)].remove(&node);
-                for &other in &adjacent {
-                    if other != one {
-                        neighbours[index(one)].insert(other);
-                    }
-                }
-                waiting.insert((neighbours[index(one)].len(), one));
+        let base_metrics = base.metrics();
+        for mask in masks {
+            if mask.zeros.is_empty() {
+                continue;
             }
+            let mut is_zero = vec![false; unknowns.len()];
+            let mut zeros = Vec::with_capacity(mask.zeros.len());
+            for &entry in &mask.zeros {
+                let idx = index(entry);
+                if idx < unknowns.len() && !pivot_entry[idx] && !is_zero[idx] {
+                    is_zero[idx] = true;
+                    zeros.push(entry);
+                }
+            }
+            if zeros.is_empty() {
+                continue;
+            }
+            let plan = Self::plan_single(offsets, unknowns, solved_by, Some(&is_zero));
+            let metrics = plan.metrics();
+            if metrics.factor_macs < base_metrics.factor_macs || metrics.nonzeros < base_metrics.nonzeros {
+                let probes: Vec<u32> = mask
+                    .probes
+                    .iter()
+                    .copied()
+                    .filter(|&entry| is_zero[index(entry)])
+                    .collect();
+                base.specialized.push(SpecializedPlan { probes, zeros, plan });
+            }
+        }
+        base
+    }
+
+    pub(crate) fn specialized_masks(&self) -> impl Iterator<Item = (&[u32], &[u32])> + '_ {
+        self.specialized
+            .iter()
+            .map(|spec| (spec.probes.as_slice(), spec.zeros.as_slice()))
+    }
+
+    fn plan_single(
+        offsets: &[usize],
+        unknowns: &[UnknownId],
+        solved_by: &[RowId],
+        is_zero: Option<&[bool]>,
+    ) -> Self {
+        let size = offsets.len() - 1;
+        let mut node_of_row = vec![0_u32; size];
+        for (unknown, row) in solved_by.iter().enumerate() {
+            node_of_row[row.index()] = unknown as u32;
+        }
+        let mut adj: Vec<Vec<u32>> = vec![Vec::new(); size];
+        let mut edges: Vec<(usize, usize)> = Vec::with_capacity(unknowns.len());
+        for row in 0..size {
+            let node = node_of_row[row];
+            let line = &mut adj[index(node)];
+            for entry in offsets[row]..offsets[row + 1] {
+                if is_zero.is_some_and(|masked| masked[entry]) {
+                    continue;
+                }
+                let other = unknowns[entry].index() as u32;
+                if other != node {
+                    line.push(other);
+                }
+            }
+            line.sort_unstable();
+            line.dedup();
+            for &other in line.iter() {
+                edges.push((index(node), index(other)));
+            }
+        }
+        // Tarjan emits SCCs in reverse topological order: every cross-block edge points to an earlier block.
+        let comp = Digraph::new(size, &edges).strongly_connected_components();
+        let num_comp = comp.iter().copied().max().map_or(0, |last| last + 1);
+        let mut members: Vec<Vec<u32>> = vec![Vec::new(); num_comp];
+        for (node, &c) in comp.iter().enumerate() {
+            members[c].push(node as u32);
+        }
+        let mut order = Vec::with_capacity(size);
+        let mut blocks = Vec::with_capacity(num_comp + 1);
+        blocks.push(0_u32);
+        let mut max_block = 0_usize;
+        let mut local_of = vec![u32::MAX; size];
+        for ms in &members {
+            order_block(ms, &adj, &mut local_of, &mut order);
+            blocks.push(order.len() as u32);
+            max_block = max_block.max(ms.len());
+        }
+        let mut position = vec![u32::MAX; size];
+        for (at, &node) in order.iter().enumerate() {
+            position[index(node)] = at as u32;
         }
         let rows: Vec<u32> = (order.iter())
             .map(|&node| solved_by[index(node)].index() as u32)
             .collect();
-        let mut closure: Vec<Vec<u32>> = vec![Vec::new(); size];
-        for (at, &node) in order.iter().enumerate() {
-            for &other in &fill[index(node)] {
-                closure[index(position[index(other)])].push(at as u32);
-            }
-        }
-        for (at, &node) in order.iter().enumerate() {
-            closure[at].push(at as u32);
-            let mut upper: Vec<u32> = (fill[index(node)].iter())
-                .map(|&other| position[index(other)])
-                .collect();
-            upper.sort_unstable();
-            closure[at].extend_from_slice(&upper);
-        }
         let mut own: Vec<Vec<u32>> = Vec::with_capacity(size);
         let mut stamp = vec![u32::MAX; size];
-        for (at, &row) in rows.iter().enumerate() {
-            let at = at as u32;
-            let (mut line, mut pending) = (vec![at], Vec::new());
-            stamp[index(at)] = at;
-            let read = unknowns[offsets[index(row)]..offsets[index(row) + 1]].iter();
-            let mut reach = |column: u32, line: &mut Vec<u32>, pending: &mut Vec<u32>| {
-                if stamp[index(column)] != at {
-                    stamp[index(column)] = at;
-                    line.push(column);
-                    if column < at {
-                        pending.push(column);
+        for block in blocks.windows(2) {
+            let (lo, hi) = (block[0], block[1]);
+            for at in lo..hi {
+                let row = rows[index(at)];
+                let (mut line, mut pending) = (vec![at], Vec::new());
+                stamp[index(at)] = at;
+                let mut reach = |column: u32, line: &mut Vec<u32>, pending: &mut Vec<u32>| {
+                    if stamp[index(column)] != at {
+                        stamp[index(column)] = at;
+                        line.push(column);
+                        if column >= lo && column < at {
+                            pending.push(column);
+                        }
+                    }
+                };
+                for entry in offsets[index(row)]..offsets[index(row) + 1] {
+                    if is_zero.is_some_and(|masked| masked[entry]) {
+                        continue;
+                    }
+                    reach(position[unknowns[entry].index()], &mut line, &mut pending);
+                }
+                while let Some(pivot) = pending.pop() {
+                    for &column in &own[index(pivot)] {
+                        if column > pivot {
+                            reach(column, &mut line, &mut pending);
+                        }
                     }
                 }
-            };
-            for unknown in read {
-                reach(position[unknown.index()], &mut line, &mut pending);
+                line.sort_unstable();
+                own.push(line);
             }
-            while let Some(pivot) = pending.pop() {
-                for &column in &own[index(pivot)] {
-                    if column > pivot {
-                        reach(column, &mut line, &mut pending);
+        }
+        let mut closure: Vec<Vec<u32>> = Vec::with_capacity(size);
+        stamp.fill(u32::MAX);
+        for block in blocks.windows(2) {
+            let (lo, hi) = (block[0], block[1]);
+            if lo + 1 == hi {
+                closure.push(own[index(lo)].clone());
+                continue;
+            }
+            let len = index(hi - lo);
+            let mut sym_intra: Vec<Vec<u32>> = vec![Vec::new(); len];
+            for at in lo..hi {
+                let row = rows[index(at)];
+                for entry in offsets[index(row)]..offsets[index(row) + 1] {
+                    if is_zero.is_some_and(|masked| masked[entry]) {
+                        continue;
+                    }
+                    let col = position[unknowns[entry].index()];
+                    if col >= lo && col != at {
+                        sym_intra[index(at - lo)].push(col);
+                        sym_intra[index(col - lo)].push(at);
                     }
                 }
             }
-            line.sort_unstable();
-            own.push(line);
+            for at in lo..hi {
+                let (mut line, mut todo) = (vec![at], Vec::new());
+                stamp[index(at)] = at;
+                for &col in &own[index(at)] {
+                    if col < lo && stamp[index(col)] != at {
+                        stamp[index(col)] = at;
+                        line.push(col);
+                    }
+                }
+                let mut visit = |col: u32, line: &mut Vec<u32>, todo: &mut Vec<u32>| {
+                    if stamp[index(col)] != at {
+                        stamp[index(col)] = at;
+                        line.push(col);
+                        if col >= lo && col < at {
+                            todo.push(col);
+                        }
+                    }
+                };
+                for &col in &sym_intra[index(at - lo)] {
+                    visit(col, &mut line, &mut todo);
+                }
+                while let Some(piv) = todo.pop() {
+                    for &col in &closure[index(piv)] {
+                        if col > piv {
+                            visit(col, &mut line, &mut todo);
+                        }
+                    }
+                }
+                line.sort_unstable();
+                closure.push(line);
+            }
         }
         let mut ghosts = Ghosts {
             starts: vec![0],
@@ -182,11 +645,14 @@ impl Elimination {
             ghosts.starts.push(ghosts.columns.len() as u32);
         }
         Self {
-            own: Pattern::of(&own, &rows, offsets, unknowns, &position),
-            closure: Pattern::of(&closure, &rows, offsets, unknowns, &position),
+            own: Pattern::of(&own, &blocks, &rows, offsets, unknowns, &position, is_zero),
+            closure: Pattern::of(&closure, &blocks, &rows, offsets, unknowns, &position, is_zero),
             rows,
             unknowns: order,
+            blocks,
+            max_block,
             ghosts,
+            specialized: Vec::new(),
         }
     }
 
@@ -205,8 +671,71 @@ impl Elimination {
         }
         solved_by
     }
+    pub(crate) fn metrics(&self) -> EliminationMetrics {
+        let Pattern {
+            starts,
+            intra_starts,
+            columns,
+            diagonals,
+            ..
+        } = &self.own;
+        let size = self.rows.len();
+        let mut factor_macs = 0_usize;
+        for at in 0..size {
+            for &pivot in &columns[index(intra_starts[at])..index(diagonals[at])] {
+                let p = index(pivot);
+                factor_macs += index(starts[p + 1]) - index(diagonals[p]) - 1;
+            }
+        }
+        EliminationMetrics {
+            nonzeros: columns.len(),
+            factor_macs,
+            solve_macs: columns.len().saturating_sub(size),
+            blocks: self.blocks.len().saturating_sub(1),
+            largest_block: self.max_block,
+        }
+    }
+
+    fn factor_specialized(&self, values: &[f64]) -> Option<Result<Factors<'_>, usize>> {
+        for spec in &self.specialized {
+            if !spec.matches(values) {
+                continue;
+            }
+            match spec.plan.eliminate(&spec.plan.own, values) {
+                Eliminated {
+                    found: Ok(lu),
+                    finite: true,
+                } => {
+                    return Some(Ok(Factors {
+                        plan: &spec.plan,
+                        base: Some(self),
+                        closed: false,
+                        lu,
+                    }));
+                }
+                Eliminated { finite: false, .. } => {
+                    let found = self.eliminate(&self.closure, values).found;
+                    let lu = found.map_err(|at| index(self.rows[at]));
+                    return Some(lu.map(|lu| Factors {
+                        plan: self,
+                        base: None,
+                        closed: true,
+                        lu,
+                    }));
+                }
+                Eliminated {
+                    found: Err(_),
+                    finite: true,
+                } => return None,
+            }
+        }
+        None
+    }
 
     pub(crate) fn factor(&self, values: &[f64]) -> Result<Factors<'_>, usize> {
+        if let Some(found) = self.factor_specialized(values) {
+            return found;
+        }
         let (found, closed) = match self.eliminate(&self.own, values) {
             Eliminated { found, finite: true } => (found, false),
             Eliminated { finite: false, .. } => (self.eliminate(&self.closure, values).found, true),
@@ -214,49 +743,126 @@ impl Elimination {
         let lu = found.map_err(|at| index(self.rows[at]))?;
         Ok(Factors {
             plan: self,
+            base: None,
             closed,
             lu,
         })
     }
 
     fn eliminate(&self, pattern: &Pattern, values: &[f64]) -> Eliminated {
+        let cap = self.max_block;
+        if cap <= 256 {
+            let mut seen = [0.0; 256];
+            self.eliminate_in(pattern, values, &mut seen[..cap])
+        } else if cap <= 768 {
+            let mut seen = [0.0; 768];
+            self.eliminate_in(pattern, values, &mut seen[..cap])
+        } else if cap <= 1536 {
+            let mut seen = [0.0; 1536];
+            self.eliminate_in(pattern, values, &mut seen[..cap])
+        } else {
+            let mut seen = vec![0.0; cap];
+            self.eliminate_in(pattern, values, &mut seen)
+        }
+    }
+
+    fn eliminate_in(&self, pattern: &Pattern, values: &[f64], seen: &mut [f64]) -> Eliminated {
         let Pattern {
             starts,
+            intra_starts,
             columns,
             diagonals,
             places,
+            scatter,
         } = pattern;
+        let size = self.rows.len();
+        let starts = &starts[..=size];
+        let intra_starts = &intra_starts[..size];
+        let diagonals = &diagonals[..size];
         let mut lu = vec![0.0; columns.len()];
-        for (&place, &value) in places.iter().zip(values) {
-            lu[index(place)] += value;
+        if scatter.is_empty() {
+            for (&place, &value) in places.iter().zip(values) {
+                lu[index(place)] += value;
+            }
+        } else {
+            for &(entry, place) in scatter {
+                lu[index(place)] += values[index(entry)];
+            }
         }
-        let (mut seen, mut finite) = (vec![0.0; self.rows.len()], true);
-        for at in 0..self.rows.len() {
-            let (start, end) = (index(starts[at]), index(starts[at + 1]));
-            let (done, rest) = lu.split_at_mut(start);
-            let line = &mut rest[..end - start];
-            for (cell, &column) in line.iter().zip(&columns[start..end]) {
-                seen[index(column)] = *cell;
-            }
-            for &pivot in &columns[start..index(diagonals[at])] {
-                let pivot = index(pivot);
-                let factor = seen[pivot] / done[index(diagonals[pivot])];
-                seen[pivot] = factor;
-                let tail = index(diagonals[pivot]) + 1..index(starts[pivot + 1]);
-                for (cell, &column) in done[tail.clone()].iter().zip(&columns[tail]) {
-                    seen[index(column)] -= factor * cell;
+        assert_eq!(lu.len(), columns.len());
+        let mut scales: Option<(Vec<f64>, Vec<f64>)> = None;
+        let mut finite = true;
+        for block in self.blocks.windows(2) {
+            let (lo, hi) = (index(block[0]), index(block[1]));
+            if lo + 1 == hi {
+                let (start, end) = (index(starts[lo]), index(starts[lo + 1]));
+                for &cell in &lu[start..end] {
+                    finite &= cell.is_finite();
                 }
+                let diagonal = lu[index(diagonals[lo])];
+                if diagonal == 0.0 || !diagonal.is_finite() {
+                    return Eliminated {
+                        found: Err(lo),
+                        finite,
+                    };
+                }
+                continue;
             }
-            for (cell, &column) in line.iter_mut().zip(&columns[start..end]) {
-                *cell = seen[index(column)];
-                finite &= cell.is_finite();
-            }
-            let diagonal = seen[at];
-            if diagonal == 0.0 || !diagonal.is_finite() {
-                return Eliminated {
-                    found: Err(at),
-                    finite,
+            for at in lo..hi {
+                let (start, intra, diag, end) = (
+                    index(starts[at]),
+                    index(intra_starts[at]),
+                    index(diagonals[at]),
+                    index(starts[at + 1]),
+                );
+                for &cell in &lu[start..intra] {
+                    finite &= cell.is_finite();
+                }
+                let mut row_max = 0.0;
+                let (done, rest) = lu.split_at_mut(intra);
+                let line = &mut rest[..end - intra];
+                let diagonal = if intra == diag {
+                    for &cell in line.iter() {
+                        finite &= cell.is_finite();
+                        let abs = cell.abs();
+                        if abs > row_max {
+                            row_max = abs;
+                        }
+                    }
+                    line[0]
+                } else {
+                    for (&cell, &column) in line.iter().zip(&columns[intra..end]) {
+                        seen[index(column) - lo] = cell;
+                        let abs = cell.abs();
+                        if abs > row_max {
+                            row_max = abs;
+                        }
+                    }
+                    let (lower, upper) = line.split_at_mut(diag - intra);
+                    for (lower_cell, &pivot) in lower.iter_mut().zip(&columns[intra..diag]) {
+                        let pivot = index(pivot);
+                        let pivot_diag = index(diagonals[pivot]);
+                        let factor = seen[pivot - lo] / done[pivot_diag];
+                        *lower_cell = factor;
+                        finite &= factor.is_finite();
+                        let tail = pivot_diag + 1..index(starts[pivot + 1]);
+                        for (&cell, &column) in done[tail.clone()].iter().zip(&columns[tail]) {
+                            seen[index(column) - lo] -= factor * cell;
+                        }
+                    }
+                    for (cell, &column) in upper.iter_mut().zip(&columns[diag..end]) {
+                        let value = seen[index(column) - lo];
+                        *cell = value;
+                        finite &= value.is_finite();
+                    }
+                    upper[0]
                 };
+                if bad_pivot(diagonal, at, row_max, pattern, values, &mut scales) {
+                    return Eliminated {
+                        found: Err(at),
+                        finite,
+                    };
+                }
             }
         }
         Eliminated {
@@ -267,6 +873,7 @@ impl Elimination {
 }
 pub struct Factors<'b> {
     plan: &'b Elimination,
+    base: Option<&'b Elimination>,
     closed: bool,
     lu: Vec<f64>,
 }
@@ -274,6 +881,12 @@ pub(crate) const LANES: usize = 8;
 const NEGATIVE_ZERO: u64 = 0x8000_0000_0000_0000;
 
 impl Factors<'_> {
+    pub fn metrics(&self) -> EliminationMetrics {
+        self.plan.metrics()
+    }
+    pub(crate) fn places(&self) -> (Vec<usize>, Vec<usize>) {
+        self.plan.places()
+    }
     fn pattern(&self) -> &Pattern {
         if self.closed {
             &self.plan.closure
@@ -291,16 +904,140 @@ impl Factors<'_> {
     }
     /// Replaces a right side, one slot per row, with the update, one slot per unknown.
     pub fn solve(&self, side: &mut [f64]) {
-        let Elimination { rows, unknowns, .. } = self.plan;
-        let pivot = |side: &[f64]| -> Vec<[f64; 1]> { rows.iter().map(|&row| [side[index(row)]]).collect() };
-        let mut pivoted = pivot(side);
-        if !self.substitute(&mut pivoted) {
-            pivoted = pivot(side);
-            self.substitute_closed(&mut pivoted);
+        let size = self.plan.rows.len();
+        if size <= 64 {
+            let mut buf = [[0.0; 1]; 64];
+            self.solve_in(side, &mut buf[..size]);
+        } else if size <= 320 {
+            let mut buf = [[0.0; 1]; 320];
+            self.solve_in(side, &mut buf[..size]);
+        } else if size <= 2048 {
+            let mut buf = [[0.0; 1]; 2048];
+            self.solve_in(side, &mut buf[..size]);
+        } else if size <= 3072 {
+            let mut buf = [[0.0; 1]; 3072];
+            self.solve_in(side, &mut buf[..size]);
+        } else {
+            let mut buf = vec![[0.0; 1]; size];
+            self.solve_in(side, &mut buf);
         }
-        for (&unknown, [value]) in unknowns.iter().zip(pivoted) {
+    }
+    fn solve_in(&self, side: &mut [f64], pivoted: &mut [[f64; 1]]) {
+        let Elimination { rows, unknowns, .. } = self.plan;
+        for (slot, &row) in pivoted.iter_mut().zip(rows) {
+            *slot = [side[index(row)]];
+        }
+        if !self.substitute(pivoted) {
+            if let Some(base) = self.base
+                && self.solve_unmasked(base, side, pivoted)
+            {
+                return;
+            }
+            for (slot, &row) in pivoted.iter_mut().zip(rows) {
+                *slot = [side[index(row)]];
+            }
+            self.substitute_closed(pivoted);
+        }
+        for (&unknown, &[value]) in unknowns.iter().zip(pivoted.iter()) {
             side[index(unknown)] = value;
         }
+    }
+    #[cold]
+    #[inline(never)]
+    fn reconstruct_values(&self, total_entries: usize) -> Vec<f64> {
+        let Pattern {
+            starts,
+            intra_starts,
+            columns,
+            diagonals,
+            places,
+            scatter,
+        } = &self.plan.own;
+        let mut raw = vec![0.0; columns.len()];
+        let mut row = vec![0.0; self.plan.max_block];
+        for block in self.plan.blocks.windows(2) {
+            let (lo, hi) = (index(block[0]), index(block[1]));
+            if lo + 1 == hi {
+                let range = index(starts[lo])..index(starts[lo + 1]);
+                raw[range.clone()].copy_from_slice(&self.lu[range]);
+                continue;
+            }
+            for at in lo..hi {
+                let (start, intra, diag, end) = (
+                    index(starts[at]),
+                    index(intra_starts[at]),
+                    index(diagonals[at]),
+                    index(starts[at + 1]),
+                );
+                raw[start..intra].copy_from_slice(&self.lu[start..intra]);
+                row[..hi - lo].fill(0.0);
+                for (&u_val, &col) in self.lu[diag..end].iter().zip(&columns[diag..end]) {
+                    row[index(col) - lo] = u_val;
+                }
+                for (&l_val, &pivot) in self.lu[intra..diag].iter().zip(&columns[intra..diag]) {
+                    let p = index(pivot);
+                    let tail = index(diagonals[p])..index(starts[p + 1]);
+                    for (&u_val, &col) in self.lu[tail.clone()].iter().zip(&columns[tail]) {
+                        row[index(col) - lo] += l_val * u_val;
+                    }
+                }
+                for (slot, &col) in raw[intra..end].iter_mut().zip(&columns[intra..end]) {
+                    *slot = row[index(col) - lo];
+                }
+            }
+        }
+        let mut values = vec![0.0; total_entries];
+        if scatter.is_empty() {
+            for (entry, &place) in places.iter().enumerate() {
+                values[entry] = raw[index(place)];
+            }
+        } else {
+            for &(entry, place) in scatter {
+                values[index(entry)] = raw[index(place)];
+            }
+        }
+        values
+    }
+    #[cold]
+    #[inline(never)]
+    fn solve_unmasked(&self, base: &Elimination, side: &mut [f64], pivoted: &mut [[f64; 1]]) -> bool {
+        let values = self.reconstruct_values(base.own.places.len());
+        let Ok(lu) = base.eliminate(&base.closure, &values).found else {
+            return false;
+        };
+        for (slot, &row) in pivoted.iter_mut().zip(&base.rows) {
+            *slot = [side[index(row)]];
+        }
+        walk(&base.blocks, &base.closure, &lu, None, pivoted);
+        for (&unknown, &[value]) in base.unknowns.iter().zip(pivoted.iter()) {
+            side[index(unknown)] = value;
+        }
+        true
+    }
+    #[cold]
+    #[inline(never)]
+    fn solve_pivoted_unmasked(&self, base: &Elimination, group: &mut [[f64; LANES]]) -> bool {
+        let values = self.reconstruct_values(base.own.places.len());
+        let Ok(lu) = base.eliminate(&base.closure, &values).found else {
+            return false;
+        };
+        let size = group.len();
+        let mut orig = vec![[0.0; LANES]; size];
+        for (&row, &lanes) in self.plan.rows.iter().zip(group.iter()) {
+            orig[index(row)] = lanes;
+        }
+        let mut pivoted = vec![[0.0; LANES]; size];
+        for (slot, &row) in pivoted.iter_mut().zip(&base.rows) {
+            *slot = orig[index(row)];
+        }
+        walk(&base.blocks, &base.closure, &lu, None, &mut pivoted);
+        for (&unknown, &lanes) in base.unknowns.iter().zip(pivoted.iter()) {
+            orig[index(unknown)] = lanes;
+        }
+        for (slot, &unknown) in group.iter_mut().zip(&self.plan.unknowns) {
+            *slot = orig[index(unknown)];
+        }
+        true
     }
     pub(crate) fn reach(&self) -> Option<Reach> {
         Reach::of(self)
@@ -312,44 +1049,124 @@ impl Factors<'_> {
         spare: &mut [[f64; LANES]],
         marks: &mut Marks,
     ) {
-        spare.copy_from_slice(group);
-        if !reach.is_some_and(|reach| self.substitute_reached(group, reach, marks)) {
-            group.copy_from_slice(spare);
+        if let Some(reach) = reach {
+            if self.substitute_reached(group, reach, spare, marks) {
+                return;
+            }
+            group.fill([0.0; LANES]);
+            for &at in &marks.seeds {
+                group[index(at)] = spare[index(at)];
+            }
+            if !self.substitute(group) {
+                group.fill([0.0; LANES]);
+                for &at in &marks.seeds {
+                    group[index(at)] = spare[index(at)];
+                }
+                if !self
+                    .base
+                    .is_some_and(|base| self.solve_pivoted_unmasked(base, group))
+                {
+                    self.substitute_closed(group);
+                }
+            }
+        } else {
+            spare.copy_from_slice(group);
             if !self.substitute(group) {
                 group.copy_from_slice(spare);
-                self.substitute_closed(group);
+                if !self
+                    .base
+                    .is_some_and(|base| self.solve_pivoted_unmasked(base, group))
+                {
+                    self.substitute_closed(group);
+                }
             }
         }
     }
-    /// Walks only the rows a nonzero side reaches through a nonzero factor, in the order a full walk takes them. A row
-    /// whose side is a positive zero and whose nonzero factors read only such rows keeps that zero going forward and
-    /// takes zero over its pivot going back, as a full walk gives it. A value that is not finite sends the group back
-    /// to the full walk, since a zero factor times it is not zero.
-    fn substitute_reached(&self, pivoted: &mut [[f64; LANES]], reach: &Reach, marks: &mut Marks) -> bool {
+    /// Walks only the rows a nonzero side reaches through a nonzero factor, block by block in the order a full walk
+    /// takes them. A row whose side is a positive zero and whose nonzero factors read only such rows keeps that zero
+    /// going forward and takes zero over its pivot going back, as a full walk gives it. A value that is not finite
+    /// sends the group back to the full walk, since a zero factor times it is not zero.
+    fn substitute_reached(
+        &self,
+        pivoted: &mut [[f64; LANES]],
+        reach: &Reach,
+        spare: &mut [[f64; LANES]],
+        marks: &mut Marks,
+    ) -> bool {
+        match self.ghosts(pivoted) {
+            Some(ghosts) => self.substitute_reached_with(pivoted, reach, spare, marks, Some(ghosts)),
+            None => self.substitute_reached_with(pivoted, reach, spare, marks, None),
+        }
+    }
+    #[inline(always)]
+    fn substitute_reached_with(
+        &self,
+        pivoted: &mut [[f64; LANES]],
+        reach: &Reach,
+        spare: &mut [[f64; LANES]],
+        marks: &mut Marks,
+        ghosts: Option<&Ghosts>,
+    ) -> bool {
         let pattern = self.pattern();
-        let (diagonals, ghosts) = (&pattern.diagonals, self.ghosts(pivoted));
         let size = pivoted.len();
+        let starts = &pattern.starts[..=size];
+        let diagonals = &pattern.diagonals[..size];
+        let columns = &pattern.columns;
+        assert_eq!(self.lu.len(), columns.len());
         marks.clear();
         for (at, values) in pivoted.iter().enumerate() {
             if values.iter().any(|value| value.to_bits() != 0) {
                 marks.forward[at] = true;
-                marks.stack.push(at as u32);
+                marks.seeds.push(at as u32);
+                spare[at] = *values;
             }
         }
-        marks.spread(|marks| &mut marks.forward, &reach.lower_starts, &reach.lower);
-        for at in (0..size).filter(|&at| marks.forward[at]) {
-            forward(pattern, &self.lu, ghosts, pivoted, at);
-        }
-        marks.back.copy_from_slice(&marks.forward);
-        marks
-            .stack
-            .extend((0..size as u32).filter(|&at| marks.forward[index(at)]));
-        marks.spread(|marks| &mut marks.back, &reach.upper_starts, &reach.upper);
-        for at in (0..size).filter(|&at| !marks.back[at]) {
-            pivoted[at] = [0.0 / self.lu[index(diagonals[at])]; LANES];
-        }
-        for at in (0..size).rev().filter(|&at| marks.back[at]) {
-            back(pattern, &self.lu, ghosts, pivoted, at);
+        for (block_idx, block) in self.plan.blocks.windows(2).enumerate() {
+            let (lo, hi) = (index(block[0]), index(block[1]));
+            let mut any = false;
+            for at in lo..hi {
+                if marks.forward[at] {
+                    any = true;
+                    marks.stack.push(at as u32);
+                }
+            }
+            if !any && !reach.block_neg_diag[block_idx] {
+                continue;
+            }
+            if any {
+                if lo + 1 == hi {
+                    marks.stack.pop();
+                    marks.back[lo] = true;
+                    forward(starts, diagonals, columns, &self.lu, ghosts, pivoted, lo);
+                    back(starts, diagonals, columns, &self.lu, ghosts, pivoted, lo);
+                    for &reader in reach.off_readers(lo) {
+                        marks.forward[index(reader)] = true;
+                    }
+                    continue;
+                }
+                marks.spread(|marks| &mut marks.forward, &reach.lower_starts, &reach.lower);
+                for at in (lo..hi).filter(|&at| marks.forward[at]) {
+                    forward(starts, diagonals, columns, &self.lu, ghosts, pivoted, at);
+                    marks.back[at] = true;
+                    marks.stack.push(at as u32);
+                }
+                marks.spread(|marks| &mut marks.back, &reach.upper_starts, &reach.upper);
+            }
+            for at in (lo..hi).filter(|&at| !marks.back[at]) {
+                if self.lu[index(diagonals[at])].is_sign_negative() {
+                    pivoted[at] = [0.0 / self.lu[index(diagonals[at])]; LANES];
+                }
+            }
+            if any {
+                for at in (lo..hi).rev().filter(|&at| marks.back[at]) {
+                    back(starts, diagonals, columns, &self.lu, ghosts, pivoted, at);
+                }
+                for at in (lo..hi).filter(|&at| marks.back[at]) {
+                    for &reader in reach.off_readers(at) {
+                        marks.forward[index(reader)] = true;
+                    }
+                }
+            }
         }
         (0..size)
             .filter(|&at| marks.back[at])
@@ -357,13 +1174,15 @@ impl Factors<'_> {
     }
     fn substitute<const L: usize>(&self, pivoted: &mut [[f64; L]]) -> bool {
         match self.ghosts(pivoted) {
-            Some(ghosts) => walk(self.pattern(), &self.lu, Some(ghosts), pivoted),
-            None => walk(self.pattern(), &self.lu, None, pivoted),
+            Some(ghosts) => walk(&self.plan.blocks, self.pattern(), &self.lu, Some(ghosts), pivoted),
+            None => walk(&self.plan.blocks, self.pattern(), &self.lu, None, pivoted),
         }
         self.closed || (pivoted.as_flattened().iter()).fold(true, |finite, value| finite & value.is_finite())
     }
     fn substitute_closed<const L: usize>(&self, pivoted: &mut [[f64; L]]) {
-        let Elimination { own, closure, .. } = self.plan;
+        let Elimination {
+            own, closure, blocks, ..
+        } = self.plan;
         let mut lu = Vec::with_capacity(closure.columns.len());
         for at in 0..own.diagonals.len() {
             let (line, values) = (
@@ -381,37 +1200,75 @@ impl Factors<'_> {
                     }),
             );
         }
-        walk(closure, &lu, None, pivoted);
+        walk(blocks, closure, &lu, None, pivoted);
     }
 }
 
 #[inline(always)]
-fn walk<const L: usize>(pattern: &Pattern, lu: &[f64], ghosts: Option<&Ghosts>, pivoted: &mut [[f64; L]]) {
-    for at in 0..pivoted.len() {
-        forward(pattern, lu, ghosts, pivoted, at);
-    }
-    for at in (0..pivoted.len()).rev() {
-        back(pattern, lu, ghosts, pivoted, at);
+fn walk<const L: usize>(
+    blocks: &[u32],
+    pattern: &Pattern,
+    lu: &[f64],
+    ghosts: Option<&Ghosts>,
+    pivoted: &mut [[f64; L]],
+) {
+    let size = pivoted.len();
+    let starts = &pattern.starts[..=size];
+    let diagonals = &pattern.diagonals[..size];
+    let columns = &pattern.columns;
+    assert_eq!(lu.len(), columns.len());
+    for block in blocks.windows(2) {
+        let (lo, hi) = (index(block[0]), index(block[1]));
+        if lo + 1 == hi {
+            let (start, diag) = (index(starts[lo]), index(diagonals[lo]));
+            let mut sum = pivoted[lo];
+            if start < diag {
+                for (&cell, &column) in lu[start..diag].iter().zip(&columns[start..diag]) {
+                    let read = pivoted[index(column)];
+                    for (value, read) in sum.iter_mut().zip(read) {
+                        *value -= cell * read;
+                    }
+                }
+            }
+            let pivot = lu[diag];
+            for value in &mut sum {
+                *value /= pivot;
+            }
+            pivoted[lo] = sum;
+            continue;
+        }
+        for at in lo..hi {
+            forward(starts, diagonals, columns, lu, ghosts, pivoted, at);
+        }
+        for at in (lo..hi).rev() {
+            back(starts, diagonals, columns, lu, ghosts, pivoted, at);
+        }
     }
 }
 
 #[inline(always)]
 fn forward<const L: usize>(
-    pattern: &Pattern,
+    starts: &[u32],
+    diagonals: &[u32],
+    columns: &[u32],
     lu: &[f64],
     ghosts: Option<&Ghosts>,
     pivoted: &mut [[f64; L]],
     at: usize,
 ) {
-    let line = index(pattern.starts[at])..index(pattern.diagonals[at]);
+    let (start, diag) = (index(starts[at]), index(diagonals[at]));
+    if start == diag && ghosts.is_none() {
+        return;
+    }
     let mut sum = pivoted[at];
-    for (cell, &column) in lu[line.clone()].iter().zip(&pattern.columns[line]) {
-        for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
+    for (&cell, &column) in lu[start..diag].iter().zip(&columns[start..diag]) {
+        let read = pivoted[index(column)];
+        for (value, read) in sum.iter_mut().zip(read) {
             *value -= cell * read;
         }
     }
     if let Some(ghosts) = ghosts.filter(|_| sum.iter().any(|value| value.to_bits() == NEGATIVE_ZERO)) {
-        let negative = |pivot: usize| lu[index(pattern.diagonals[pivot])].is_sign_negative();
+        let negative = |pivot: usize| lu[index(diagonals[pivot])].is_sign_negative();
         ghosts.settle(&mut sum, ghosts.lower(at), negative, pivoted);
     }
     pivoted[at] = sum;
@@ -419,23 +1276,28 @@ fn forward<const L: usize>(
 
 #[inline(always)]
 fn back<const L: usize>(
-    pattern: &Pattern,
+    starts: &[u32],
+    diagonals: &[u32],
+    columns: &[u32],
     lu: &[f64],
     ghosts: Option<&Ghosts>,
     pivoted: &mut [[f64; L]],
     at: usize,
 ) {
-    let line = index(pattern.diagonals[at]) + 1..index(pattern.starts[at + 1]);
+    let (diag, end) = (index(diagonals[at]), index(starts[at + 1]));
     let mut sum = pivoted[at];
-    for (cell, &column) in lu[line.clone()].iter().zip(&pattern.columns[line]) {
-        for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
-            *value -= cell * read;
+    if diag + 1 < end {
+        for (&cell, &column) in lu[diag + 1..end].iter().zip(&columns[diag + 1..end]) {
+            let read = pivoted[index(column)];
+            for (value, read) in sum.iter_mut().zip(read) {
+                *value -= cell * read;
+            }
         }
     }
     if let Some(ghosts) = ghosts.filter(|_| sum.iter().any(|value| value.to_bits() == NEGATIVE_ZERO)) {
         ghosts.settle(&mut sum, ghosts.upper(at), |_| false, pivoted);
     }
-    let pivot = lu[index(pattern.diagonals[at])];
+    let pivot = lu[diag];
     for value in &mut sum {
         *value /= pivot;
     }
@@ -470,12 +1332,19 @@ impl Ghosts {
 }
 
 pub(crate) struct Reach {
+    blocks: Vec<u32>,
+    block_neg_diag: Vec<bool>,
+    off_starts: Vec<u32>,
+    off: Vec<u32>,
     lower_starts: Vec<u32>,
     lower: Vec<u32>,
     upper_starts: Vec<u32>,
     upper: Vec<u32>,
 }
 impl Reach {
+    fn off_readers(&self, at: usize) -> &[u32] {
+        &self.off[index(self.off_starts[at])..index(self.off_starts[at + 1])]
+    }
     pub(crate) fn key(
         &self,
         rows: &[usize],
@@ -484,18 +1353,45 @@ impl Reach {
     ) -> (usize, usize, usize, u64) {
         marks.clear();
         for &row in rows {
-            let at = at_row[row];
-            if !marks.forward[at] {
-                marks.forward[at] = true;
-                marks.stack.push(at as u32);
+            marks.forward[at_row[row]] = true;
+        }
+        for block in self.blocks.windows(2) {
+            let (lo, hi) = (index(block[0]), index(block[1]));
+            if lo + 1 == hi {
+                if marks.forward[lo] {
+                    marks.back[lo] = true;
+                    for &reader in self.off_readers(lo) {
+                        marks.forward[index(reader)] = true;
+                    }
+                }
+                continue;
+            }
+            let mut any = false;
+            for at in lo..hi {
+                if marks.forward[at] {
+                    any = true;
+                    marks.stack.push(at as u32);
+                }
+            }
+            if !any {
+                continue;
+            }
+            marks.spread(|marks| &mut marks.forward, &self.lower_starts, &self.lower);
+            for at in lo..hi {
+                if marks.forward[at] {
+                    marks.back[at] = true;
+                    marks.stack.push(at as u32);
+                }
+            }
+            marks.spread(|marks| &mut marks.back, &self.upper_starts, &self.upper);
+            for at in lo..hi {
+                if marks.back[at] {
+                    for &reader in self.off_readers(at) {
+                        marks.forward[index(reader)] = true;
+                    }
+                }
             }
         }
-        marks.spread(|marks| &mut marks.forward, &self.lower_starts, &self.lower);
-        marks.back.copy_from_slice(&marks.forward);
-        marks
-            .stack
-            .extend((0..marks.forward.len() as u32).filter(|&at| marks.forward[index(at)]));
-        marks.spread(|marks| &mut marks.back, &self.upper_starts, &self.upper);
         let mut key = (usize::MAX, 0, 0, 0_u64);
         for at in (0..marks.back.len()).filter(|&at| marks.back[at]) {
             key.0 = key.0.min(at);
@@ -512,6 +1408,7 @@ impl Reach {
     fn of(factors: &Factors<'_>) -> Option<Self> {
         let Pattern {
             starts,
+            intra_starts,
             columns,
             diagonals,
             ..
@@ -520,10 +1417,15 @@ impl Reach {
             return None;
         }
         let size = diagonals.len();
-        let transpose = |lines: &dyn Fn(usize) -> core::ops::Range<usize>| {
+        fn transpose(
+            size: usize,
+            lu: &[f64],
+            columns: &[u32],
+            lines: impl Fn(usize) -> core::ops::Range<usize>,
+        ) -> (Vec<u32>, Vec<u32>) {
             let mut counts = vec![0_u32; size + 1];
             for at in 0..size {
-                for entry in lines(at).filter(|&entry| factors.lu[entry] != 0.0) {
+                for entry in lines(at).filter(|&entry| lu[entry] != 0.0) {
                     counts[index(columns[entry]) + 1] += 1;
                 }
             }
@@ -533,17 +1435,37 @@ impl Reach {
             let mut filled = counts.clone();
             let mut readers = vec![0_u32; index(counts[size])];
             for at in 0..size {
-                for entry in lines(at).filter(|&entry| factors.lu[entry] != 0.0) {
+                for entry in lines(at).filter(|&entry| lu[entry] != 0.0) {
                     let column = index(columns[entry]);
                     readers[index(filled[column])] = at as u32;
                     filled[column] += 1;
                 }
             }
             (counts, readers)
-        };
-        let (lower_starts, lower) = transpose(&|at| index(starts[at])..index(diagonals[at]));
-        let (upper_starts, upper) = transpose(&|at| index(diagonals[at]) + 1..index(starts[at + 1]));
+        }
+        let (off_starts, off) = transpose(size, &factors.lu, columns, |at| {
+            index(starts[at])..index(intra_starts[at])
+        });
+        let (lower_starts, lower) = transpose(size, &factors.lu, columns, |at| {
+            index(intra_starts[at])..index(diagonals[at])
+        });
+        let (upper_starts, upper) = transpose(size, &factors.lu, columns, |at| {
+            index(diagonals[at]) + 1..index(starts[at + 1])
+        });
+        let block_neg_diag: Vec<bool> = factors
+            .plan
+            .blocks
+            .windows(2)
+            .map(|block| {
+                (index(block[0])..index(block[1]))
+                    .any(|at| factors.lu[index(diagonals[at])].is_sign_negative())
+            })
+            .collect();
         Some(Self {
+            blocks: factors.plan.blocks.clone(),
+            block_neg_diag,
+            off_starts,
+            off,
             lower_starts,
             lower,
             upper_starts,
@@ -556,6 +1478,7 @@ pub(crate) struct Marks {
     forward: Vec<bool>,
     back: Vec<bool>,
     stack: Vec<u32>,
+    seeds: Vec<u32>,
 }
 impl Marks {
     pub(crate) fn new(size: usize) -> Self {
@@ -563,12 +1486,14 @@ impl Marks {
             forward: vec![false; size],
             back: vec![false; size],
             stack: Vec::with_capacity(size),
+            seeds: Vec::with_capacity(size),
         }
     }
     fn clear(&mut self) {
         self.forward.fill(false);
         self.back.fill(false);
         self.stack.clear();
+        self.seeds.clear();
     }
     fn spread(&mut self, set: impl Fn(&mut Self) -> &mut Vec<bool>, starts: &[u32], readers: &[u32]) {
         while let Some(row) = self.stack.pop() {
@@ -740,7 +1665,7 @@ mod tests {
                 full.extend(bits(&whole));
             }
         }
-        let had = "9c64d90d69b25c98bf72b65448a978ef42f6406db1317f7541e070b3d7eb3478";
+        let had = "8a58da40fecd96f6811d6858bfa0901640ea6d20c50d307fadfd508600e635a7";
         assert_eq!(hex(&alone), had);
         assert_eq!(hex(&reached), had);
         assert_eq!(hex(&full), had);
@@ -864,6 +1789,7 @@ mod tests {
             let lu = lu.map_err(|at| self.rows[at] as usize)?;
             Ok(Factors {
                 plan: self,
+                base: None,
                 closed: true,
                 lu,
             })
@@ -948,11 +1874,14 @@ mod tests {
                     filled[at_row[row]][at_unknown[unknown.index()]] = true;
                 }
             }
-            for pivot in 0..size {
-                let (above, below) = filled.split_at_mut(pivot + 1);
-                for line in below.iter_mut().filter(|line| line[pivot]) {
-                    for (cell, &held) in line.iter_mut().zip(&above[pivot]).skip(pivot + 1) {
-                        *cell |= held;
+            for block in plan.blocks.windows(2) {
+                let (lo, hi) = (block[0] as usize, block[1] as usize);
+                for pivot in lo..hi {
+                    let (above, below) = filled.split_at_mut(pivot + 1);
+                    for line in below[..hi - pivot - 1].iter_mut().filter(|line| line[pivot]) {
+                        for (cell, &held) in line.iter_mut().zip(&above[pivot]).skip(pivot + 1) {
+                            *cell |= held;
+                        }
                     }
                 }
             }
@@ -1006,6 +1935,15 @@ mod tests {
                 }
             }
             let mut sides = sides(size, &mut state);
+            let ghost_row = (0..size)
+                .find_map(|at| {
+                    plan.ghosts
+                        .lower(at)
+                        .first()
+                        .or_else(|| plan.ghosts.upper(at).first())
+                        .map(|&col| plan.rows[col as usize] as usize)
+                })
+                .unwrap_or(size / 2);
             for (side, value) in
                 sides
                     .iter_mut()
@@ -1013,6 +1951,7 @@ mod tests {
                     .zip([f64::INFINITY, f64::NAN, f64::NEG_INFINITY])
             {
                 side[size / 2] = value;
+                side[ghost_row] = value;
             }
             let mut marks = Marks::new(size);
             for reached in [true, false] {
@@ -1031,6 +1970,7 @@ mod tests {
                 assert!(same_bits(&kept, &had), "a solve alone keeps today's bits");
             }
         }
+        non_finite_specialized_substitution_falls_back_to_unmasked_closure();
     }
 
     #[test]
@@ -1073,7 +2013,7 @@ mod tests {
                     for (from, &value) in side.iter().enumerate() {
                         pivoted[at_row[from]] = [value];
                     }
-                    super::walk(&plan.own, &own.lu, None, &mut pivoted);
+                    super::walk(&plan.blocks, &plan.own, &own.lu, None, &mut pivoted);
                     let bare: Vec<f64> = (0..size).map(|unknown| pivoted[at_unknown[unknown]][0]).collect();
                     *turned += usize::from(at_row[row] > 0 && !same_bits(&bare, had));
                 }
@@ -1118,6 +2058,7 @@ mod tests {
                 );
                 let own = (plan.eliminate(&plan.own, &system.values).found).map(|lu| Factors {
                     plan: &plan,
+                    base: None,
                     closed: false,
                     lu,
                 });
@@ -1142,5 +2083,274 @@ mod tests {
         let matching = [RowId::at(0), RowId::at(1)];
         let plan = Elimination::plan(&[0, 2, 4], &unknowns, &matching);
         assert!(plan.factor(&[1.0, 1.0, 1.0, 1.0]).is_err());
+    }
+
+    #[test]
+    fn a_tiny_pivot_relative_to_its_row_and_column_is_refused_while_a_scaled_diagonal_passes() {
+        let unknowns = [
+            UnknownId::at(0),
+            UnknownId::at(1),
+            UnknownId::at(0),
+            UnknownId::at(1),
+        ];
+        let matching = [RowId::at(0), RowId::at(1)];
+        let plan = Elimination::plan(&[0, 2, 4], &unknowns, &matching);
+        for tiny in [1e-13, 1e-17, 1e-18, 1e-20] {
+            assert_eq!(plan.factor(&[tiny, 1.0, 1.0, 1.0]).err(), Some(0));
+        }
+        let mut side = [2.0, 3.0];
+        plan.factor(&[1e-20, 0.0, 0.0, 1.0])
+            .expect("a uniformly scaled diagonal passes")
+            .solve(&mut side);
+        assert!((side[0] - 2e20).abs() <= 1e9);
+        assert!((side[1] - 3.0).abs() <= 1e-12);
+    }
+
+    #[test]
+    fn a_block_triangular_plan_adds_no_cross_block_fill() {
+        let mut a = vec![vec![0.0; 10]; 10];
+        for row in 0..4 {
+            a[row][row] = 4.0;
+            a[row][(row + 1) % 4] = 0.5;
+            a[row][(row + 2) % 4] = -0.25;
+        }
+        for row in 4..8 {
+            a[row][row] = 4.0;
+            a[row][4 + (row - 3) % 4] = 0.5;
+            a[row][0] = 0.3;
+        }
+        a[8][8] = 2.0;
+        a[9][9] = 3.0;
+        a[9][4] = 0.2;
+        let matching: Vec<RowId> = (0..10).map(RowId::at).collect();
+        let (plan, values) = planned(&a, &matching);
+        assert_eq!(plan.blocks.len() - 1, 4);
+        assert_eq!(plan.max_block, 4);
+        let off_diag: usize = (0..10)
+            .map(|at| (plan.own.intra_starts[at] - plan.own.starts[at]) as usize)
+            .sum();
+        assert_eq!(off_diag, 5, "only the 5 raw cross-block reads sit off-diagonal");
+        let side: Vec<f64> = (1..=10).map(|i| i as f64).collect();
+        let mut found = side.clone();
+        plan.factor(&values).expect("a pivot").solve(&mut found);
+        for (one, other) in found.iter().zip(dense_solve(a, side)) {
+            assert!((one - other).abs() < 1e-11, "{one} against {other}");
+        }
+    }
+
+    #[test]
+    fn a_singleton_block_keeps_its_pivot_despite_larger_cross_block_reads() {
+        let a = vec![vec![1.0, 0.0, 0.0], vec![1.0, 1e-16, 0.0], vec![0.0, 1.0, 1.0]];
+        let matching = [RowId::at(0), RowId::at(1), RowId::at(2)];
+        let (plan, values) = planned(&a, &matching);
+        assert_eq!(plan.blocks.len() - 1, 3);
+        let mut side = [0.0, 1e-16, 1.0];
+        plan.factor(&values)
+            .expect("singleton pivot is unaffected by cross-block scale")
+            .solve(&mut side);
+        assert_eq!(side, [0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn a_fully_connected_block_plans_in_canonical_order() {
+        let size = 128;
+        let mut offsets = Vec::with_capacity(size + 1);
+        let mut unknowns = Vec::with_capacity(size * size);
+        offsets.push(0);
+        for _ in 0..size {
+            for col in 0..size {
+                unknowns.push(UnknownId::at(col));
+            }
+            offsets.push(unknowns.len());
+        }
+        let matching: Vec<RowId> = (0..size).map(RowId::at).collect();
+        let plan = Elimination::plan(&offsets, &unknowns, &matching);
+        assert_eq!(plan.blocks, vec![0, size as u32]);
+        let expected: Vec<u32> = (0..size as u32).collect();
+        assert_eq!(plan.unknowns, expected);
+        assert_eq!(plan.rows, expected);
+    }
+
+    #[test]
+    fn a_specialized_mask_breaks_a_cycle_on_exact_zeros_and_falls_back_otherwise() {
+        let size = 6;
+        let mut offsets = vec![0];
+        let mut unknowns = Vec::new();
+        let mut reverse_entries = Vec::new();
+        let mut cut_entry = 0_u32;
+        for row in 0..size {
+            let mut cols = vec![row, (row + 1) % size, (row + size - 1) % size];
+            cols.sort_unstable();
+            cols.dedup();
+            for col in cols {
+                let entry = unknowns.len() as u32;
+                unknowns.push(UnknownId::at(col));
+                if col == (row + size - 1) % size {
+                    reverse_entries.push(entry);
+                }
+                if row == size - 1 && col == 0 {
+                    cut_entry = entry;
+                }
+            }
+            offsets.push(unknowns.len());
+        }
+        let matching: Vec<RowId> = (0..size).map(RowId::at).collect();
+        let mut cut_zeros = reverse_entries.clone();
+        cut_zeros.push(cut_entry);
+        let masks = vec![
+            super::ZeroMask {
+                probes: vec![cut_entry],
+                zeros: cut_zeros,
+            },
+            super::ZeroMask {
+                probes: Vec::new(),
+                zeros: reverse_entries.clone(),
+            },
+        ];
+        let plan = Elimination::plan_with_masks(&offsets, &unknowns, &matching, &masks);
+        let base = Elimination::plan(&offsets, &unknowns, &matching);
+        assert_eq!(plan.metrics(), base.metrics());
+        assert_eq!(plan.specialized.len(), 2);
+
+        let build_values = |fwd: f64, rev: f64, cut: f64| -> (Vec<f64>, Vec<Vec<f64>>) {
+            let mut values = vec![0.0; unknowns.len()];
+            let mut dense = vec![vec![0.0; size]; size];
+            for row in 0..size {
+                for entry in offsets[row]..offsets[row + 1] {
+                    let col = unknowns[entry].index();
+                    let v = if col == row {
+                        4.0
+                    } else if row == size - 1 && col == 0 {
+                        cut
+                    } else if col == (row + 1) % size {
+                        fwd
+                    } else {
+                        rev
+                    };
+                    values[entry] = v;
+                    dense[row][col] = v;
+                }
+            }
+            (values, dense)
+        };
+        let side: Vec<f64> = (1..=size).map(|i| i as f64 * 0.7 - 1.5).collect();
+
+        // Radau's negative off-diagonal stage weight produces -0.0 in masked slots.
+        for zero in [0.0, -0.0] {
+            let (values, dense) = build_values(0.5, zero, zero);
+            let factors = plan.factor(&values).expect("factors");
+            assert_eq!(factors.metrics().blocks, size);
+            assert_eq!(factors.metrics().factor_macs, 0);
+            let mut found = side.clone();
+            factors.solve(&mut found);
+            for (one, other) in found.iter().zip(dense_solve(dense, side.clone())) {
+                assert!((one - other).abs() < 1e-12, "{one} against {other}");
+            }
+        }
+
+        let (values, dense) = build_values(0.5, 0.0, 0.5);
+        let factors = plan.factor(&values).expect("factors");
+        assert!(factors.metrics().factor_macs < base.metrics().factor_macs);
+        let mut found = side.clone();
+        factors.solve(&mut found);
+        for (one, other) in found.iter().zip(dense_solve(dense, side.clone())) {
+            assert!((one - other).abs() < 1e-12, "{one} against {other}");
+        }
+
+        for bad in [1e-300, f64::MIN_POSITIVE / 2.0, -0.25, f64::NAN, f64::INFINITY] {
+            let (mut values, _) = build_values(0.5, 0.0, 0.0);
+            values[reverse_entries[0] as usize] = bad;
+            let result = plan.factor(&values);
+            if bad.is_finite() {
+                let factors = result.expect("finite factors");
+                assert_eq!(factors.metrics(), base.metrics());
+            } else {
+                assert_eq!(result.is_err(), base.factor(&values).is_err());
+            }
+        }
+
+        let (mut values, _) = build_values(0.5, 0.0, 0.0);
+        values[offsets[0]] = f64::INFINITY;
+        assert_eq!(plan.factor(&values).err(), base.factor_closed(&values).err());
+    }
+
+    #[test]
+    fn non_finite_specialized_substitution_falls_back_to_unmasked_closure() {
+        let offsets = [0, 3, 6, 9];
+        let unknowns: Vec<UnknownId> = (0..3).flat_map(|_| (0..3).map(UnknownId::at)).collect();
+        let matching = [RowId::at(0), RowId::at(1), RowId::at(2)];
+        let values = [1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let masks = vec![super::ZeroMask {
+            probes: Vec::new(),
+            zeros: vec![3, 6, 7],
+        }];
+        let plan = Elimination::plan_with_masks(&offsets, &unknowns, &matching, &masks);
+        let base = Elimination::plan(&offsets, &unknowns, &matching);
+        let specialized = plan.factor(&values).expect("specialized factors");
+        assert_eq!(specialized.metrics().blocks, 3);
+        let unmasked = base.factor_closed(&values).expect("base factors");
+
+        let m = f64::MAX;
+        let sides = vec![
+            vec![m, m, -m],
+            vec![f64::INFINITY, 1.0, 1.0],
+            vec![1.0, f64::INFINITY, 1.0],
+            vec![1.0, 1.0, f64::NEG_INFINITY],
+        ];
+        for side in &sides {
+            let (mut got, mut want) = (side.clone(), side.clone());
+            specialized.solve(&mut got);
+            unmasked.solve(&mut want);
+            assert!(same_bits(&got, &want), "got {got:?} against {want:?}");
+        }
+        let mut group_sides = vec![vec![0.0; 3]; LANES];
+        for (slot, side) in group_sides.iter_mut().zip(&sides) {
+            *slot = side.clone();
+        }
+        let mut marks = Marks::new(3);
+        for reached in [true, false] {
+            let got = grouped(&specialized, &group_sides, reached, &mut marks);
+            let want = grouped(&unmasked, &group_sides, reached, &mut marks);
+            for (g, w) in got.iter().zip(&want) {
+                assert!(same_bits(g, w), "grouped(reached={reached}): {g:?} against {w:?}");
+            }
+        }
+
+        let offsets4 = [0, 3, 6, 9, 12];
+        let unknowns4 = [
+            UnknownId::at(0),
+            UnknownId::at(1),
+            UnknownId::at(2),
+            UnknownId::at(0),
+            UnknownId::at(1),
+            UnknownId::at(2),
+            UnknownId::at(1),
+            UnknownId::at(2),
+            UnknownId::at(3),
+            UnknownId::at(0),
+            UnknownId::at(2),
+            UnknownId::at(3),
+        ];
+        let matching4 = [RowId::at(0), RowId::at(1), RowId::at(2), RowId::at(3)];
+        let values4 = [4.0, 1.0, 0.0, 1.0, 4.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0];
+        let masks4 = vec![super::ZeroMask {
+            probes: Vec::new(),
+            zeros: vec![2, 5, 6, 9, 10],
+        }];
+        let plan4 = Elimination::plan_with_masks(&offsets4, &unknowns4, &matching4, &masks4);
+        let base4 = Elimination::plan(&offsets4, &unknowns4, &matching4);
+        let spec4 = plan4
+            .factor(&values4)
+            .expect("multi-row block specialized factors");
+        assert_eq!(spec4.metrics().largest_block, 2);
+        let base4_closed = base4.factor_closed(&values4).expect("base4 closed");
+        let mut got = vec![1.0, 2.0, f64::INFINITY, 1.0];
+        let mut want = got.clone();
+        spec4.solve(&mut got);
+        base4_closed.solve(&mut want);
+        assert!(
+            same_bits(&got, &want),
+            "multi-row block fallback: {got:?} against {want:?}"
+        );
     }
 }

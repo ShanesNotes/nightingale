@@ -5,7 +5,10 @@ use ng_contract::{
     CoverageManifest, Digest, Dimensionless, HeldRoute, Interval, Measure, QuantityId, Rate, RhythmId,
     SimTime, Slot, Substance,
 };
-use ng_record::{CheckpointError, ConservationView, Curve, HistorySeal, HistorySegment, OldestFirst};
+use ng_record::{
+    AcceptedStep, CheckpointError, ConservationFeed, ConservationRefusal, ConservationView, Curve,
+    HistorySeal, HistorySegment, OldestFirst, Session,
+};
 
 const SECOND: u64 = 1_000_000_000;
 
@@ -756,7 +759,8 @@ fn pair(
     };
     let window =
         |start: u64| Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length)).ok_or(coverage);
-    let mut drifted = None;
+    let mut opened = None;
+    let mut drifted = [None; 2];
     let mut windows = Vec::with_capacity(2 * policy.quantities.len());
     for (at, limits) in policy.quantities.iter().enumerate() {
         let quantity = limits.quantity;
@@ -780,11 +784,16 @@ fn pair(
                 allowance: None,
             };
             match balance.outcome {
-                Outcome::Open => return Err(failure(CertificateCheck::Closure, balance.closure)),
-                Outcome::Drifts if drifted.is_none() => {
-                    drifted = Some(failure(CertificateCheck::Drift, balance.drift));
+                Outcome::Open if index == 0 => {
+                    return Err(failure(CertificateCheck::Closure, balance.closure));
                 }
-                Outcome::Drifts | Outcome::Holds => {}
+                Outcome::Open => {
+                    opened.get_or_insert_with(|| failure(CertificateCheck::Closure, balance.closure));
+                }
+                Outcome::Drifts => {
+                    drifted[index].get_or_insert_with(|| failure(CertificateCheck::Drift, balance.drift));
+                }
+                Outcome::Holds => {}
             }
             windows.push(Window {
                 quantity: at,
@@ -796,6 +805,10 @@ fn pair(
             });
         }
     }
+    if let Some(failure) = opened {
+        return Err(failure);
+    }
+    let drifted = drifted[0].or(drifted[1]);
     let mut carried = Vec::with_capacity(2 * routes.len());
     for (at, route) in routes.iter().enumerate() {
         let ((forward, reverse), (forward_before, reverse_before)) = (
@@ -947,6 +960,31 @@ impl<'p> Rhythm<'p> {
             self.widest = Some(stretch);
         }
     }
+    fn snapshot(&self, head: u64) -> Result<RhythmResult, CertificateFailure> {
+        let tail = Self {
+            limits: self.limits,
+            rhythm: self.rhythm,
+            admission: self.admission,
+            early: self.early,
+            since: self.since,
+            open: Vec::new(),
+            judged: self.judged,
+            last_close: self.last_close,
+            widest: self.widest,
+            worst: self.worst.clone(),
+            stopped: self.stopped,
+            drifted: self.drifted,
+        };
+        tail.finish(head)
+    }
+    fn heap_bytes(&self) -> usize {
+        let open_values: usize = (self.open.iter())
+            .map(|(_, values)| values.capacity() * size_of::<Compensated>())
+            .sum();
+        self.open.capacity() * size_of::<(u64, Vec<Compensated>)>()
+            + open_values
+            + self.worst.capacity() * size_of::<Option<EdgeResult>>()
+    }
     fn finish(mut self, head: u64) -> Result<RhythmResult, CertificateFailure> {
         self.stretch(self.last_close.unwrap_or(self.admission), head);
         if let Some(failure) = self.stopped.or(self.drifted) {
@@ -962,9 +1000,9 @@ impl<'p> Rhythm<'p> {
     }
 }
 
-struct Windows<'p> {
+struct Windows<'p, 'r> {
     policy: &'p CertificatePolicy,
-    routes: &'p [HeldRoute],
+    routes: &'r [HeldRoute],
     first: u64,
     last: u64,
     from: u64,
@@ -976,10 +1014,10 @@ struct Windows<'p> {
     done: bool,
     rhythm: Option<Rhythm<'p>>,
 }
-impl<'p> Windows<'p> {
+impl<'p, 'r> Windows<'p, 'r> {
     fn new(
         policy: &'p CertificatePolicy,
-        routes: &'p [HeldRoute],
+        routes: &'r [HeldRoute],
         (first, last): (u64, u64),
         rhythm: Option<RhythmId>,
     ) -> Self {
@@ -1004,6 +1042,18 @@ impl<'p> Windows<'p> {
             rhythm.arrive(segment);
         }
     }
+    fn reaches(&self, leading: &HistorySegment) -> bool {
+        if self.done {
+            return false;
+        }
+        let length = self.policy.windows.window_ns.get();
+        let end = |segment: &HistorySegment| segment.interval().end().nanoseconds();
+        if self.first == self.last {
+            self.first.checked_add(length).is_some() && self.first + length <= end(leading)
+        } else {
+            self.from.checked_add(length).is_some() && self.from + length < end(leading)
+        }
+    }
     fn offer(
         &mut self,
         (behind, trailing): (u64, &HistorySegment),
@@ -1013,16 +1063,11 @@ impl<'p> Windows<'p> {
         let end = |segment: &HistorySegment| segment.interval().end().nanoseconds();
         let one_window = self.first == self.last;
         while !self.done {
+            if !self.reaches(leading) {
+                return Need::Leading;
+            }
             if end(trailing) <= self.from {
                 return Need::Trailing;
-            }
-            let reaches = if one_window {
-                self.first + length <= end(leading)
-            } else {
-                self.from + length < end(leading)
-            };
-            if !reaches {
-                return Need::Leading;
             }
             let steps = behind.abs_diff(ahead) + 1;
             let to = (end(trailing).min(end(leading) - length)).min(self.last);
@@ -1102,14 +1147,24 @@ impl<'p> Windows<'p> {
             }
         }
     }
-    fn finish(self, view: &ConservationView<'_>, span: Interval) -> Result<Certificate, CertificateFailure> {
+    fn heap_bytes(&self) -> usize {
+        self.worst.capacity() * size_of::<Option<QuantityResult>>()
+            + self.most.capacity() * size_of::<Option<[(Compensated, Interval); 2]>>()
+            + self.rhythm.as_ref().map_or(0, Rhythm::heap_bytes)
+    }
+    fn snapshot(
+        &self,
+        seal: HistorySeal,
+        manifest: &CoverageManifest,
+        span: Interval,
+    ) -> Result<Certificate, CertificateFailure> {
         if let Some(failure) = self.failed.or(self.drifted) {
             return Err(failure);
         }
         let coverage = of_history(CertificateCheck::Coverage);
-        let results = self.worst.into_iter().collect::<Option<Vec<_>>>();
-        let support = (self.routes.iter().zip(self.most)).map(|(&route, most)| {
-            let [(most_inflow, inflow_window), (most_outflow, outflow_window)] = most?;
+        let results = self.worst.iter().copied().collect::<Option<Vec<_>>>();
+        let support = (self.routes.iter().zip(&self.most)).map(|(&route, most)| {
+            let [(most_inflow, inflow_window), (most_outflow, outflow_window)] = (*most)?;
             Some(HeldSupport {
                 route,
                 most_inflow,
@@ -1121,19 +1176,186 @@ impl<'p> Windows<'p> {
         let support = support.collect::<Option<Vec<_>>>().ok_or(coverage)?;
         let results = results.ok_or(coverage)?;
         let head = span.end().nanoseconds();
-        let rhythm = self.rhythm.map(|rhythm| rhythm.finish(head)).transpose()?;
+        let rhythm = self
+            .rhythm
+            .as_ref()
+            .map(|rhythm| rhythm.snapshot(head))
+            .transpose()?;
         Ok(Certificate {
-            seal: view.seal(),
+            seal,
             basis: self.policy.basis,
             policy: self.policy.digest(),
             windows: self.policy.windows,
             span,
             results,
-            coverage: view.basis().coverage().clone(),
+            coverage: manifest.clone(),
             support,
             pieces: self.pieces,
             rhythm,
         })
+    }
+    fn finish(self, view: &ConservationView<'_>, span: Interval) -> Result<Certificate, CertificateFailure> {
+        self.snapshot(view.seal(), view.basis().coverage(), span)
+    }
+}
+
+fn feed_step(
+    windows: &mut Windows<'_, '_>,
+    trailing: &mut Option<(u64, HistorySegment)>,
+    history_error: &mut Option<CheckpointError>,
+    step: &mut AcceptedStep<'_, '_, '_>,
+) {
+    let (ahead, leading) = (step.revision(), step.segment());
+    windows.arrive(leading);
+    if history_error.is_some() {
+        return;
+    }
+    while windows.reaches(leading) {
+        if trailing.is_none() {
+            match step.next_trailing() {
+                Ok(Some(next)) => *trailing = Some(next),
+                Ok(None) => return,
+                Err(error) => {
+                    *history_error = Some(error);
+                    return;
+                }
+            }
+        }
+        let (behind, early) = trailing.as_ref().expect("filled above");
+        match windows.offer((*behind, early), (ahead, leading)) {
+            Need::Trailing => match step.next_trailing() {
+                Ok(Some(next)) => *trailing = Some(next),
+                Ok(None) => return,
+                Err(error) => {
+                    *history_error = Some(error);
+                    return;
+                }
+            },
+            Need::Leading | Need::Finish => break,
+        }
+    }
+}
+
+/// Folds a certificate over one session as each step is accepted, sharing `certify`'s evaluator and order.
+/// Reads the session through an `ng_record::ConservationFeed` minted at admission or rebuilt from the verified
+/// prefix after `resume`, `rewind` or `recover`, so no host can feed two runs or two branches.
+pub struct CertificateFold<'m, 'p> {
+    feed: ConservationFeed<'m>,
+    windows: Windows<'p, 'm>,
+    trailing: Option<(u64, HistorySegment)>,
+    history_error: Option<CheckpointError>,
+}
+impl<'m, 'p> CertificateFold<'m, 'p> {
+    /// Opens a fold bound to `session`'s run and branch. At admission no store link is read; after `resume`,
+    /// `rewind` or `recover` the fold rebuilds from the verified prefix up to `session`'s head.
+    pub fn open<S>(
+        session: &Session<'m, S>,
+        policy: &'p CertificatePolicy,
+    ) -> Result<Self, CertificateFailure> {
+        let coverage = of_history(CertificateCheck::Coverage);
+        let head = session.conservation();
+        if policy.basis != head.basis().digest() {
+            return Err(coverage);
+        }
+        let rhythm = match &policy.edges {
+            Some(limits) => {
+                let clock = limits.windows.clock;
+                let declared = head.rhythms().find(|&(_, phase)| phase == clock);
+                Some(
+                    declared
+                        .ok_or_else(|| of_history(CertificateCheck::UndeclaredRhythm))?
+                        .0,
+                )
+            }
+            None => None,
+        };
+        let mut feed = session.conservation_feed();
+        let ExpectedDrift::Zero = policy.expected;
+        let length = policy.windows.window_ns.get();
+        let first = feed.admission().nanoseconds();
+        let last = match policy.windows.coverage_ns == length {
+            true => first,
+            false => u64::MAX,
+        };
+        let routes = feed.basis().coverage().held_routes();
+        let mut windows = Windows::new(policy, routes, (first, last), rhythm);
+        let mut trailing = None;
+        let mut history_error = None;
+        let prefix_start = match rhythm {
+            Some(_) => feed.admission(),
+            None => SimTime::from_ns(first.saturating_add(length)),
+        };
+        let replayed = feed.take_prefix(prefix_start, |step| {
+            feed_step(&mut windows, &mut trailing, &mut history_error, step);
+            history_error.is_none() && (rhythm.is_some() || !windows.done)
+        });
+        if let Err(error) = replayed {
+            history_error.get_or_insert(error);
+        }
+        if windows.done || history_error.is_some() {
+            feed.release_trailing();
+            trailing = None;
+        }
+        Ok(Self {
+            feed,
+            windows,
+            trailing,
+            history_error,
+        })
+    }
+    /// Advances the fold by one accepted step of its session. Refuses another run, another branch, or a skipped
+    /// or repeated revision without changing the fold.
+    pub fn advance<S>(&mut self, session: &Session<'m, S>) -> Result<(), ConservationRefusal> {
+        let mut step = self.feed.advance(session)?;
+        feed_step(
+            &mut self.windows,
+            &mut self.trailing,
+            &mut self.history_error,
+            &mut step,
+        );
+        if self.windows.done || self.history_error.is_some() {
+            self.feed.release_trailing();
+            self.trailing = None;
+        }
+        Ok(())
+    }
+    /// Reads the certificate at the last accepted head without consuming or mutating the fold.
+    pub fn certificate(&self) -> Result<Certificate, CertificateFailure> {
+        let coverage = of_history(CertificateCheck::Coverage);
+        let span = self.feed.span().ok_or(coverage)?;
+        if span.length_ns() < self.windows.policy.windows.coverage_ns {
+            return Err(coverage);
+        }
+        if let Some(seal) = self.feed.pending_before_head() {
+            return Err(of_history(CertificateCheck::History(
+                CheckpointError::HistoryMissing { seal },
+            )));
+        }
+        if let Some(error) = self.history_error {
+            return Err(of_history(CertificateCheck::History(error)));
+        }
+        self.windows
+            .snapshot(self.feed.seal(), self.feed.basis().coverage(), span)
+    }
+    pub fn seal(&self) -> HistorySeal {
+        self.feed.seal()
+    }
+    pub fn span(&self) -> Option<Interval> {
+        self.feed.span()
+    }
+    pub fn pieces(&self) -> u64 {
+        self.windows.pieces
+    }
+    /// Heap and inline bytes currently held by this fold and its feed.
+    pub fn memory_bytes(&self) -> usize {
+        let trailing_heap = self
+            .trailing
+            .as_ref()
+            .map_or(0, |(_, segment)| segment.heap_bytes());
+        size_of::<Self>() - size_of::<ConservationFeed<'m>>()
+            + self.feed.memory_bytes()
+            + trailing_heap
+            + self.windows.heap_bytes()
     }
 }
 

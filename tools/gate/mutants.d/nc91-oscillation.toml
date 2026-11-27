@@ -1,0 +1,24 @@
+[[mutant]]
+name = "oscillation-cap-below-damping-bound"
+path = "crates/ng-validate/tests/accuracy.rs"
+old = '''    let cap = 6 * SECOND;'''
+new = '''    let cap = 500 * MILLISECOND;'''
+test = "-p ng-validate --test accuracy an_honest_core_past_four_growth_over_omega_squared_closes_every_ledger_and_fails_only_the_oscillation_case"
+
+[[mutant]]
+name = "oscillation-amplitude-unchecked"
+path = "crates/ng-validate/src/accuracy.rs"
+old = '''            if !error.at_most(tolerance) {'''
+new = '''            if false {'''
+test = "-p ng-validate --test accuracy an_honest_core_past_four_growth_over_omega_squared_closes_every_ledger_and_fails_only_the_oscillation_case"
+
+[[mutant]]
+name = "oscillation-clips-at-case-end"
+path = "crates/ng-validate/src/accuracy.rs"
+old = '''        let end = if interval.end() > case.end() {
+            case.end()
+        } else {
+            interval.end()
+        };'''
+new = '''        let end = interval.end();'''
+test = "-p ng-validate --test accuracy oscillation_scoring_clips_at_case_end"

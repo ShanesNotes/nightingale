@@ -6,7 +6,7 @@ use crate::body::{
 use crate::catalog::{self, Projection, SpeciationReader};
 use crate::chance::key_word;
 use crate::conservation::{Balanced, admission_totals, conserved_basis, weight};
-use crate::elimination::Elimination;
+use crate::elimination::{Elimination, ZeroMask};
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::law::{
@@ -123,7 +123,6 @@ pub(crate) fn compile(
     let judged = judged_rows(reads.len(), &stores);
     let pivots = pivots(solved_by.clone(), &stores);
     let sparsity = sparsity(reads);
-    let elimination = Elimination::plan(&sparsity.offsets, &sparsity.unknowns, &pivots);
     let layout = Layout {
         schema,
         rows: rows.rows,
@@ -142,7 +141,285 @@ pub(crate) fn compile(
         rhythms,
         basis,
     };
+    let masks = transport_masks(&layout, &pivots);
+    let elimination = Elimination::plan_with_masks(
+        &layout.sparsity.offsets,
+        &layout.sparsity.unknowns,
+        &pivots,
+        &masks,
+    );
     Ok(CompiledBody::seal(layout, elimination, totals))
+}
+
+fn transport_masks(layout: &Layout, solved_by: &[RowId]) -> Vec<ZeroMask> {
+    const MAX_VALVES: usize = 4;
+    let size = layout.rows.len();
+    let offsets = &layout.sparsity.offsets;
+    let unknowns = &layout.sparsity.unknowns;
+    let nnz = unknowns.len();
+    if nnz == 0 {
+        return Vec::new();
+    }
+    let entry_of = |row: usize, unknown: usize| -> Option<usize> {
+        let range = offsets[row]..offsets[row + 1];
+        unknowns[range.clone()]
+            .binary_search_by_key(&unknown, |u| u.index())
+            .ok()
+            .map(|at| range.start + at)
+    };
+    let mut writers = vec![0_u32; nnz];
+    for inst in &layout.instances {
+        match inst.target {
+            Target::Column(col) => {
+                for &(row, _) in &layout.columns[col.index()].terms {
+                    for input in &inst.inputs {
+                        if let Some(unknown) = input.unknown()
+                            && let Some(entry) = entry_of(row.index(), unknown.index())
+                        {
+                            writers[entry] += 1;
+                        }
+                    }
+                }
+            }
+            Target::Row(row) => {
+                for input in &inst.inputs {
+                    if let Some(unknown) = input.unknown()
+                        && let Some(entry) = entry_of(row.index(), unknown.index())
+                    {
+                        writers[entry] += 1;
+                    }
+                }
+            }
+        }
+    }
+    for (row, info) in layout.rows.iter().enumerate() {
+        if !matches!(info.kind, RowKind::Algebraic(_))
+            && let Some(entry) = entry_of(row, info.unknown.index())
+        {
+            writers[entry] += 1;
+        }
+    }
+    for (unknown, &row) in solved_by.iter().enumerate() {
+        if let Some(entry) = entry_of(row.index(), unknown) {
+            writers[entry] += 1;
+        }
+    }
+    struct UpwindEdge {
+        flow: usize,
+        col: usize,
+        upwind: [usize; 2],
+        downwind: [usize; 2],
+    }
+    let mut upwinds = Vec::new();
+    for inst in &layout.instances {
+        if !matches!(inst.context, Context::Edge { .. }) || inst.mode.is_some() || inst.rectified {
+            continue;
+        }
+        let Target::Column(col) = inst.target else {
+            continue;
+        };
+        let ops = &layout.programs[inst.program.index()].code.ops;
+        if ops.len() != 6 || !matches!(ops[5], Op::Upwind([0, 1, 2, 3, 4])) || inst.inputs.len() != 5 {
+            continue;
+        }
+        let [
+            Bound::Unknown(flow),
+            Bound::Unknown(from_amt),
+            Bound::Unknown(from_water),
+            Bound::Unknown(to_amt),
+            Bound::Unknown(to_water),
+        ] = inst.inputs[..]
+        else {
+            continue;
+        };
+        upwinds.push(UpwindEdge {
+            flow: flow.index(),
+            col: col.index(),
+            upwind: [from_amt.index(), from_water.index()],
+            downwind: [to_amt.index(), to_water.index()],
+        });
+    }
+    if upwinds.is_empty() {
+        return Vec::new();
+    }
+    let mut downwind_count = vec![0_u32; nnz];
+    for edge in &upwinds {
+        for &(row, _) in &layout.columns[edge.col].terms {
+            for unknown in edge.downwind {
+                if let Some(entry) = entry_of(row.index(), unknown) {
+                    downwind_count[entry] += 1;
+                }
+            }
+        }
+    }
+    let edge_downwind: Vec<u32> = (0..nnz)
+        .filter(|&e| downwind_count[e] > 0 && downwind_count[e] == writers[e])
+        .map(|e| e as u32)
+        .collect();
+    if edge_downwind.is_empty() {
+        return Vec::new();
+    }
+    let mut edge_flows: Vec<usize> = upwinds.iter().map(|edge| edge.flow).collect();
+    edge_flows.sort_unstable();
+    edge_flows.dedup();
+    struct ShutValve {
+        probe: u32,
+        counts: Vec<(u32, u32)>,
+    }
+    let mut shut_candidates: Vec<(usize, usize, usize, usize)> = Vec::new();
+    for inst in &layout.instances {
+        let Some((var, shut_val)) = inst.mode else {
+            continue;
+        };
+        let Target::Row(q_row) = inst.target else {
+            continue;
+        };
+        let flow = layout.rows[q_row.index()].unknown.index();
+        if edge_flows.binary_search(&flow).is_err() {
+            continue;
+        }
+        if inst.inputs.iter().any(|input| input.unknown().is_some()) {
+            continue;
+        }
+        let ops = &layout.programs[inst.program.index()].code.ops;
+        if ops
+            .iter()
+            .all(|op| matches!(op, Op::Zero(_) | Op::AsDimension(_)))
+        {
+            shut_candidates.push((q_row.index(), flow, var, shut_val));
+        }
+    }
+    shut_candidates.sort_unstable();
+    shut_candidates.dedup_by_key(|item| item.0);
+    let mut valves = Vec::new();
+    for (q_row, flow, var, shut_val) in shut_candidates {
+        let mut raw = Vec::new();
+        for inst in &layout.instances {
+            if inst.target == Target::Row(RowId::at(q_row)) && inst.mode != Some((var, shut_val)) {
+                for input in &inst.inputs {
+                    if let Some(unknown) = input.unknown()
+                        && let Some(entry) = entry_of(q_row, unknown.index())
+                    {
+                        raw.push(entry as u32);
+                    }
+                }
+            }
+        }
+        for edge in &upwinds {
+            if edge.flow != flow {
+                continue;
+            }
+            for &(row, _) in &layout.columns[edge.col].terms {
+                for unknown in edge.upwind {
+                    if let Some(entry) = entry_of(row.index(), unknown) {
+                        raw.push(entry as u32);
+                    }
+                }
+            }
+        }
+        raw.sort_unstable();
+        let mut counts: Vec<(u32, u32)> = Vec::new();
+        for entry in raw {
+            if let Some(last) = counts.last_mut()
+                && last.0 == entry
+            {
+                last.1 += 1;
+            } else {
+                counts.push((entry, 1));
+            }
+        }
+        let q_range = offsets[q_row] as u32..offsets[q_row + 1] as u32;
+        let newly_zero = |&(entry, count): &(u32, u32)| {
+            let e = entry as usize;
+            downwind_count[e] < writers[e] && downwind_count[e] + count == writers[e]
+        };
+        let probe = counts
+            .iter()
+            .find(|item| q_range.contains(&item.0) && newly_zero(item))
+            .or_else(|| counts.iter().find(|item| newly_zero(item)))
+            .map(|&(entry, _)| entry);
+        if let Some(probe) = probe {
+            valves.push(ShutValve { probe, counts });
+        }
+    }
+    let mut node_of_row = vec![0_u32; size];
+    for (unknown, row) in solved_by.iter().enumerate() {
+        node_of_row[row.index()] = unknown as u32;
+    }
+    let scc_score = |zeros: &[u32]| -> (usize, usize) {
+        let mut is_zero = vec![false; nnz];
+        for &entry in zeros {
+            is_zero[entry as usize] = true;
+        }
+        let mut edges = Vec::with_capacity(nnz);
+        for row in 0..size {
+            let node = node_of_row[row] as usize;
+            for entry in offsets[row]..offsets[row + 1] {
+                if !is_zero[entry] {
+                    let other = unknowns[entry].index();
+                    if other != node {
+                        edges.push((node, other));
+                    }
+                }
+            }
+        }
+        let comp = Digraph::new(size, &edges).strongly_connected_components();
+        let num_comp = comp.iter().copied().max().map_or(0, |last| last + 1);
+        let mut sizes = vec![0_usize; num_comp];
+        for c in comp {
+            sizes[c] += 1;
+        }
+        let multi: usize = sizes.iter().copied().filter(|&s| s > 1).sum();
+        let largest = sizes.into_iter().max().unwrap_or(0);
+        (multi, largest)
+    };
+    let build_mask = |subset: &[usize]| -> ZeroMask {
+        let mut added = downwind_count.clone();
+        let mut probes = Vec::with_capacity(subset.len());
+        for &idx in subset {
+            probes.push(valves[idx].probe);
+            for &(entry, count) in &valves[idx].counts {
+                added[entry as usize] += count;
+            }
+        }
+        let zeros: Vec<u32> = (0..nnz)
+            .filter(|&e| added[e] > 0 && added[e] == writers[e])
+            .map(|e| e as u32)
+            .collect();
+        ZeroMask { probes, zeros }
+    };
+    let base_score = scc_score(&edge_downwind);
+    let mut ranked: Vec<((usize, usize), usize)> = valves
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, _)| {
+            let mask = build_mask(&[idx]);
+            let score = scc_score(&mask.zeros);
+            (score < base_score).then_some((score, idx))
+        })
+        .collect();
+    ranked.sort_unstable();
+    ranked.truncate(MAX_VALVES);
+    let selected: Vec<usize> = ranked.into_iter().map(|(_, idx)| idx).collect();
+    let mut masks = Vec::new();
+    if selected.len() >= 3 {
+        masks.push(build_mask(&selected));
+    }
+    if selected.len() >= 2 {
+        for i in 0..selected.len() {
+            for j in i + 1..selected.len() {
+                masks.push(build_mask(&[selected[i], selected[j]]));
+            }
+        }
+    }
+    for &idx in &selected {
+        masks.push(build_mask(&[idx]));
+    }
+    masks.push(ZeroMask {
+        probes: Vec::new(),
+        zeros: edge_downwind,
+    });
+    masks
 }
 
 fn check_fragments(
