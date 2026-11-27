@@ -1055,6 +1055,11 @@ impl<'p> Rhythm<'p> {
             self.widest = Some(stretch);
         }
     }
+    fn anchor_open_tail_at_last_edge(&mut self) {
+        if self.last_close.is_none() {
+            self.admission = self.since;
+        }
+    }
     fn snapshot(&self, head: u64) -> Result<RhythmResult, CertificateFailure> {
         let tail = Self {
             limits: self.limits,
@@ -1461,12 +1466,12 @@ impl<'m, 'p> CertificateFold<'m, 'p> {
             return Some(failure);
         }
         let head = self.feed.span()?.end().nanoseconds();
-        let tail_from = rhythm.last_close.unwrap_or(rhythm.admission);
-        if head.saturating_sub(tail_from) > rhythm.limits.windows.widest_ns {
+        let since = rhythm.since;
+        if head.saturating_sub(since) > rhythm.limits.windows.widest_ns {
             return Some(CertificateFailure {
                 check: CertificateCheck::RhythmStopped,
                 quantity: None,
-                window: Interval::new(SimTime::from_ns(tail_from), SimTime::from_ns(head)),
+                window: Interval::new(SimTime::from_ns(since), SimTime::from_ns(head)),
                 residual: Compensated::ZERO,
                 allowance: None,
             });
@@ -1639,9 +1644,6 @@ pub fn certify_flight_recorder(
     if let Some(edge) = &mut windows.rhythm {
         edge.admission = retained.opened().nanoseconds();
         edge.since = first;
-        if retained.from_revision() > 0 {
-            edge.last_close = Some(first);
-        }
     }
     if !segments.is_empty() {
         let mut ti = 0;
@@ -1673,6 +1675,11 @@ pub fn certify_flight_recorder(
                 windows.arrive(segment);
             }
         }
+    }
+    if retained.from_revision() > 0
+        && let Some(edge) = &mut windows.rhythm
+    {
+        edge.anchor_open_tail_at_last_edge();
     }
     if let Some(failure) = windows.failed.or(windows.drifted) {
         return Err(failure);

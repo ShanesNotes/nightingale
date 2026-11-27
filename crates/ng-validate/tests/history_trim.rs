@@ -1543,6 +1543,11 @@ fn a_retained_span_refuses_tampered_prefix_witnesses_trimmed_span_links_and_repr
         .expect("present");
     let local_err = certify_flight_recorder(&retained, &policy).expect_err("reproduces stopped rhythm");
     assert_eq!(local_err.check(), CertificateCheck::RhythmStopped);
+    assert_eq!(
+        local_err.window(),
+        Interval::new(at(18 * SECOND), at(30 * SECOND)),
+        "stopped stretch runs from the last edge observed in the suffix, not the suffix start"
+    );
 
     let from_ckpt = store
         .checkpoint_at_revision(fr.from_checkpoint_revision)
@@ -1615,4 +1620,183 @@ fn a_retained_span_refuses_tampered_prefix_witnesses_trimmed_span_links_and_repr
         .err(),
         Some(CheckpointError::NotOnThisBranch)
     );
+}
+
+#[test]
+fn a_passing_settled_rhythm_run_does_not_latch_the_flight_recorder_and_trims_all_links() {
+    let breath = breathing_body();
+    let basis = breath.conserved_basis();
+    let water_id = basis.ids().next().expect("water");
+    let clock = Slot::from(LawName {
+        owner: "Boundary",
+        local: "phase",
+    });
+    let policy = policy_for(basis, 10, 40, 1e-6, 1e-9, 1e9)
+        .between_edges(
+            EdgeWindows::new(
+                clock,
+                10 * SECOND,
+                NonZeroU64::new(10 * SECOND).expect("pos"),
+                15 * SECOND,
+            ),
+            vec![EdgeRate::new(water_id, measure::<Rate<Water>>(100.0), None).expect("rate")],
+        )
+        .expect("edge policy");
+    let events = vec![BoundaryEvent::new(
+        InputId::new(Digest::of_canonical(b"steady")),
+        at(0),
+        room_input(false, true),
+    )];
+    let store = RollingStore::new();
+    let core = ReferenceIntegrator::new(250_000_000);
+    let session = admit_fixture(
+        &breath,
+        breathing_packet(&breath, 0.0),
+        BoundaryPort::new(events).expect("port"),
+        &core,
+        &store,
+    )
+    .expect("admitted");
+    let out = run_rolling(
+        session,
+        at(40 * SECOND),
+        &policy,
+        &store,
+        RollingConfig {
+            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("pos"),
+        },
+    )
+    .expect("rolling");
+    assert!(out.certificate.is_ok(), "steady settled breathing passes");
+    assert_eq!(
+        out.listing.flight_recorder, None,
+        "a passing settled-rhythm run must not latch the flight recorder before its first close"
+    );
+    assert!(
+        out.listing.complete_link_revisions.is_empty(),
+        "a passing settled-rhythm run trims every complete link on finish"
+    );
+    assert!(out.listing.witness_count > 0);
+}
+
+#[test]
+fn a_flight_recorder_suffix_uses_its_last_edge_for_open_tails_and_never_falsely_stops_healthy_breathing() {
+    let breath = breathing_body();
+    let basis = breath.conserved_basis();
+    let water_id = basis.ids().next().expect("water");
+    let clock = Slot::from(LawName {
+        owner: "Boundary",
+        local: "phase",
+    });
+    let stop_policy = policy_for(basis, 10, 20, 1e-6, 1e-9, 1e9)
+        .between_edges(
+            EdgeWindows::new(clock, 0, NonZeroU64::new(6 * SECOND).expect("pos"), 9 * SECOND),
+            vec![EdgeRate::new(water_id, measure::<Rate<Water>>(100.0), None).expect("rate")],
+        )
+        .expect("policy");
+    let stop_events = vec![
+        BoundaryEvent::new(
+            InputId::new(Digest::of_canonical(b"go")),
+            at(0),
+            room_input(false, true),
+        ),
+        BoundaryEvent::new(
+            InputId::new(Digest::of_canonical(b"hold")),
+            at(18 * SECOND),
+            room_input(false, false),
+        ),
+    ];
+    let stop_store = RollingStore::new();
+    let core = ReferenceIntegrator::new(250_000_000);
+    let stop_session = admit_fixture(
+        &breath,
+        breathing_packet(&breath, 0.0),
+        BoundaryPort::new(stop_events).expect("port"),
+        &core,
+        &stop_store,
+    )
+    .expect("admitted");
+    let stop_out = run_rolling(
+        stop_session,
+        at(30 * SECOND),
+        &stop_policy,
+        &stop_store,
+        RollingConfig {
+            checkpoint_every_ns: NonZeroU64::new(5 * SECOND).expect("pos"),
+        },
+    )
+    .expect("rolling");
+    let RollingStatus::Completed(stopped_session) = stop_out.status else {
+        panic!("completed");
+    };
+    let fold_err = stop_out.certificate.expect_err("rhythm stopped");
+    let retained_stop = stop_store
+        .retained_flight_recorder(&breath, stopped_session.record().identity())
+        .expect("verified")
+        .expect("present");
+    let local_err = certify_flight_recorder(&retained_stop, &stop_policy).expect_err("local stopped");
+    assert_eq!(fold_err.check(), CertificateCheck::RhythmStopped);
+    assert_eq!(local_err.check(), fold_err.check());
+    assert_eq!(
+        local_err.window(),
+        Interval::new(at(18 * SECOND), at(30 * SECOND))
+    );
+    assert_eq!(local_err.window(), fold_err.window());
+
+    let healthy_events = vec![BoundaryEvent::new(
+        InputId::new(Digest::of_canonical(b"steady")),
+        at(0),
+        room_input(false, true),
+    )];
+    let healthy_store = RollingStore::new();
+    let mut healthy = admit_fixture(
+        &breath,
+        breathing_packet(&breath, 0.0),
+        BoundaryPort::new(healthy_events).expect("port"),
+        &core,
+        &healthy_store,
+    )
+    .expect("admitted");
+    let mut ckpt_at_15 = None;
+    while healthy.record().accepted().time() < at(23 * SECOND) {
+        healthy = step_accepted(healthy);
+        if ckpt_at_15.is_none() && healthy.record().accepted().time() >= at(15 * SECOND) {
+            ckpt_at_15 = Some(healthy.checkpoint().expect("ckpt at 15s"));
+        }
+    }
+    let ckpt_at_15 = ckpt_at_15.expect("checkpoint at 15s");
+    let retained_healthy = ng_record::retained_span(
+        &breath,
+        healthy.record().identity(),
+        &ckpt_at_15,
+        healthy.record().seal().digest(),
+        healthy.record().revision(),
+        &healthy_store,
+    )
+    .expect("retained healthy suffix");
+    assert!(retained_healthy.from_revision() > 0);
+    let span = retained_healthy.span().expect("non-empty span");
+    assert!(span.length_ns() > 5 * SECOND && span.length_ns() < 10 * SECOND);
+
+    let healthy_policy = policy_for(basis, 4, 20, 1e-6, 1e-9, 1e9)
+        .between_edges(
+            EdgeWindows::new(clock, 0, NonZeroU64::new(10 * SECOND).expect("pos"), 5 * SECOND),
+            vec![EdgeRate::new(water_id, measure::<Rate<Water>>(100.0), None).expect("rate")],
+        )
+        .expect("healthy policy");
+    let cert = certify_flight_recorder(&retained_healthy, &healthy_policy)
+        .expect("healthy breathing suffix shorter than edge window length must pass");
+    let rhythm = cert.rhythm().expect("rhythm result");
+    assert_eq!(rhythm.judged(), 0);
+    assert_eq!(rhythm.last_close(), None);
+
+    let short_fixed_policy = policy_for(basis, 10, 20, 1e-6, 1e-9, 1e9)
+        .between_edges(
+            EdgeWindows::new(clock, 0, NonZeroU64::new(10 * SECOND).expect("pos"), 5 * SECOND),
+            vec![EdgeRate::new(water_id, measure::<Rate<Water>>(100.0), None).expect("rate")],
+        )
+        .expect("short fixed policy");
+    let short_err = certify_flight_recorder(&retained_healthy, &short_fixed_policy)
+        .expect_err("shorter than fixed window reports coverage, not stopped rhythm");
+    assert_eq!(short_err.check(), CertificateCheck::Coverage);
 }

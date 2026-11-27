@@ -215,3 +215,26 @@ path = "crates/ng-validate/src/trim.rs"
 old = '''        let base = self.checkpoint_for(window_start.or(self.open_from))?;'''
 new = '''        let base = self.checkpoint_for(window_start)?;'''
 test = "-p ng-validate --test history_trim the_flight_recorder_latches_on_engine_fault_store_failure_and_replay_divergence"
+
+[[mutant]]
+name = "trim-fold-failure-checks-last-close-mid-run"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''        let since = rhythm.since;'''
+new = '''        let since = rhythm.last_close.unwrap_or(rhythm.admission);'''
+test = "-p ng-validate --test history_trim a_passing_settled_rhythm_run_does_not_latch_the_flight_recorder_and_trims_all_links"
+
+[[mutant]]
+name = "trim-flight-recorder-rhythm-anchors-tail-at-first"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''    if retained.from_revision() > 0
+        && let Some(edge) = &mut windows.rhythm
+    {
+        edge.anchor_open_tail_at_last_edge();
+    }'''
+new = '''    if retained.from_revision() > 0
+        && let Some(edge) = &mut windows.rhythm
+        && edge.last_close.is_none()
+    {
+        edge.admission = first;
+    }'''
+test = "-p ng-validate --test history_trim a_flight_recorder_suffix_uses_its_last_edge_for_open_tails_and_never_falsely_stops_healthy_breathing"
