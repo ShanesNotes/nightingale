@@ -3894,8 +3894,8 @@ test = "-p ng-validate --test body each_beds_glycolysis_and_lactate_burn_carry_t
 [[mutant]]
 name = "water-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''(Species::Water, 2e-1, 8e-3, 4e-3),'''
-new = '''(Species::Water, 4e-1, 8e-3, 4e-3),'''
+old = '''(Species::Water, 2e-1, 7e-3, 4e-3),'''
+new = '''(Species::Water, 4e-1, 7e-3, 4e-3),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -5100,8 +5100,8 @@ test = "-p ng-validate --test body the_whole_body_holds_its_rows_columns_and_dig
 [[mutant]]
 name = "body-edge-rate-apart-from-rule"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''    (Species::Energy, 2e6, 2e5, 1e5),'''
-new = '''    (Species::Energy, 2e6, 4e5, 1e5),'''
+old = '''    (Species::Energy, 3e6, 2e5, 8e4),'''
+new = '''    (Species::Energy, 3e6, 4e5, 8e4),'''
 test = "-p ng-validate --test body_run each_figure_of_rule_is_the_bodys_policy_bit_for_bit"
 
 [[mutant]]
