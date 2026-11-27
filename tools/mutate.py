@@ -39,9 +39,9 @@ flushes verdicts in exact table order, and removes target/mutate/lanes/ on exit.
 
 Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. --since keeps the
 rows whose path, crate Cargo.toml, or test target's source or test file changed after REV (--test <bin> matches its own
-file and shared helper subdirs under tests/, --lib matches its module or lib.rs and fails closed to src/, --doc matches
-src/). Each command runs in its own process group, and that group dies with the command and with this script, however
-this script dies.
+file, imported local helpers and shared helper subdirs under tests/, --lib matches its module or lib.rs and fails closed
+to src/, --doc matches src/). Each command runs in its own process group, and that group dies with the command and with
+this script, however this script dies.
 
 tools/verify's 40-mutants step runs this script through `gate.py mutants`. Before 10-rust it replays the rows a change
 adds or edits, or whose path it changes, and after 10-rust the rest. It passes --stop-on-fail and stops each sweep at
@@ -196,6 +196,13 @@ def parse_test_command(test):
     return crates, targets, filters, broad
 
 
+_MOD_DECL = re.compile(r"\bmod\s+(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*;")
+_PATH_ATTR = re.compile(r"#\[\s*path\s*=")
+_PATH_STR = re.compile(r'#\[\s*path\s*=\s*"([^"]+)"\s*\]')
+_INCLUDE_CALL = re.compile(r"\binclude(?:_str|_bytes)?!\s*\(")
+_INCLUDE_STR = re.compile(r'\binclude(?:_str|_bytes)?!\s*\(\s*"([^"]+)"\s*\)')
+
+
 def _lib_module(crate, filters, root):
     if len(filters) != 1 or "::" not in filters[0]:
         return None
@@ -206,6 +213,71 @@ def _lib_module(crate, filters, root):
     if (src / f"{mod0}.rs").is_file() or (src / mod0).is_dir():
         return mod0
     return None
+
+
+def _test_bin_paths(crate, bin_name, root):
+    root_path = pathlib.Path(root).resolve()
+    tests_dir = root_path / "crates" / crate / "tests"
+    entry = tests_dir / f"{bin_name}.rs"
+    if not entry.is_file():
+        entry = tests_dir / bin_name / "main.rs"
+        if not entry.is_file():
+            return None
+    paths = set()
+    seen = set()
+    queue = collections.deque([entry])
+    while queue:
+        current = queue.popleft()
+        resolved = current.resolve()
+        try:
+            rel = resolved.relative_to(root_path).as_posix()
+        except ValueError:
+            return None
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        paths.add(rel)
+        if not resolved.is_file():
+            continue
+        text = resolved.read_text(encoding="utf-8", errors="replace")
+        path_attrs = _PATH_ATTR.findall(text)
+        path_strs = _PATH_STR.findall(text)
+        if len(path_attrs) != len(path_strs):
+            return None
+        include_calls = _INCLUDE_CALL.findall(text)
+        include_strs = _INCLUDE_STR.findall(text)
+        if len(include_calls) != len(include_strs):
+            return None
+        for rel_target in (*path_strs, *include_strs):
+            bases = [resolved.parent]
+            if resolved.stem not in ("mod", "main"):
+                bases.append(resolved.parent / resolved.stem)
+            matched_any = False
+            for base in bases:
+                cand = (base / rel_target).resolve()
+                try:
+                    cand_rel = cand.relative_to(root_path).as_posix()
+                except ValueError:
+                    return None
+                if base == resolved.parent or cand.is_file():
+                    paths.add(cand_rel)
+                    matched_any = True
+                    if cand.suffix == ".rs" and cand.is_file() and cand not in seen:
+                        queue.append(cand)
+            if not matched_any:
+                return None
+        for ident in _MOD_DECL.findall(text):
+            sibling = (resolved.parent / f"{ident}.rs").resolve()
+            try:
+                paths.add(sibling.relative_to(root_path).as_posix())
+            except ValueError:
+                return None
+            if sibling.is_file() and sibling not in seen:
+                queue.append(sibling)
+            nested_mod = (resolved.parent / ident / "mod.rs").resolve()
+            if nested_mod.is_file() and nested_mod not in seen:
+                queue.append(nested_mod)
+    return paths
 
 
 def touched(row, changed, root=ROOT):
@@ -227,8 +299,13 @@ def touched(row, changed, root=ROOT):
                 tests_prefix = f"{prefix}tests/"
                 exact = f"{tests_prefix}{name}.rs"
                 nested = f"{tests_prefix}{name}/"
+                bin_paths = _test_bin_paths(crate, name, root)
+                if bin_paths is None:
+                    if any(path.startswith(tests_prefix) for path in changed):
+                        return True
+                    continue
                 for path in changed:
-                    if path == exact or path.startswith(nested):
+                    if path == exact or path in bin_paths or path.startswith(nested):
                         return True
                     if path.startswith(tests_prefix) and "/" in path[len(tests_prefix) :]:
                         return True
@@ -395,14 +472,16 @@ def built_batches(tests):
             continue
         crates, targets = sel
         key = (release, tuple(crates))
-        groups.setdefault(key, set()).update(targets)
+        entry = groups.setdefault(key, [set(), []])
+        entry[0].update(targets)
+        entry[1].append(test)
     batches = []
-    for (release, crates), targets in groups.items():
+    for (release, crates), (targets, batch_tests) in groups.items():
         parts = ["--release"] if release else []
         parts.extend(f"-p {crate}" for crate in crates)
         if "all" not in targets:
             parts.extend(f"--{t}" for t in sorted(targets))
-        batches.append(" ".join(parts))
+        batches.append((" ".join(parts), batch_tests))
     return batches
 
 
@@ -455,9 +534,21 @@ def clone_lane(lane_idx, seed_tree, seed_target):
     return lane_tree, lane_target
 
 
-def lane_env(base_env, target_dir, build_jobs, force_build_jobs=False):
+def effective_build_jobs(base_env, lanes_n, build_jobs_arg):
+    if build_jobs_arg is not None:
+        return build_jobs_arg
+    cap = max(1, (os.cpu_count() or 1) // lanes_n)
+    raw = base_env.get("CARGO_BUILD_JOBS", "").strip()
+    try:
+        inherited = int(raw)
+    except ValueError:
+        return cap
+    return min(inherited, cap) if inherited >= 1 else cap
+
+
+def lane_env(base_env, target_dir, build_jobs):
     out = dict(base_env, CARGO_TARGET_DIR=str(target_dir), CARGO_BUILD_BUILD_DIR=str(target_dir))
-    if build_jobs is not None and (force_build_jobs or "CARGO_BUILD_JOBS" not in base_env):
+    if build_jobs is not None:
         out["CARGO_BUILD_JOBS"] = str(build_jobs)
     return out
 
@@ -508,7 +599,7 @@ def main():
         code, found = run_tethered(["git", "rev-parse", "--verify", "--quiet", f"{args.since}^{{commit}}"], cwd=ROOT)
         if code != 0:
             refuse(f"{args.since} is no commit here")
-        code, found = run_tethered(["git", "diff", "--name-only", "-z", found.decode().strip(), sha], cwd=ROOT)
+        code, found = run_tethered(["git", "diff", "--name-only", "--no-renames", "-z", found.decode().strip(), sha], cwd=ROOT)
         if code != 0:
             refuse(f"git diff failed:\n{found.decode(errors='replace')}")
         changed = set(found.decode().split("\0")) - {""}
@@ -537,6 +628,10 @@ def main():
             applied.append(row)
         else:
             report("NOT APPLIED", row["name"], 0, f"{count} matches in {row['path']}")
+            if args.stop_on_fail and not args.check:
+                counts = ", ".join(f"{count} {verdict}" for verdict, count in tally.items())
+                print(f"summary: {counts}, of {len(rows)} rows at {sha}")
+                sys.exit(1)
     if args.check:
         print(f"{len(applied)} of {len(rows)} rows apply")
         sys.exit(0 if len(applied) == len(rows) else 1)
@@ -596,7 +691,9 @@ def main():
     skipped = [test for test in all_tests if covered(test, calls)]
     unskipped = [test for test in all_tests if not covered(test, calls)]
     lanes_n = choose_lanes(args.jobs, len(applied), WORK)
-    build_limit = max(held, max(test_budget.values(), default=args.budget) * BASELINE_TIMES)
+
+    def batch_limit(batch_tests):
+        return max(args.budget, *(test_budget.get(test, args.budget) for test in batch_tests)) * BASELINE_TIMES
 
     def mutated_in(row, tree, run_env, track=None):
         with io_lock:
@@ -619,11 +716,12 @@ def main():
                 refuse(err)
         if skipped:
             print(f"baselines skipped: {len(skipped)}, whose tests 10-rust passed on this commit", flush=True)
-        for build in built_batches(skipped):
+        for build, batch_tests in built_batches(skipped):
+            limit = batch_limit(batch_tests)
             began = time.monotonic()
-            code, output = cargo_test(f"--no-run {build}", env, build_limit)
+            code, output = cargo_test(f"--no-run {build}", env, limit)
             if code != 0:
-                gave = output[-2000:] or f"nothing in {build_limit} s"
+                gave = output[-2000:] or f"nothing in {limit} s"
                 refuse(f"`cargo test --no-run {build}` must build on the unmutated tree, and it gave:\n{gave}\n")
             print(f"build     {time.monotonic() - began:.0f} s  cargo test --no-run {build}", flush=True)
         for row in applied:
@@ -642,49 +740,55 @@ def main():
             if args.stop_on_fail and verdict not in ("CAUGHT", "CAUGHT at build"):
                 break
     else:
-        build_jobs = args.build_jobs if args.build_jobs is not None else max(1, (os.cpu_count() or 1) // lanes_n)
+        build_jobs = effective_build_jobs(env, lanes_n, args.build_jobs)
         if skipped:
             print(f"baselines skipped: {len(skipped)}, whose tests 10-rust passed on this commit", flush=True)
-        for build in built_batches(all_tests):
+        for build, batch_tests in built_batches(all_tests):
+            limit = batch_limit(batch_tests)
             began = time.monotonic()
-            code, output = cargo_test(f"--no-run {build}", env, build_limit)
+            code, output = cargo_test(f"--no-run {build}", env, limit)
             if code != 0:
-                gave = output[-2000:] or f"nothing in {build_limit} s"
+                gave = output[-2000:] or f"nothing in {limit} s"
                 refuse(f"`cargo test --no-run {build}` must build on the unmutated tree, and it gave:\n{gave}\n")
             print(f"build     {time.monotonic() - began:.0f} s  cargo test --no-run {build}", flush=True)
         print(f"lanes: {lanes_n}, cargo build jobs per lane: {build_jobs}", flush=True)
         try:
-            force_bj = args.build_jobs is not None
-            lane_specs = [(TREE, lane_env(env, seed_target, build_jobs, force_bj))]
+            lane_specs = [(TREE, lane_env(env, seed_target, build_jobs))]
             for i in range(1, lanes_n):
                 ltree, ltarget = clone_lane(i, TREE, seed_target)
-                lane_specs.append((ltree, lane_env(env, ltarget, build_jobs, force_bj)))
+                lane_specs.append((ltree, lane_env(env, ltarget, build_jobs)))
 
             state_lock = threading.Lock()
             abort_error = None
             stop_at = None
+            refuse_at = None
             active_pgs = {}
 
+            def limit_rank():
+                ranks = [r for r in (stop_at if args.stop_on_fail else None, refuse_at) if r is not None]
+                return min(ranks) if ranks else None
+
             def cancel_pgs(above=None):
-                for pgid, rank in list(active_pgs.items()):
+                for pgid, box in list(active_pgs.items()):
+                    rank = None if box is None else box[0]
                     if above is None or (rank is not None and rank > above):
                         try:
                             os.killpg(pgid, signal.SIGKILL)
                         except ProcessLookupError:
                             pass
 
-            def track_for(rank):
+            def track_for_box(box):
                 def start(pgid):
                     with state_lock:
-                        if abort_error is not None or (
-                            args.stop_on_fail and stop_at is not None and rank is not None and rank > stop_at
-                        ):
+                        bound = limit_rank()
+                        rank = None if box is None else box[0]
+                        if abort_error is not None or (bound is not None and rank is not None and rank > bound):
                             try:
                                 os.killpg(pgid, signal.SIGKILL)
                             except ProcessLookupError:
                                 pass
                         else:
-                            active_pgs[pgid] = rank
+                            active_pgs[pgid] = box
 
                 def end(pgid):
                     with state_lock:
@@ -692,24 +796,37 @@ def main():
 
                 return start, end
 
+            def track_for(rank):
+                return track_for_box(None if rank is None else [rank])
+
+            def record_exception(exc):
+                nonlocal abort_error
+                with state_lock:
+                    if abort_error is None:
+                        abort_error = f"worker failed with {type(exc).__name__}: {exc}"
+                        cancel_pgs(None)
+
             if unskipped:
                 base_cursor = 0
 
                 def baseline_worker(ltree, lenv):
                     nonlocal base_cursor, abort_error
-                    while True:
-                        with state_lock:
-                            if abort_error is not None or base_cursor >= len(unskipped):
-                                return
-                            test = unskipped[base_cursor]
-                            base_cursor += 1
-                        err = run_baseline(test, tree=ltree, run_env=lenv, track=track_for(None))
-                        if err is not None:
+                    try:
+                        while True:
                             with state_lock:
-                                if abort_error is None:
-                                    abort_error = err
-                                    cancel_pgs(None)
-                            return
+                                if abort_error is not None or base_cursor >= len(unskipped):
+                                    return
+                                test = unskipped[base_cursor]
+                                base_cursor += 1
+                            err = run_baseline(test, tree=ltree, run_env=lenv, track=track_for(None))
+                            if err is not None:
+                                with state_lock:
+                                    if abort_error is None:
+                                        abort_error = err
+                                        cancel_pgs(None)
+                                return
+                    except BaseException as exc:
+                        record_exception(exc)
 
                 bthreads = [threading.Thread(target=baseline_worker, args=(ltree, lenv)) for ltree, lenv in lane_specs]
                 for thread in bthreads:
@@ -722,73 +839,128 @@ def main():
             test_locks = collections.defaultdict(threading.Lock)
             initial_skipped = frozenset(skipped)
             skipped_set = set(skipped)
+            recovery_box = {}
+            recovery_errors = {}
             cursor = 0
             next_print = 0
             results = {}
 
-            def ensure_baseline(test, tree, run_env):
-                nonlocal abort_error
+            def flush_results():
+                nonlocal next_print, abort_error
+                while next_print in results:
+                    if abort_error is not None:
+                        break
+                    if args.stop_on_fail and stop_at is not None and next_print > stop_at:
+                        break
+                    entry = results.pop(next_print)
+                    if entry[0] == "REFUSE":
+                        abort_error = entry[1]
+                        cancel_pgs(None)
+                        break
+                    v, n, s, d, lim = entry
+                    with io_lock:
+                        report(v, n, s, d, lim)
+                    next_print += 1
+
+            def ensure_baseline(test, tree, run_env, idx):
+                with state_lock:
+                    bound = limit_rank()
+                    if abort_error is not None or (bound is not None and idx > bound):
+                        return None, True
+                    if test in recovery_errors:
+                        return recovery_errors[test], False
+                    if test not in skipped_set:
+                        return None, False
+                    box = recovery_box.setdefault(test, [idx])
+                    box[0] = min(box[0], idx)
                 with test_locks[test]:
                     with state_lock:
-                        if abort_error is not None:
-                            return False
-                        still_skipped = test in skipped_set
-                    if not still_skipped:
-                        return True
-                    err = run_baseline(test, tree=tree, run_env=run_env, track=track_for(None))
+                        bound = limit_rank()
+                        if abort_error is not None or (bound is not None and idx > bound):
+                            return None, True
+                        if test in recovery_errors:
+                            return recovery_errors[test], False
+                        if test not in skipped_set:
+                            return None, False
+                        box = recovery_box.setdefault(test, [idx])
+                        box[0] = min(box[0], idx)
+                    err = run_baseline(test, tree=tree, run_env=run_env, track=track_for_box(box))
                     with state_lock:
+                        bound = limit_rank()
+                        if abort_error is not None or (bound is not None and box[0] > bound):
+                            return None, True
                         if err is not None:
-                            if abort_error is None:
-                                abort_error = err
-                                cancel_pgs(None)
-                            return False
+                            recovery_errors[test] = err
+                            skipped_set.discard(test)
+                            return err, False
                         skipped_set.discard(test)
-                    return True
+                    return None, False
+
+            def record_refusal(idx, err):
+                nonlocal refuse_at
+                with state_lock:
+                    bound = limit_rank()
+                    if abort_error is not None or (bound is not None and idx > bound):
+                        return
+                    results[idx] = ("REFUSE", err)
+                    refuse_at = idx if refuse_at is None else min(refuse_at, idx)
+                    cancel_pgs(limit_rank())
+                    flush_results()
 
             def worker(ltree, lenv):
-                nonlocal cursor, next_print, stop_at
-                while True:
-                    with state_lock:
-                        if abort_error is not None or cursor >= len(applied):
-                            return
-                        if args.stop_on_fail and stop_at is not None and cursor >= stop_at:
-                            return
-                        idx = cursor
-                        cursor += 1
-                    row = applied[idx]
-                    track = track_for(idx)
-                    code, verdict, detail, seconds, limit, had_base = mutated_in(row, ltree, lenv, track=track)
-                    with state_lock:
-                        if abort_error is not None or (args.stop_on_fail and stop_at is not None and idx > stop_at):
-                            return
-                    if verdict == "CAUGHT at build":
+                nonlocal cursor, stop_at
+                try:
+                    while True:
                         with state_lock:
-                            need = row["test"] in skipped_set
-                        if need and not ensure_baseline(row["test"], ltree, lenv):
-                            return
-                    if code is None and not had_base and row["test"] in initial_skipped:
-                        with io_lock:
-                            print(f"over      {limit:.0f} s  {row['name']} runs again after its skipped baseline", flush=True)
-                        if not ensure_baseline(row["test"], ltree, lenv):
-                            return
-                        code, verdict, detail, seconds, limit, _ = mutated_in(row, ltree, lenv, track=track)
-                        with state_lock:
-                            if abort_error is not None or (args.stop_on_fail and stop_at is not None and idx > stop_at):
+                            bound = limit_rank()
+                            if abort_error is not None or cursor >= len(applied):
                                 return
-                    with state_lock:
-                        if abort_error is not None or (args.stop_on_fail and stop_at is not None and idx > stop_at):
-                            return
-                        results[idx] = (verdict, row["name"], seconds, detail, limit)
-                        if args.stop_on_fail and verdict not in ("CAUGHT", "CAUGHT at build"):
-                            stop_at = idx if stop_at is None else min(stop_at, idx)
-                            cancel_pgs(stop_at)
-                        while next_print in results:
-                            if args.stop_on_fail and stop_at is not None and next_print > stop_at:
-                                break
-                            v, n, s, d, lim = results.pop(next_print)
+                            if bound is not None and cursor >= bound:
+                                return
+                            idx = cursor
+                            cursor += 1
+                        row = applied[idx]
+                        track = track_for(idx)
+                        code, verdict, detail, seconds, limit, had_base = mutated_in(row, ltree, lenv, track=track)
+                        with state_lock:
+                            bound = limit_rank()
+                            if abort_error is not None or (bound is not None and idx > bound):
+                                return
+                        if verdict == "CAUGHT at build":
+                            with state_lock:
+                                need = row["test"] in skipped_set or row["test"] in recovery_errors
+                            if need:
+                                err, stopped = ensure_baseline(row["test"], ltree, lenv, idx)
+                                if stopped:
+                                    return
+                                if err is not None:
+                                    record_refusal(idx, err)
+                                    return
+                        if code is None and not had_base and row["test"] in initial_skipped:
                             with io_lock:
-                                report(v, n, s, d, lim)
-                            next_print += 1
+                                print(f"over      {limit:.0f} s  {row['name']} runs again after its skipped baseline", flush=True)
+                            err, stopped = ensure_baseline(row["test"], ltree, lenv, idx)
+                            if stopped:
+                                return
+                            if err is not None:
+                                record_refusal(idx, err)
+                                return
+                            code, verdict, detail, seconds, limit, _ = mutated_in(row, ltree, lenv, track=track)
+                            with state_lock:
+                                bound = limit_rank()
+                                if abort_error is not None or (bound is not None and idx > bound):
+                                    return
+                        with state_lock:
+                            bound = limit_rank()
+                            if abort_error is not None or (bound is not None and idx > bound):
+                                return
+                            results[idx] = (verdict, row["name"], seconds, detail, limit)
+                            if args.stop_on_fail and verdict not in ("CAUGHT", "CAUGHT at build"):
+                                stop_at = idx if stop_at is None else min(stop_at, idx)
+                                cancel_pgs(limit_rank())
+                            flush_results()
+                except BaseException as exc:
+                    record_exception(exc)
 
             threads = [threading.Thread(target=worker, args=(ltree, lenv)) for ltree, lenv in lane_specs]
             for thread in threads:
@@ -803,7 +975,7 @@ def main():
 
     counts = ", ".join(f"{count} {verdict}" for verdict, count in tally.items())
     print(f"summary: {counts}, of {len(rows)} rows at {sha}")
-    sys.exit(0 if set(tally) <= {"CAUGHT", "CAUGHT at build"} else 1)
+    sys.exit(0 if sum(tally.values()) == len(rows) and set(tally) <= {"CAUGHT", "CAUGHT at build"} else 1)
 
 
 if __name__ == "__main__":

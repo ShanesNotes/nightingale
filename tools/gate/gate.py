@@ -2995,7 +2995,13 @@ def sweep(argv: list[str], names: Sequence[str], later: int) -> int:
     with subprocess.Popen(argv, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as child:
         stop, left = first_stop(echoed(child.stdout), names, later)
         if stop is not None:
-            child.kill()
+            if "--stop-on-fail" in argv:
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+            else:
+                child.kill()
     if stop is not None:
         print(f"40-mutants: the sweep stops at {stop[0]}, {stop[1]}. Rows not run: {left}", flush=True)
         return 1
@@ -3015,7 +3021,7 @@ def mutants(part: str | None) -> int:
     changed: set[str] = set()
     base_rows: list[dict] = []
     if mode != "changed" and base is not None:
-        changed, base_rows = set(_git_z(ROOT, "diff", "--name-only", "-z", base, "HEAD")), rows_at(base)
+        changed, base_rows = set(_git_z(ROOT, "diff", "--name-only", "--no-renames", "-z", base, "HEAD")), rows_at(base)
     parts = sweep_parts(mode, scope, base, rows, base_rows, changed)
     if part != "rest" and sweep([*command, "--check"], (*parts.first, *parts.rest), 0):
         return 1
@@ -3934,18 +3940,29 @@ def touched_cases() -> list[Violation]:
     mutate = mutate_py()
     with tempfile.TemporaryDirectory(prefix="gate-touched-") as tmp:
         root = pathlib.Path(tmp)
-        for rel in (
-            "crates/ng-v/src/lib.rs",
-            "crates/ng-v/src/day/tests.rs",
-            "crates/ng-v/src/window.rs",
-            "crates/ng-v/src/other.rs",
-            "crates/ng-c/src/lib.rs",
-            "crates/ng-c/src/evaluate/terms.rs",
-            "crates/ng-c/src/scope.rs",
-        ):
+        fixture_files = {
+            "crates/ng-v/src/lib.rs": "",
+            "crates/ng-v/src/day/tests.rs": "",
+            "crates/ng-v/src/window.rs": "",
+            "crates/ng-v/src/other.rs": "",
+            "crates/ng-v/tests/body_run.rs": "#[test] fn a_test() {}\n",
+            "crates/ng-v/tests/arena.rs": "#[test] fn a_test() {}\n",
+            "crates/ng-v/tests/closure_rounding.rs": "#[test] fn a_test() {}\n",
+            "crates/ng-v/tests/arena_body.rs": "#[test] fn a_test() {}\n",
+            "crates/ng-v/tests/rhythm_certificate.rs": "mod certificate_oracle;\n#[test] fn a_test() {}\n",
+            "crates/ng-v/tests/alpha.rs": "mod common;\n#[test] fn a_test() {}\n",
+            "crates/ng-v/tests/common.rs": "pub fn helper() {}\n",
+            "crates/ng-v/tests/beta.rs": "#[test] fn a_test() {}\n",
+            "crates/ng-v/tests/path_user.rs": '#[path = "shared.rs"]\nmod shared;\n#[test] fn a_test() {}\n',
+            "crates/ng-v/tests/shared.rs": "pub fn helper() {}\n",
+            "crates/ng-c/src/lib.rs": "",
+            "crates/ng-c/src/evaluate/terms.rs": "",
+            "crates/ng-c/src/scope.rs": "",
+        }
+        for rel, body in fixture_files.items():
             p = root / rel
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text("", encoding="utf-8")
+            p.write_text(body, encoding="utf-8")
         cases = (
             (
                 "lib test in separate src/mod/tests.rs",
@@ -3988,6 +4005,30 @@ def touched_cases() -> list[Violation]:
                 {"path": "crates/ng-v/src/arena.rs", "test": "-p ng-v --test arena a_test"},
                 {"crates/ng-v/tests/body_run.rs"},
                 False,
+            ),
+            (
+                "test binary hit by top-level helper via mod common",
+                {"path": "crates/ng-v/src/other.rs", "test": "-p ng-v --test alpha a_test"},
+                {"crates/ng-v/tests/common.rs"},
+                True,
+            ),
+            (
+                "test binary untouched by unimported top-level helper",
+                {"path": "crates/ng-v/src/other.rs", "test": "-p ng-v --test beta a_test"},
+                {"crates/ng-v/tests/common.rs"},
+                False,
+            ),
+            (
+                "test binary hit by top-level helper via #[path]",
+                {"path": "crates/ng-v/src/other.rs", "test": "-p ng-v --test path_user a_test"},
+                {"crates/ng-v/tests/shared.rs"},
+                True,
+            ),
+            (
+                "missing or renamed test binary fails closed to tests/",
+                {"path": "crates/ng-v/src/other.rs", "test": "-p ng-v --test renamed_away a_test"},
+                {"crates/ng-v/tests/beta.rs"},
+                True,
             ),
             (
                 "lib test untouched by integration test file",
@@ -4060,6 +4101,24 @@ def touched_cases() -> list[Violation]:
             got = mutate.touched(row, changed, root=root)
             if got != want:
                 out.append(Violation("sweep", f"touched: {what}", f"returned {got}; want {want}"))
+    with _scratch_git(), tempfile.TemporaryDirectory(prefix="gate-rename-") as tmp:
+        repo = _fixture(pathlib.Path(tmp))
+        _git_z(repo, "mv", "crates/ng-a/tests/alpha.rs", "crates/ng-a/tests/alpha_renamed.rs")
+        _git_z(repo, "-c", "core.hooksPath=/dev/null", *COMMIT, "rename alpha")
+        ran = subprocess.run(
+            [sys.executable, "-I", MUTATE, "mutants.toml", "--since", "HEAD~1", "--check"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        if ran.returncode != 0 or "1 of 1 rows apply" not in ran.stdout:
+            out.append(
+                Violation(
+                    "sweep",
+                    "touched: renamed test file",
+                    f"exit {ran.returncode}, stdout={ran.stdout!r}; --since must select renamed test target",
+                )
+            )
     return out
 
 
@@ -4181,6 +4240,8 @@ def parallel_case() -> list[Violation]:
             code = sweep(cmd, ("r0", "r1", "r2", "r3"), 0)
         if code != 1 or "40-mutants: the sweep stops at r1, SURVIVED. Rows not run: 2" not in log.getvalue().splitlines():
             out.append(Violation("sweep", "parallel first-stop", f"exit {code}, log tail {log.getvalue().splitlines()[-3:]}"))
+        if (root / "target/mutate/lanes").exists():
+            out.append(Violation("sweep", "parallel stop cleanup", "target/mutate/lanes remained after gate sweep stopped"))
         if pids_file.exists():
             time.sleep(0.1)
             for raw_pid in _read(pids_file).splitlines():
@@ -4232,6 +4293,42 @@ def parallel_case() -> list[Violation]:
                         os.kill(int(raw_pid), 0)
                         out.append(Violation("sweep", "parallel cancel orphan", f"stub pid {raw_pid} stayed alive after cancel"))
 
+        mutate = mutate_py()
+        cap2 = max(1, (os.cpu_count() or 1) // 2)
+        if mutate.effective_build_jobs({"CARGO_BUILD_JOBS": "999"}, 2, None) != cap2:
+            out.append(Violation("sweep", "inherited build jobs cap", "did not cap oversized CARGO_BUILD_JOBS"))
+        if mutate.effective_build_jobs({"CARGO_BUILD_JOBS": "1"}, 2, None) != 1:
+            out.append(Violation("sweep", "inherited build jobs floor", "did not keep stricter CARGO_BUILD_JOBS=1"))
+
+        not_applied_calls = pathlib.Path(tmp) / "na.calls"
+        (stub / "cargo").write_text(
+            f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n"
+            f"echo \"$*\" >>'{not_applied_calls}'\nexit 0\n",
+            encoding="utf-8",
+        )
+        (stub / "cargo").chmod(0o755)
+        na_toml = pathlib.Path(tmp) / "na.toml"
+        na_toml.write_text(
+            '[[mutant]]\nname = "na0"\npath = "crates/ng-a/src/one.rs"\nold = "missing"\nnew = "b"\ntest = "-p ng-a --test alpha"\n'
+            '[[mutant]]\nname = "na1"\npath = "crates/ng-a/src/one.rs"\nold = "a"\nnew = "b"\ntest = "-p ng-a --test alpha"\n',
+            encoding="utf-8",
+        )
+        na_run = subprocess.run(
+            [sys.executable, "-I", MUTATE, str(na_toml), "--jobs", "2", "--stop-on-fail"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if na_run.returncode != 1 or verdicts_of(na_run.stdout) != [("NOT APPLIED", "na0")] or not_applied_calls.exists():
+            out.append(
+                Violation(
+                    "sweep",
+                    "stop-on-fail NOT APPLIED",
+                    f"exit {na_run.returncode}, verdicts={verdicts_of(na_run.stdout)}, ran_cargo={not_applied_calls.exists()}",
+                )
+            )
+
         base_hits = pathlib.Path(tmp) / "base.hits"
         build_script = (
             f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n"
@@ -4254,6 +4351,80 @@ def parallel_case() -> list[Violation]:
         hits = len(_read(base_hits).splitlines()) if base_hits.exists() else 0
         if dedup.returncode != 0 or hits != 2:
             out.append(Violation("sweep", "parallel skipped baseline dedup", f"exit {dedup.returncode}, base_hits={hits} (want 2: one per test)"))
+
+        rank_script = (
+            f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n"
+            f"case \"$*\" in *--no-run*) exit 0 ;; esac\n"
+            "v=$(cat crates/ng-a/src/one.rs)\n"
+            "case \"$v\" in\n"
+            "  a) echo 'running 0 tests'; exit 0 ;;\n"
+            "  b) sleep 0.3; echo 'test alpha::t ... ok'; exit 0 ;;\n"
+            "  c) echo 'error[E0308]: mismatched types'; exit 101 ;;\n"
+            "  *) echo 'test t ... FAILED'; exit 101 ;;\n"
+            "esac\n"
+        )
+        (stub / "cargo").write_text(rank_script, encoding="utf-8")
+        (stub / "cargo").chmod(0o755)
+        rank_surv = subprocess.run(
+            [sys.executable, "-I", MUTATE, "parallel.toml", "--jobs", "2", "--stop-on-fail", "--tested", str(root / TESTED)],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if rank_surv.returncode != 1 or verdicts_of(rank_surv.stdout) != [("SURVIVED", "r0")] or "must pass some test" in rank_surv.stderr:
+            out.append(
+                Violation(
+                    "sweep",
+                    "recovery baseline rank order",
+                    f"exit {rank_surv.returncode}, verdicts={verdicts_of(rank_surv.stdout)}, stderr={rank_surv.stderr!r}",
+                )
+            )
+        (stub / "cargo").write_text(rank_script.replace("ok'; exit 0", "FAILED'; exit 101"), encoding="utf-8")
+        (stub / "cargo").chmod(0o755)
+        rank_caught = subprocess.run(
+            [sys.executable, "-I", MUTATE, "parallel.toml", "--jobs", "2", "--stop-on-fail", "--tested", str(root / TESTED)],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if rank_caught.returncode != 1 or verdicts_of(rank_caught.stdout) != [("CAUGHT", "r0")] or "must pass some test" not in rank_caught.stderr:
+            out.append(
+                Violation(
+                    "sweep",
+                    "recovery baseline refusal after earlier CAUGHT",
+                    f"exit {rank_caught.returncode}, verdicts={verdicts_of(rank_caught.stdout)}, stderr={rank_caught.stderr!r}",
+                )
+            )
+
+        exc_script = (
+            f"#!/bin/sh\nif [ \"$1\" = metadata ]; then exec '{real_cargo}' \"$@\"; fi\n"
+            f"case \"$*\" in *--no-run*) exit 0 ;; esac\n"
+            "v=$(cat crates/ng-a/src/one.rs)\n"
+            "case \"$v\" in\n"
+            "  a) echo 'test t ... ok'; exit 0 ;;\n"
+            "  b) chmod 0444 crates/ng-a/src/one.rs; echo 'test alpha::t ... FAILED'; exit 101 ;;\n"
+            "  *) echo 'test t ... FAILED'; exit 101 ;;\n"
+            "esac\n"
+        )
+        (stub / "cargo").write_text(exc_script, encoding="utf-8")
+        (stub / "cargo").chmod(0o755)
+        exc_run = subprocess.run(
+            [sys.executable, "-I", MUTATE, "parallel.toml", "--jobs", "2"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if exc_run.returncode == 0 or "PermissionError" not in exc_run.stderr:
+            out.append(
+                Violation(
+                    "sweep",
+                    "parallel worker exception propagation",
+                    f"exit {exc_run.returncode}, stderr={exc_run.stderr!r}; worker exception must fail sweep",
+                )
+            )
     return out
 
 
