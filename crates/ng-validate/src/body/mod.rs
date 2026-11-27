@@ -116,7 +116,7 @@ fn leak<'b, Q: Substance>(
 
 /// The composition root of the whole body: the slice's systems, and every other card held.
 pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
-    assembled(body_schema()?, false)
+    assembled(body_schema()?, false, false)
 }
 
 /// The whole body with four steady leaks for its certificate's tests, each into the body at the signed rate its
@@ -126,12 +126,12 @@ pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
 pub fn whole_body_leaking() -> Result<CompiledBody, AdmissionError> {
     let mut schema = body_schema()?;
     schema::leaks(&mut schema)?;
-    assembled(schema, true)
+    assembled(schema, true, false)
 }
 
-fn assembled(schema: Schema, leaking: bool) -> Result<CompiledBody, AdmissionError> {
+fn assembled(schema: Schema, leaking: bool, heat: bool) -> Result<CompiledBody, AdmissionError> {
     assemble(schema, |mut body| {
-        holds::hold_every_card(&mut body)?;
+        holds::hold_every_card(&mut body, heat)?;
         exits(&mut body, leaking)?;
         let fragment = ng_cardiovascular::declare_in_the_whole_body(body.cardiovascular()?)?;
         body.add(fragment);
@@ -151,22 +151,12 @@ fn assembled(schema: Schema, leaking: bool) -> Result<CompiledBody, AdmissionErr
 mod placement {
     use super::*;
 
-    /// Ticket 12's placement: with the contract unchanged, the whole body compiles with conduction from the core
-    /// to the skin and airway stores, and the skin's losses out of the skin store and the skin bed.
-    #[test]
-    fn each_heat_law_moves_the_stores_ticket_12_places_it_on() -> Result<(), AdmissionError> {
-        let body = whole_body()?;
-        let laws = [
-            "conduction",
-            "dry heat loss",
-            "skin evaporation",
-            "skin evaporative heat",
-        ];
-        type Moved = (&'static str, Species, Space, i64);
+    type Moved = (&'static str, Species, Space, i64);
+
+    /// Each column of `card`'s laws named in `laws`, with the pools it moves, sorted.
+    fn placed(body: &CompiledBody, card: &str, laws: &[&str]) -> Vec<(&'static str, Vec<Moved>)> {
         let mut placed: Vec<(&str, Vec<Moved>)> = (body.columns().iter())
-            .filter(|column| {
-                column.origin().owner == Metabolism::CARD && laws.contains(&column.origin().local)
-            })
+            .filter(|column| column.origin().owner == card && laws.contains(&column.origin().local))
             .map(|column| {
                 let terms = (column.terms().iter())
                     .filter_map(|&(row, sign)| match body.rows()[row.index()].kind() {
@@ -178,9 +168,45 @@ mod placement {
             })
             .collect();
         placed.sort();
+        placed
+    }
+
+    /// Ticket 12's placement for 12e: with the contract unchanged and the respiratory card's hold on airway heat
+    /// released, the whole body compiles with the airway's heat leaving the airway store from a law that reads the
+    /// expired water's pools and the room's inputs, and the card keeps a declaration that holds nothing, for the
+    /// pleural fluid.
+    #[test]
+    fn the_airway_heat_leaves_the_airway_store_beside_the_water_it_follows() -> Result<(), AdmissionError> {
+        let body = assembled(body_schema()?, false, true)?;
+        let thermal = ("conducting airway", Species::Energy, Space::Thermal, -1);
+        let gas = ("conducting airway", Species::Water, Space::Gas, -1);
+        assert_eq!(
+            placed(&body, Respiratory::CARD, &["airway heat", "expired water"]),
+            [("airway heat", vec![thermal]), ("expired water", vec![gas])]
+        );
+        let declarations = body.conserved_basis().coverage().declarations();
+        let respiratory = (declarations.iter())
+            .find(|card| card.card() == Respiratory::CARD)
+            .expect("the respiratory card's declaration for the pleural fluid");
+        assert!(respiratory.routes().is_empty() && respiratory.species().is_empty());
+        assert!(respiratory.spaces().is_empty());
+        Ok(())
+    }
+
+    /// Ticket 12's placement: with the contract unchanged, the whole body compiles with conduction from the core
+    /// to the skin and airway stores, and the skin's losses out of the skin store and the skin bed.
+    #[test]
+    fn each_heat_law_moves_the_stores_ticket_12_places_it_on() -> Result<(), AdmissionError> {
+        let body = whole_body()?;
+        let laws = [
+            "conduction",
+            "dry heat loss",
+            "skin evaporation",
+            "skin evaporative heat",
+        ];
         let thermal = |site, sign| (site, Species::Energy, Space::Thermal, sign);
         assert_eq!(
-            placed,
+            placed(&body, Metabolism::CARD, &laws),
             [
                 (
                     "conduction",

@@ -7,9 +7,26 @@ type Amounts<'b, 'k> = (
     Expr<'b, 'k, Respiratory, CarbonDioxide>,
     Expr<'b, 'k, Respiratory, NitrogenGas>,
 );
+type Held<'b> = (
+    ReadPort<'b, Respiratory, Oxygen>,
+    ReadPort<'b, Respiratory, CarbonDioxide>,
+    ReadPort<'b, Respiratory, NitrogenGas>,
+    ReadPort<'b, Respiratory, Water>,
+);
+type PerWater<'b> = Bound<'b, Quotient<Volume, Water>>;
+type LatentHeat = Quotient<Rate<Energy>, Rate<Water>>;
 
 pub(crate) fn class() -> Result<RateClass, AdmissionError> {
     RateClass::new(RateBand::Beat, 1_000_000_000)
+}
+
+fn water_volume<'b>(laws: &mut FragmentBuilder<'b, Respiratory>) -> PerWater<'b> {
+    laws.parameter(ParameterKey::new("rs.water-volume"), Admissible::positive())
+}
+
+/// The dead space's gases and water, which the expired water's route leaves.
+fn held_by<'b>(out: &Pair<'b, Respiratory, Water>) -> Held<'b> {
+    (out.amount(), out.amount(), out.amount(), out.amount())
 }
 
 pub(crate) struct Gas<'b, Q> {
@@ -21,6 +38,43 @@ impl<'b, Q: Substance> Gas<'b, Q> {
         Self {
             volume: laws.parameter(ParameterKey::new(key), Admissible::positive()),
         }
+    }
+}
+
+/// The room's saturated vapour pressure at its air temperature, `P_sat(T) = P_ref exp(a - b / (T + c))`, the Antoine
+/// form the skin's evaporation reads (research 12, the row 'Saturated vapour pressure'). This crate reaches no other
+/// card's code, so it carries the form with keys of its own.
+struct Room<'b> {
+    reference: Bound<'b, Pressure>,
+    a: Bound<'b, Dimensionless>,
+    b: Bound<'b, Temperature>,
+    c: Bound<'b, Temperature>,
+}
+
+impl<'b> Room<'b> {
+    fn declare(laws: &mut FragmentBuilder<'b, Respiratory>) -> Self {
+        let key = ParameterKey::new;
+        Self {
+            reference: laws.parameter(key("rs.vapour-reference"), Admissible::positive()),
+            a: laws.parameter(key("rs.vapour-a"), Admissible::finite()),
+            b: laws.parameter(key("rs.vapour-b"), Admissible::positive()),
+            c: laws.parameter(key("rs.vapour-c"), Admissible::finite()),
+        }
+    }
+
+    fn saturated<'k, C>(
+        &self,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+    ) -> Expr<'b, 'k, Respiratory, Pressure> {
+        let (a, b, c) = (k.parameter(&self.a), k.parameter(&self.b), k.parameter(&self.c));
+        let air = k.room_air();
+        let shifted = k.add(air, c);
+        let ratio = k.divide(b, shifted);
+        let ratio = k.as_dimension(ratio);
+        let exponent = k.subtract(a, ratio);
+        let factor = k.exp(exponent);
+        let reference = k.parameter(&self.reference);
+        k.scale(reference, factor)
     }
 }
 
@@ -364,7 +418,7 @@ impl<'b> Ventilation<'b> {
             let vapour = k.parameter(&self.vapour);
             let saturated = k.divide(vapour, dry);
             let saturated = k.as_dimension(saturated);
-            let given = self.room_water(&mut k, room);
+            let given = self.stated_room_water(&mut k, room);
             let gap = k.subtract(saturated, given);
             let ventilation = k.parameter(&ventilated);
             let flow = k.scale(ventilation, gap);
@@ -417,7 +471,7 @@ impl<'b> Ventilation<'b> {
             let head = self.dead_space_head(&mut k, airway);
             let [inward, outward] = self.parts(&mut k, head);
             let leaving = self.at_the_room(&mut k, outward, share, &per);
-            let room_share = self.room_water(&mut k, room);
+            let room_share = self.stated_room_water(&mut k, room);
             let entering = self.at_the_room(&mut k, inward, room_share, &per);
             let value = k.subtract(leaving, entering);
             k.finish(value, laws.every_mode(), class)
@@ -426,7 +480,52 @@ impl<'b> Ventilation<'b> {
         Ok(())
     }
 
-    fn room_water<'k, C>(
+    /// The water the breath carries out takes its latent heat with it, `Q = lambda W'`, with `W'` the net water the
+    /// expired water's law posts, what leaves less what the room gives back (research 11, Guyton p. 869). The heat
+    /// leaves the airway store, which conduction from the core feeds.
+    pub fn airway_heat(
+        &self,
+        laws: &mut FragmentBuilder<'b, Respiratory>,
+        ports: &RespiratoryPorts<'b>,
+    ) -> Result<(), AdmissionError> {
+        let class = class()?;
+        let (per, room) = (water_volume(laws), Room::declare(laws));
+        let latent =
+            laws.parameter::<LatentHeat>(ParameterKey::new("rs.latent-heat"), Admissible::positive());
+        let held = held_by(&ports.boundary::<Expired<Water>>()?.route);
+        let heat = ports.boundary::<AirwayHeat>()?.route;
+        let rate = laws.kernel(|mut k| {
+            let [leaving, entering] = self.exhaled(&mut k, &held, &per, &room);
+            let water = k.subtract(leaving, entering);
+            let latent = k.parameter(&latent);
+            let product = k.multiply(latent, water);
+            let value = k.as_dimension(product);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.transfer(Transfer::new(&heat, rate));
+        Ok(())
+    }
+
+    /// What the dead space's water carries to the room and what the room gives back.
+    fn exhaled<'k>(
+        &self,
+        k: &mut Kernel<'b, 'k, Respiratory>,
+        held: &Held<'b>,
+        per: &PerWater<'b>,
+        room: &Room<'b>,
+    ) -> [Expr<'b, 'k, Respiratory, Rate<Water>>; 2] {
+        let airway = (k.read(&held.0), k.read(&held.1), k.read(&held.2));
+        let water = k.read(&held.3);
+        let share = self.share_of(k, per, water, airway);
+        let head = self.dead_space_head(k, airway);
+        let [inward, outward] = self.parts(k, head);
+        let leaving = self.at_the_room(k, outward, share, per);
+        let room_share = self.room_water(k, room);
+        let entering = self.at_the_room(k, inward, room_share, per);
+        [leaving, entering]
+    }
+
+    fn stated_room_water<'k, C>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory, C>,
         (humidity, saturating): (&Bound<'b, Dimensionless>, &Bound<'b, Pressure>),
@@ -435,6 +534,20 @@ impl<'b> Ventilation<'b> {
         let vapour = k.scale(saturated, h);
         let room = k.parameter(&self.room);
         let dry = k.subtract(room, vapour);
+        let share = k.divide(vapour, dry);
+        k.as_dimension(share)
+    }
+
+    fn room_water<'k, C>(
+        &self,
+        k: &mut Kernel<'b, 'k, Respiratory, C>,
+        room: &Room<'b>,
+    ) -> Expr<'b, 'k, Respiratory, Dimensionless> {
+        let saturated = room.saturated(k);
+        let h = k.room_humidity();
+        let vapour = k.scale(saturated, h);
+        let pressure = k.parameter(&self.room);
+        let dry = k.subtract(pressure, vapour);
         let share = k.divide(vapour, dry);
         k.as_dimension(share)
     }

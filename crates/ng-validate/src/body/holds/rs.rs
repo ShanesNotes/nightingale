@@ -11,10 +11,11 @@ constant_routes! {Respiratory;
     AirwayHeat => "rs.airway-heat",
 }
 
-pub(super) fn respiratory(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
-    let declaration = HeldDeclaration::<Respiratory>::new(CONSTANT.to_vec(), Vec::new(), HELD);
+pub(super) fn respiratory(body: &mut Assembly<'_>, heat: bool) -> Result<(), AdmissionError> {
+    let supplies = if heat { Vec::new() } else { CONSTANT.to_vec() };
+    let declaration = HeldDeclaration::<Respiratory>::new(supplies, Vec::new(), HELD);
     let mut held = body.hold(declaration)?;
-    {
+    if !heat {
         let (laws, ports) = held.stand_ins();
         constants(laws, ports)?;
     }
@@ -25,6 +26,9 @@ pub(super) fn respiratory(body: &mut Assembly<'_>) -> Result<(), AdmissionError>
     ventilation.pleural(&mut laws, &ports)?;
     ventilation.work(&mut laws, &ports)?;
     ventilation.water(&mut laws, &ports)?;
+    if heat {
+        ventilation.airway_heat(&mut laws, &ports)?;
+    }
     body.add(laws.finish());
     Ok(())
 }
