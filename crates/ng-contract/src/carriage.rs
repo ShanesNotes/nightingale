@@ -75,6 +75,10 @@ fn sites(feed: Feed) -> (AnatomyBuilder, Sites) {
 }
 
 fn compiled(feed: Feed) -> Result<(CompiledBody, Sites), AdmissionError> {
+    compiled_with(feed, true)
+}
+
+fn compiled_with(feed: Feed, carry_heat: bool) -> Result<(CompiledBody, Sites), AdmissionError> {
     let (mut map, sites) = sites(feed);
     match feed {
         Feed::Valve => map.valve(sites.artery, sites.bed),
@@ -111,6 +115,14 @@ fn compiled(feed: Feed) -> Result<(CompiledBody, Sites), AdmissionError> {
             k.finish(value, mt.every_mode(), class)
         });
         mt.define_at(&stores.other, value);
+        if !carry_heat {
+            let route = ports.conduction(&mut mt);
+            let still = mt.site_kernel(|mut k| {
+                let zero = k.zero::<Rate<Energy>>();
+                k.finish(zero, mt.every_mode(), class)
+            });
+            mt.transfer_at(&route, still);
+        }
         body.add(mt.finish());
         let (mut cv, ports) = body.cardiovascular()?.parts();
         let circulation = ports.circulation(&mut cv);
@@ -127,9 +139,11 @@ fn compiled(feed: Feed) -> Result<(CompiledBody, Sites), AdmissionError> {
             });
             cv.memory_rate(&flow, still);
         }
-        match feed {
-            Feed::Dropped => drop(ports.heat_carried(&mut cv)),
-            _ => carry(&mut cv, &ports, class),
+        if carry_heat {
+            match feed {
+                Feed::Dropped => drop(ports.heat_carried(&mut cv)),
+                _ => carry(&mut cv, &ports, class),
+            }
         }
         body.add(cv.finish());
         if feed == Feed::Sinusoid {
@@ -299,6 +313,38 @@ fn two_feeders_a_sinusoid_and_an_edge_with_no_flow_row_refuse_the_bed_inflow() {
         let expected = AdmissionError::Compile(CompileDefect::NoSuchRead { law: CARRIED });
         assert_eq!(refused, Some(expected));
     }
+    let (no_flow, sites) = compiled_with(Feed::NoFlowRow, false).expect("no-flow control compiles");
+    let anatomy = &no_flow.layout.schema.anatomy;
+    let feeders: Vec<(SiteId, SiteId)> = anatomy.vascular().filter(|edge| edge.1 == sites.bed).collect();
+    assert_eq!(feeders, [(sites.artery, sites.bed)], "one vascular feeder");
+    assert!(!anatomy.is_valve((sites.artery, sites.bed)), "plain vessel");
+    assert_eq!(anatomy.tissue(sites.bed), Some(Tissue::Skin), "not a sinusoid");
+    let flow_row = |from, to| {
+        RowKind::Algebraic(Slot {
+            law: LawName {
+                owner: "CV",
+                local: "circulation",
+            },
+            at: Context::Edge { from, to },
+        })
+    };
+    assert!(
+        !no_flow
+            .rows()
+            .iter()
+            .any(|row| row.kind() == flow_row(sites.artery, sites.bed)),
+        "Feed::NoFlowRow carries no circulation flow row, so BedInflow fails in Rows::inflow_row"
+    );
+    let (with_flow, with_sites) =
+        compiled_with(Feed::Circulation, false).expect("circulation control compiles");
+    assert!(
+        with_flow
+            .rows()
+            .iter()
+            .any(|row| row.kind() == flow_row(with_sites.artery, with_sites.bed)),
+        "Feed::Circulation emits that flow row"
+    );
+    assert!(compiled(Feed::Circulation).is_ok());
 }
 
 #[test]

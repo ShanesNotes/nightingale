@@ -729,3 +729,177 @@ fn a_guards_read_is_held_to_the_table() {
     });
     assert_eq!(refused, CompileDefect::UnwiredRead { law, field });
 }
+
+fn compiled_explicit_reader(
+    table: Table,
+    owner: &'static str,
+    landmark: usize,
+    guard: bool,
+) -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at());
+    let artery = map.site::<VesselSegment>("artery", at());
+    let first = map.site::<CapillaryBed>("first bed", at());
+    let vein = map.site::<VesselSegment>("vein", at());
+    let second = map.site::<CapillaryBed>("second bed", at());
+    let sites = [artery.id(), first.id(), vein.id(), second.id()];
+    for (at, &site) in sites.iter().enumerate() {
+        map.contain(root.id(), site);
+        map.connect(Network::Vascular, site, sites[(at + 1) % sites.len()]);
+    }
+    map.unsupplied(&sites);
+    if landmark == 0 {
+        map.sample(&artery);
+    }
+    let mark = Landmark::PeripheralChemoreceptor;
+    map.landmark(mark, sites[landmark], sites[landmark]);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.leave_out(Space::Interstitium, "a bench with no tissue");
+    schema.leave_out(Space::Cells, "a bench with no tissue");
+    assemble(schema, |mut body| {
+        let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        body.add(cv.finish());
+
+        let (mut bc, ports) = body.blood_chemistry(None)?.parts();
+        let stated = ports.speciation(&mut bc);
+        let zero_pressure = bc.site_kernel(|mut k| {
+            let value = k.zero::<Pressure>();
+            k.finish(value, bc.every_mode(), class)
+        });
+        bc.define_at(&stated.oxygen_partial_pressure.0, zero_pressure);
+        for output in [&stated.oxygen_saturation.0, &stated.acidity.0] {
+            let zero = bc.site_kernel(|mut k| {
+                let value = k.zero::<Dimensionless>();
+                k.finish(value, bc.every_mode(), class)
+            });
+            bc.define_at(output, zero);
+        }
+        let zero_base = bc.site_kernel(|mut k| {
+            let value = k.zero::<Concentration<CarbonDioxide>>();
+            k.finish(value, bc.every_mode(), class)
+        });
+        bc.define_at(&stated.bicarbonate.0, zero_base);
+        bc.express_at(&stated.carbon_dioxide_partial_pressure.0, |mut k| {
+            let value = k.at_site(&stated.oxygen_partial_pressure.1);
+            k.finish_term(value)
+        });
+        body.add(bc.finish());
+
+        let oxygen_name = LawName {
+            owner: "BC",
+            local: OxygenPartialPressure::NAME,
+        };
+        let local = "explicit oxygen";
+        match owner {
+            Respiratory::CARD => {
+                let (mut rs, _) = body.respiratory(None)?.parts();
+                let oxygen: ReadPort<'_, Respiratory, PerSite<Speciated, Pressure>> =
+                    ReadPort::field(oxygen_name);
+                let (explicit, _) = rs.explicit_field::<Speciated, Pressure>(local);
+                rs.express_at(&explicit, |mut k| {
+                    let value = k.at_site(&oxygen);
+                    k.finish_term(value)
+                });
+                body.add(rs.finish());
+            }
+            Metabolism::CARD => {
+                let (mut mt, _) = body.metabolism(None)?.parts();
+                let oxygen: ReadPort<'_, Metabolism, PerSite<Speciated, Pressure>> =
+                    ReadPort::field(oxygen_name);
+                let (explicit, _) = mt.explicit_field::<Speciated, Pressure>(local);
+                mt.express_at(&explicit, |mut k| {
+                    let value = k.at_site(&oxygen);
+                    k.finish_term(value)
+                });
+                body.add(mt.finish());
+            }
+            Receptor::CARD => {
+                let (mut rc, _) = body.receptor()?.parts();
+                let oxygen: ReadPort<'_, Receptor, PerSite<Speciated, Pressure>> =
+                    ReadPort::field(oxygen_name);
+                let (explicit, _) = rc.explicit_field::<Speciated, Pressure>(local);
+                rc.express_at(&explicit, |mut k| {
+                    let value = k.at_site(&oxygen);
+                    k.finish_term(value)
+                });
+                body.add(rc.finish());
+            }
+            other => panic!("unexpected owner {other}"),
+        }
+
+        let (mut ns, _) = body.nervous()?.parts();
+        let read: ReadPort<'_, Nervous, PerSite<Speciated, Pressure>> =
+            ReadPort::field(LawName { owner, local });
+        if guard {
+            let [low, high] = ns.modes("sensed oxygen", ["low", "high"]);
+            let zero = ns.kernel(|mut k| {
+                let value = k.at_landmark(mark, &read);
+                k.finish(value, low.only(), class)
+            });
+            ns.event(Guard::new(zero, Crossing::Rising, low.to(&high)?));
+        } else {
+            let slot = ns.algebraic::<Pressure>("sensed oxygen", Admissible::finite());
+            let residual = ns.kernel(|mut k| {
+                let value = k.at_landmark(mark, &read);
+                let own = k.algebraic(&slot);
+                let residual = k.subtract(own, value);
+                k.finish(residual, ns.every_mode(), class)
+            });
+            ns.residual(&slot, residual);
+        }
+        body.add(ns.finish());
+
+        match table {
+            Table::Sensors => body.compile_reading(&SENSORS),
+            Table::Today => body.compile(),
+        }
+    })
+}
+
+#[test]
+fn a_speciation_read_inside_another_cards_explicit_field_is_held_to_the_table() {
+    let field = LawName {
+        owner: "BC",
+        local: OxygenPartialPressure::NAME,
+    };
+    for owner in [Respiratory::CARD, Receptor::CARD] {
+        let law = LawName {
+            owner,
+            local: "explicit oxygen",
+        };
+        for guard in [false, true] {
+            assert_eq!(
+                compiled_explicit_reader(Table::Sensors, owner, 0, guard)
+                    .map(|_| ())
+                    .err(),
+                Some(AdmissionError::Compile(CompileDefect::UnwiredRead { law, field })),
+                "unwired {owner} explicit field read by wired NS (guard={guard})"
+            );
+        }
+    }
+    let mt_law = LawName {
+        owner: Metabolism::CARD,
+        local: "explicit oxygen",
+    };
+    assert_eq!(
+        compiled_explicit_reader(Table::Today, Metabolism::CARD, 0, false)
+            .map(|_| ())
+            .err(),
+        Some(AdmissionError::Compile(CompileDefect::UnwiredRead {
+            law: mt_law,
+            field,
+        })),
+        "MT explicit field landed at sampled artery off its wired CapillaryBed set"
+    );
+    assert!(
+        compiled_explicit_reader(Table::Today, Metabolism::CARD, 1, false).is_ok(),
+        "MT explicit field landed at a wired CapillaryBed compiles"
+    );
+}

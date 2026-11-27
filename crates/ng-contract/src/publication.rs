@@ -606,6 +606,70 @@ fn the_carriages_tissue_end_the_skin_thermoreceptor_and_the_skin_exit_read_the_o
 }
 
 #[test]
+fn the_thermoreceptor_reads_the_landmarks_sampled_store_and_never_its_height_store() {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at());
+    let sampled = map.site::<TissueSite>("sampled skin store", at());
+    let height = map.site::<TissueSite>("height skin store", at());
+    let artery = map.site::<VesselSegment>("artery", at());
+    let vein = map.site::<VesselSegment>("vein", at());
+    let sampled_bed = map.site::<CapillaryBed>("sampled skin bed", at());
+    let height_bed = map.site::<CapillaryBed>("height skin bed", at());
+    for site in [sampled.id(), height.id(), artery.id(), vein.id()] {
+        map.contain(root.id(), site);
+    }
+    map.contain(sampled.id(), sampled_bed.id());
+    map.contain(height.id(), height_bed.id());
+    map.serves(&sampled_bed, Tissue::Skin);
+    map.serves(&height_bed, Tissue::Skin);
+    for bed in [sampled_bed.id(), height_bed.id()] {
+        map.connect(Network::Vascular, artery.id(), bed);
+        map.connect(Network::Vascular, bed, vein.id());
+    }
+    map.connect(Network::Vascular, vein.id(), artery.id());
+    map.unsupplied(&[artery.id(), vein.id(), sampled_bed.id(), height_bed.id()]);
+    map.landmark(Landmark::SkinThermoreceptor, sampled.id(), height.id());
+    let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
+    for space in [Space::Plasma, Space::Interstitium, Space::Cells, Space::Lumen] {
+        schema.leave_out(space, "a bench of heat alone");
+    }
+    for store in [root.id(), sampled.id(), height.id()] {
+        schema.pool::<Energy>(store, Space::Thermal).expect("a store");
+    }
+    let class = class();
+    let body = assemble(schema, |mut body| {
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let stores = ports.temperatures(&mut mt);
+        zeroed(&mut mt, &stores, class);
+        let route = ports.conduction(&mut mt);
+        let still = mt.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, mt.every_mode(), class)
+        });
+        mt.transfer_at(&route, still);
+        body.add(mt.finish());
+        let (mut ns, _) = body.nervous()?.parts();
+        sense(&mut ns, Reads::Granted, class);
+        body.add(ns.finish());
+        body.compile()
+    })
+    .unwrap_or_else(|refused| panic!("{refused:?}"));
+    let sensed = named("NS", "sensed skin");
+    let read: Vec<RowKind> = bound_rows(&body, sensed)
+        .into_iter()
+        .filter(|kind| matches!(kind, RowKind::Algebraic(slot) if slot.law.owner == "MT"))
+        .collect();
+    assert_eq!(
+        read,
+        [RowKind::Algebraic(Slot {
+            law: named("MT", TISSUE_TEMPERATURE),
+            at: Context::Site(sampled.id()),
+        })],
+        "the skin thermoreceptor must bind the landmark's sampled store, never its height store"
+    );
+}
+
+#[test]
 fn the_thermoreceptor_reads_its_sampled_store_and_refuses_one_no_skin_bed_sits_in() {
     let skin_temperature = named("MT", "skin_temperature");
     let law = named("NS", "sensed skin");
@@ -684,13 +748,9 @@ fn the_catalog_checks_a_kept_or_forged_read_each_terms_variant_and_a_read_no_sit
 #[test]
 fn a_plain_core_temperature_read_inlined_at_a_muscle_bed_is_refused() {
     let found = compiled(Mark::SampledAtSkin, Reads::PlainCoreInExplicit).err();
+    let law = named("CV", "explicit core");
     let field = named("MT", CORE_TEMPERATURE);
-    let laws = [named("CV", "explicit core"), named("CV", "muscle temperature")];
-    assert!(
-        laws.into_iter()
-            .any(|law| found == refused(CompileDefect::UnwiredRead { law, field })),
-        "expected UnwiredRead for {field:?} in the CV muscle read, got {found:?}"
-    );
+    assert_eq!(found, refused(CompileDefect::UnwiredRead { law, field }));
 }
 
 /// docs/architecture/solver-contract.md section 7: "In an explicit field it is a plain read of the name by a
@@ -722,6 +782,26 @@ fn class() -> RateClass {
 
 fn row_kinds(body: &CompiledBody) -> Vec<RowKind> {
     body.rows().iter().map(|row| row.kind()).collect()
+}
+
+fn bound_rows(body: &CompiledBody, law: LawName) -> Vec<RowKind> {
+    let rows = body.rows();
+    let programs = &body.layout.programs;
+    (body.layout.instances.iter())
+        .filter(|instance| programs[instance.program.index()].law == law)
+        .flat_map(|instance| instance.inputs.iter().filter_map(crate::body::Bound::unknown))
+        .map(|unknown| rows[unknown.index()].kind())
+        .collect()
+}
+
+fn assert_refused_read(outcome: Result<CompiledBody, AdmissionError>, law: LawName, expected: CompileDefect) {
+    match outcome {
+        Err(error) => assert_eq!(error, AdmissionError::Compile(expected)),
+        Ok(body) => panic!(
+            "expected {expected:?}, compiled with {law:?} reading {:?}",
+            bound_rows(&body, law)
+        ),
+    }
 }
 
 #[test]
@@ -892,9 +972,9 @@ enum Lookup {
     CoreAtASite,
 }
 
-fn looked_up(lookup: Lookup) -> Option<AdmissionError> {
+fn looked_up(lookup: Lookup) -> Result<CompiledBody, AdmissionError> {
     let class = class();
-    let body = assemble(bare().expect("a map"), |mut body| {
+    assemble(bare().expect("a map"), |mut body| {
         let (mut mt, _) = body.metabolism(None)?.parts();
         let value = mt.kernel(|mut k| {
             let value = k.zero::<Temperature>();
@@ -933,32 +1013,34 @@ fn looked_up(lookup: Lookup) -> Option<AdmissionError> {
         mt.define_at(&out, value);
         body.add(mt.finish());
         body.compile()
-    });
-    body.err()
+    })
 }
 
 #[test]
 fn a_site_temperature_read_finds_its_own_row_and_never_the_bodys_of_that_name() {
-    let unemitted = refused(CompileDefect::UnemittedField {
-        law: named("MT", "reads"),
+    let law = named("MT", "reads");
+    let unemitted = CompileDefect::UnemittedField {
+        law,
         field: named("MT", TISSUE_TEMPERATURE),
-    });
-    assert_eq!(looked_up(Lookup::BodyFieldOfTheName), unemitted);
-    assert_eq!(looked_up(Lookup::AlgebraicOfTheName), unemitted);
+    };
+    assert_refused_read(looked_up(Lookup::BodyFieldOfTheName), law, unemitted);
+    assert_refused_read(looked_up(Lookup::AlgebraicOfTheName), law, unemitted);
 }
 
 #[test]
 fn the_core_read_finds_only_the_bodys_row_and_a_store_read_only_its_stores_row() {
-    let core = refused(CompileDefect::UnemittedField {
-        law: named("MT", "reads"),
+    let reads = named("MT", "reads");
+    let core = CompileDefect::UnemittedField {
+        law: reads,
         field: named("MT", CORE_TEMPERATURE),
-    });
-    assert_eq!(looked_up(Lookup::CoreAtASite), core);
-    let tissue = refused(CompileDefect::UnemittedField {
-        law: named("CV", "tissue end"),
+    };
+    assert_refused_read(looked_up(Lookup::CoreAtASite), reads, core);
+    let carriage = named("CV", "tissue end");
+    let tissue = CompileDefect::UnemittedField {
+        law: carriage,
         field: named("MT", TISSUE_TEMPERATURE),
-    });
-    assert_eq!(sent(Sender::BodyOnly, Reader::Carriage), tissue);
+    };
+    assert_refused_read(sent(Sender::BodyOnly, Reader::Carriage), carriage, tissue);
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -969,7 +1051,7 @@ enum Missing {
     ExitAtTheElasticStore,
 }
 
-fn missing(missing: Missing) -> Option<AdmissionError> {
+fn missing(missing: Missing) -> Result<CompiledBody, AdmissionError> {
     let class = class();
     let (anatomy, sites) = map(Mark::SampledAtSkin).expect("a map");
     let muscle_bed = anatomy.in_set(Sites::Tissue(Tissue::Muscle))[0];
@@ -1003,7 +1085,7 @@ fn missing(missing: Missing) -> Option<AdmissionError> {
         }
         Missing::CoreStore | Missing::HeatAtAnUnheatedSite => {}
     }
-    let body = assemble(schema, |mut body| {
+    assemble(schema, |mut body| {
         let (mut mt, ports) = body.metabolism(None)?.parts();
         let stores = ports.temperatures(&mut mt);
         let key = ParameterKey::new;
@@ -1021,6 +1103,14 @@ fn missing(missing: Missing) -> Option<AdmissionError> {
             k.finish(value, mt.every_mode(), class)
         });
         mt.define_at(&stores.other, value);
+        if missing != Missing::CoreStore {
+            let route = ports.conduction(&mut mt);
+            let still = mt.site_kernel(|mut k| {
+                let zero = k.zero::<Rate<Energy>>();
+                k.finish(zero, mt.every_mode(), class)
+            });
+            mt.transfer_at(&route, still);
+        }
         match missing {
             Missing::HeatAtAnUnheatedSite => {
                 let (out, _) = mt.site_field::<TissueSite, Energy>("every site's heat", Admissible::finite());
@@ -1045,24 +1135,19 @@ fn missing(missing: Missing) -> Option<AdmissionError> {
         }
         body.add(mt.finish());
         body.compile()
-    });
-    body.err()
+    })
 }
 
 #[test]
 fn a_store_read_whose_store_is_missing_or_no_tissue_heat_store_is_refused() {
-    let no_read = |local| {
-        refused(CompileDefect::NoSuchRead {
-            law: named("MT", local),
-        })
+    let check = |case, local| {
+        let law = named("MT", local);
+        assert_refused_read(missing(case), law, CompileDefect::NoSuchRead { law });
     };
-    assert_eq!(missing(Missing::CoreStore), no_read(CORE_TEMPERATURE));
-    assert_eq!(
-        missing(Missing::HeatAtAnUnheatedSite),
-        no_read("every site's heat")
-    );
-    assert_eq!(missing(Missing::ExitAtABedsHeat), no_read("dry heat loss"));
-    assert_eq!(missing(Missing::ExitAtTheElasticStore), no_read("dry heat loss"));
+    check(Missing::CoreStore, CORE_TEMPERATURE);
+    check(Missing::HeatAtAnUnheatedSite, "every site's heat");
+    check(Missing::ExitAtABedsHeat, "dry heat loss");
+    check(Missing::ExitAtTheElasticStore, "dry heat loss");
 }
 
 fn heated() -> (Schema, Map) {
@@ -1105,10 +1190,16 @@ enum Reader {
     Thermoreceptor,
 }
 
-fn sent(sender: Sender, reader: Reader) -> Option<AdmissionError> {
+fn sent(sender: Sender, reader: Reader) -> Result<CompiledBody, AdmissionError> {
     let class = class();
-    let body = assemble(heated().0, |mut body| {
+    assemble(heated().0, |mut body| {
         let (mut mt, ports) = body.metabolism(None)?.parts();
+        let route = ports.conduction(&mut mt);
+        let still = mt.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, mt.every_mode(), class)
+        });
+        mt.transfer_at(&route, still);
         match sender {
             Sender::Absent => {}
             Sender::Undefined => {
@@ -1162,8 +1253,7 @@ fn sent(sender: Sender, reader: Reader) -> Option<AdmissionError> {
             }
         }
         body.compile()
-    });
-    body.err()
+    })
 }
 
 #[test]
@@ -1172,9 +1262,9 @@ fn each_projected_grant_refuses_a_missing_an_undefined_and_a_wrongly_dimensioned
     let (carriage, sensor) = (named("CV", "tissue end"), named("NS", "sensed skin"));
     for (reader, law) in [(Reader::Carriage, carriage), (Reader::Thermoreceptor, sensor)] {
         let absent = refused(CompileDefect::UnemittedField { law, field });
-        assert_eq!(sent(Sender::Absent, reader), absent);
+        assert_eq!(sent(Sender::Absent, reader).err(), absent);
         let omitted = refused(CompileDefect::OmittedLaw { law: field });
-        assert_eq!(sent(Sender::Undefined, reader), omitted);
+        assert_eq!(sent(Sender::Undefined, reader).err(), omitted);
     }
     for (reader, law) in [
         (Reader::Carriage, carriage),
@@ -1182,7 +1272,7 @@ fn each_projected_grant_refuses_a_missing_an_undefined_and_a_wrongly_dimensioned
         (Reader::Thermoreceptor, sensor),
     ] {
         let dimension = refused(CompileDefect::FieldDimension { law, field });
-        assert_eq!(sent(Sender::OtherDimension, reader), dimension);
+        assert_eq!(sent(Sender::OtherDimension, reader).err(), dimension);
     }
 }
 
