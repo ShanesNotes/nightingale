@@ -293,117 +293,60 @@ fn blake2b(message: &[u8]) -> [u8; 32] {
 }
 
 fn blake2b_block<const LAST: bool>(state: &mut [u64; 8], block: &[u8; 128], counted: u128) {
-    let chunks: &[[u8; 8]; 16] = block.as_chunks::<8>().0.try_into().expect("128 bytes");
-    let word = |i: usize| u64::from_le_bytes(chunks[i]);
-    let mut a0 = [state[0], state[1]];
-    let mut a1 = [state[2], state[3]];
-    let mut b0 = [state[4], state[5]];
-    let mut b1 = [state[6], state[7]];
-    let mut c0 = [BLAKE2B_INITIAL[0], BLAKE2B_INITIAL[1]];
-    let mut c1 = [BLAKE2B_INITIAL[2], BLAKE2B_INITIAL[3]];
-    let mut d0 = [
-        BLAKE2B_INITIAL[4] ^ (counted as u64),
-        BLAKE2B_INITIAL[5] ^ ((counted >> 64) as u64),
-    ];
-    let mut d1 = [
-        if LAST {
-            !BLAKE2B_INITIAL[6]
-        } else {
-            BLAKE2B_INITIAL[6]
-        },
-        BLAKE2B_INITIAL[7],
-    ];
-    macro_rules! run_round {
-        ($r:expr) => {{
-            let s = &SIGMA[$r];
-            mix_pair(
-                &mut a0,
-                &mut b0,
-                &mut c0,
-                &mut d0,
-                [word(s[0]), word(s[2])],
-                [word(s[1]), word(s[3])],
-            );
-            mix_pair(
-                &mut a1,
-                &mut b1,
-                &mut c1,
-                &mut d1,
-                [word(s[4]), word(s[6])],
-                [word(s[5]), word(s[7])],
-            );
-            (b0, b1) = ([b0[1], b1[0]], [b1[1], b0[0]]);
-            core::mem::swap(&mut c0, &mut c1);
-            (d0, d1) = ([d1[1], d0[0]], [d0[1], d1[0]]);
-            mix_pair(
-                &mut a0,
-                &mut b0,
-                &mut c0,
-                &mut d0,
-                [word(s[8]), word(s[10])],
-                [word(s[9]), word(s[11])],
-            );
-            mix_pair(
-                &mut a1,
-                &mut b1,
-                &mut c1,
-                &mut d1,
-                [word(s[12]), word(s[14])],
-                [word(s[13]), word(s[15])],
-            );
-            (b0, b1) = ([b1[1], b0[0]], [b0[1], b1[0]]);
-            core::mem::swap(&mut c0, &mut c1);
-            (d0, d1) = ([d0[1], d1[0]], [d1[1], d0[0]]);
-        }};
+    let mut words = [0u64; 16];
+    for (word, bytes) in words.iter_mut().zip(block.as_chunks::<8>().0) {
+        *word = u64::from_le_bytes(*bytes);
     }
-    run_round!(0);
-    run_round!(1);
-    run_round!(2);
-    run_round!(3);
-    run_round!(4);
-    run_round!(5);
-    run_round!(6);
-    run_round!(7);
-    run_round!(8);
-    run_round!(9);
-    run_round!(10);
-    run_round!(11);
-    state[0] ^= a0[0] ^ c0[0];
-    state[1] ^= a0[1] ^ c0[1];
-    state[2] ^= a1[0] ^ c1[0];
-    state[3] ^= a1[1] ^ c1[1];
-    state[4] ^= b0[0] ^ d0[0];
-    state[5] ^= b0[1] ^ d0[1];
-    state[6] ^= b1[0] ^ d1[0];
-    state[7] ^= b1[1] ^ d1[1];
+    let mut work = [0u64; 16];
+    work[..8].copy_from_slice(state);
+    work[8..].copy_from_slice(&BLAKE2B_INITIAL);
+    work[12] ^= counted as u64;
+    work[13] ^= (counted >> 64) as u64;
+    if LAST {
+        work[14] = !work[14];
+    }
+    round::<0>(&mut work, &words);
+    round::<1>(&mut work, &words);
+    round::<2>(&mut work, &words);
+    round::<3>(&mut work, &words);
+    round::<4>(&mut work, &words);
+    round::<5>(&mut work, &words);
+    round::<6>(&mut work, &words);
+    round::<7>(&mut work, &words);
+    round::<8>(&mut work, &words);
+    round::<9>(&mut work, &words);
+    round::<10>(&mut work, &words);
+    round::<11>(&mut work, &words);
+    for (word, (low, high)) in state.iter_mut().zip(work[..8].iter().zip(&work[8..])) {
+        *word ^= low ^ high;
+    }
 }
 
-/// RFC 7693, section 3.1, two independent columns interleaved to expose ILP without exceeding GPR budget.
+/// Inlined by force, with `mix`: left to the compiler, these rounds hash slower than SHA-256.
 #[inline(always)]
-fn mix_pair(
-    a: &mut [u64; 2],
-    b: &mut [u64; 2],
-    c: &mut [u64; 2],
-    d: &mut [u64; 2],
-    x: [u64; 2],
-    y: [u64; 2],
-) {
-    a[0] = a[0].wrapping_add(b[0]).wrapping_add(x[0]);
-    a[1] = a[1].wrapping_add(b[1]).wrapping_add(x[1]);
-    d[0] = (d[0] ^ a[0]).rotate_right(32);
-    d[1] = (d[1] ^ a[1]).rotate_right(32);
-    c[0] = c[0].wrapping_add(d[0]);
-    c[1] = c[1].wrapping_add(d[1]);
-    b[0] = (b[0] ^ c[0]).rotate_right(24);
-    b[1] = (b[1] ^ c[1]).rotate_right(24);
-    a[0] = a[0].wrapping_add(b[0]).wrapping_add(y[0]);
-    a[1] = a[1].wrapping_add(b[1]).wrapping_add(y[1]);
-    d[0] = (d[0] ^ a[0]).rotate_right(16);
-    d[1] = (d[1] ^ a[1]).rotate_right(16);
-    c[0] = c[0].wrapping_add(d[0]);
-    c[1] = c[1].wrapping_add(d[1]);
-    b[0] = (b[0] ^ c[0]).rotate_right(63);
-    b[1] = (b[1] ^ c[1]).rotate_right(63);
+fn round<const R: usize>(work: &mut [u64; 16], words: &[u64; 16]) {
+    let s = &SIGMA[R];
+    mix(work, [0, 4, 8, 12], words[s[0]], words[s[1]]);
+    mix(work, [1, 5, 9, 13], words[s[2]], words[s[3]]);
+    mix(work, [2, 6, 10, 14], words[s[4]], words[s[5]]);
+    mix(work, [3, 7, 11, 15], words[s[6]], words[s[7]]);
+    mix(work, [0, 5, 10, 15], words[s[8]], words[s[9]]);
+    mix(work, [1, 6, 11, 12], words[s[10]], words[s[11]]);
+    mix(work, [2, 7, 8, 13], words[s[12]], words[s[13]]);
+    mix(work, [3, 4, 9, 14], words[s[14]], words[s[15]]);
+}
+
+/// RFC 7693, section 3.1.
+#[inline(always)]
+fn mix(work: &mut [u64; 16], [a, b, c, d]: [usize; 4], x: u64, y: u64) {
+    work[a] = work[a].wrapping_add(x).wrapping_add(work[b]);
+    work[d] = (work[d] ^ work[a]).rotate_right(32);
+    work[c] = work[c].wrapping_add(work[d]);
+    work[b] = (work[b] ^ work[c]).rotate_right(24);
+    work[a] = work[a].wrapping_add(y).wrapping_add(work[b]);
+    work[d] = (work[d] ^ work[a]).rotate_right(16);
+    work[c] = work[c].wrapping_add(work[d]);
+    work[b] = (work[b] ^ work[c]).rotate_right(63);
 }
 
 /// `Seal` written straight into a hash, for an identity too large to buffer each step. Each impl writes the bytes the
