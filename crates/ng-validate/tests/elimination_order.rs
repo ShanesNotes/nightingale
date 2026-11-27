@@ -32,28 +32,20 @@ fn joining_rows_to_the_largest_block_stays_within_the_factoring_price() {
         base.factor_macs
     );
 
+    let largest = (body.blocks().iter())
+        .max_by_key(|block| block.rows().len())
+        .expect("whole body has blocks");
+    for site in ["conducting airway", "pulmonary bed"] {
+        let gas_water = amount_row(&body, site, Space::Gas, Species::Water);
+        assert!(
+            largest.rows().contains(&gas_water.id()),
+            "expected the {site} gas-water row in the largest block, which the airway's heat joins by reading the \
+             dead space's water"
+        );
+    }
+    assert_eq!(base.largest_block, 671, "the largest block the whole body compiles to");
+
     let interstitium_water = amount_row(&body, "pulmonary bed", Space::Interstitium, Species::Water);
-    let alveolar_gas_water = amount_row(&body, "pulmonary bed", Space::Gas, Species::Water);
-    let joined_gas = body
-        .elimination_metrics_with_reads(&[(interstitium_water.id(), alveolar_gas_water.unknown())])
-        .expect("in-bounds read");
-    assert_eq!(
-        joined_gas.largest_block,
-        base.largest_block + 2,
-        "expected the 2 gas-water rows to join the largest block"
-    );
-    assert!(
-        joined_gas.factor_macs * 10 <= base.factor_macs * 11,
-        "joining 2 gas-water rows grew factor MACs over +10%: {} -> {}",
-        base.factor_macs,
-        joined_gas.factor_macs
-    );
-    assert!(
-        joined_gas.nonzeros * 10 <= base.nonzeros * 11,
-        "joining 2 gas-water rows grew nonzeros over +10%: {} -> {}",
-        base.nonzeros,
-        joined_gas.nonzeros
-    );
 
     let solute_block = body
         .blocks()

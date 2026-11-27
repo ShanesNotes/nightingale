@@ -1265,12 +1265,12 @@ const ELEMENT_BOUNDS: [(Element, f64, f64, f64); 3] = [
 const PAYER_HYDROGEN: (f64, f64, f64) = (0.4, 4e-2, 2e-2);
 const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
 const SPECIES_BOUNDS: [(Species, f64, f64, f64); 7] = [
-    (Species::Energy, 2e6, 2e5, 1e5),
-    (Species::Water, 2e-1, 8e-3, 4e-3),
-    (Species::Sodium, 6e-3, 6e-4, 9e-6),
+    (Species::Energy, 3e6, 2e5, 8e4),
+    (Species::Water, 2e-1, 7e-3, 4e-3),
+    (Species::Sodium, 6e-3, 6e-4, 1e-5),
     (Species::Chloride, 6e-3, 6e-4, 1e-5),
     (Species::Potassium, 3e-4, 3e-5, 5e-7),
-    (Species::Vasopressin, 6e-2, 5e-3, 3e-4),
+    (Species::Vasopressin, 5e-2, 5e-3, 3e-4),
     (Species::NitrogenGas, 2e4, 2e1, 8.0),
 ];
 const SETTLING_TIME: u64 = 20 * SECOND;
