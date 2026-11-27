@@ -1252,8 +1252,8 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// the widest gap between edges, each rounded up to one significant figure. The onset is pinned at 30 s because the
 /// figures are taken there, inside the admission's own fall of energy, which puts energy's above a settled onset's, so
 /// moving the onset moves them. The salts' excess grows to the run's end, so a longer run leaves their bounds (body
-/// ticket 17). Energy's figures belong to the held feeds and to the evaporation's forcing, which swings the skin's
-/// evaporative heat (body ticket 12), and are measured again when body tickets 13 to 16 land. The payers of the stroke
+/// ticket 17). Energy's figures are sized by native-contract 85's rule from the reference run, which includes the
+/// airway's latent heat (body ticket 12), and are sized again when body tickets 13 to 16 land. The payers of the stroke
 /// work and of the work of breathing take a hydrogen bound of their own, since their cells settle as their works do,
 /// and each is judged on its own. Oxygen and carbon dioxide as species keep only held pools that never move, so the
 /// slice's bound for an unmoved species holds them.
