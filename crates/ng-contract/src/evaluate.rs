@@ -178,6 +178,38 @@ enum FastInstr {
 }
 
 #[derive(Clone, Copy)]
+enum HoistedOp {
+    Zero,
+    Add([u8; 2]),
+    Subtract([u8; 2]),
+    Multiply([u8; 2]),
+    Divide([u8; 2]),
+    SmoothMax([u8; 3]),
+    SmoothMin([u8; 3]),
+    SmoothMaxZero([u8; 2]),
+    Exp([u8; 1]),
+    Expm1([u8; 1]),
+    Logistic([u8; 1]),
+    Ln([u8; 1]),
+    Relax([u8; 3]),
+    Volume([u8; 1]),
+    Neg([u8; 1]),
+    MulAdd([u8; 3]),
+    MulSubL([u8; 3]),
+    MulSubR([u8; 3]),
+    SubMul([u8; 3]),
+    AddMul([u8; 3]),
+    AddAdd([u8; 3]),
+    SubSub([u8; 3]),
+    MulMul([u8; 3]),
+    VolDiv([u8; 2]),
+    DivMul([u8; 3]),
+    SubDiv([u8; 3]),
+    DivSubL([u8; 3]),
+    DivSubR([u8; 3]),
+}
+
+#[derive(Clone, Copy)]
 struct FastGeneral {
     steps_start: u32,
     steps_end: u32,
@@ -193,6 +225,7 @@ struct FastGeneral {
 
 #[derive(Clone, Copy)]
 enum FastKind {
+    Zero,
     Upwind5([u16; 5]),
     ReadUnknown(u16),
     ReadParameter(u16),
@@ -268,6 +301,7 @@ struct FastTape {
     col_term_ranges: Vec<Range<u32>>,
     generals: Vec<FastGeneral>,
     steps: Vec<(u8, FastInstr)>,
+    hoisted_steps: Vec<(u8, HoistedOp)>,
     parameters: Vec<(u8, u16)>,
     unknowns: Vec<(u8, u16)>,
     judged_ops: Vec<u8>,
@@ -470,6 +504,7 @@ impl Tape {
             return None;
         }
         let mut steps = Vec::new();
+        let mut hoisted_steps = Vec::new();
         let mut program_fast = Vec::with_capacity(layout.programs.len());
         let mut program_alias = Vec::with_capacity(layout.programs.len());
         for program in &layout.programs {
@@ -548,7 +583,174 @@ impl Tape {
                 }
             }
             let hoist_finite = !has_upwind && p_steps.iter().all(|&(at, _)| live[usize::from(at)]);
-            program_fast.push((start as u32, steps.len() as u32, output, hoist_finite));
+            let (hoisted_start, hoisted_end) = if hoist_finite {
+                let h_start = hoisted_steps.len() as u32;
+                let mut uses = [0_u16; STACK_SLOTS];
+                uses[usize::from(output)] += 1;
+                for &(op, ..) in &program.code.judged {
+                    uses[usize::from(alias[op])] += 1;
+                }
+                for &(_, instr) in p_steps {
+                    match instr {
+                        FastInstr::Zero => {}
+                        FastInstr::Add([a, b])
+                        | FastInstr::Subtract([a, b])
+                        | FastInstr::Multiply([a, b])
+                        | FastInstr::Divide([a, b]) => {
+                            uses[usize::from(a)] += 1;
+                            uses[usize::from(b)] += 1;
+                        }
+                        FastInstr::SmoothMax([a, b, w])
+                        | FastInstr::SmoothMin([a, b, w])
+                        | FastInstr::Relax([a, b, w]) => {
+                            uses[usize::from(a)] += 1;
+                            uses[usize::from(b)] += 1;
+                            uses[usize::from(w)] += 1;
+                        }
+                        FastInstr::Exp([x])
+                        | FastInstr::Expm1([x])
+                        | FastInstr::Logistic([x])
+                        | FastInstr::Ln([x])
+                        | FastInstr::Volume([x]) => {
+                            uses[usize::from(x)] += 1;
+                        }
+                        FastInstr::Upwind(_) => unreachable!(),
+                    }
+                }
+                let mut i = 0;
+                while i < p_steps.len() {
+                    let (s0, op0) = p_steps[i];
+                    if i + 1 < p_steps.len() && uses[usize::from(s0)] == 1 {
+                        let (s1, op1) = p_steps[i + 1];
+                        let fused = match (op0, op1) {
+                            (FastInstr::Zero, FastInstr::Subtract([a, b])) if a == s0 && b != s0 => {
+                                Some(HoistedOp::Neg([b]))
+                            }
+                            (FastInstr::Zero, FastInstr::SmoothMax([a, b, w]))
+                                if b == s0 && a != s0 && w != s0 =>
+                            {
+                                Some(HoistedOp::SmoothMaxZero([a, w]))
+                            }
+                            (FastInstr::Multiply([a, b]), FastInstr::Add([x, y])) if x == s0 && y != s0 => {
+                                Some(HoistedOp::MulAdd([a, b, y]))
+                            }
+                            (FastInstr::Multiply([a, b]), FastInstr::Add([x, y])) if y == s0 && x != s0 => {
+                                Some(HoistedOp::MulAdd([a, b, x]))
+                            }
+                            (FastInstr::Multiply([a, b]), FastInstr::Subtract([x, y]))
+                                if x == s0 && y != s0 =>
+                            {
+                                Some(HoistedOp::MulSubL([a, b, y]))
+                            }
+                            (FastInstr::Multiply([a, b]), FastInstr::Subtract([x, y]))
+                                if y == s0 && x != s0 =>
+                            {
+                                Some(HoistedOp::MulSubR([a, b, x]))
+                            }
+                            (FastInstr::Subtract([a, b]), FastInstr::Multiply([x, y]))
+                                if x == s0 && y != s0 =>
+                            {
+                                Some(HoistedOp::SubMul([a, b, y]))
+                            }
+                            (FastInstr::Subtract([a, b]), FastInstr::Multiply([x, y]))
+                                if y == s0 && x != s0 =>
+                            {
+                                Some(HoistedOp::SubMul([a, b, x]))
+                            }
+                            (FastInstr::Add([a, b]), FastInstr::Multiply([x, y])) if x == s0 && y != s0 => {
+                                Some(HoistedOp::AddMul([a, b, y]))
+                            }
+                            (FastInstr::Add([a, b]), FastInstr::Multiply([x, y])) if y == s0 && x != s0 => {
+                                Some(HoistedOp::AddMul([a, b, x]))
+                            }
+                            (FastInstr::Add([a, b]), FastInstr::Add([x, y])) if x == s0 && y != s0 => {
+                                Some(HoistedOp::AddAdd([a, b, y]))
+                            }
+                            (FastInstr::Add([a, b]), FastInstr::Add([x, y])) if y == s0 && x != s0 => {
+                                Some(HoistedOp::AddAdd([a, b, x]))
+                            }
+                            (FastInstr::Subtract([a, b]), FastInstr::Subtract([x, y]))
+                                if x == s0 && y != s0 =>
+                            {
+                                Some(HoistedOp::SubSub([a, b, y]))
+                            }
+                            (FastInstr::Multiply([a, b]), FastInstr::Multiply([x, y]))
+                                if x == s0 && y != s0 =>
+                            {
+                                Some(HoistedOp::MulMul([a, b, y]))
+                            }
+                            (FastInstr::Multiply([a, b]), FastInstr::Multiply([x, y]))
+                                if y == s0 && x != s0 =>
+                            {
+                                Some(HoistedOp::MulMul([a, b, x]))
+                            }
+                            (FastInstr::Volume([w]), FastInstr::Divide([a, b])) if b == s0 && a != s0 => {
+                                Some(HoistedOp::VolDiv([a, w]))
+                            }
+                            (FastInstr::Divide([a, b]), FastInstr::Multiply([x, y]))
+                                if x == s0 && y != s0 =>
+                            {
+                                Some(HoistedOp::DivMul([a, b, y]))
+                            }
+                            (FastInstr::Divide([a, b]), FastInstr::Multiply([x, y]))
+                                if y == s0 && x != s0 =>
+                            {
+                                Some(HoistedOp::DivMul([a, b, x]))
+                            }
+                            (FastInstr::Subtract([a, b]), FastInstr::Divide([x, y]))
+                                if x == s0 && y != s0 =>
+                            {
+                                Some(HoistedOp::SubDiv([a, b, y]))
+                            }
+                            (FastInstr::Divide([a, b]), FastInstr::Subtract([x, y]))
+                                if x == s0 && y != s0 =>
+                            {
+                                Some(HoistedOp::DivSubL([a, b, y]))
+                            }
+                            (FastInstr::Divide([a, b]), FastInstr::Subtract([x, y]))
+                                if y == s0 && x != s0 =>
+                            {
+                                Some(HoistedOp::DivSubR([a, b, x]))
+                            }
+                            _ => None,
+                        };
+                        if let Some(op) = fused {
+                            hoisted_steps.push((s1, op));
+                            i += 2;
+                            continue;
+                        }
+                    }
+                    let op = match op0 {
+                        FastInstr::Zero => HoistedOp::Zero,
+                        FastInstr::Add(v) => HoistedOp::Add(v),
+                        FastInstr::Subtract(v) => HoistedOp::Subtract(v),
+                        FastInstr::Multiply(v) => HoistedOp::Multiply(v),
+                        FastInstr::Divide(v) => HoistedOp::Divide(v),
+                        FastInstr::SmoothMax(v) => HoistedOp::SmoothMax(v),
+                        FastInstr::SmoothMin(v) => HoistedOp::SmoothMin(v),
+                        FastInstr::Exp(v) => HoistedOp::Exp(v),
+                        FastInstr::Expm1(v) => HoistedOp::Expm1(v),
+                        FastInstr::Logistic(v) => HoistedOp::Logistic(v),
+                        FastInstr::Ln(v) => HoistedOp::Ln(v),
+                        FastInstr::Relax(v) => HoistedOp::Relax(v),
+                        FastInstr::Volume(v) => HoistedOp::Volume(v),
+                        FastInstr::Upwind(_) => unreachable!(),
+                    };
+                    hoisted_steps.push((s0, op));
+                    i += 1;
+                }
+                (h_start, hoisted_steps.len() as u32)
+            } else {
+                (start as u32, steps.len() as u32)
+            };
+            program_fast.push((
+                start as u32,
+                steps.len() as u32,
+                hoisted_start,
+                hoisted_end,
+                output,
+                hoist_finite,
+            ));
             program_alias.push(alias);
         }
         let mut instances = Vec::with_capacity(layout.instances.len());
@@ -570,7 +772,7 @@ impl Tape {
                 return None;
             }
             let pid = instance.program.index();
-            let (steps_start, steps_end, output, hoist_finite) = program_fast[pid];
+            let (raw_start, raw_end, run_start, run_end, output, hoist_finite) = program_fast[pid];
             let alias = &program_alias[pid];
             let judged_start = judged_ops.len() as u32;
             for &(op, ..) in &layout.programs[pid].code.judged {
@@ -581,8 +783,15 @@ impl Tape {
                 judged_ranges.push(judged_start..judged_end);
             }
             let reads = self.instance(at);
-            let p_steps = &steps[steps_start as usize..steps_end as usize];
+            let p_steps = &steps[raw_start as usize..raw_end as usize];
             let kind = if judged_start == judged_end
+                && reads.parameters.is_empty()
+                && reads.unknowns.is_empty()
+                && reads.others.is_empty()
+                && matches!(p_steps, [(slot, FastInstr::Zero)] if *slot == output)
+            {
+                FastKind::Zero
+            } else if judged_start == judged_end
                 && reads.parameters.is_empty()
                 && reads.others.is_empty()
                 && reads.unknowns.len() == 5
@@ -631,8 +840,8 @@ impl Tape {
                 let other_range = &self.instances[at].others;
                 let general_at = generals.len() as u32;
                 generals.push(FastGeneral {
-                    steps_start,
-                    steps_end,
+                    steps_start: run_start,
+                    steps_end: run_end,
                     param_start,
                     param_end,
                     unknown_start,
@@ -874,6 +1083,7 @@ impl Tape {
             col_term_ranges,
             generals,
             steps,
+            hoisted_steps,
             parameters,
             unknowns,
             judged_ops,
@@ -1192,68 +1402,130 @@ fn forward_fast(
 /// domain guard below or propagate to `values[output]`, and any failure replays through `forward`.
 #[inline(always)]
 fn forward_fast_hoisted(
-    steps: &[(u8, FastInstr)],
+    steps: &[(u8, HoistedOp)],
     partial_volume: f64,
     values: &mut [f64; STACK_SLOTS],
 ) -> Result<(), ()> {
     for &(at, instr) in steps {
         let value = match instr {
-            FastInstr::Zero => 0.0,
-            FastInstr::Add([a, b]) => values[usize::from(a)] + values[usize::from(b)],
-            FastInstr::Subtract([a, b]) => values[usize::from(a)] - values[usize::from(b)],
-            FastInstr::Multiply([a, b]) => values[usize::from(a)] * values[usize::from(b)],
-            FastInstr::Divide([a, b]) => {
+            HoistedOp::Zero => 0.0,
+            HoistedOp::Add([a, b]) => values[usize::from(a)] + values[usize::from(b)],
+            HoistedOp::Subtract([a, b]) => values[usize::from(a)] - values[usize::from(b)],
+            HoistedOp::Multiply([a, b]) => values[usize::from(a)] * values[usize::from(b)],
+            HoistedOp::Divide([a, b]) => {
                 let divisor = values[usize::from(b)];
                 if !(divisor > 0.0 && divisor < f64::INFINITY) {
                     return Err(());
                 }
                 values[usize::from(a)] / divisor
             }
-            FastInstr::SmoothMax([a, b, width]) => smooth_value(
+            HoistedOp::SmoothMax([a, b, width]) => smooth_value(
                 values[usize::from(a)],
                 values[usize::from(b)],
                 values[usize::from(width)],
                 1.0,
             ),
-            FastInstr::SmoothMin([a, b, width]) => smooth_value(
+            HoistedOp::SmoothMin([a, b, width]) => smooth_value(
                 values[usize::from(a)],
                 values[usize::from(b)],
                 values[usize::from(width)],
                 -1.0,
             ),
-            FastInstr::Exp([x]) => {
+            HoistedOp::SmoothMaxZero([a, width]) => {
+                smooth_value(values[usize::from(a)], 0.0, values[usize::from(width)], 1.0)
+            }
+            HoistedOp::Exp([x]) => {
                 let x = values[usize::from(x)];
                 if !(x.abs() < f64::INFINITY) {
                     return Err(());
                 }
                 pinned::exp(x)
             }
-            FastInstr::Expm1([x]) => {
+            HoistedOp::Expm1([x]) => {
                 let x = values[usize::from(x)];
                 if !(x.abs() < f64::INFINITY) {
                     return Err(());
                 }
                 pinned::expm1(x)
             }
-            FastInstr::Logistic([x]) => {
+            HoistedOp::Logistic([x]) => {
                 let x = values[usize::from(x)];
                 if !(x.abs() < f64::INFINITY) {
                     return Err(());
                 }
                 1.0 / (1.0 + pinned::exp(-x))
             }
-            FastInstr::Ln([x]) => {
+            HoistedOp::Ln([x]) => {
                 let x = values[usize::from(x)];
                 if !(x > 0.0 && x < f64::INFINITY) {
                     return Err(());
                 }
                 pinned::ln_positive_finite(x)
             }
-            FastInstr::Relax([target, current, speed]) => {
+            HoistedOp::Relax([target, current, speed]) => {
                 values[usize::from(speed)] * (values[usize::from(target)] - values[usize::from(current)])
             }
-            FastInstr::Volume([amount]) => values[usize::from(amount)] * partial_volume,
-            FastInstr::Upwind(_) => return Err(()),
+            HoistedOp::Volume([amount]) => values[usize::from(amount)] * partial_volume,
+            HoistedOp::Neg([x]) => 0.0 - values[usize::from(x)],
+            HoistedOp::MulAdd([a, b, c]) => {
+                (values[usize::from(a)] * values[usize::from(b)]) + values[usize::from(c)]
+            }
+            HoistedOp::MulSubL([a, b, c]) => {
+                (values[usize::from(a)] * values[usize::from(b)]) - values[usize::from(c)]
+            }
+            HoistedOp::MulSubR([a, b, c]) => {
+                values[usize::from(c)] - (values[usize::from(a)] * values[usize::from(b)])
+            }
+            HoistedOp::SubMul([a, b, c]) => {
+                (values[usize::from(a)] - values[usize::from(b)]) * values[usize::from(c)]
+            }
+            HoistedOp::AddMul([a, b, c]) => {
+                (values[usize::from(a)] + values[usize::from(b)]) * values[usize::from(c)]
+            }
+            HoistedOp::AddAdd([a, b, c]) => {
+                (values[usize::from(a)] + values[usize::from(b)]) + values[usize::from(c)]
+            }
+            HoistedOp::SubSub([a, b, c]) => {
+                (values[usize::from(a)] - values[usize::from(b)]) - values[usize::from(c)]
+            }
+            HoistedOp::MulMul([a, b, c]) => {
+                (values[usize::from(a)] * values[usize::from(b)]) * values[usize::from(c)]
+            }
+            HoistedOp::VolDiv([a, w]) => {
+                let divisor = values[usize::from(w)] * partial_volume;
+                if !(divisor > 0.0 && divisor < f64::INFINITY) {
+                    return Err(());
+                }
+                values[usize::from(a)] / divisor
+            }
+            HoistedOp::DivMul([a, b, c]) => {
+                let divisor = values[usize::from(b)];
+                if !(divisor > 0.0 && divisor < f64::INFINITY) {
+                    return Err(());
+                }
+                (values[usize::from(a)] / divisor) * values[usize::from(c)]
+            }
+            HoistedOp::SubDiv([a, b, c]) => {
+                let divisor = values[usize::from(c)];
+                if !(divisor > 0.0 && divisor < f64::INFINITY) {
+                    return Err(());
+                }
+                (values[usize::from(a)] - values[usize::from(b)]) / divisor
+            }
+            HoistedOp::DivSubL([a, b, c]) => {
+                let divisor = values[usize::from(b)];
+                if !(divisor > 0.0 && divisor < f64::INFINITY) {
+                    return Err(());
+                }
+                (values[usize::from(a)] / divisor) - values[usize::from(c)]
+            }
+            HoistedOp::DivSubR([a, b, c]) => {
+                let divisor = values[usize::from(b)];
+                if !(divisor > 0.0 && divisor < f64::INFINITY) {
+                    return Err(());
+                }
+                values[usize::from(c)] - (values[usize::from(a)] / divisor)
+            }
         };
         values[usize::from(at)] = value;
     }
@@ -1714,6 +1986,7 @@ impl CompiledBody {
         let parameters = inputs.parameters;
         let unknowns = inputs.unknowns;
         Ok(match inst.kind {
+            FastKind::Zero => 0.0,
             FastKind::Upwind5(u) => {
                 let flow = unknowns[usize::from(u[0])];
                 let value = if flow > 0.0 {
@@ -1758,7 +2031,7 @@ impl CompiledBody {
                 if clean {
                     if g.hoist_finite {
                         if forward_fast_hoisted(
-                            &fast.steps[g.steps_start as usize..g.steps_end as usize],
+                            &fast.hoisted_steps[g.steps_start as usize..g.steps_end as usize],
                             partial_volume,
                             values,
                         )
@@ -2197,6 +2470,15 @@ impl CompiledBody {
         let (parameters, unknowns) = (inputs.parameters, inputs.unknowns);
         let reads = self.tape.instance(at);
         match inst.kind {
+            FastKind::Zero => {
+                each(&Swept {
+                    at,
+                    instance,
+                    reads,
+                    slopes,
+                    flat: false,
+                })?;
+            }
             FastKind::Upwind5(u) => {
                 let flow = unknowns[usize::from(u[0])];
                 let mut upwind_slopes = [0.0; 5];
@@ -2764,7 +3046,10 @@ impl CompiledBody {
                         if algebraic_slot.is_none()
                             && !fast.has_validity[idx]
                             && !has_judged
-                            && matches!(inst.kind, FastKind::ReadUnknown(_) | FastKind::ReadParameter(_))
+                            && matches!(
+                                inst.kind,
+                                FastKind::Zero | FastKind::ReadUnknown(_) | FastKind::ReadParameter(_)
+                            )
                         {
                             continue;
                         }
