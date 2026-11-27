@@ -287,6 +287,20 @@ struct ColumnTerm {
     coefficient: f64,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum FlatColumn {
+    UnitPair {
+        a: u32,
+        a_neg: bool,
+        b: u32,
+        b_neg: bool,
+    },
+    General {
+        start: u32,
+        end: u32,
+    },
+}
+
 /// A read is split by where its value comes from, so a parameter or unknown is copied from the caller's slice with no
 /// dispatch.
 pub(crate) struct Tape {
@@ -310,6 +324,9 @@ pub(crate) struct Tape {
     memory_end: usize,
     contiguous_rows: bool,
     column_terms: Vec<ColumnTerm>,
+    pub(crate) admissible: Vec<crate::AdmissibleSet>,
+    pub(crate) flat_columns: Vec<FlatColumn>,
+    pub(crate) flat_terms: Vec<(u32, i64)>,
     fast: Option<FastTape>,
 }
 struct Kernel {
@@ -355,8 +372,31 @@ impl Tape {
             memory_end: 0,
             contiguous_rows: false,
             column_terms: Vec::new(),
+            admissible: layout.rows.iter().map(|row| row.admissible).collect(),
+            flat_columns: Vec::with_capacity(layout.columns.len()),
+            flat_terms: Vec::new(),
             fast: None,
         };
+        for column in &layout.columns {
+            let flat = match column.terms.as_slice() {
+                [(a, ca @ (1 | -1)), (b, cb @ (1 | -1))] => FlatColumn::UnitPair {
+                    a: u32::try_from(a.index()).expect("rows fit in u32"),
+                    a_neg: *ca < 0,
+                    b: u32::try_from(b.index()).expect("rows fit in u32"),
+                    b_neg: *cb < 0,
+                },
+                terms => {
+                    let start = u32::try_from(tape.flat_terms.len()).expect("terms fit in u32");
+                    for &(row, coeff) in terms {
+                        tape.flat_terms
+                            .push((u32::try_from(row.index()).expect("rows fit in u32"), coeff));
+                    }
+                    let end = u32::try_from(tape.flat_terms.len()).expect("terms fit in u32");
+                    FlatColumn::General { start, end }
+                }
+            };
+            tape.flat_columns.push(flat);
+        }
         for program in &layout.programs {
             let kernel = tape.lower(&program.code.ops);
             tape.programs.push(kernel);

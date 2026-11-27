@@ -1,5 +1,6 @@
-use crate::body::RowKind;
+use crate::body::{Row, RowKind};
 use crate::chance::Trigger;
+use crate::evaluate::FlatColumn;
 use crate::problem::{ProblemSeal, SolveWorkspace, StagePoint};
 use crate::scheme::{Estimate, Stage};
 use crate::{
@@ -79,12 +80,17 @@ impl Quadrature {
                 if rate == 0.0 {
                     continue;
                 }
+                let extent = rate.abs() * seconds;
                 let side = if rate < 0.0 {
                     &mut self.reverse[column]
                 } else {
                     &mut self.forward[column]
                 };
-                *side = side.plus(Compensated::exact(rate.abs() * seconds));
+                if side.bits() == [0, 0] && extent > 0.0 && extent < f64::INFINITY {
+                    *side = Compensated::exact(extent);
+                } else {
+                    *side = side.plus_exact(extent);
+                }
             }
         }
         let rates = &rows[self.first_memory..];
@@ -193,13 +199,16 @@ impl StageWitness {
         body: &CompiledBody,
     ) -> Worst {
         let mut error = Worst::NONE;
+        let rows = body.rows();
+        let count = rows.len();
         match estimate {
             Estimate::Difference { fine, coarse } => {
                 let (fine, coarse) = (&self.stages[fine].unknowns, &self.stages[coarse].unknowns);
-                for (at, row) in body.rows().iter().enumerate() {
-                    error.note(
+                for at in 0..count {
+                    error.note_at(
                         (fine[at] - coarse[at]).abs() / scales.at(fine[at], sizes[at]),
-                        row.id(),
+                        at,
+                        rows,
                     );
                 }
             }
@@ -208,10 +217,10 @@ impl StageWitness {
                 let first = early.offset_ns as f64;
                 let rest = (late.offset_ns - early.offset_ns) as f64;
                 let reach = late.offset_ns as f64 / 2.0;
-                for (at, row) in body.rows().iter().enumerate() {
+                for at in 0..count {
                     let (from, middle, to) = (start[at], early.unknowns[at], late.unknowns[at]);
                     let curvature = reach * ((to - middle) / rest - (middle - from) / first);
-                    error.note(curvature.abs() / scales.at(to, sizes[at]), row.id());
+                    error.note_at(curvature.abs() / scales.at(to, sizes[at]), at, rows);
                 }
             }
         }
@@ -306,11 +315,12 @@ impl Worst {
         normalized: 0.0,
         row: None,
     };
-    fn note(&mut self, normalized: f64, row: RowId) {
+    #[inline(always)]
+    fn note_at(&mut self, normalized: f64, at: usize, rows: &[Row]) {
         if normalized > self.normalized {
             *self = Self {
                 normalized,
-                row: Some(row),
+                row: Some(rows[at].id()),
             };
         }
     }
@@ -442,12 +452,14 @@ impl StepProposal {
         let published = problem.evaluate_published(&ticket, &coordinates)?;
         if algebraic_rows > 0 {
             let first_algebraic = problem.first_algebraic;
+            let rows = body.rows();
             let mut algebraic_defect = Worst::NONE;
-            for (slot, (at, row)) in body.rows().iter().enumerate().skip(first_algebraic).enumerate() {
+            for slot in 0..algebraic_rows {
+                let at = first_algebraic + slot;
                 let judge = body.judged_at(at);
                 let normalized =
                     published.algebraic[slot].abs() / scales.at(coordinates[judge], sizes[judge]);
-                algebraic_defect.note(normalized, row.id());
+                algebraic_defect.note_at(normalized, at, rows);
             }
             if let Some(row) = algebraic_defect.above_one() {
                 return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
@@ -491,25 +503,33 @@ fn note_stage_defect(
     let slope = &stages[stage.slope].derivative;
     let step_seconds = seconds(ticket_ns);
     let span_seconds = seconds(stage.span_ns);
-    for (at, row) in body.rows().iter().enumerate() {
-        let value = seen.unknowns[at];
+    let rows = body.rows();
+    let unknowns = seen.unknowns.as_slice();
+    let first_algebraic = problem.first_algebraic;
+    for at in 0..first_algebraic {
+        let value = unknowns[at];
         let residual = residuals[at].abs();
-        let defect = match row.kind() {
-            RowKind::Algebraic(_) => residual,
-            RowKind::Amount { .. } | RowKind::Memory(_) => {
-                let reached = from[at] + span_seconds * slope[at];
-                let position = (value - reached).abs();
-                let rate = step_seconds * residual;
-                if position > rate { position } else { rate }
-            }
-        };
+        let reached = from[at] + span_seconds * slope[at];
+        let position = (value - reached).abs();
+        let rate = step_seconds * residual;
+        let defect = if position > rate { position } else { rate };
         let judge = body.judged_at(at);
         let scale = if judge == at {
             scales.at(value, sizes[at])
         } else {
-            scales.at(seen.unknowns[judge], sizes[judge])
+            scales.at(unknowns[judge], sizes[judge])
         };
-        stage_defect.note(defect / scale, row.id());
+        stage_defect.note_at(defect / scale, at, rows);
+    }
+    for at in first_algebraic..rows.len() {
+        let defect = residuals[at].abs();
+        let judge = body.judged_at(at);
+        let scale = if judge == at {
+            scales.at(unknowns[at], sizes[at])
+        } else {
+            scales.at(unknowns[judge], sizes[judge])
+        };
+        stage_defect.note_at(defect / scale, at, rows);
     }
 }
 
@@ -546,22 +566,63 @@ fn next_state(
     algebraic: Vec<f64>,
 ) -> Candidate {
     const NEG_ZERO: u64 = (-0.0f64).to_bits();
+    let is_special = |amount: Compensated| {
+        let [hi, lo] = amount.bits();
+        hi == NEG_ZERO || lo == NEG_ZERO || !amount.is_finite()
+    };
     let mut amounts = base.amounts.clone();
+    let mut any_special = amounts.iter().any(|&amount| is_special(amount));
+    let flat_terms = body.tape.flat_terms.as_slice();
     let gross = extents.forward.iter().zip(&extents.reverse);
-    for (column, (&forward, &reverse)) in body.columns().iter().zip(gross) {
+    for (&column, (&forward, &reverse)) in body.tape.flat_columns.iter().zip(gross) {
         if forward.bits() == [0, 0] && reverse.bits() == [0, 0] {
-            for &(row, _) in column.terms() {
-                let amount = amounts[row.index()];
-                let bits = amount.bits();
-                if bits[0] == NEG_ZERO || bits[1] == NEG_ZERO || !amount.is_finite() {
-                    amounts[row.index()] = amount.plus(Compensated::ZERO);
+            if any_special {
+                match column {
+                    FlatColumn::UnitPair { a, b, .. } => {
+                        for row in [a as usize, b as usize] {
+                            let amount = amounts[row];
+                            if is_special(amount) {
+                                amounts[row] = amount.plus(Compensated::ZERO);
+                            }
+                        }
+                    }
+                    FlatColumn::General { start, end } => {
+                        for &(row, _) in &flat_terms[start as usize..end as usize] {
+                            let row = row as usize;
+                            let amount = amounts[row];
+                            if is_special(amount) {
+                                amounts[row] = amount.plus(Compensated::ZERO);
+                            }
+                        }
+                    }
                 }
             }
             continue;
         }
-        let net = forward.minus(reverse);
-        for &(row, coefficient) in column.terms() {
-            amounts[row.index()] = amounts[row.index()].plus(net.scaled(coefficient));
+        let net = Compensated::net_extent(forward, reverse);
+        match column {
+            FlatColumn::UnitPair { a, a_neg, b, b_neg } => {
+                let (pos, neg) = net.unit_pair();
+                let a = a as usize;
+                let updated_a = amounts[a].plus(if a_neg { neg } else { pos });
+                amounts[a] = updated_a;
+                let b = b as usize;
+                let updated_b = amounts[b].plus(if b_neg { neg } else { pos });
+                amounts[b] = updated_b;
+                if is_special(updated_a) || is_special(updated_b) {
+                    any_special = true;
+                }
+            }
+            FlatColumn::General { start, end } => {
+                for &(row, coefficient) in &flat_terms[start as usize..end as usize] {
+                    let row = row as usize;
+                    let updated = amounts[row].plus(net.scaled(coefficient));
+                    amounts[row] = updated;
+                    if is_special(updated) {
+                        any_special = true;
+                    }
+                }
+            }
         }
     }
     let memory = (base.memory.iter().zip(memory))

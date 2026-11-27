@@ -67,6 +67,67 @@ impl Compensated {
         Self { hi, lo }
     }
     #[inline]
+    pub(crate) fn plus_exact(self, value: f64) -> Self {
+        if self.lo.abs() < f64::INFINITY {
+            let (sum, error) = two_sum(self.hi, value);
+            let low = self.lo + 0.0;
+            let (sum, error) = two_sum(sum, error + low);
+            let (hi, lo) = two_sum(sum, error + 0.0);
+            Self { hi, lo }
+        } else {
+            self.plus(Self::exact(value))
+        }
+    }
+    /// Exact bit-identical `forward.minus(reverse)`, skipping `two_sum` when one side is positive zero
+    /// and the other is a finite normalized pair.
+    #[inline]
+    pub(crate) fn net_extent(forward: Self, reverse: Self) -> Self {
+        const NEG_ZERO: u64 = (-0.0f64).to_bits();
+        if reverse.bits() == [0, 0]
+            && forward.hi.abs() < f64::INFINITY
+            && forward.hi != 0.0
+            && forward.lo.to_bits() != NEG_ZERO
+            && forward.hi + forward.lo == forward.hi
+        {
+            return forward;
+        }
+        if forward.bits() == [0, 0]
+            && reverse.hi.abs() < f64::INFINITY
+            && reverse.hi != 0.0
+            && reverse.lo.to_bits() != NEG_ZERO
+            && reverse.hi + reverse.lo == reverse.hi
+        {
+            return Self {
+                hi: -reverse.hi,
+                lo: if reverse.lo == 0.0 { 0.0 } else { -reverse.lo },
+            };
+        }
+        forward.minus(reverse)
+    }
+    #[inline]
+    pub(crate) fn unit_pair(self) -> (Self, Self) {
+        if self.hi.abs() <= SPLIT_LIMIT {
+            if self.hi == 0.0 && self.lo == 0.0 {
+                return (Self::ZERO, Self::ZERO);
+            }
+            if self.hi != 0.0 && self.hi + self.lo == self.hi {
+                let pos_lo = if self.lo == 0.0 { 0.0 } else { self.lo };
+                let neg_lo = if self.lo == 0.0 { 0.0 } else { -self.lo };
+                return (
+                    Self {
+                        hi: self.hi,
+                        lo: pos_lo,
+                    },
+                    Self {
+                        hi: -self.hi,
+                        lo: neg_lo,
+                    },
+                );
+            }
+        }
+        (self.product(1.0), self.product(-1.0))
+    }
+    #[inline]
     pub fn minus(self, other: Self) -> Self {
         self.plus(Self {
             hi: -other.hi,
@@ -309,5 +370,69 @@ mod tests {
         }
         assert!(exact(f64::NAN).scaled(1).hi.is_nan());
         assert!(exact(f64::NAN).scaled(-1).hi.is_nan());
+    }
+
+    #[test]
+    fn fast_extent_helpers_match_compensated_bits_on_edge_cases() {
+        let pairs = [
+            Compensated::ZERO,
+            Compensated { hi: -0.0, lo: 0.0 },
+            Compensated { hi: 0.0, lo: -0.0 },
+            Compensated { hi: -0.0, lo: -0.0 },
+            exact(1.0),
+            exact(-1.0),
+            Compensated { hi: 5.0, lo: -0.0 },
+            exact(1.0).quotient(3.0),
+            exact(-1.0).quotient(3.0),
+            exact(1.0).plus(exact(1e-30)),
+            exact(f64::from_bits(1)),
+            exact(f64::MIN_POSITIVE),
+            exact(1e301),
+            exact(f64::MAX),
+            exact(f64::INFINITY),
+            exact(f64::NEG_INFINITY),
+            Compensated { hi: 1.0, lo: 1.0 },
+            Compensated {
+                hi: 1.0,
+                lo: f64::INFINITY,
+            },
+        ];
+        let values = [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            1e-30,
+            f64::from_bits(1),
+            f64::MIN_POSITIVE,
+            f64::MAX,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for p in pairs {
+            let (pos, neg) = p.unit_pair();
+            assert_eq!(pos.bits(), p.scaled(1).bits(), "unit_pair(+1) {p:?}");
+            assert_eq!(neg.bits(), p.scaled(-1).bits(), "unit_pair(-1) {p:?}");
+            for v in values {
+                let got = p.plus_exact(v);
+                let expected = p.plus(exact(v));
+                if expected.hi.is_nan() || expected.lo.is_nan() {
+                    assert_eq!(got.hi.is_nan(), expected.hi.is_nan());
+                    assert_eq!(got.lo.is_nan(), expected.lo.is_nan());
+                } else {
+                    assert_eq!(got.bits(), expected.bits(), "plus_exact {p:?} + {v:?}");
+                }
+            }
+            for q in pairs {
+                let got = Compensated::net_extent(p, q);
+                let expected = p.minus(q);
+                if expected.hi.is_nan() || expected.lo.is_nan() {
+                    assert_eq!(got.hi.is_nan(), expected.hi.is_nan());
+                    assert_eq!(got.lo.is_nan(), expected.lo.is_nan());
+                } else {
+                    assert_eq!(got.bits(), expected.bits(), "net_extent {p:?} - {q:?}");
+                }
+            }
+        }
     }
 }
