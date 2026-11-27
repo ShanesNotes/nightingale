@@ -312,11 +312,61 @@ test = "-p ng-validate --test history_trim a_v1_sha256_run_imports_hashes_trims_
 [[mutant]]
 name = "trim-one-window-stops-trimming-after-close"
 path = "crates/ng-validate/src/trim.rs"
-old = '''            None if oldest_retained_revision.is_none() => {
-                state.checkpoints.last().map(|saved| saved.revision + 1)
-            }'''
-new = '''            None if oldest_retained_revision.is_none() => None,'''
+old = '''            None => state.checkpoints.last().map(|saved| saved.revision + 1),'''
+new = '''            None => None,'''
 test = "-p ng-validate --test history_trim a_one_window_run_keeps_trimming_after_its_single_window_closes"
+
+[[mutant]]
+name = "trim-none-open-window-ignores-latest-checkpoint-with-retained-floor"
+path = "crates/ng-validate/src/trim.rs"
+old = '''            None => state.checkpoints.last().map(|saved| saved.revision + 1),'''
+new = '''            None if oldest_retained_revision.is_none() => {
+                state.checkpoints.last().map(|saved| saved.revision + 1)
+            }
+            None => None,'''
+test = "-p ng-validate --test history_trim trim_before_with_no_open_window_still_preserves_links_after_the_latest_checkpoint"
+
+[[mutant]]
+name = "trim-rolling-does-not-seed-open-from-before-step-one"
+path = "crates/ng-validate/src/trim.rs"
+old = '''    store.note_open_from(fold.oldest_open_window_start());'''
+new = '''    let _ = fold.oldest_open_window_start();'''
+test = "-p ng-validate --test history_trim a_store_failure_on_step_one_of_a_continued_rolling_run_anchors_to_its_open_window"
+
+[[mutant]]
+name = "trim-shared-store-failure-latches-global-latest-head"
+path = "crates/ng-validate/src/trim.rs"
+old = '''            let (last_rev, last_seal) = state.kept_head_for_previous(witness.previous());
+            state.latch(
+                FlightRecorderTrigger::StoreFailure { seal },
+                None,
+                last_rev,
+                last_seal,
+            );
+            return Err(CheckpointError::StoreFailed { seal });'''
+new = '''            let (last_rev, last_seal) = state
+                .backend
+                .latest()
+                .unwrap_or_else(|| state.kept_head_for_previous(witness.previous()));
+            state.latch(
+                FlightRecorderTrigger::StoreFailure { seal },
+                None,
+                last_rev,
+                last_seal,
+            );
+            return Err(CheckpointError::StoreFailed { seal });'''
+test = "-p ng-validate --test history_trim a_store_failure_on_a_shared_store_latches_the_failing_chains_head_and_extends_on_retry"
+
+[[mutant]]
+name = "trim-latch-none-without-checkpoint-drops-missing-base"
+path = "crates/ng-validate/src/trim.rs"
+old = '''            self.missing_base_checkpoint
+                .get_or_insert((trigger, target, last_head_seal));'''
+new = '''            if let Some(needed) = target {
+                self.missing_base_checkpoint
+                    .get_or_insert((trigger, Some(needed), last_head_seal));
+            }'''
+test = "-p ng-validate --test history_trim latching_with_no_target_and_no_checkpoint_retains_links_and_surfaces_history_missing"
 
 [[mutant]]
 name = "trim-live-replay-ignores-shadow-divergence"

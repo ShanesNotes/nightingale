@@ -152,7 +152,7 @@ struct RollingState {
     pinned_links: BTreeMap<Digest, Vec<u8>>,
     checkpoints: Vec<SavedCheckpoint>,
     flight_recorder: Option<FlightRecorderSpan>,
-    missing_base_checkpoint: Option<(FlightRecorderTrigger, SimTime)>,
+    missing_base_checkpoint: Option<(FlightRecorderTrigger, Option<SimTime>, Digest)>,
     open_from: Option<SimTime>,
     fail_next_keep: bool,
     resolve_calls: usize,
@@ -244,9 +244,8 @@ impl RollingState {
         }
         let target = window_start.or(self.open_from);
         let Some(base) = self.checkpoint_for_chain(target, last_head_revision, last_head_seal) else {
-            if let Some(needed_at) = target {
-                self.missing_base_checkpoint.get_or_insert((trigger, needed_at));
-            }
+            self.missing_base_checkpoint
+                .get_or_insert((trigger, target, last_head_seal));
             return None;
         };
         let span = FlightRecorderSpan {
@@ -260,14 +259,14 @@ impl RollingState {
         self.flight_recorder = Some(span.clone());
         Some(span)
     }
-    fn latest_kept(&self) -> (u64, Digest) {
-        if let Some(latest) = self.backend.latest() {
-            return latest;
+    fn kept_head_for_previous(&self, previous: Digest) -> (u64, Digest) {
+        if let Some(&prev_rev) = self.seal_to_rev.get(&previous) {
+            return (prev_rev, previous);
         }
-        if let Some(ckpt) = self.checkpoints.last() {
-            return (ckpt.revision, ckpt.seal);
+        if let Some(ckpt) = (self.checkpoints.iter().rev()).find(|saved| saved.seal == previous) {
+            return (ckpt.revision, previous);
         }
-        (0, self.origin.unwrap_or_else(|| Digest::of_canonical(b"")))
+        (0, previous)
     }
 }
 
@@ -436,10 +435,7 @@ impl RollingStore {
                     .checkpoint_for(Some(start))
                     .map_or(1, |saved| saved.revision + 1),
             ),
-            None if oldest_retained_revision.is_none() => {
-                state.checkpoints.last().map(|saved| saved.revision + 1)
-            }
-            None => None,
+            None => state.checkpoints.last().map(|saved| saved.revision + 1),
         };
         let mut floor = match (window_floor, oldest_retained_revision) {
             (Some(a), Some(b)) => Some(a.min(b)),
@@ -517,8 +513,7 @@ impl RollingStore {
     ) -> Result<Option<RetainedSpan<'m, 's>>, CheckpointError> {
         let Some(span) = self.flight_recorder() else {
             let state = self.state.borrow();
-            if state.missing_base_checkpoint.is_some() {
-                let (_, seal) = state.latest_kept();
+            if let Some((_, _, seal)) = state.missing_base_checkpoint {
                 return Err(CheckpointError::HistoryMissing { seal });
             }
             return Ok(None);
@@ -544,8 +539,8 @@ impl RollingStore {
     pub fn reset_resolve_calls(&self) {
         self.state.borrow_mut().resolve_calls = 0;
     }
-    fn latest_kept(&self) -> (u64, Digest) {
-        self.state.borrow().latest_kept()
+    fn note_open_from(&self, open_from: Option<SimTime>) {
+        self.state.borrow_mut().open_from = open_from;
     }
 }
 impl HistoryStore for RollingStore {
@@ -575,7 +570,7 @@ impl HistoryStore for RollingStore {
         let mut state = self.state.borrow_mut();
         if state.fail_next_keep {
             state.fail_next_keep = false;
-            let (last_rev, last_seal) = state.latest_kept();
+            let (last_rev, last_seal) = state.kept_head_for_previous(witness.previous());
             state.latch(
                 FlightRecorderTrigger::StoreFailure { seal },
                 None,
@@ -587,7 +582,7 @@ impl HistoryStore for RollingStore {
         if let Some(&rev) = state.seal_to_rev.get(&seal) {
             if state.backend.get(rev, &seal).is_none() {
                 if let Err(err) = state.backend.put(rev, seal, link) {
-                    let (last_rev, last_seal) = state.latest_kept();
+                    let (last_rev, last_seal) = state.kept_head_for_previous(witness.previous());
                     state.latch(
                         FlightRecorderTrigger::StoreFailure { seal },
                         None,
@@ -613,7 +608,7 @@ impl HistoryStore for RollingStore {
             state.witnesses.len() as u64 + 1
         };
         if let Err(err) = state.backend.put(rev, seal, link) {
-            let (last_rev, last_seal) = state.latest_kept();
+            let (last_rev, last_seal) = state.kept_head_for_previous(witness.previous());
             state.latch(
                 FlightRecorderTrigger::StoreFailure { seal },
                 None,
@@ -828,7 +823,9 @@ fn run_rolling_inner<'m>(
     store
         .record_checkpoint(&session)
         .map_err(RollingError::Checkpoint)?;
+    let mut last_kept = (session.record().revision(), session.record().seal().digest());
     let mut fold = CertificateFold::open(&session, policy).map_err(RollingError::Certificate)?;
+    store.note_open_from(fold.oldest_open_window_start());
     let every = config.checkpoint_every_ns;
     let mut next_checkpoint = session
         .record()
@@ -905,7 +902,7 @@ fn run_rolling_inner<'m>(
         });
         fold.advance(&session).expect("same session");
         if let Some(failed) = session.record().oldest_unkept() {
-            let (kept_rev, kept_seal) = store.latest_kept();
+            let (kept_rev, kept_seal) = last_kept;
             let needed = fold.oldest_open_window_start();
             if store
                 .latch_flight_recorder(
@@ -920,6 +917,8 @@ fn run_rolling_inner<'m>(
                     needed_at: needed.unwrap_or(time),
                 });
             }
+        } else {
+            last_kept = (rev, seal);
         }
         if let Some(other) = shadow.take() {
             let matched = if shadow_input_diverged {
@@ -970,7 +969,7 @@ fn run_rolling_inner<'m>(
                     next_checkpoint = next_checkpoint_after(deadline, time, every);
                 }
                 Err(CheckpointError::StoreFailed { seal: failed }) => {
-                    let (kept_rev, kept_seal) = store.latest_kept();
+                    let (kept_rev, kept_seal) = last_kept;
                     let needed = fold.oldest_open_window_start();
                     if store
                         .latch_flight_recorder(
@@ -992,7 +991,7 @@ fn run_rolling_inner<'m>(
         store.trim_before(fold.oldest_open_window_start(), fold.oldest_retained_revision());
     }
     if let Err(CheckpointError::StoreFailed { seal: failed }) = session.flush_store() {
-        let (kept_rev, kept_seal) = store.latest_kept();
+        let (kept_rev, kept_seal) = last_kept;
         let _ = store.latch_flight_recorder(
             FlightRecorderTrigger::StoreFailure { seal: failed },
             fold.oldest_open_window_start(),

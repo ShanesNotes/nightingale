@@ -2772,3 +2772,160 @@ fn checkpoint_before_never_falls_back_past_window_start_and_missing_base_surface
         RollingError::MissingCheckpoint { needed_at } if needed_at < at(20 * SECOND)
     ));
 }
+
+#[test]
+fn a_store_failure_on_step_one_of_a_continued_rolling_run_anchors_to_its_open_window() {
+    let case = TwoReservoirs::delivering([measure(500.0), measure(500.0)], Vec::new()).expect("case");
+    let policy = policy_for(case.body().conserved_basis(), 30, 40, 1e-9, 1e-12, 100.0);
+    let core = ReferenceIntegrator::new(2 * SECOND);
+    let store = RollingStore::new();
+    let mut session = case.admit(&core, &store).expect("admitted");
+    store.record_checkpoint(&session).expect("rev 0");
+    while session.record().revision() < 10 {
+        session = step_accepted(session);
+    }
+    store.fail_next_keep();
+    let outcome = run_rolling(
+        session,
+        at(40 * SECOND),
+        &policy,
+        &store,
+        rolling_config(20 * SECOND),
+    )
+    .expect("rolling");
+    let fr = outcome.listing.flight_recorder.expect("latched");
+    assert!(matches!(fr.trigger, FlightRecorderTrigger::StoreFailure { .. }));
+    assert_eq!(
+        fr.from_checkpoint_revision, 0,
+        "step 1 store failure must anchor to rev 0 for the open 30s window, not rev 10: {fr:?}"
+    );
+    assert_eq!(fr.from_checkpoint_time, at(0));
+    assert_eq!(
+        outcome.listing.complete_link_revisions,
+        (1..=fr.last_head_revision).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_store_failure_on_a_shared_store_latches_the_failing_chains_head_and_extends_on_retry() {
+    let case = TwoReservoirs::delivering(
+        [measure(500.0), measure(500.0)],
+        vec![delivery(b"sip", 4, 30, 0.5)],
+    )
+    .expect("case");
+    let core_a = ReferenceIntegrator::new(2 * SECOND);
+    let core_b = PerturbedCore {
+        inner: ReferenceIntegrator::new(2 * SECOND),
+        perturb_after_s: 0,
+    };
+    let store = RollingStore::new();
+    let mut a = case.admit(&core_a, &store).expect("admitted");
+    store.record_checkpoint(&a).expect("rev 0");
+    let mut ckpt_at_5 = None;
+    while a.record().revision() < 10 {
+        a = step_accepted(a);
+        if a.record().revision() == 5 {
+            ckpt_at_5 = Some(a.checkpoint().expect("ckpt 5"));
+        }
+    }
+    let identity = a.record().identity().clone();
+    let mut b = Session::resume(
+        &ckpt_at_5.expect("ckpt 5"),
+        &identity,
+        case.body(),
+        &core_b,
+        &store,
+    )
+    .expect("resumed b");
+    b = step_accepted(b);
+    assert_eq!(b.record().revision(), 6);
+    store.record_checkpoint(&b).expect("b rev 6");
+    let b6_seal = b.record().seal().digest();
+
+    store.fail_next_keep();
+    b = step_accepted(b);
+    let b7_seal = b.record().seal().digest();
+    let fr = store.flight_recorder().expect("latched on b");
+    assert_eq!(fr.trigger, FlightRecorderTrigger::StoreFailure { seal: b7_seal });
+    assert_eq!(
+        (fr.last_head_revision, fr.last_head_seal),
+        (6, b6_seal),
+        "shared-store failure on branch b must latch b's head (6, b6), not branch a's (10, a10)"
+    );
+
+    b.flush_store().expect("retry keeps b7");
+    let fr_after = store.flight_recorder().expect("extended on retry");
+    assert_eq!(
+        (fr_after.last_head_revision, fr_after.last_head_seal),
+        (7, b7_seal)
+    );
+    let retained = store
+        .retained_flight_recorder(case.body(), &identity)
+        .expect("retained b's span")
+        .expect("present");
+    assert_eq!(retained.from_revision(), 6);
+    assert_eq!(retained.seal().base, b7_seal);
+}
+
+#[test]
+fn trim_before_with_no_open_window_still_preserves_links_after_the_latest_checkpoint() {
+    let case = TwoReservoirs::delivering([measure(500.0), measure(500.0)], Vec::new()).expect("case");
+    let core = ReferenceIntegrator::new(2 * SECOND);
+    let store = RollingStore::new();
+    let mut session = case.admit(&core, &store).expect("admitted");
+    store.record_checkpoint(&session).expect("rev 0");
+    while session.record().revision() < 15 {
+        session = step_accepted(session);
+        if session.record().revision() == 5 {
+            store.record_checkpoint(&session).expect("rev 5");
+        }
+    }
+    store.trim_before(None, Some(10));
+    assert_eq!(
+        store.listing().complete_link_revisions,
+        (6..=15).collect::<Vec<_>>(),
+        "trim_before(None, Some(10)) must not trim past latest checkpoint rev 5"
+    );
+    let head_seal = session.record().seal().digest();
+    let fr = store
+        .latch_flight_recorder(FlightRecorderTrigger::ReplayDivergence, None, 15, head_seal)
+        .expect("latched at rev 5");
+    assert_eq!(fr.from_checkpoint_revision, 5);
+    store.finish();
+    assert!(
+        store
+            .retained_flight_recorder(case.body(), session.record().identity())
+            .expect("links 6..=15 stayed intact for flight recorder")
+            .is_some()
+    );
+}
+
+#[test]
+fn latching_with_no_target_and_no_checkpoint_retains_links_and_surfaces_history_missing() {
+    let case = TwoReservoirs::delivering([measure(500.0), measure(500.0)], Vec::new()).expect("case");
+    let core = ReferenceIntegrator::new(2 * SECOND);
+    let store = RollingStore::new();
+    let mut session = case.admit(&core, &store).expect("admitted");
+    for _ in 0..5 {
+        session = step_accepted(session);
+    }
+    let head_seal = session.record().seal().digest();
+    assert!(
+        store
+            .latch_flight_recorder(FlightRecorderTrigger::ReplayDivergence, None, 5, head_seal)
+            .is_none(),
+        "no checkpoint on chain returns None"
+    );
+    store.finish();
+    assert_eq!(
+        store.listing().complete_link_revisions,
+        vec![1, 2, 3, 4, 5],
+        "finish must retain links when latch(None) found no covering checkpoint"
+    );
+    assert_eq!(
+        store
+            .retained_flight_recorder(case.body(), session.record().identity())
+            .err(),
+        Some(CheckpointError::HistoryMissing { seal: head_seal })
+    );
+}
