@@ -17,7 +17,7 @@ Blocked by: none
 - [ ] `timed-run-knows-no-input` and the ten slowest rows of [ticket 14](14-slow-mutant-rows-run-long-tests.md) are timed at each K against each row's own limit, the larger of the 420 s budget and twice its test's baseline, and any that would read UNCLEAR is named
   - Timed at three and four lanes only, in the Answer. Two lanes did not run.
 - [x] Ryzen's filesystem is read, and the copy of a lane's target is shown to share blocks, or its full size is stated
-- [ ] The Answer says which K halves the sweep, or that none does. If one does, ticket 13's `Blocked by:` line is set to `none` with this ticket's figures. If none does, ticket 14 becomes the next lever, with its expected saving per proof
+- [x] The Answer says which K halves the sweep, or that none does. If one does, ticket 13's `Blocked by:` line is set to `none` with this ticket's figures. If none does, ticket 14 becomes the next lever, with its expected saving per proof
 
 **Non-goals.** Changing any row, its test or its budget. Merging the prototype. Running it on the beelink again.
 

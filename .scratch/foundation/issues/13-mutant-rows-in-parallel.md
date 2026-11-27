@@ -2,7 +2,7 @@
 
 Type: task
 Status: open
-Blocked by: parked, see What the plan measured
+Blocked by: none
 
 **What to build:** `40-mutants` runs its rows side by side instead of one after another, and the gate means what it means today. It builds on [ticket 12](12-mutant-baseline-once.md), which changed the same sweep in `tools/mutate.py` and its driver in `tools/gate/gate.py`.
 
@@ -20,7 +20,7 @@ What must not change:
 - [ ] `40-mutants` runs more than one row at once, each in its own extract with its own target, and how many run at once follows the machine's threads
 - [ ] On one head, a parallel sweep and a serial sweep catch the same rows, row for row, and a check compares the two lists
 - [ ] A seeded surviving row stops a parallel sweep as it stops a serial one, and the stop line names the rows not run
-- [ ] The sweep's wall time, measured before and after on one build worker under the same other load, with the worker named beside each number
+- [ ] The sweep's wall time, measured before and after on one build worker under the same other load, with the worker named beside each number. The "before" is taken on main, since [ticket 17](17-the-parallel-sweep-is-measured-on-ryzen.md)'s figures predate the table's move to `tools/gate/mutants.d/`
 - [ ] The PR body says how many rows the sweep ran at once and what bounds it after the change
 - [ ] Carried from the check of nightingale#142: a sweep case marks a changed file assume-unchanged after `10-rust` wrote its record, and the sweep then runs every baseline. The case fails when the sweep's second look stops reading the marks
 
@@ -36,14 +36,24 @@ The plan is `~/lanes/logs/ng-wave-4/f13/PLAN.md`. It built a sweep that runs its
 - Every parallel run gave all 64 rows the serial verdict, by name.
 - The shape it recommends is the seed shape: lane 0 extracts and builds every test once, then copies its extract and target to the other lanes. Its setup stayed 142 to 175 s at every K, against 388 s for K cold builds at K=6, and it peaked at 3.44 GB of memory at K=6 against 5.58 GB.
 
-## Why it is parked
+## Why it was parked
 
 The plan's stop condition was met: no shape halves the sweep's wall time on the beelink at any K tried. The plan infers the cause: the beelink has 8 cores, and a serial row already rebuilds on 3 to 4 threads. Ryzen was not measured. The plan's estimates for a full proof are inferred from the beelink's ratios and are not measured. If ryzen also does not halve, the levers left are moving the arena rows to other tests, or grouping rows by mutated file so one rebuild serves several. [Ticket 14](14-slow-mutant-rows-run-long-tests.md) takes the first.
+
+## What ticket 17 found
+
+[Ticket 17](17-the-parallel-sweep-is-measured-on-ryzen.md) ran the seed shape on the proof worker over all 706 rows of one head, in the shape of a proof's sweep. Its Answer holds the figures.
+
+- Lanes alone did not halve the sweep at three or four lanes. Four lanes took 7,504 and 7,394 s and three lanes 8,038 s, against a half of 5,847 s, and six to eight rows a sweep went over 420 s and ran again after their skipped baseline.
+- Four lanes did halve it, in 5,075 and 5,128 s, when every row had a budget of 1,000 s in place of 420 s. No row ran a second time.
+- Every sweep that finished gave all 706 rows the serial verdict, by name.
+
+So this ticket's PR builds the lanes together with [ticket 14](14-slow-mutant-rows-run-long-tests.md)'s last box, "A row can name its own budget". Ticket 17's figures come from one head before nightingale#238 moved the table and changed which baselines a sweep skips, so they are not shown on main.
 
 ## Hazards the plan found
 
 - `timed-run-knows-no-input` took 149 s alone and 296 to 306 s at K=6 on the beelink, and 280 s serial on ryzen beside a bench. At K=3 on ryzen it would pass 420 s and read UNCLEAR. It fails closed, but load alone would turn proofs red. Measure this row on ryzen at K=2 and 3 beside a bench before setting K.
-- The halving is not shown on ryzen.
+- On ryzen the halving is shown only with a 1,000 s budget for every row, and only at one head before nightingale#238.
 - A Cargo config inside a lane's directory is read by that lane's cargo. The sweep removes the lanes at its start, but the seam check and the writer must name the place.
-- The copy needs a filesystem that shares blocks (btrfs or XFS). On another it copies in full, about 3 GB a lane. Ryzen's filesystem was not read.
+- The copy needs a filesystem that shares blocks (btrfs or XFS). On another it copies in full, about 3 GB a lane. Ryzen's is btrfs, and ticket 17 showed a copied target sharing its blocks.
 - A row's printed seconds would include the other lanes' load, so a row's time would no longer compare across proofs.
