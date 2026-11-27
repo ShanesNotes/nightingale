@@ -14,7 +14,7 @@ Declared at `origin/main` commit `9a7469ff` (`nightingale#242`, merging [ticket 
 
 Also read: [the wayfinder map](map.md), [tickets 01](issues/01-concept-brief.md) to [09](issues/09-frozen-study-and-freeze.md), [14](issues/14-first-experiment-on-the-whole-body.md), [15](issues/15-learned-emulator-for-parameters.md), [16](issues/16-architecture-foundations.md), [native-contract 86](../native-contract/issues/86-admission-reaches-a-moved-rest.md), `tools/generative-physiology/`, and `crates/{ng-contract,ng-record,ng-observe,ng-validate}/`.
 
-**Live repository facts at `9a7469ff` (`ffcd1a7a` code):** `tools/generative-physiology/**` runs the fast gate `["10-docs", "10-rust"]` (`tools/gate/paths.toml:14-16`, `nightingale#238`), and `10-rust` executes `python3 -I tools/generative-physiology/gp.py selftest` (`tools/verify.d/10-rust.sh:60`). `native-contract 91` (`nightingale#241`) and `CertificateFold` (`nightingale#240`, `crates/ng-validate/src/certificate.rs:1242`) are landed; [body 28](../body/issues/28-two-synthetic-days.md) remains the parking condition on `main`.
+**Live repository facts at `9a7469ff` (`ffcd1a7a` code):** `tools/generative-physiology/**` runs the fast gate `["10-docs", "10-rust"]` (`tools/gate/paths.toml:14-16`, `nightingale#238`), and `10-rust` executes `python3 -I tools/generative-physiology/gp.py selftest` (`tools/verify.d/10-rust.sh:60`). `native-contract 91` (`nightingale#241`) and `CertificateFold` (`nightingale#240`, `crates/ng-validate/src/certificate.rs:1242`) are landed; the parking condition on `main` is in [the map](map.md).
 
 ## 2. Bound four-seam contract and two provenance rules
 
