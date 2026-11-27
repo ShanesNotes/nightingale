@@ -13,6 +13,7 @@ publish = false
 # depend on this: no profile here relaxes IEEE arithmetic.
 [profile.test]
 opt-level = 2
+debug = 0
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

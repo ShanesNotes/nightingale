@@ -4,7 +4,9 @@ Spec: `crates/ng-contract/src/admission.rs` (`InitializationSystem::solve` and `
 
 Type: task
 
-Status: open
+Status: resolved
+
+Claimed by: lu-order
 
 Blocked by: none
 
@@ -17,8 +19,15 @@ What changes:
 - When the ring's linear solve finds no pivot, admission refuses with a failure that names the unknown's row and stage, not the first row a recheck fails.
 - A test builds a small body with two moved pools joined only by a transfer that reads no state, and asserts the refusal names one of those pools.
 
-- [ ] A ring solve with no pivot refuses with the unknown's row and stage, and a test shows it on a body built to have a free direction
-- [ ] A mutant row that returns the recheck's row instead is caught by that test
-- [ ] The slice's model hash, basis and the pins of `crates/ng-validate/tests/trace.rs` stay
+- [x] A ring solve with no pivot refuses with the unknown's row and stage, and a test shows it on a body built to have a free direction
+- [x] A mutant row that returns the recheck's row instead is caught by that test
+- [x] The slice's model hash, basis and the pins of `crates/ng-validate/tests/trace.rs` stay
 
 **Non-goals:** pinning a free direction to the packet's guess, which body 06 refused; any change to how the ring solves.
+
+## Answer
+
+- `InitializationFailure::NoRank` in `crates/ng-contract/src/admission.rs` now carries `stage: Option<usize>` alongside `row: RowId` (`Some(slot / rows)` — `0` for an instant solve, `2 * leg` for leg `leg`'s end stage and `2 * leg + 1` for its interior stage on a periodic ring — or `None` for a fitted parameter whose anchor row is named).
+- `crates/ng-contract/src/ring.rs` returns the unknown column `pivot` with no pivot left (rather than the row permutation index after partial pivoting), maps per-leg block failures to `point * size + at`, and maps corner failures to `last * size + at` or `border + at - size`.
+- `InitializationSystem::recheck` checks full-ring rank first on an unsolved workspace, and only when the ring lacks a pivot checks unread fits and unpaced cycles before returning `NoRank` (leaving `Inconsistent`, admissible-set, net-boundary-flow and conserved-total refusals intact and adding no extra work to valid workspaces).
+- `a_free_direction_on_the_ring_names_the_unknown_and_stage_not_the_recheck_row` and two regression tests in `crates/ng-validate/tests/admission.rs` verify exact global-stage reporting, full-ring precedence over single-leg `rankless` when an anchor supplies an end-stage pivot, and `Inconsistent` precedence over `FitUnread` on a full-rank unsolved workspace with a zero fit guess; `admission-no-pivot-names-recheck-row` in `tools/gate/mutants.d/nc49-no-pivot.toml` pins the refusal path.

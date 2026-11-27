@@ -140,6 +140,10 @@ impl DenseSegment {
     pub fn interval(&self) -> Option<Interval> {
         self.interval
     }
+    /// Each row's compensated value at the interval's start, empty on an admission segment.
+    pub fn start_values(&self) -> &[Compensated] {
+        &self.start
+    }
     /// One row at `at`; `None` outside the interval.
     pub fn sample(&self, row: RowId, at: SimTime) -> Option<Compensated> {
         let interval = self

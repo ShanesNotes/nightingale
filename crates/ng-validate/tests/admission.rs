@@ -3366,3 +3366,378 @@ fn finding_15_two_different_expressions_divided_are_backed() {
     });
     assert!(!matches!(outcome, Some(AdmissionError::UnbackedConstant { .. })));
 }
+
+#[test]
+fn a_free_direction_on_the_ring_names_the_unknown_and_stage_not_the_recheck_row() {
+    let store = MemoryStore::default();
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let regulated = map.site::<VesselSegment>("alpha", origin());
+    let stomach = map.site::<VesselSegment>("stomach", origin());
+    let gut = map.site::<VesselSegment>("gut", origin());
+    map.contain(root.id(), regulated.id());
+    map.contain(root.id(), stomach.id());
+    map.contain(root.id(), gut.id());
+    map.connect(Network::Vascular, stomach.id(), gut.id());
+    let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    schema
+        .boundary::<Water>(DRAIN, BoundaryDirection::OutOfBody, regulated.id(), Space::Lumen)
+        .expect("a boundary");
+    let body = assemble(schema, |mut body| {
+        let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        let (mut cv, cv_ports) = body.cardiovascular()?.parts();
+        let route = cv_ports.circulation(&mut cv);
+        let transit =
+            cv.edge_parameter::<_, Rate<Water>>(ParameterKey::new("cv.transit"), Admissible::nonnegative());
+        let flow = cv.edge_kernel(|mut k| {
+            let rate = k.edge_parameter(&transit);
+            k.finish(rate, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, flow);
+        body.add(cv.finish());
+
+        let (mut bd, bd_ports) = body.boundary()?.parts();
+        let drain = bd_ports.route::<Water>(DRAIN)?.route;
+        let speed =
+            bd.parameter::<Rate<Dimensionless>>(ParameterKey::new("bd.speed"), Admissible::positive());
+        let target = bd.parameter::<Water>(ParameterKey::new("bd.target"), Admissible::positive());
+        let drain_flow = bd.kernel(|mut k| {
+            let amount = k.read(&drain.amount::<Water>());
+            let target = k.parameter(&target);
+            let speed = k.parameter(&speed);
+            let rate = k.relax(amount, target, speed);
+            k.finish(rate, bd.every_mode(), class)
+        });
+        bd.transfer(Transfer::new(&drain, drain_flow));
+        body.add(bd.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let row_of = |site: SiteId| {
+        body.rows()
+            .iter()
+            .find(|row| row.kind() == lumen(site))
+            .expect("a pool row")
+            .id()
+    };
+    let regulated_row = row_of(regulated.id());
+    let stomach_row = row_of(stomach.id());
+    let gut_row = row_of(gut.id());
+    assert_eq!(regulated_row, body.rows()[0].id());
+
+    let build_packet = || {
+        let mut packet = ParameterPacket::periodic(cycle(4));
+        packet.within(admission_tolerance());
+        packet
+            .synthetic(
+                ParameterKey::new("cv.transit"),
+                NETWORK,
+                measure::<Rate<Water>>(0.0),
+                NOTE,
+            )
+            .expect("once");
+        packet
+            .synthetic(
+                ParameterKey::new("bd.speed"),
+                Binding::Body,
+                measure::<Rate<Dimensionless>>(1e-3),
+                NOTE,
+            )
+            .expect("once");
+        packet
+            .synthetic(
+                ParameterKey::new("bd.target"),
+                Binding::Body,
+                measure::<Water>(10.0),
+                NOTE,
+            )
+            .expect("once");
+        packet
+            .start(lumen(regulated.id()), measure::<Water>(1.0), NOTE)
+            .expect("once");
+        packet
+            .start(lumen(stomach.id()), measure::<Water>(50.0), NOTE)
+            .expect("once");
+        packet
+            .start(lumen(gut.id()), measure::<Water>(50.0), NOTE)
+            .expect("once");
+        packet
+    };
+
+    let lens = body.lens(Vec::new(), count(SECOND)).expect("a lens");
+    let core = reference(REFERENCE_NS);
+    let parameters = body.bind(build_packet()).expect("bound");
+    let system = body
+        .initialization(
+            parameters,
+            empty_port(),
+            InitializationRequest::at(at(0)).reading(&lens),
+        )
+        .expect("a system");
+    let workspace = system.workspace();
+    let residuals = system.evaluate(&workspace).expect("residuals");
+    let jacobian = system.linearize(&workspace).expect("jacobian");
+    let slot = system
+        .solve(&workspace, &jacobian, &residuals)
+        .err()
+        .expect("free direction has no pivot");
+    let rows = body.rows().len();
+    let expected_row = body.rows()[slot % rows].id();
+    let expected_stage = slot / rows;
+    assert!(
+        expected_stage >= 2,
+        "expected global stage preserving leg > 0, got {expected_stage}"
+    );
+    assert!(
+        expected_row == stomach_row || expected_row == gut_row,
+        "solve named {expected_row:?}, expected stomach ({stomach_row:?}) or gut ({gut_row:?})"
+    );
+
+    let refused = admit_solved(&body, build_packet(), empty_port(), &core, &lens, &store).err();
+    assert_eq!(
+        refused,
+        Some(InitializationFailure::NoRank {
+            row: expected_row,
+            stage: Some(expected_stage),
+        }),
+        "expected NoRank at {expected_row:?} stage {expected_stage}, got {refused:?} (regulated is {regulated_row:?})"
+    );
+}
+
+#[test]
+fn an_unsolved_ring_with_an_anchor_on_one_end_stage_names_the_rings_missing_pivot() {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let alpha = map.site::<VesselSegment>("alpha", origin());
+    let beta = map.site::<VesselSegment>("beta", origin());
+    let gamma = map.site::<VesselSegment>("gamma", origin());
+    map.contain(root.id(), alpha.id());
+    map.contain(root.id(), beta.id());
+    map.contain(root.id(), gamma.id());
+    let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    schema
+        .boundary::<Water>("drain_a", BoundaryDirection::OutOfBody, alpha.id(), Space::Lumen)
+        .expect("a boundary");
+    schema
+        .boundary::<Water>("drain_b", BoundaryDirection::OutOfBody, beta.id(), Space::Lumen)
+        .expect("a boundary");
+    schema
+        .boundary::<Water>("drain_c", BoundaryDirection::OutOfBody, gamma.id(), Space::Lumen)
+        .expect("a boundary");
+    let body = assemble(schema, |mut body| {
+        let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        let (mut bd, bd_ports) = body.boundary()?.parts();
+        let drain_a = bd_ports.route::<Water>("drain_a")?.route;
+        let drain_b = bd_ports.route::<Water>("drain_b")?.route;
+        let drain_c = bd_ports.route::<Water>("drain_c")?.route;
+        let speed_a =
+            bd.parameter::<Rate<Dimensionless>>(ParameterKey::new("bd.speed_a"), Admissible::positive());
+        let speed_zero = bd
+            .parameter::<Rate<Dimensionless>>(ParameterKey::new("bd.speed_zero"), Admissible::nonnegative());
+        let target = bd.parameter::<Water>(ParameterKey::new("bd.target"), Admissible::positive());
+        let flow_a = bd.kernel(|mut k| {
+            let amount = k.read(&drain_a.amount::<Water>());
+            let target = k.parameter(&target);
+            let speed = k.parameter(&speed_a);
+            let rate = k.relax(amount, target, speed);
+            k.finish(rate, bd.every_mode(), class)
+        });
+        let flow_b = bd.kernel(|mut k| {
+            let amount = k.read(&drain_a.amount::<Water>());
+            let target = k.parameter(&target);
+            let speed = k.parameter(&speed_a);
+            let rate = k.relax(amount, target, speed);
+            k.finish(rate, bd.every_mode(), class)
+        });
+        let flow_c = bd.kernel(|mut k| {
+            let amount = k.read(&drain_c.amount::<Water>());
+            let target = k.parameter(&target);
+            let speed = k.parameter(&speed_zero);
+            let rate = k.relax(amount, target, speed);
+            k.finish(rate, bd.every_mode(), class)
+        });
+        bd.transfer(Transfer::new(&drain_a, flow_a));
+        bd.transfer(Transfer::new(&drain_b, flow_b));
+        bd.transfer(Transfer::new(&drain_c, flow_c));
+        body.add(bd.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let row_of = |site: SiteId| {
+        body.rows()
+            .iter()
+            .find(|row| row.kind() == lumen(site))
+            .expect("a pool row")
+            .id()
+    };
+    let beta_row = row_of(beta.id());
+    let gamma_row = row_of(gamma.id());
+
+    let mut packet = ParameterPacket::periodic(cycle(1));
+    packet.within(admission_tolerance());
+    packet
+        .synthetic(
+            ParameterKey::new("bd.speed_a"),
+            Binding::Body,
+            measure::<Rate<Dimensionless>>(1e-3),
+            NOTE,
+        )
+        .expect("once");
+    packet
+        .synthetic(
+            ParameterKey::new("bd.speed_zero"),
+            Binding::Body,
+            measure::<Rate<Dimensionless>>(0.0),
+            NOTE,
+        )
+        .expect("once");
+    packet
+        .start(lumen(alpha.id()), measure::<Water>(1.0), NOTE)
+        .expect("once");
+    packet
+        .start(lumen(beta.id()), measure::<Water>(20.0), NOTE)
+        .expect("once");
+    packet
+        .start(lumen(gamma.id()), measure::<Water>(30.0), NOTE)
+        .expect("once");
+    let anchor_id = AnchorId::new("fixture.beta_mean");
+    let read = Snapshot::new(
+        lumen(beta.id()),
+        GAUGE,
+        AnchorStatistic::CycleMean,
+        measure::<Water>(20.0),
+    );
+    packet
+        .anchor(Synthetic::new(anchor_id, read, NOTE))
+        .expect("once");
+    packet
+        .calibrated(
+            ParameterKey::new("bd.target"),
+            Binding::Body,
+            measure::<Water>(10.0),
+            anchor_id,
+        )
+        .expect("once");
+    let lens = body
+        .lens(vec![ChannelSpec::new(GAUGE, lumen(beta.id()))], count(SECOND))
+        .expect("a lens");
+    let parameters = body.bind(packet).expect("bound");
+    let system = body
+        .initialization(
+            parameters,
+            empty_port(),
+            InitializationRequest::at(at(0)).reading(&lens),
+        )
+        .expect("a system");
+    let workspace = system.workspace();
+    let residuals = system.evaluate(&workspace).expect("residuals");
+    let jacobian = system.linearize(&workspace).expect("jacobian");
+    let slot = system
+        .solve(&workspace, &jacobian, &residuals)
+        .err()
+        .expect("gamma has no pivot");
+    let rows = body.rows().len();
+    let expected_row = body.rows()[slot % rows].id();
+    let expected_stage = slot / rows;
+    assert_eq!(expected_row, gamma_row);
+    assert_ne!(expected_row, beta_row);
+
+    let history = MethodHistory::new(Digest::of_canonical(b"a schema"), at(0), Vec::new());
+    let refused = system.admit(workspace, history).err();
+    assert_eq!(
+        refused,
+        Some(InitializationFailure::NoRank {
+            row: expected_row,
+            stage: Some(expected_stage),
+        }),
+        "expected full-ring pivot {expected_row:?} stage {expected_stage} rather than rankless beta ({beta_row:?}), got {refused:?}"
+    );
+}
+
+#[test]
+fn a_full_rank_unsolved_workspace_with_a_zero_fit_guess_refuses_inconsistent_not_fit_unread() {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let alpha = map.site::<VesselSegment>("alpha", origin());
+    map.contain(root.id(), alpha.id());
+    let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    schema
+        .boundary::<Water>(DRAIN, BoundaryDirection::OutOfBody, alpha.id(), Space::Lumen)
+        .expect("a boundary");
+    let body = assemble(schema, |mut body| {
+        let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        let (mut bd, bd_ports) = body.boundary()?.parts();
+        let drain = bd_ports.route::<Water>(DRAIN)?.route;
+        let speed =
+            bd.parameter::<Rate<Dimensionless>>(ParameterKey::new("bd.speed"), Admissible::positive());
+        let target = bd.parameter::<Water>(ParameterKey::new("bd.target"), Admissible::nonnegative());
+        let flow = bd.kernel(|mut k| {
+            let amount = k.read(&drain.amount::<Water>());
+            let target = k.parameter(&target);
+            let speed = k.parameter(&speed);
+            let rate = k.relax(amount, target, speed);
+            k.finish(rate, bd.every_mode(), class)
+        });
+        bd.transfer(Transfer::new(&drain, flow));
+        body.add(bd.finish());
+        body.compile()
+    })
+    .expect("compiled");
+
+    let mut packet = ParameterPacket::periodic(cycle(1));
+    packet.within(admission_tolerance());
+    packet
+        .synthetic(
+            ParameterKey::new("bd.speed"),
+            Binding::Body,
+            measure::<Rate<Dimensionless>>(1e-3),
+            NOTE,
+        )
+        .expect("once");
+    packet
+        .start(lumen(alpha.id()), measure::<Water>(1.0), NOTE)
+        .expect("once");
+    let anchor_id = AnchorId::new("fixture.alpha_mean");
+    let read = Snapshot::new(
+        lumen(alpha.id()),
+        GAUGE,
+        AnchorStatistic::CycleMean,
+        measure::<Water>(10.0),
+    );
+    packet
+        .anchor(Synthetic::new(anchor_id, read, NOTE))
+        .expect("once");
+    packet
+        .calibrated(
+            ParameterKey::new("bd.target"),
+            Binding::Body,
+            measure::<Water>(0.0),
+            anchor_id,
+        )
+        .expect("once");
+    let lens = body
+        .lens(vec![ChannelSpec::new(GAUGE, lumen(alpha.id()))], count(SECOND))
+        .expect("a lens");
+    let parameters = body.bind(packet).expect("bound");
+    let system = body
+        .initialization(
+            parameters,
+            empty_port(),
+            InitializationRequest::at(at(0)).reading(&lens),
+        )
+        .expect("a system");
+    let workspace = system.workspace();
+    let residuals = system.evaluate(&workspace).expect("residuals");
+    let jacobian = system.linearize(&workspace).expect("jacobian");
+    assert!(
+        system.solve(&workspace, &jacobian, &residuals).is_ok(),
+        "ring should have full rank even at zero fit guess"
+    );
+
+    let history = MethodHistory::new(Digest::of_canonical(b"a schema"), at(0), Vec::new());
+    let refused = system.admit(workspace, history).err();
+    assert!(
+        matches!(refused, Some(InitializationFailure::Inconsistent { .. })),
+        "expected Inconsistent on full-rank unsolved workspace, got {refused:?}"
+    );
+}

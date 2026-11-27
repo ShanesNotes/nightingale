@@ -42,18 +42,20 @@ impl Curve {
     fn jet(&self, row: usize, lo: f64, hi: f64) -> Jet {
         let (a, b, c) = (self.a[row], self.b[row], self.c[row]);
         let value = |s: f64| a + s * (b + s * c);
-        let mut points = vec![value(lo), value(hi)];
+        let mut points = [value(lo), value(hi), 0.0];
+        let mut len = 2;
         if c != 0.0 {
             let vertex = -b / (2.0 * c);
             if lo < vertex && vertex < hi {
-                points.push(value(vertex));
+                points[2] = value(vertex);
+                len = 3;
             }
         }
-        let least = points
+        let least = points[..len]
             .iter()
             .copied()
             .fold(f64::INFINITY, |least, v| if v < least { v } else { least });
-        let most = points
+        let most = points[..len]
             .iter()
             .copied()
             .fold(f64::NEG_INFINITY, |most, v| if v > most { v } else { most });
