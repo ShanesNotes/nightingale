@@ -1,0 +1,28 @@
+[[mutant]]
+name = "reach-missing-pool-dropped"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                if family.allows_absent_pool() {'''
+new = '''                if true {'''
+test = "-p ng-contract --test routes every_required_family_refuses_a_missing_endpoint_pool"
+
+[[mutant]]
+name = "reach-missing-root-store-dropped"
+path = "crates/ng-contract/src/compile.rs"
+old = '''    let require_store = |space: Space| {
+        store(space).ok_or(CompileDefect::RouteEndpoint {
+            law,
+            site: None,
+            space,
+            species: Species::Energy,
+        })
+    };'''
+new = '''    let require_store = |space: Space| {
+        Ok::<_, CompileDefect>(store(space).unwrap_or_else(|| {
+            species_at(
+                anatomy.sites().next().expect("a site"),
+                space,
+                Species::Energy,
+            )
+        }))
+    };'''
+test = "-p ng-contract --test routes body_energy_families_refuse_a_map_without_a_tissue_root"

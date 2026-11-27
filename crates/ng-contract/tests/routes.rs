@@ -726,3 +726,664 @@ fn blood_carries_heat_into_the_nearest_tissue_heat_store_above_each_bed() -> Res
     }
     Ok(())
 }
+
+fn every_route_anatomy() -> Result<Anatomy, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let body = map.site::<TissueSite>("body", at()?);
+    let airway = map.site::<TissueSite>("conducting airway", at()?);
+    let skin = map.site::<TissueSite>("skin heat site", at()?);
+    let unheated = map.site::<TissueSite>("unheated tissue", at()?);
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let stomach = map.site::<VesselSegment>("stomach", at()?);
+    let intestine = map.site::<VesselSegment>("small intestine", at()?);
+    let tubule = map.site::<VesselSegment>("tubule", at()?);
+    let lung = map.site::<CapillaryBed>("lung bed", at()?);
+    let liver = map.site::<CapillaryBed>("liver bed", at()?);
+    let gut = map.site::<CapillaryBed>("gut bed", at()?);
+    let fat = map.site::<CapillaryBed>("fat bed", at()?);
+    let skin_bed = map.site::<CapillaryBed>("skin bed", at()?);
+    let bare = map.site::<CapillaryBed>("bare bed", at()?);
+    let sa = map.site::<Junction>("sinoatrial junction", at()?);
+    let other_j = map.site::<Junction>("other junction", at()?);
+    for child in [
+        airway.id(),
+        skin.id(),
+        unheated.id(),
+        vessel.id(),
+        stomach.id(),
+        intestine.id(),
+        tubule.id(),
+        sa.id(),
+        other_j.id(),
+    ] {
+        map.contain(body.id(), child);
+    }
+    for bed in [
+        lung.id(),
+        liver.id(),
+        gut.id(),
+        fat.id(),
+        skin_bed.id(),
+        bare.id(),
+    ] {
+        let holder = if bed == skin_bed.id() {
+            skin.id()
+        } else {
+            body.id()
+        };
+        map.contain(holder, bed);
+        map.connect(Network::Vascular, vessel.id(), bed);
+        map.connect(Network::Vascular, bed, vessel.id());
+    }
+    for (bed, tissue) in [
+        (&lung, Tissue::Lung),
+        (&liver, Tissue::Liver),
+        (&gut, Tissue::Gut),
+        (&fat, Tissue::Fat),
+        (&skin_bed, Tissue::Skin),
+    ] {
+        map.serves(bed, tissue);
+    }
+    map.connect(Network::Airway, airway.id(), lung.id());
+    map.connect(Network::Gut, stomach.id(), intestine.id());
+    map.connect(Network::Gut, intestine.id(), gut.id());
+    map.connect(Network::Urinary, bare.id(), tubule.id());
+    map.connect(Network::Reclaim, tubule.id(), bare.id());
+    map.finish()
+}
+
+fn route_defect(
+    configure: impl FnOnce(&mut Schema) -> Result<(), AdmissionError>,
+    build: impl FnOnce(&mut Assembly<'_>, RateClass) -> Result<(), AdmissionError>,
+) -> Option<CompileDefect> {
+    let mut schema = Schema::new(every_route_anatomy().expect("anatomy")).expect("schema");
+    watery_spaces_left_out(&mut schema);
+    configure(&mut schema).expect("schema setup");
+    let class = wave().expect("class");
+    match assemble(schema, |mut body| {
+        build(&mut body, class)?;
+        body.compile()
+    }) {
+        Err(AdmissionError::Compile(defect)) => Some(defect),
+        other => panic!("expected compile defect, got {:?}", other.err()),
+    }
+}
+
+fn zero_site<'b, O: Owner, C: SiteSet, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, O>,
+    route: &SiteRoute<'b, O, C, Q>,
+    class: RateClass,
+) {
+    let still = laws.site_kernel(|mut k| {
+        let zero = k.zero::<Rate<Q>>();
+        k.finish(zero, laws.every_mode(), class)
+    });
+    laws.transfer_at(route, still);
+}
+
+fn zero_edge<'b, O: Owner, E: EdgeKind, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, O>,
+    route: &EdgeRoute<'b, O, Q, E>,
+    class: RateClass,
+) {
+    let still = laws.edge_kernel(|mut k| {
+        let zero = k.zero::<Rate<Q>>();
+        k.finish(zero, laws.every_mode(), class)
+    });
+    laws.transfer_along(route, still);
+}
+
+fn zero_body<'b, O: Owner, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, O>,
+    route: &Pair<'b, O, Q>,
+    class: RateClass,
+) {
+    let still = laws.kernel(|mut k| {
+        let zero = k.zero::<Rate<Q>>();
+        k.finish(zero, laws.every_mode(), class)
+    });
+    laws.transfer(Transfer::new(route, still));
+}
+
+#[test]
+fn every_required_family_refuses_a_missing_endpoint_pool() {
+    let named = |owner, local| LawName { owner, local };
+    let endpoint = |owner, local, site, space, species| {
+        Some(CompileDefect::RouteEndpoint {
+            law: named(owner, local),
+            site: Some(site),
+            space,
+            species,
+        })
+    };
+
+    assert_eq!(
+        route_defect(
+            |_| Ok(()),
+            |body, class| {
+                let (mut rn, ports) = body.renal()?.parts();
+                let route = ports.reclaim::<Sodium>(&mut rn);
+                zero_edge(&mut rn, &route, class);
+                body.add(rn.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "RN",
+            "reclaim sodium",
+            site::<VesselSegment>("tubule"),
+            Space::Lumen,
+            Species::Sodium,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.carry::<Sodium, CapillaryBed>(Space::Plasma);
+                Ok(())
+            },
+            |body, class| {
+                let (mut fl, ports) = body.fluids()?.parts();
+                let route = ports.exchange::<Sodium>(&mut fl);
+                zero_site(&mut fl, &route, class);
+                body.add(fl.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "FL",
+            "exchange sodium",
+            site::<CapillaryBed>("bare bed"),
+            Space::Interstitium,
+            Species::Sodium,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |_| Ok(()),
+            |body, class| {
+                let (mut cv, ports) = body.cardiovascular()?.parts();
+                let route = ports.stroke_work(&mut cv);
+                zero_site(&mut cv, &route, class);
+                body.add(cv.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "CV",
+            "stroke work",
+            site::<TissueSite>("body"),
+            Space::Elastic,
+            Species::Energy,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |_| Ok(()),
+            |body, class| {
+                let (mut cv, ports) = body.cardiovascular()?.parts();
+                let route = ports.gravity_work(&mut cv);
+                zero_edge(&mut cv, &route, class);
+                body.add(cv.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "CV",
+            "gravity work",
+            site::<TissueSite>("body"),
+            Space::Elastic,
+            Species::Energy,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |_| Ok(()),
+            |body, class| {
+                let (mut cv, ports) = body.cardiovascular()?.parts();
+                let route = ports.wall_work(&mut cv);
+                zero_body(&mut cv, &route, class);
+                body.add(cv.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "CV",
+            "wall work",
+            site::<TissueSite>("body"),
+            Space::Elastic,
+            Species::Energy,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.pool::<Energy>(site::<TissueSite>("body"), Space::Elastic)?;
+                Ok(())
+            },
+            |body, class| {
+                let (mut cv, ports) = body.cardiovascular()?.parts();
+                let route = ports.dissipation(&mut cv);
+                zero_body(&mut cv, &route, class);
+                body.add(cv.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "CV",
+            "dissipation",
+            site::<TissueSite>("body"),
+            Space::Thermal,
+            Species::Energy,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.carry::<Sodium, CapillaryBed>(Space::Interstitium);
+                Ok(())
+            },
+            |body, class| {
+                let (mut fl, ports) = body.fluids()?.parts();
+                let route = ports.cell_membrane::<CapillaryBed, Sodium>(&mut fl);
+                zero_site(&mut fl, &route, class);
+                body.add(fl.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "FL",
+            "cell membrane sodium",
+            site::<CapillaryBed>("bare bed"),
+            Space::Cells,
+            Species::Sodium,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.carry::<Oxygen, CapillaryBed>(Space::Plasma);
+                Ok(())
+            },
+            |body, class| {
+                let (mut rs, ports) = body.respiratory(None)?.parts();
+                let route = ports.alveolar::<Oxygen>(&mut rs);
+                zero_site(&mut rs, &route, class);
+                body.add(rs.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "RS",
+            "alveolar oxygen",
+            site::<CapillaryBed>("lung bed"),
+            Space::Gas,
+            Species::Oxygen,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |_| Ok(()),
+            |body, class| {
+                let (mut rs, ports) = body.respiratory(None)?.parts();
+                let route = ports.lining(&mut rs);
+                zero_site(&mut rs, &route, class);
+                body.add(rs.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "RS",
+            "lining water",
+            site::<CapillaryBed>("lung bed"),
+            Space::Gas,
+            Species::Water,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.pool::<Triglyceride>(site::<CapillaryBed>("fat bed"), Space::Plasma)?;
+                Ok(())
+            },
+            |body, class| {
+                let (mut mt, ports) = body.metabolism(None)?.parts();
+                let route = ports.fat_into_cells::<Beds<Fat>>(&mut mt);
+                zero_site(&mut mt, &route, class);
+                body.add(mt.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "MT",
+            "endothelium triglyceride",
+            site::<CapillaryBed>("fat bed"),
+            Space::Cells,
+            Species::Triglyceride,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |_| Ok(()),
+            |body, class| {
+                let (mut rs, ports) = body.respiratory(None)?.parts();
+                let route = ports.airway::<Oxygen>(&mut rs);
+                zero_edge(&mut rs, &route, class);
+                body.add(rs.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "RS",
+            "airway oxygen",
+            site::<TissueSite>("conducting airway"),
+            Space::Gas,
+            Species::Oxygen,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |_| Ok(()),
+            |body, class| {
+                let (mut gi, ports) = body.gastrointestinal(None)?.parts();
+                let route = ports.transit::<Sodium>(&mut gi);
+                zero_edge(&mut gi, &route, class);
+                body.add(gi.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "GI",
+            "transit sodium",
+            site::<VesselSegment>("stomach"),
+            Space::Lumen,
+            Species::Sodium,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.carry::<Glucose, Alimentary>(Space::Lumen);
+                Ok(())
+            },
+            |body, class| {
+                let (mut gi, ports) = body.gastrointestinal(None)?.parts();
+                let route = ports.absorption::<Glucose>(&mut gi);
+                zero_edge(&mut gi, &route, class);
+                body.add(gi.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "GI",
+            "absorb glucose",
+            site::<CapillaryBed>("gut bed"),
+            Space::Plasma,
+            Species::Glucose,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.carry::<Triglyceride, Alimentary>(Space::Lumen);
+                Ok(())
+            },
+            |body, class| {
+                let (mut gi, ports) = body.gastrointestinal(None)?.parts();
+                let route = ports.chyle(&mut gi);
+                zero_edge(&mut gi, &route, class);
+                body.add(gi.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "GI",
+            "chyle triglyceride",
+            site::<CapillaryBed>("gut bed"),
+            Space::Interstitium,
+            Species::Triglyceride,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.carry::<Iron, Alimentary>(Space::Lumen);
+                Ok(())
+            },
+            |body, class| {
+                let (mut gi, ports) = body.gastrointestinal(None)?.parts();
+                let route = ports.shedding(&mut gi);
+                zero_edge(&mut gi, &route, class);
+                body.add(gi.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "GI",
+            "shed iron",
+            site::<CapillaryBed>("gut bed"),
+            Space::Cells,
+            Species::Iron,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.pool::<Ammonium>(site::<CapillaryBed>("bare bed"), Space::Cells)?;
+                Ok(())
+            },
+            |body, class| {
+                let (mut rn, ports) = body.renal()?.parts();
+                let route = ports.secretion::<Ammonium>(&mut rn);
+                zero_edge(&mut rn, &route, class);
+                body.add(rn.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "RN",
+            "secrete ammonium",
+            site::<VesselSegment>("tubule"),
+            Space::Lumen,
+            Species::Ammonium,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |schema| {
+                schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+                Ok(())
+            },
+            |body, class| {
+                let (mut mt, ports) = body.metabolism(None)?.parts();
+                let route = ports.bed_heat(&mut mt);
+                zero_site(&mut mt, &route, class);
+                body.add(mt.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "MT",
+            "bed heat",
+            site::<TissueSite>("body"),
+            Space::Thermal,
+            Species::Energy,
+        )
+    );
+    assert_eq!(
+        route_defect(
+            |_| Ok(()),
+            |body, class| {
+                let (mut fl, ports) = body.fluids()?.parts();
+                let route = ports.pump_work(&mut fl);
+                zero_site(&mut fl, &route, class);
+                body.add(fl.finish());
+                Ok(())
+            },
+        ),
+        endpoint(
+            "FL",
+            "pump work",
+            site::<CapillaryBed>("bare bed"),
+            Space::Thermal,
+            Species::Energy,
+        )
+    );
+}
+
+#[test]
+fn body_energy_families_refuse_a_map_without_a_tissue_root() -> Result<(), AdmissionError> {
+    let vessel_root = || -> Result<Schema, AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let aorta = map.site::<VesselSegment>("aorta", at()?);
+        let bed = map.site::<CapillaryBed>("bed", at()?).id();
+        map.contain(aorta.id(), bed);
+        map.connect(Network::Vascular, aorta.id(), bed);
+        map.connect(Network::Vascular, bed, aorta.id());
+        let mut schema = Schema::new(map.finish()?)?;
+        watery_spaces_left_out(&mut schema);
+        schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+        Ok(schema)
+    };
+    let class = wave()?;
+    let run = |build: fn(&mut Assembly<'_>, RateClass) -> Result<(), AdmissionError>| {
+        assemble(vessel_root().expect("schema"), |mut body| {
+            build(&mut body, class)?;
+            body.compile()
+        })
+        .err()
+    };
+    let missing = |owner, local, space| {
+        Some(AdmissionError::Compile(CompileDefect::RouteEndpoint {
+            law: LawName { owner, local },
+            site: None,
+            space,
+            species: Species::Energy,
+        }))
+    };
+    assert_eq!(
+        run(|body, class| {
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let route = ports.stroke_work(&mut cv);
+            zero_site(&mut cv, &route, class);
+            body.add(cv.finish());
+            Ok(())
+        }),
+        missing("CV", "stroke work", Space::Elastic)
+    );
+    assert_eq!(
+        run(|body, class| {
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let route = ports.gravity_work(&mut cv);
+            zero_edge(&mut cv, &route, class);
+            body.add(cv.finish());
+            Ok(())
+        }),
+        missing("CV", "gravity work", Space::Elastic)
+    );
+    assert_eq!(
+        run(|body, class| {
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let route = ports.wall_work(&mut cv);
+            zero_body(&mut cv, &route, class);
+            body.add(cv.finish());
+            Ok(())
+        }),
+        missing("CV", "wall work", Space::Elastic)
+    );
+    assert_eq!(
+        run(|body, class| {
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let route = ports.dissipation(&mut cv);
+            zero_body(&mut cv, &route, class);
+            body.add(cv.finish());
+            Ok(())
+        }),
+        missing("CV", "dissipation", Space::Elastic)
+    );
+    assert_eq!(
+        run(|body, class| {
+            let (mut mt, ports) = body.metabolism(None)?.parts();
+            let route = ports.bed_heat(&mut mt);
+            zero_site(&mut mt, &route, class);
+            body.add(mt.finish());
+            Ok(())
+        }),
+        missing("MT", "bed heat", Space::Thermal)
+    );
+    Ok(())
+}
+
+#[test]
+fn families_that_allow_absent_pools_drop_only_missing_sites() -> Result<(), AdmissionError> {
+    let mut schema = Schema::new(every_route_anatomy()?)?;
+    schema.leave_out(Space::Lumen, "a bench without vessel flow");
+    let sa = site::<Junction>("sinoatrial junction");
+    for space in [Space::Vesicle, Space::Cleft, Space::Bound] {
+        schema.pool::<Acetylcholine>(sa, space)?;
+    }
+    schema.pool::<Vasopressin>(site::<CapillaryBed>("bare bed"), Space::Plasma)?;
+    schema.pool::<Vasopressin>(site::<CapillaryBed>("bare bed"), Space::Bound)?;
+    schema.pool::<Vasopressin>(site::<CapillaryBed>("skin bed"), Space::Plasma)?;
+    for bed in ["gut bed", "liver bed"] {
+        let bed = site::<CapillaryBed>(bed);
+        schema.pool::<Iron>(bed, Space::Interstitium)?;
+        schema.pool::<Iron>(bed, Space::Cells)?;
+    }
+    schema.pool::<Iron>(site::<CapillaryBed>("fat bed"), Space::Interstitium)?;
+    schema.pool::<Energy>(site::<TissueSite>("body"), Space::Thermal)?;
+    schema.pool::<Energy>(site::<TissueSite>("skin heat site"), Space::Thermal)?;
+    let class = wave()?;
+    let body = assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let starling = ports.starling(&mut fl);
+        starling.keeps_back::<Vasopressin>(&mut fl);
+        starling.keeps_back::<Iron>(&mut fl);
+        zero_site(&mut fl, &starling, class);
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        zero_site(&mut fl, &water, class);
+        body.add(fl.finish());
+        let (mut ns, ports) = body.nervous()?.parts();
+        let release = ports.release::<Acetylcholine>(&mut ns);
+        zero_site(&mut ns, &release, class);
+        let reuptake = ports.reuptake::<Acetylcholine>(&mut ns);
+        zero_site(&mut ns, &reuptake, class);
+        body.add(ns.finish());
+        let (mut rc, ports) = body.receptor()?.parts();
+        let ach = ports.binding::<Junction, Acetylcholine>(&mut rc);
+        zero_site(&mut rc, &ach, class);
+        let avp = ports.binding::<Blood, Vasopressin>(&mut rc);
+        zero_site(&mut rc, &avp, class);
+        body.add(rc.finish());
+        let (mut hc, ports) = body.hematology(None)?.parts();
+        let iron = ports.iron_into_cells(&mut hc);
+        zero_site(&mut hc, &iron, class);
+        body.add(hc.finish());
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let conduction = ports.conduction(&mut mt);
+        zero_site(&mut mt, &conduction, class);
+        body.add(mt.finish());
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let carriage = ports.heat_carried(&mut cv);
+        let still = cv.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Energy>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        carriage.post(&mut cv, still);
+        body.add(cv.finish());
+        let decl = HeldDeclaration::<Endocrine>::new(Vec::new(), Vec::new(), "synthetic")
+            .pool::<Vasopressin, Beds<Skin>>(Space::Plasma)
+            .pool::<Iron, Beds<Fat>>(Space::Interstitium);
+        let (held, _) = body.hold(decl)?.parts();
+        body.add(held.finish());
+        body.compile()
+    })?;
+    assert_eq!(columns(&body, "release acetylcholine").len(), 1);
+    assert_eq!(columns(&body, "reuptake acetylcholine").len(), 1);
+    assert_eq!(columns(&body, "binding acetylcholine").len(), 1);
+    assert_eq!(columns(&body, "binding vasopressin").len(), 1);
+    assert_eq!(columns(&body, "cell membrane iron").len(), 2);
+    assert_eq!(columns(&body, "conduction").len(), 1);
+    assert_eq!(columns(&body, "heat carried by blood").len(), 1);
+    Ok(())
+}

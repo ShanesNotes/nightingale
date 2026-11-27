@@ -48,7 +48,7 @@ pub(crate) fn compile(
     let unread = check_chance(&fragments, &schema.anatomy)?;
     check_volume(&schema, &owed, &fragments)?;
 
-    let reaches = Reaches::of(&schema, &fragments);
+    let reaches = Reaches::of(&schema, &fragments)?;
     check_crossings(&fragments, &reaches)?;
     let rows = Rows::lay_out(&schema, &fragments, &reaches, &held);
     let chance = ChanceNames::of(&fragments);
@@ -756,12 +756,14 @@ fn obligations<'f>(
         });
     }
     let requested = |family| (fragments.iter()).any(|fragment| fragment.families.contains(&family));
-    let unowed = !requested(Family::Sinusoids) && !reaches_of(Family::Sinusoids, schema).is_empty();
+    let sinusoids = LawName {
+        owner: crate::Hepatic::CARD,
+        local: Family::Sinusoids.name(),
+    };
+    let unowed =
+        !requested(Family::Sinusoids) && !reaches_of(sinusoids, Family::Sinusoids, schema)?.is_empty();
     if requested(Family::Circulation) && unowed {
-        let (owner, local) = (crate::Hepatic::CARD, Family::Sinusoids.name());
-        return Err(CompileDefect::OmittedLaw {
-            law: LawName { owner, local },
-        });
+        return Err(CompileDefect::OmittedLaw { law: sinusoids });
     }
     let mut owed = Vec::new();
     for water in &schema.boundaries {
@@ -1287,28 +1289,46 @@ fn flowing(site: SiteId) -> PoolRef {
     water(site, space)
 }
 impl Reaches {
-    fn of(schema: &Schema, fragments: &[FragmentData]) -> Self {
+    fn of(schema: &Schema, fragments: &[FragmentData]) -> Result<Self, CompileDefect> {
         let mut pools: Vec<PoolRef> = (schema.pools())
             .map(|(site, space, species)| PoolRef { site, space, species })
             .collect();
         pools.sort_unstable();
-        let families = fragments
-            .iter()
-            .flat_map(|fragment| fragment.families.iter().copied());
-        let routes = families
-            .map(|family| {
-                let held = |reach: &Reach| {
-                    reach.ends.iter().all(|end| match end {
-                        Terminal::Pool(pool) => pools.binary_search(pool).is_ok(),
-                        Terminal::Exterior(_) => true,
-                    })
+        let mut routes = Vec::new();
+        for fragment in fragments {
+            for &family in &fragment.families {
+                let law = LawName {
+                    owner: fragment.owner,
+                    local: family.name(),
                 };
-                let mut reaches = reaches_of(family, schema);
-                reaches.retain(held);
-                (family, reaches)
-            })
-            .collect();
-        Self { routes, pools }
+                let mut reaches = reaches_of(law, family, schema)?;
+                if family.allows_absent_pool() {
+                    reaches.retain(|reach| {
+                        reach.ends.iter().all(|end| match end {
+                            Terminal::Pool(pool) => pools.binary_search(pool).is_ok(),
+                            Terminal::Exterior(_) => true,
+                        })
+                    });
+                } else {
+                    for reach in &reaches {
+                        for end in reach.ends {
+                            if let Terminal::Pool(pool) = end
+                                && pools.binary_search(&pool).is_err()
+                            {
+                                return Err(CompileDefect::RouteEndpoint {
+                                    law,
+                                    site: Some(pool.site),
+                                    space: pool.space,
+                                    species: pool.species,
+                                });
+                            }
+                        }
+                    }
+                }
+                routes.push((family, reaches));
+            }
+        }
+        Ok(Self { routes, pools })
     }
     fn of_family(&self, family: Family) -> &[Reach] {
         (self.routes.iter())
@@ -1341,7 +1361,7 @@ fn sinusoidal(anatomy: &Anatomy, (from, to): (SiteId, SiteId)) -> bool {
     liver(from) || liver(to)
 }
 
-fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
+fn reaches_of(law: LawName, family: Family, schema: &Schema) -> Result<Vec<Reach>, CompileDefect> {
     let anatomy = &schema.anatomy;
     let edge = |(from, to): (SiteId, SiteId), ends: [PoolRef; 2]| Reach {
         context: Context::Edge { from, to },
@@ -1359,12 +1379,20 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
         let root = anatomy.root().filter(|root| root.class() == Class::TissueSite)?;
         Some(species_at(root, space, Species::Energy))
     };
+    let require_store = |space: Space| {
+        store(space).ok_or(CompileDefect::RouteEndpoint {
+            law,
+            site: None,
+            space,
+            species: Species::Energy,
+        })
+    };
     let heat = |site| species_at(site, Space::Thermal, Species::Energy);
     let paid = |work| match schema.payers.iter().find(|payer| payer.0 == work) {
         Some(&(_, bed)) => Terminal::Pool(heat(bed)),
         None => Terminal::Exterior("chemical energy"),
     };
-    match family {
+    Ok(match family {
         Family::Circulation => (anatomy.vascular())
             .filter(|&pair| !anatomy.is_valve(pair) && !sinusoidal(anatomy, pair))
             .map(blood)
@@ -1447,37 +1475,51 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
                 )
             })
             .collect(),
-        Family::StrokeWork => (anatomy.in_set(Sites::Blood).into_iter())
-            .filter_map(|site| {
-                Some(Reach {
-                    context: Context::Site(site),
-                    ends: [paid(Work::Stroke), Terminal::Pool(store(Space::Elastic)?)],
-                })
-            })
-            .collect(),
-        Family::GravityWork => (anatomy.vascular())
-            .filter_map(|(from, to)| {
-                Some(Reach {
-                    context: Context::Edge { from, to },
-                    ends: [
-                        Terminal::Exterior("gravity"),
-                        Terminal::Pool(store(Space::Elastic)?),
-                    ],
-                })
-            })
-            .collect(),
-        Family::WallWork => (store(Space::Elastic).into_iter())
-            .map(|elastic| Reach {
+        Family::StrokeWork => {
+            let sites = anatomy.in_set(Sites::Blood);
+            if sites.is_empty() {
+                Vec::new()
+            } else {
+                let elastic = require_store(Space::Elastic)?;
+                sites
+                    .into_iter()
+                    .map(|site| Reach {
+                        context: Context::Site(site),
+                        ends: [paid(Work::Stroke), Terminal::Pool(elastic)],
+                    })
+                    .collect()
+            }
+        }
+        Family::GravityWork => {
+            let edges: Vec<_> = anatomy.vascular().collect();
+            if edges.is_empty() {
+                Vec::new()
+            } else {
+                let elastic = require_store(Space::Elastic)?;
+                edges
+                    .into_iter()
+                    .map(|(from, to)| Reach {
+                        context: Context::Edge { from, to },
+                        ends: [Terminal::Exterior("gravity"), Terminal::Pool(elastic)],
+                    })
+                    .collect()
+            }
+        }
+        Family::WallWork => {
+            let elastic = require_store(Space::Elastic)?;
+            vec![Reach {
                 context: Context::Body,
                 ends: [paid(Work::Walls), Terminal::Pool(elastic)],
-            })
-            .collect(),
-        Family::Dissipation => (store(Space::Elastic).zip(store(Space::Thermal)).into_iter())
-            .map(|(elastic, thermal)| Reach {
+            }]
+        }
+        Family::Dissipation => {
+            let elastic = require_store(Space::Elastic)?;
+            let thermal = require_store(Space::Thermal)?;
+            vec![Reach {
                 context: Context::Body,
                 ends: [Terminal::Pool(elastic), Terminal::Pool(thermal)],
-            })
-            .collect(),
+            }]
+        }
         Family::Across(wall, set, species) => {
             let [from, to] = match wall {
                 Wall::Cell => [Space::Interstitium, Space::Cells],
@@ -1533,9 +1575,15 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
                     .collect(),
             }
         }
-        Family::Heat(HeatRoute::FromBeds) => beds()
-            .filter_map(|bed| Some(at(bed, [heat(bed), store(Space::Thermal)?])))
-            .collect(),
+        Family::Heat(HeatRoute::FromBeds) => {
+            let list: Vec<_> = beds().collect();
+            if list.is_empty() {
+                Vec::new()
+            } else {
+                let core = require_store(Space::Thermal)?;
+                list.into_iter().map(|bed| at(bed, [heat(bed), core])).collect()
+            }
+        }
         Family::Heat(HeatRoute::CarriedByBlood) => beds()
             .filter_map(|bed| {
                 let (core, held) = (store(Space::Thermal)?, heat(store_above(schema, bed)?));
@@ -1554,7 +1602,7 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
                 ends: [Terminal::Exterior("chemical energy"), Terminal::Pool(heat(bed))],
             })
             .collect(),
-    }
+    })
 }
 
 struct Placement {
@@ -3741,7 +3789,11 @@ mod tests {
 
     fn reached(family: Family, species: Species) -> Result<Vec<Reached>, AdmissionError> {
         let schema = whole_body()?;
-        let reaches = reaches_of(family, &schema).into_iter().map(|reach| {
+        let law = LawName {
+            owner: "TEST",
+            local: family.name(),
+        };
+        let reaches = reaches_of(law, family, &schema)?.into_iter().map(|reach| {
             let end = |at: usize| match reach.ends[at] {
                 Terminal::Pool(pool) if pool.species == species => (pool.site.key(), pool.space),
                 Terminal::Pool(pool) => panic!("a pool of {species:?}, not of {:?}", pool.species),
@@ -3904,5 +3956,20 @@ mod tests {
             None
         );
         Ok(())
+    }
+
+    #[test]
+    fn fluid_families_forbid_absent_pools() {
+        for family in [
+            Family::Circulation,
+            Family::Valves,
+            Family::Sinusoids,
+            Family::Starling,
+            Family::Lymph,
+            Family::Filtration,
+            Family::Tubular,
+        ] {
+            assert!(!family.allows_absent_pool(), "{family:?}");
+        }
     }
 }

@@ -292,6 +292,39 @@ impl Family {
             | Family::Heat(_) => None,
         }
     }
+    pub(crate) fn allows_absent_pool(self) -> bool {
+        match self {
+            Family::Release(_)
+            | Family::Reuptake(_)
+            | Family::Binding(..)
+            | Family::Across(Wall::Cell, Sites::Class(crate::Class::CapillaryBed), Species::Iron)
+            | Family::Heat(HeatRoute::Conduction | HeatRoute::CarriedByBlood) => true,
+            Family::Circulation
+            | Family::Valves
+            | Family::Sinusoids
+            | Family::Starling
+            | Family::Lymph
+            | Family::Filtration
+            | Family::Tubular
+            | Family::Reclaim(_)
+            | Family::Exchange(_)
+            | Family::StrokeWork
+            | Family::GravityWork
+            | Family::WallWork
+            | Family::Dissipation
+            | Family::Across(Wall::Cell | Wall::Alveolar | Wall::Lining | Wall::Endothelium, ..)
+            | Family::Along(
+                Passage::Airway
+                | Passage::Transit
+                | Passage::Absorption
+                | Passage::Chyle
+                | Passage::Shedding
+                | Passage::Secretion,
+                _,
+            )
+            | Family::Heat(HeatRoute::FromBeds | HeatRoute::Pumps) => false,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Crossed {
