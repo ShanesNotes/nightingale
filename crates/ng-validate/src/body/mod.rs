@@ -116,7 +116,7 @@ fn leak<'b, Q: Substance>(
 
 /// The composition root of the whole body: the slice's systems, and every other card held.
 pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
-    assembled(body_schema()?, false, false)
+    assembled(body_schema()?, false)
 }
 
 /// The whole body with four steady leaks for its certificate's tests, each into the body at the signed rate its
@@ -126,12 +126,12 @@ pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
 pub fn whole_body_leaking() -> Result<CompiledBody, AdmissionError> {
     let mut schema = body_schema()?;
     schema::leaks(&mut schema)?;
-    assembled(schema, true, false)
+    assembled(schema, true)
 }
 
-fn assembled(schema: Schema, leaking: bool, heat: bool) -> Result<CompiledBody, AdmissionError> {
+fn assembled(schema: Schema, leaking: bool) -> Result<CompiledBody, AdmissionError> {
     assemble(schema, |mut body| {
-        holds::hold_every_card(&mut body, heat)?;
+        holds::hold_every_card(&mut body)?;
         exits(&mut body, leaking)?;
         let fragment = ng_cardiovascular::declare_in_the_whole_body(body.cardiovascular()?)?;
         body.add(fragment);
@@ -177,7 +177,7 @@ mod placement {
     /// pleural fluid.
     #[test]
     fn the_airway_heat_leaves_the_airway_store_beside_the_water_it_follows() -> Result<(), AdmissionError> {
-        let body = assembled(body_schema()?, false, true)?;
+        let body = whole_body()?;
         let thermal = ("conducting airway", Species::Energy, Space::Thermal, -1);
         let gas = ("conducting airway", Species::Water, Space::Gas, -1);
         assert_eq!(

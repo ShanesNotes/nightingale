@@ -531,7 +531,6 @@ const ZERO_STAND_INS: &[(&str, Zero)] = &[
     ("mt.sweat-chloride", zero::<Chloride>),
     ("mt.sweat-sodium", zero::<Sodium>),
     ("mt.sweat-water", zero::<Water>),
-    ("rs.airway-heat", zero::<Energy>),
     ("rs.expired-carbon-dioxide", zero::<CarbonDioxide>),
     ("rs.expired-nitrogen-gas", zero::<NitrogenGas>),
     ("rs.expired-oxygen", zero::<Oxygen>),
@@ -1105,8 +1104,7 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
 /// core store's capacity `c_body m_core` (MT-013, MT-015), the skin store's `c_body m_skin` (MT-013, MT-014), the skin's
 /// conductance `K_min A` (MT-020, MT-021), radiation's `h_r A` (MT-021, MT-022), still air's `h_c0 A` (MT-021,
 /// MT-023), still air's speed `v_0` (MT-024) and its width (MT-025), the Lewis relation (MT-026), the skin's
-/// wettedness from diffusion (MT-027) and the latent heat (MT-028). The room's air speed is its ratio to 0.1 m/s, so
-/// still air reads 1.
+/// wettedness from diffusion (MT-027). The room's air speed is its ratio to 0.1 m/s, so still air reads 1.
 /// Model defaults with no row: the thermal zero (ticket 12's second ruling), the airway store's conductance, the air
 /// speed's exponent (Stolwijk's square root), one clo's conductance over the body's surface for dry heat (Gagge's
 /// 0.155 m2 C/W a clo) and for vapour (0.143), and the evaporation's forcing, which keeps the period and amplitude of
@@ -1130,16 +1128,20 @@ fn tissue_heat(packet: &mut ParameterPacket<SyntheticFixture>, amplitude: f64) -
     set::<HeatConductance>(packet, "mt.clothing-vapour-conductance", body, 1.8e5)?;
     set::<Quotient<Temperature, Pressure>>(packet, "mt.lewis-relation", body, 2.2)?;
     set::<Dimensionless>(packet, "mt.diffusion-wettedness", body, 0.06)?;
-    set::<Quotient<Rate<Energy>, Rate<Water>>>(packet, "mt.latent-heat", body, 2.2e7)?;
     set::<Time>(packet, "mt.evaporation-period", body, 300.0)?;
     set::<Dimensionless>(packet, "mt.evaporation-amplitude", body, amplitude)
 }
 
 /// The constants the skin's and the airway's laws both read, one design value each for the two cards' keys, so one
-/// room gives the skin and the airway one saturated vapour pressure: the vapour form's (MT-030 to MT-033, which the
-/// respiratory keys bind to as well), with Kingma's `c` for degrees Celsius moved onto the room's absolute scale.
+/// room gives the skin and the airway one saturated vapour pressure and their water one latent heat: water's latent
+/// heat (MT-028, and RS-015, which research 16 says one record should serve with it) and the vapour form's (MT-030 to
+/// MT-033, which the respiratory keys bind to as well), with Kingma's `c` for degrees Celsius moved onto the room's
+/// absolute scale.
 fn twins(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
     let body = Binding::Body;
+    for key in ["mt.latent-heat", "rs.latent-heat"] {
+        set::<Quotient<Rate<Energy>, Rate<Water>>>(packet, key, body, 2.2e7)?;
+    }
     for key in ["mt.vapour-reference", "rs.vapour-reference"] {
         set::<Pressure>(packet, key, body, 7.50062)?;
     }

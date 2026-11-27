@@ -419,7 +419,6 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         .map(|hold| format!("{} {:?} {:?} {}\n", hold.card, hold.held, hold.release, hold.line))
         .collect();
     expect![[r#"
-        RS Route("airway heat") Ticket(12, "RS") 01:171-172, 873
         GI Route("gut water") Ticket(13, "GI") 01:54, 876
         GI Route("gut sodium") Ticket(13, "GI") 01:77, 876
         GI Route("gut potassium") Ticket(13, "GI") 01:94, 876
@@ -614,9 +613,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 143: routes 84, pools 59
-        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 14, "MT": 41, "RS": 1}
-        by ticket {"09": 3, "12": 4, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 142: routes 83, pools 59
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 14, "MT": 41}
+        by ticket {"09": 3, "12": 3, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
