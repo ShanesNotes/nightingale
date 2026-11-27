@@ -1,4 +1,6 @@
-use crate::checkpoint::{BranchFork, CheckpointError, HistoryStore, RecordFormat};
+use crate::checkpoint::{
+    BranchFork, Checkpoint, CheckpointError, HistoryStore, RecordFormat, Trailer, VerifiedBase, verify_base,
+};
 use crate::record::PatientRecord;
 use crate::session::Session;
 use alloc::collections::VecDeque;
@@ -6,7 +8,7 @@ use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, AdmissibleSet, ByteReader, ColumnId, Compensated, CompiledBody, ConservedBasis,
     DenseBasis, Digest, Dimensionless, Interval, Malformed, Measure, QuantityId, RecordHash, RhythmId,
-    SimTime, Slot, VerifiedStep,
+    RunIdentity, SimTime, Slot, VerifiedStep,
 };
 
 pub(crate) fn push_bits(bytes: &mut Vec<u8>, value: Compensated) {
@@ -391,13 +393,68 @@ impl LedgerChunk {
 
 type Shape = (usize, usize, usize);
 
-fn linked(hash: RecordHash, previous: Digest, revision: u64, image: Digest, ledger: &[u8]) -> Digest {
-    let mut bytes = Vec::with_capacity(104);
-    bytes.extend_from_slice(previous.as_bytes());
-    bytes.extend_from_slice(&revision.to_be_bytes());
-    bytes.extend_from_slice(image.as_bytes());
-    bytes.extend_from_slice(Digest::for_record(ledger, hash).as_bytes());
+/// A step's 96-byte chain witness: the seal it builds on, its image digest and its ledger digest.
+/// Its own seal recomputes from these three digests and its revision under the run's hash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Witness {
+    previous: Digest,
+    image: Digest,
+    ledger: Digest,
+}
+
+const _: () = assert!(size_of::<Witness>() == 96);
+
+impl Witness {
+    pub const fn new(previous: Digest, image: Digest, ledger: Digest) -> Self {
+        Self {
+            previous,
+            image,
+            ledger,
+        }
+    }
+    pub const fn previous(&self) -> Digest {
+        self.previous
+    }
+    pub const fn image(&self) -> Digest {
+        self.image
+    }
+    pub const fn ledger(&self) -> Digest {
+        self.ledger
+    }
+    pub fn seal(&self, hash: RecordHash, revision: u64) -> Digest {
+        linked_digests(hash, self.previous, revision, self.image, self.ledger)
+    }
+    pub fn from_link(hash: RecordHash, link: &[u8]) -> Option<Self> {
+        let (previous, rest) = link.split_at_checked(32)?;
+        let (image, bytes) = rest.split_at_checked(32)?;
+        let previous = Digest::from_bytes(*previous.first_chunk()?);
+        let image = Digest::from_bytes(*image.first_chunk()?);
+        let ledger = Digest::for_record(bytes, hash);
+        Some(Self {
+            previous,
+            image,
+            ledger,
+        })
+    }
+}
+
+fn linked_digests(
+    hash: RecordHash,
+    previous: Digest,
+    revision: u64,
+    image: Digest,
+    ledger: Digest,
+) -> Digest {
+    let mut bytes = [0u8; 104];
+    bytes[..32].copy_from_slice(previous.as_bytes());
+    bytes[32..40].copy_from_slice(&revision.to_be_bytes());
+    bytes[40..72].copy_from_slice(image.as_bytes());
+    bytes[72..104].copy_from_slice(ledger.as_bytes());
     Digest::for_record(&bytes, hash)
+}
+
+fn linked(hash: RecordHash, previous: Digest, revision: u64, image: Digest, ledger: &[u8]) -> Digest {
+    linked_digests(hash, previous, revision, image, Digest::for_record(ledger, hash))
 }
 
 const LINK_HEAD: usize = 2 * size_of::<Digest>();
@@ -501,6 +558,7 @@ pub(crate) struct Link {
     chunk: LedgerChunk,
     image: Digest,
     seal: Digest,
+    witness: Witness,
     stored: Vec<u8>,
 }
 impl Link {
@@ -513,7 +571,7 @@ impl Link {
 #[derive(PartialEq)]
 pub(crate) struct Origin {
     pub(crate) image: Digest,
-    seal: Digest,
+    pub(crate) seal: Digest,
 }
 
 enum Chain {
@@ -547,7 +605,7 @@ pub(crate) struct History {
     columns: usize,
     origin: Origin,
     chain: Chain,
-    unkept: Vec<(Digest, Vec<u8>)>,
+    unkept: Vec<(Digest, Vec<u8>, Witness)>,
 }
 impl History {
     pub(crate) fn opening(
@@ -633,17 +691,41 @@ impl History {
     pub(crate) fn head_segment(&self) -> Option<&HistorySegment> {
         self.chain.head().map(|head| &head.segment)
     }
-    pub(crate) fn oldest_unkept(&self) -> Option<Digest> {
-        self.unkept.first().map(|(seal, _)| *seal)
+    pub(crate) fn opened(&self) -> Option<SimTime> {
+        match &self.chain {
+            Chain::Opening => None,
+            Chain::Grown { opened, .. } => Some(*opened),
+        }
     }
-    pub(crate) fn unkept(&self) -> &[(Digest, Vec<u8>)] {
+    pub(crate) fn head_link_bytes(&self) -> Option<Vec<u8>> {
+        let head = self.chain.head()?;
+        let mut stored = Vec::with_capacity(LINK_HEAD + head.segment.chunk.byte_len());
+        stored.extend_from_slice(head.previous.as_bytes());
+        stored.extend_from_slice(head.image.as_bytes());
+        head.segment.chunk.write(&mut stored);
+        debug_assert_eq!(
+            linked(
+                self.format.hash(),
+                head.previous,
+                self.revision(),
+                head.image,
+                &stored[LINK_HEAD..],
+            ),
+            head.seal
+        );
+        Some(stored)
+    }
+    pub(crate) fn oldest_unkept(&self) -> Option<Digest> {
+        self.unkept.first().map(|(seal, _, _)| *seal)
+    }
+    pub(crate) fn unkept(&self) -> &[(Digest, Vec<u8>, Witness)] {
         &self.unkept
     }
     pub(crate) fn newest_unkept_before_head(&self) -> Option<Digest> {
         let head = self.seal();
         (self.unkept.iter().rev())
-            .find(|(seal, _)| *seal != head)
-            .map(|(seal, _)| *seal)
+            .find(|(seal, _, _)| *seal != head)
+            .map(|(seal, _, _)| *seal)
     }
     pub(crate) fn linked(&self, chunk: LedgerChunk, image: Digest) -> Link {
         let previous = self.seal();
@@ -653,17 +735,15 @@ impl History {
         chunk.write(&mut stored);
         debug_assert_eq!(stored.len(), LINK_HEAD + chunk.byte_len());
         let revision = self.revision() + 1;
-        let seal = linked(
-            self.format.hash(),
-            previous,
-            revision,
-            image,
-            &stored[LINK_HEAD..],
-        );
+        let hash = self.format.hash();
+        let ledger = Digest::for_record(&stored[LINK_HEAD..], hash);
+        let seal = linked_digests(hash, previous, revision, image, ledger);
+        let witness = Witness::new(previous, image, ledger);
         Link {
             chunk,
             image,
             seal,
+            witness,
             stored,
         }
     }
@@ -672,6 +752,7 @@ impl History {
             chunk,
             image,
             seal,
+            witness,
             stored,
         } = link;
         let revision = NonZeroU64::MIN.saturating_add(self.revision());
@@ -691,12 +772,12 @@ impl History {
             opened,
             head,
         };
-        self.unkept.push((seal, stored));
+        self.unkept.push((seal, stored, witness));
         self.keep_waiting(store);
     }
     pub(crate) fn keep_waiting(&mut self, store: &dyn HistoryStore) {
         let kept = (self.unkept.iter())
-            .position(|(seal, link)| store.keep(*seal, link).is_err())
+            .position(|(seal, link, witness)| store.keep_with_witness(*seal, link, *witness).is_err())
             .unwrap_or(self.unkept.len());
         self.unkept.drain(..kept);
     }
@@ -728,10 +809,17 @@ impl History {
             Some(0) => return Ok(seal == head.seal),
             Some(below) => below,
         };
+        let hash = self.format.hash();
+        let shape = head.segment.chunk.shape();
         let mut at = head.previous;
-        let between = usize::try_from(below - 1).unwrap_or(usize::MAX);
-        for walked in self.before_head(store).into_iter().flatten().take(between) {
-            at = walked?.previous;
+        let mut step_rev = self.revision() - 1;
+        for _ in 0..(below - 1) {
+            let (previous, _) = verify_ancestor_step(store, hash, shape, at, step_rev)?;
+            at = previous;
+            step_rev -= 1;
+        }
+        if revision == 0 && at != self.origin.seal {
+            return Err(CheckpointError::HistoryAltered { seal: at });
         }
         Ok(at == seal)
     }
@@ -740,6 +828,7 @@ impl History {
         start: Start,
         seal: Digest,
         revision: u64,
+        trailer: Option<Trailer>,
         store: &dyn HistoryStore,
     ) -> Result<Self, CheckpointError> {
         let Start {
@@ -750,43 +839,107 @@ impl History {
             parameters,
         } = start;
         let mut history = Self::from_opening(format, body, opening, run, image, parameters);
-        let mut walk = Walk {
-            store,
-            format,
-            shape: (
-                body.conserved_basis().combinations().len(),
-                body.columns().len(),
-                body.rhythms().len(),
-            ),
-            origin: history.origin.seal,
-            at: seal,
-            revision,
-            done: false,
+        let shape = (
+            body.conserved_basis().combinations().len(),
+            body.columns().len(),
+            body.rhythms().len(),
+        );
+        if revision == 0 {
+            if seal != history.origin.seal {
+                return Err(CheckpointError::HistoryAltered { seal });
+            }
+            return Ok(history);
+        }
+        let hash = format.hash();
+        let (newest, trailer_opened) = match trailer {
+            Some(Trailer { opened, head_link }) => {
+                let newest = parse_verified_link(hash, shape, seal, revision, &head_link)?;
+                (newest, Some(opened))
+            }
+            None => {
+                let newest = Walk {
+                    store,
+                    format,
+                    shape,
+                    origin: history.origin.seal,
+                    at: seal,
+                    revision,
+                    done: false,
+                }
+                .read()?;
+                (newest, None)
+            }
         };
-        let newest = walk.next().transpose()?;
-        let mut opened = newest.as_ref().map(|walked| walked.chunk.interval.start());
-        for walked in walk {
-            opened = Some(walked?.chunk.interval.start());
-        }
-        if let (Some(revision), Some(opened), Some(newest)) = (NonZeroU64::new(revision), opened, newest) {
-            let Walked {
-                chunk,
-                image,
-                seal,
-                previous,
-            } = newest;
-            let head = Head {
-                segment: HistorySegment { chunk },
-                image,
-                seal,
-                previous,
+        let opened = if revision == 1 {
+            if newest.previous != history.origin.seal {
+                return Err(CheckpointError::HistoryAltered {
+                    seal: newest.previous,
+                });
+            }
+            let head_start = newest.chunk.interval.start();
+            if let Some(opened) = trailer_opened
+                && opened != head_start
+            {
+                return Err(CheckpointError::Malformed);
+            }
+            head_start
+        } else if let Some(opened) = trailer_opened {
+            let mut at = newest.previous;
+            let mut step_rev = revision - 1;
+            let mut first_start = None;
+            while step_rev >= 1 {
+                let (previous, start) = verify_ancestor_step(store, hash, shape, at, step_rev)?;
+                if step_rev == 1 {
+                    first_start = start;
+                }
+                at = previous;
+                step_rev -= 1;
+            }
+            if at != history.origin.seal {
+                return Err(CheckpointError::HistoryAltered { seal: at });
+            }
+            if let Some(start) = first_start
+                && opened != start
+            {
+                return Err(CheckpointError::Malformed);
+            }
+            if opened > newest.chunk.interval.start() {
+                return Err(CheckpointError::Malformed);
+            }
+            opened
+        } else {
+            let walk = Walk {
+                store,
+                format,
+                shape,
+                origin: history.origin.seal,
+                at: newest.previous,
+                revision: revision - 1,
+                done: false,
             };
-            history.chain = Chain::Grown {
-                revision,
-                opened,
-                head,
-            };
-        }
+            let mut opened = None;
+            for walked in walk {
+                opened = Some(walked?.chunk.interval.start());
+            }
+            opened.ok_or(CheckpointError::HistoryAltered { seal })?
+        };
+        let Walked {
+            chunk,
+            image,
+            seal,
+            previous,
+        } = newest;
+        let head = Head {
+            segment: HistorySegment { chunk },
+            image,
+            seal,
+            previous,
+        };
+        history.chain = Chain::Grown {
+            revision: NonZeroU64::new(revision).expect("revision > 0"),
+            opened,
+            head,
+        };
         Ok(history)
     }
     pub(crate) fn digest(&self) -> Digest {
@@ -826,27 +979,64 @@ pub(crate) struct Walked {
     seal: Digest,
     previous: Digest,
 }
+fn parse_verified_link(
+    hash: RecordHash,
+    shape: Shape,
+    at: Digest,
+    revision: u64,
+    link: &[u8],
+) -> Result<Walked, CheckpointError> {
+    let altered = CheckpointError::HistoryAltered { seal: at };
+    let (previous, rest) = link.split_at_checked(32).ok_or(altered)?;
+    let (image, bytes) = rest.split_at_checked(32).ok_or(altered)?;
+    let previous = Digest::from_bytes(*previous.first_chunk().ok_or(altered)?);
+    let image = Digest::from_bytes(*image.first_chunk().ok_or(altered)?);
+    if linked(hash, previous, revision, image, bytes) != at {
+        return Err(altered);
+    }
+    let mut read = ByteReader::new(bytes);
+    let chunk = LedgerChunk::read(&mut read, shape).map_err(|_| altered)?;
+    read.finish().map_err(|_| altered)?;
+    Ok(Walked {
+        chunk,
+        image,
+        seal: at,
+        previous,
+    })
+}
+
+fn verify_ancestor_step(
+    store: &dyn HistoryStore,
+    hash: RecordHash,
+    shape: Shape,
+    at: Digest,
+    revision: u64,
+) -> Result<(Digest, Option<SimTime>), CheckpointError> {
+    if let Some(witness) = store.resolve_witness(&at) {
+        if witness.seal(hash, revision) != at {
+            return Err(CheckpointError::HistoryAltered { seal: at });
+        }
+        return Ok((witness.previous(), None));
+    }
+    let link = (store.resolve(&at)).ok_or(CheckpointError::HistoryMissing { seal: at })?;
+    let walked = parse_verified_link(hash, shape, at, revision, &link)?;
+    Ok((walked.previous, Some(walked.chunk.interval.start())))
+}
+
 impl Walk<'_> {
     fn read(&self) -> Result<Walked, CheckpointError> {
         let at = self.at;
-        let altered = CheckpointError::HistoryAltered { seal: at };
-        let link = (self.store.resolve(&at)).ok_or(CheckpointError::HistoryMissing { seal: at })?;
-        let (previous, rest) = link.split_at_checked(32).ok_or(altered)?;
-        let (image, bytes) = rest.split_at_checked(32).ok_or(altered)?;
-        let previous = Digest::from_bytes(*previous.first_chunk().ok_or(altered)?);
-        let image = Digest::from_bytes(*image.first_chunk().ok_or(altered)?);
-        if linked(self.format.hash(), previous, self.revision, image, bytes) != at {
-            return Err(altered);
-        }
-        let mut read = ByteReader::new(bytes);
-        let chunk = LedgerChunk::read(&mut read, self.shape).map_err(|_| altered)?;
-        read.finish().map_err(|_| altered)?;
-        Ok(Walked {
-            chunk,
-            image,
-            seal: at,
-            previous,
-        })
+        let Some(link) = self.store.resolve(&at) else {
+            if let Some(witness) = self.store.resolve_witness(&at) {
+                return if witness.seal(self.format.hash(), self.revision) == at {
+                    Err(CheckpointError::HistoryTrimmed { seal: at })
+                } else {
+                    Err(CheckpointError::HistoryAltered { seal: at })
+                };
+            }
+            return Err(CheckpointError::HistoryMissing { seal: at });
+        };
+        parse_verified_link(self.format.hash(), self.shape, at, self.revision, &link)
     }
 }
 impl Iterator for Walk<'_> {
@@ -934,18 +1124,28 @@ impl<'r> ConservationView<'r> {
 
 struct StoreOrUnkept<'a> {
     store: &'a dyn HistoryStore,
-    unkept: &'a [(Digest, Vec<u8>)],
+    unkept: &'a [(Digest, Vec<u8>, Witness)],
 }
 impl HistoryStore for StoreOrUnkept<'_> {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
         self.store.resolve(seal).or_else(|| {
             (self.unkept.iter().rev())
-                .find(|(held, _)| held == seal)
-                .map(|(_, bytes)| bytes.clone())
+                .find(|(held, _, _)| held == seal)
+                .map(|(_, bytes, _)| bytes.clone())
         })
     }
     fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
         self.store.keep(seal, link)
+    }
+    fn resolve_witness(&self, seal: &Digest) -> Option<Witness> {
+        self.store.resolve_witness(seal).or_else(|| {
+            (self.unkept.iter().rev())
+                .find(|(held, _, _)| held == seal)
+                .map(|(_, _, witness)| *witness)
+        })
+    }
+    fn keep_with_witness(&self, seal: Digest, link: &[u8], witness: Witness) -> Result<(), CheckpointError> {
+        self.store.keep_with_witness(seal, link, witness)
     }
 }
 
@@ -1015,7 +1215,7 @@ struct PartialPage {
 
 enum Prefix<'m> {
     Empty,
-    Ready(Box<TimeOrder<'m>>, Vec<(Digest, Vec<u8>)>),
+    Ready(Box<TimeOrder<'m>>, Vec<(Digest, Vec<u8>, Witness)>),
     Failed(CheckpointError),
     Done,
 }
@@ -1275,6 +1475,17 @@ impl<'m> ConservationFeed<'m> {
         self.trailing.clear();
         self.trailing.shrink_to_fit();
     }
+    /// The oldest revision whose complete link this feed may still read from its store, accounting for
+    /// 64-link page boundaries. `None` once trailing pages are no longer needed.
+    pub fn oldest_retained_revision(&self) -> Option<u64> {
+        if !self.tracking_trailing {
+            return None;
+        }
+        if let Some(mark) = self.pages.front() {
+            return Some(mark.revision - mark.links + 1);
+        }
+        self.partial.as_ref().map(|page| page.revision - page.links + 1)
+    }
     /// Heap and inline bytes currently held by this view.
     pub fn memory_bytes(&self) -> usize {
         let trailing_heap: usize = self
@@ -1290,8 +1501,8 @@ impl<'m> ConservationFeed<'m> {
                         .head
                         .as_ref()
                         .map_or(0, |(_, segment)| segment.chunk.heap_bytes())
-                    + unkept.capacity() * size_of::<(Digest, Vec<u8>)>()
-                    + unkept.iter().map(|(_, bytes)| bytes.capacity()).sum::<usize>()
+                    + unkept.capacity() * size_of::<(Digest, Vec<u8>, Witness)>()
+                    + unkept.iter().map(|(_, bytes, _)| bytes.capacity()).sum::<usize>()
             }
             Prefix::Empty | Prefix::Failed(_) | Prefix::Done => 0,
         };
@@ -1360,7 +1571,7 @@ impl<'m> ConservationFeed<'m> {
         &mut self,
         head_revision: u64,
         head_segment: &HistorySegment,
-        unkept: &[(Digest, Vec<u8>)],
+        unkept: &[(Digest, Vec<u8>, Witness)],
     ) -> Result<Option<(u64, HistorySegment)>, CheckpointError> {
         if !self.tracking_trailing {
             return Ok(None);
@@ -1422,7 +1633,7 @@ pub struct AcceptedStep<'f, 'm, 's> {
     feed: &'f mut ConservationFeed<'m>,
     revision: u64,
     segment: &'s HistorySegment,
-    unkept: &'s [(Digest, Vec<u8>)],
+    unkept: &'s [(Digest, Vec<u8>, Witness)],
 }
 impl<'m, 's> AcceptedStep<'_, 'm, 's> {
     pub fn revision(&self) -> u64 {
@@ -1594,6 +1805,113 @@ impl Curve<'_> {
         let [start, end] = *self.coefficients;
         Compensated::between(start, end, reached, self.interval.length_ns())
     }
+}
+
+/// A verified contiguous span of complete links anchored to a verified checkpoint whose prefix chains back
+/// to admission through witnesses or links. Built without running any core so a flight recorder's span can
+/// be checked from the store alone.
+pub struct RetainedSpan<'m> {
+    body: &'m CompiledBody,
+    seal: HistorySeal,
+    opened: SimTime,
+    from_revision: u64,
+    segments: Vec<(u64, HistorySegment)>,
+}
+impl<'m> RetainedSpan<'m> {
+    pub fn seal(&self) -> HistorySeal {
+        self.seal
+    }
+    pub fn basis(&self) -> &'m ConservedBasis {
+        self.body.conserved_basis()
+    }
+    pub fn rhythms(&self) -> impl ExactSizeIterator<Item = (RhythmId, Slot)> + 'm {
+        self.body.rhythms()
+    }
+    pub fn opened(&self) -> SimTime {
+        self.opened
+    }
+    pub fn from_revision(&self) -> u64 {
+        self.from_revision
+    }
+    pub fn span(&self) -> Option<Interval> {
+        let first = self.segments.first()?.1.interval().start();
+        let last = self.segments.last()?.1.interval().end();
+        Interval::new(first, last)
+    }
+    pub fn segments(&self) -> &[(u64, HistorySegment)] {
+        &self.segments
+    }
+}
+
+/// Verifies `from_checkpoint` and its chain back to admission through witnesses or links, then verifies and
+/// parses every complete link from `from_checkpoint` through `(head_seal, head_revision)` without running a
+/// core.
+pub fn retained_span<'m>(
+    body: &'m CompiledBody,
+    expected: &RunIdentity,
+    from_checkpoint: &Checkpoint,
+    head_seal: Digest,
+    head_revision: u64,
+    store: &dyn HistoryStore,
+) -> Result<RetainedSpan<'m>, CheckpointError> {
+    if expected.model() != body.model_hash() {
+        return Err(CheckpointError::IdentityMismatch);
+    }
+    let VerifiedBase {
+        format,
+        origin,
+        branch,
+        opened,
+        revision: base_revision,
+        seal: base_seal,
+        head: base_head,
+    } = verify_base(from_checkpoint, expected, body, store)?;
+    if head_revision < base_revision {
+        return Err(CheckpointError::NotOnThisBranch);
+    }
+    let shape = (
+        body.conserved_basis().combinations().len(),
+        body.columns().len(),
+        body.rhythms().len(),
+    );
+    let mut after_base = Vec::new();
+    let mut at = head_seal;
+    let mut rev = head_revision;
+    while rev > base_revision {
+        let walked = Walk {
+            store,
+            format,
+            shape,
+            origin,
+            at,
+            revision: rev,
+            done: false,
+        }
+        .read()?;
+        after_base.push((rev, HistorySegment { chunk: walked.chunk }));
+        at = walked.previous;
+        rev -= 1;
+    }
+    if at != base_seal {
+        return Err(CheckpointError::HistoryAltered { seal: at });
+    }
+    after_base.reverse();
+    let mut segments = Vec::with_capacity(after_base.len() + usize::from(base_head.is_some()));
+    if let Some(head) = base_head {
+        segments.push((base_revision, head));
+    }
+    segments.extend(after_base);
+    Ok(RetainedSpan {
+        body,
+        seal: HistorySeal {
+            run: expected.digest(),
+            branch,
+            base: head_seal,
+        },
+        opened,
+        from_revision: base_revision,
+        segments,
+    })
 }
 
 #[cfg(test)]

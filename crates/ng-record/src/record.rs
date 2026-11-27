@@ -5,8 +5,9 @@ use crate::checkpoint::{
 use crate::history::{ConservationFeed, ConservationView, History, HistorySeal, LedgerChunk, Link};
 use ng_contract::{
     AcceptedHead, AcceptedStateView, AdmissionError, Attempt, BoundaryEvent, CompiledBody, CoupledProblem,
-    CoupledSolver, Digest, Fired, InitialRevision, InputId, NextHead, NumericalRefusal, RunIdentity, SimTime,
-    SplitRejected, StepExtents, TraceDraw, TrialFailure, ValidityExcursion, VerifiedStep,
+    CoupledSolver, Digest, Fired, InitialRevision, InputId, NextHead, NumericalRefusal, RecordHash,
+    RunIdentity, SimTime, SplitRejected, StepExtents, TraceDraw, TrialFailure, ValidityExcursion,
+    VerifiedStep,
 };
 
 /// The chained seal of one accepted revision: the previous seal, the revision, the image's digests and the
@@ -87,6 +88,9 @@ impl<'m> PatientRecord<'m> {
         Seal {
             digest: self.history.seal(),
         }
+    }
+    pub fn record_hash(&self) -> RecordHash {
+        self.history.format().hash()
     }
     pub fn accepted(&self) -> AcceptedStateView<'_> {
         self.image.view()

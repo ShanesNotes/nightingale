@@ -207,6 +207,31 @@
 //!     Ok(feed.advance(session)?.revision())
 //! }
 //! ```
+//! A retained span comes only from `retained_span`, after checking the checkpoint and every link in the span.
+//! ```compile_fail,E0451
+//! use ng_record::*;
+//! fn forged<'m>(
+//!     body: &'m ng_contract::CompiledBody,
+//!     seal: HistorySeal,
+//!     opened: ng_contract::SimTime,
+//! ) -> RetainedSpan<'m> {
+//!     RetainedSpan { body, seal, opened, from_revision: 0, segments: Vec::new() }
+//! }
+//! ```
+//! ```
+//! use ng_contract::{CompiledBody, Digest, RunIdentity};
+//! use ng_record::*;
+//! fn verified<'m>(
+//!     body: &'m CompiledBody,
+//!     identity: &RunIdentity,
+//!     saved: &Checkpoint,
+//!     head: Digest,
+//!     revision: u64,
+//!     store: &dyn HistoryStore,
+//! ) -> Result<RetainedSpan<'m>, CheckpointError> {
+//!     retained_span(body, identity, saved, head, revision, store)
+//! }
+//! ```
 
 extern crate alloc;
 
@@ -219,7 +244,8 @@ mod session;
 pub use checkpoint::{BranchFork, BranchId, Checkpoint, CheckpointError, HistoryStore};
 pub use history::{
     AcceptedStep, CompactLink, ConservationFeed, ConservationRefusal, ConservationView, Curve, HistorySeal,
-    HistorySegment, NewestFirst, OldestFirst, TimeOrder, compact, expand, follows,
+    HistorySegment, NewestFirst, OldestFirst, RetainedSpan, TimeOrder, Witness, compact, expand, follows,
+    retained_span,
 };
 pub use observation::{ObservationRefusal, ObservationView};
 pub use record::{AuthorizedInput, InputReceipt, NextImage, PatientRecord, RecordDigests, Seal, StepReceipt};
