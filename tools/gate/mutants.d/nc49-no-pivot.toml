@@ -1,8 +1,14 @@
 [[mutant]]
 name = "admission-no-pivot-names-recheck-row"
 path = "crates/ng-contract/src/admission.rs"
-old = '''        if let Err(failure) = self.check_rank(workspace, values) {
-            return failure;
+old = '''        if let Err(rank_failure) = self.check_ring_rank(workspace) {
+            if let Err(failure) = self.check_fits_felt(workspace, values) {
+                return failure;
+            }
+            if let Err(failure) = self.check_unpaced(workspace) {
+                return failure;
+            }
+            return rank_failure;
         }'''
 new = '''        let _ = (workspace, values);'''
 test = "-p ng-validate --test admission a_free_direction_on_the_ring_names_the_unknown_and_stage_not_the_recheck_row"

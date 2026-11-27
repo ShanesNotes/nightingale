@@ -1692,20 +1692,7 @@ impl InitializationSystem<'_> {
         }
         Ok(())
     }
-    fn check_rank(
-        &self,
-        workspace: &AdmissionWorkspace,
-        values: &[f64],
-    ) -> Result<(), InitializationFailure> {
-        if let Some((row, stage)) = self.rankless(workspace, values)? {
-            return Err(InitializationFailure::NoRank {
-                row,
-                stage: Some(stage),
-            });
-        }
-        // One stage can have rank while the whole system has a free level: a total nothing truly regulates, two fits
-        // of one anchor's worth of information, or an autonomous cycle no clock fixes. The whole bordered ring is
-        // factored, and a law with no slope here is refused, not passed over.
+    fn check_ring_rank(&self, workspace: &AdmissionWorkspace) -> Result<(), InitializationFailure> {
         let rows = self.body.rows();
         let size = rows.len();
         let owed = &self.parameters.owed;
@@ -1715,10 +1702,9 @@ impl InitializationSystem<'_> {
         if let Some(slot) = free {
             let border = workspace.fitted_slots().start;
             if slot < border {
-                let local = slot % self.width();
                 return Err(InitializationFailure::NoRank {
-                    row: rows[local % size].id(),
-                    stage: Some(local / size),
+                    row: rows[slot % size].id(),
+                    stage: Some(slot / size),
                 });
             }
             let at = slot - border;
@@ -1734,7 +1720,23 @@ impl InitializationSystem<'_> {
         }
         Ok(())
     }
-    /// When the ring solve stops with no pivot, `recheck` sees an unsolved workspace; check rank before
+    fn check_rank(
+        &self,
+        workspace: &AdmissionWorkspace,
+        values: &[f64],
+    ) -> Result<(), InitializationFailure> {
+        if let Some((row, stage)) = self.rankless(workspace, values)? {
+            return Err(InitializationFailure::NoRank {
+                row,
+                stage: Some(stage),
+            });
+        }
+        // One stage can have rank while the whole system has a free level: a total nothing truly regulates, two fits
+        // of one anchor's worth of information, or an autonomous cycle no clock fixes. The whole bordered ring is
+        // factored, and a law with no slope here is refused, not passed over.
+        self.check_ring_rank(workspace)
+    }
+    /// When the ring solve stops with no pivot, `recheck` sees an unsolved workspace; check full-ring rank before
     /// blaming the first row whose residual did not close.
     fn inconsistent_or_rank(
         &self,
@@ -1742,14 +1744,14 @@ impl InitializationSystem<'_> {
         values: &[f64],
         row: AdmissionRow,
     ) -> InitializationFailure {
-        if let Err(failure) = self.check_fits_felt(workspace, values) {
-            return failure;
-        }
-        if let Err(failure) = self.check_unpaced(workspace) {
-            return failure;
-        }
-        if let Err(failure) = self.check_rank(workspace, values) {
-            return failure;
+        if let Err(rank_failure) = self.check_ring_rank(workspace) {
+            if let Err(failure) = self.check_fits_felt(workspace, values) {
+                return failure;
+            }
+            if let Err(failure) = self.check_unpaced(workspace) {
+                return failure;
+            }
+            return rank_failure;
         }
         InitializationFailure::Inconsistent { row }
     }
@@ -2067,8 +2069,9 @@ pub enum InitializationFailure {
     /// A cycle under drives that hold still all beat whose guards fire, so it times itself, with no clock named.
     Unpaced,
     /// An unknown with no pivot on the workspace, in its own stage or on the ring, which structural
-    /// matching cannot see. `stage` is the leg stage (`0` end or instant, `1` interior), or `None`
-    /// when a fitted parameter has no pivot and `row` names its anchor's row.
+    /// matching cannot see. `stage` is the global stage index `slot / rows` (`0` for an instant solve,
+    /// `2 * leg` for leg `leg`'s end stage and `2 * leg + 1` for its interior stage on a periodic ring),
+    /// or `None` when a fitted parameter has no pivot and `row` names its anchor's row.
     NoRank {
         row: RowId,
         stage: Option<usize>,
