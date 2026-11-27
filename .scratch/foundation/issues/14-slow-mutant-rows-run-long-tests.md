@@ -29,4 +29,6 @@ The sweep is now most of a proof. In the proof of nightingale#167 on the beelink
 - [ ] A row holds the run test's comparison of counts with ceilings (body 26), or the Answer says what a run of one would have to cost first
 - [ ] A row can name its own budget, so a row that runs one body admission is held to its own limit and not to the sweep's one 420 s. Body 06 part 4c left both body rows out for this: each is one rebuild and one body admission, about 300 s on a quiet beelink and up to twice that under load, against the sweep's 420 s. The table's `tools/mutate.py` reads one budget for every row today
 
+The last box lands with [ticket 13](13-mutant-rows-in-parallel.md)'s PR. [Ticket 17](17-the-parallel-sweep-is-measured-on-ryzen.md) found that four lanes halved the sweep with a budget of 1,000 s for every row and not with 420 s. The other boxes are unchanged.
+
 **Non-goals:** running rows in parallel, which is ticket 13. Changing a row's mutation, or what any test checks. Raising the 420 s a cargo test has.

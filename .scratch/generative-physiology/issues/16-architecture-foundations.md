@@ -37,7 +37,7 @@ It also read this line's map and tickets 01 to 15, the engine tickets cited belo
 - **The teacher's time is the budget.** On its holds at body 26's commit, the whole body runs near 2.5 times real time, and its cost budget lets it slow to 1.2. A six-hour teacher run takes 2.4 to 4.9 wall hours (section 4). That figure decides the order of work more than any model choice does.
 - **The generative physiology model is the centre, not the last stage.** Tickets 01 to 14 already plan it. Chart inference over a course cannot be trained on the engine alone, because at today's speed the engine cannot make enough courses.
 - **Most of what the first capture asked of the SRS is already there.** It asked for five changes. Three are answered by the SRS, the contract or the code: a run's identity already names the start it reached and not what proposed it, rule 14 already puts disease in the event log, and a checkpoint is already a legal start away from rest. One is a live question for the engine's process, the provenance of a value fitted to a response (ticket 15). The fifth, a lighter gate for this line's tooling, was the developer reviewer's and no SRS matter, and settled in `nightingale#238` (section 7).
-- **Nothing here is built before [body 28](../../body/issues/28-two-synthetic-days.md),** and nothing here changes the engine. What can start now is on paper: the pass on sections 2 and 3, the questions of section 7, and ticket 15's count of the constants only a response pins.
+- **Nothing here is built before the line unparks ([the map](../map.md)),** and nothing here changes the engine. What can start now is on paper: the pass on sections 2 and 3, the questions of section 7, and ticket 15's count of the constants only a response pins.
 
 ## 1. One joint, drawn by the engine
 
@@ -139,7 +139,7 @@ What the engine's process must give first. None of it is this line's work, and e
 
 | Need | Why | Where it is asked |
 |---|---|---|
-| The whole body lives two synthetic days | The line is parked on it | [body 28](../../body/issues/28-two-synthetic-days.md) |
+| The whole body reaches the point where the line unparks | The line is parked on it | [the map](../map.md) |
 | A teacher whose step hides no oscillation, at a measured speed | `nightingale#241` added `SelfSustainedOscillation` to the accuracy gate, refusing damped oscillations; the step plans remain unmeasured on the body | [native-contract 91](../../native-contract/issues/91-the-accuracy-gate-holds-no-oscillation.md) (resolved), [body 30](../../body/issues/30-step-plans-on-the-whole-body.md) (open) |
 | A history a teacher run can afford | Section 4's 276 GB a run | native-contract 95 (open; unblocked by `nightingale#240`'s `CertificateFold`), and ticket 14's need 3 |
 | Varied packets, with sourced covariate scaling | Every model that conditions on traits needs them. `sampled` draws each key alone and uniformly (`packet.rs:311`, implemented), the body's value table is private, and a second value for a bound key is refused. Independent draws across dozens of traits risk anatomically incompatible combinations that waste admission runs; clinical population sampling needs sourced allometric and covariate links (GLOSSARY: Population record, "the parameters it varies with"), never unreviewed empirical patient fits | tickets 13 and 15 |
@@ -350,8 +350,8 @@ How much slow drift over two days is too much is not on this list. Record 0004 h
 ## Non-goals
 
 - Changing `docs/srs.md`, `docs/adr/`, `GLOSSARY.md`, `crates/` or `tools/`.
-- Any prototype before body 28 resolves, beyond what the map already leaves outside the parking.
-- Training on the whole body before body 28 resolves (`nightingale#241` resolved native-contract 91; [body 30](../../body/issues/30-step-plans-on-the-whole-body.md) remains open).
+- Any prototype before the line unparks, beyond what [the map](../map.md) already leaves outside the parking.
+- Training on the whole body before the line unparks ([the map](../map.md); `nightingale#241` resolved native-contract 91; [body 30](../../body/issues/30-step-plans-on-the-whole-body.md) remains open).
 - New glossary terms. This ticket uses seam, proposal, emulator, cut and manifest in their plain senses, and each enters the glossary with the first build ticket that needs it.
 - Grading, scenarios, debrief and display.
 - Any claim of clinical validity from synthetic runs or from a face-validity read.

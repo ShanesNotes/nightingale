@@ -24,7 +24,7 @@ Also verified directly on `9a7469ff` (including [ticket 16](16-architecture-foun
 - `crates/ng-validate/src/{lib.rs, initialize.rs, replay.rs, certificate.rs, day.rs, arena.rs, body/mod.rs, body/packet.rs}` and `crates/ng-validate/tests/{body.rs, body_run.rs, certificate_fold.rs}`.
 - Engine tickets: [native-contract 86](../../native-contract/issues/86-admission-reaches-a-moved-rest.md), [native-contract 95](../../native-contract/issues/95-the-record-trims-its-history.md), [body 28](../../body/issues/28-two-synthetic-days.md), [body 30](../../body/issues/30-step-plans-on-the-whole-body.md).
 
-Note on current repo status at `ffcd1a7a`: `tools/generative-physiology/**` fast gate landed in `nightingale#238` (`tools/gate/paths.toml:14-16`), `CertificateFold` on `Session` landed in `nightingale#240`, and oscillation accuracy landed in `nightingale#241`. Code builds under `5.1`, `5.2`, and `5.4` remain parked on [body 28](../../body/issues/28-two-synthetic-days.md) ([the map](../map.md)).
+Note on current repo status at `ffcd1a7a`: `tools/generative-physiology/**` fast gate landed in `nightingale#238` (`tools/gate/paths.toml:14-16`), `CertificateFold` on `Session` landed in `nightingale#240`, and oscillation accuracy landed in `nightingale#241`. Code builds under `5.1`, `5.2`, and `5.4` remain parked until the line unparks ([the map](../map.md)).
 
 ## Answer
 
@@ -40,7 +40,7 @@ Every file on `ffcd1a7a` keeps one clear owner across the Rust driver (engine li
 | `driver/src/lib.rs` | Public driver module exports | `extends` | Exports `store` (`HistoryStore` policies) and `propose` (`5.2` bridge) |
 | `driver/src/main.rs` | CLI (`smoke`, `run`, `interact`, `status`) | `extends` | Adds `--body slice\|whole-body`, `--store-mode`, `admit-only`, `mask-report` |
 | `driver/src/npy.rs` | `NpyWriter<E>`, `Table<E>` aligned 128 B NPY 1.0 | `carries` | Unchanged binary table reader/writer |
-| `driver/src/smoke.rs` | Slice `SMOKE_SPEC`, `SMOKE_PACKET`, `SMOKE_SEAL` pins | `carries` | Slice smoke stays intact; whole-body smoke pin added after `body 28` |
+| `driver/src/smoke.rs` | Slice `SMOKE_SPEC`, `SMOKE_PACKET`, `SMOKE_SEAL` pins | `carries` | Slice smoke stays intact; whole-body smoke pin added after the line unparks ([the map](../map.md)) |
 | `driver/src/spec.rs` | `CAPTURE_VERSION = 2`, `RunSpec`, `PostureEvent`, `CoreChoice`, `Variant` | `extends` | Bumps `CAPTURE_VERSION` to `3`; adds `gp-run 2` (`body`, `packet`, `branch-of`, whole-body `Day` events) |
 | `driver/src/archive.rs` | `RunSummary`, `IdentityDigests`, `PartialRun`, `Staged`, `RunState` | `extends` | Adds atomic `.refused/` archival (`spec.txt` + `refusal.txt`), `body`, `store_mode`, `links_kept_bytes`, `witnesses_bytes`, `parent_spec_id`, `branch_at_ns`, `packet_kind`; streaming SHA-256 replaces `fs::read` whole-file hashing (`tools/generative-physiology/driver/src/teacher.rs:863`) |
 | `driver/src/capture.rs` | `Catalogue`, `Capture`, `BeatReading`, `edges.npy`, `beats.npy` | `extends` | Parameterizes `Catalogue` across assemblies; adds reduction-projected boundary capture and sparse whole-vector snapshots for long runs ([ticket 14](14-first-experiment-on-the-whole-body.md)) |
@@ -55,7 +55,7 @@ Every file on `ffcd1a7a` keeps one clear owner across the Rust driver (engine li
 | `capture.py` | `RunData`, `Summary`, `Catalogue`, `Edges`, `Limbs`, `Ledger` | `extends` | Keeps v2 reader; adds v3 summary fields, `Day` event tables, and store-mode metadata |
 | `audit.py` | Slice technical and informativeness gate | `extends` | Keeps slice audit; adds whole-body audit plan (`ticket 14`) |
 | `selftest.py` | Synthetic fixture tests and `--real` driver test | `extends` | Adds `L9`/`L10`/`L12` manifest refusal tests, `Day` grammar tests, overlay store tests |
-| `spec/audit-v1.txt` | Slice audit plan | `carries` | Frozen for slice; sibling `spec/audit-body-v1.txt` added after `body 28` |
+| `spec/audit-v1.txt` | Slice audit plan | `carries` | Frozen for slice; sibling `spec/audit-body-v1.txt` added after the line unparks ([the map](../map.md)) |
 | `driver/src/store.rs` | Bounded `HistoryStore` (rolling eviction, witnesses, prefix overlay) | `new` | Implements disk-bounded retention and read-only prefix + writable branch overlay |
 | `manifest.py` | `L9`/`L10`/`L12` manifest and solved-start table manager | `new` | Builds, checks, and digests `dataset_manifest.json`, `artifact_manifest.json`, and `starts-pool` keyed by `unread_packet_hash` |
 | `driver/src/propose.rs` & `propose.py` | `5.2` start-proposal store, `L14` ladder, ingress bridge | `new` | Implements `5.2` proposal store, ladder, `Fork1Route` dispatcher, and multi-rest detector |
@@ -176,7 +176,7 @@ At admission (`crates/ng-contract/src/admission.rs:1695-1696`), `InitialRevision
 
 #### 1.4 Synthetic and Audit Gates for `5.1`
 
-1. **Whole-body teacher audit gate:** Passes both technical (whole-body first-second seal pin, checkpoint-resume, late admission, rewind, observer-off, replica, prefix equivalence, closed-loop replay, `64 * 2^-52` ledger closure, beat-identity check) and informativeness (meal/day-check responses above feature floor) gates once [body 28](../../body/issues/28-two-synthetic-days.md) unparks ([ticket 14](14-first-experiment-on-the-whole-body.md)).
+1. **Whole-body teacher audit gate:** Passes both technical (whole-body first-second seal pin, checkpoint-resume, late admission, rewind, observer-off, replica, prefix equivalence, closed-loop replay, `64 * 2^-52` ledger closure, beat-identity check) and informativeness (meal/day-check responses above feature floor) gates once [ticket 14](14-first-experiment-on-the-whole-body.md) unparks ([the map](../map.md)).
 2. **Paired-branch equivalence gate:** A Shape B checkpoint-branched run (`t_0 -> t_c -> branch`) produces bit-identical `seals`, `BranchSummary::end` digests (`RecordDigests`), and `edges.npy` rows to a Shape A fresh run from `t_0` over the same realized event list (`I2`, `I3`).
 3. **Waiting-input prefix refusal gate:** Constructing a Shape B shared prefix whose `ParameterPacket::day` or admission `BoundaryPort` includes any event past `t_c` is refused before execution (`SpecError` / `ManifestError`).
 4. **Disk-bounded capture gate:** A 6-hour whole-body run (and a `K`-branch paired group) completes within a declared `links_kept_bytes + capture_bytes` ceiling rather than retaining 276 GB of compacted links per run.
@@ -264,7 +264,7 @@ Verified directly in `crates/ng-contract/src/body.rs` and `crates/ng-validate/te
 
 #### 3.2 One-Pass Empirical Measurement Protocol (at [ticket 14](14-first-experiment-on-the-whole-body.md) Unparking)
 
-When [body 28](../../body/issues/28-two-synthetic-days.md) resolves and [ticket 14](14-first-experiment-on-the-whole-body.md) unparks, execute ONE read-only inspection pass over `whole_body()` (requiring only `CompiledBody` construction, zero admission solve or time-stepping) via a new driver command:
+When [ticket 14](14-first-experiment-on-the-whole-body.md) unparks ([the map](../map.md)), execute ONE read-only inspection pass over `whole_body()` (requiring only `CompiledBody` construction, zero admission solve or time-stepping) via a new driver command:
 
 ```text
 gp-driver mask-report --body whole-body --cuts <coarse.txt>,<tissue.txt>,<richer.txt> --out <report.json>
