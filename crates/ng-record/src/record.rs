@@ -92,6 +92,9 @@ impl<'m> PatientRecord<'m> {
     pub fn record_hash(&self) -> RecordHash {
         self.history.format().hash()
     }
+    pub fn oldest_unkept(&self) -> Option<Digest> {
+        self.history.oldest_unkept()
+    }
     pub fn accepted(&self) -> AcceptedStateView<'_> {
         self.image.view()
     }
@@ -280,6 +283,7 @@ impl StepReceipt {
 }
 
 /// A durable input reference from an authorized command's receipt, never a speculative request.
+#[derive(Clone)]
 pub struct AuthorizedInput {
     command: Digest,
     event: BoundaryEvent,
@@ -295,6 +299,9 @@ impl AuthorizedInput {
     /// bits. A host's own log pairs the two.
     pub fn command(&self) -> Digest {
         self.command
+    }
+    pub fn event(&self) -> &BoundaryEvent {
+        &self.event
     }
 }
 

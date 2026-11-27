@@ -1,12 +1,26 @@
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
 use core::cell::RefCell;
 use core::num::NonZeroU64;
+use core::ops::RangeInclusive;
 use ng_contract::*;
-use ng_record::{BranchId, Checkpoint, CheckpointError, HistoryStore, Running, Session, Step, Witness};
+use ng_record::{
+    AuthorizedInput, BranchId, Checkpoint, CheckpointError, HistoryStore, Running, Session, Step, Witness,
+};
 use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
 const MINUTE: u64 = 60 * SECOND;
 const HEADER: usize = 128;
+
+fn rolling_config(every_ns: u64) -> RollingConfig {
+    RollingConfig {
+        build_id: String::from("nightingale-nc95-test"),
+        checkpoint_every_ns: NonZeroU64::new(every_ns).expect("positive"),
+        late_inputs: Vec::new(),
+    }
+}
 
 fn measure<U>(value: f64) -> Measure<U> {
     Measure::new(value).expect("finite")
@@ -467,16 +481,7 @@ fn a_trimmed_restore_checks_every_seal_head_link_and_opening_without_reparsing_d
     let core = ReferenceIntegrator::new(3 * SECOND);
     let store = RollingStore::new();
     let session = case.admit(&core, &store).expect("admitted");
-    let outcome = run_rolling(
-        session,
-        end,
-        &policy,
-        &store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(30 * SECOND).expect("positive"),
-        },
-    )
-    .expect("rolling");
+    let outcome = run_rolling(session, end, &policy, &store, rolling_config(30 * SECOND)).expect("rolling");
     assert!(outcome.certificate.is_ok());
     assert!(outcome.listing.complete_link_revisions.is_empty());
     let RollingStatus::Completed(finished) = outcome.status else {
@@ -618,6 +623,21 @@ fn a_trimmed_restore_checks_every_seal_head_link_and_opening_without_reparsing_d
         "opened past head start must be refused"
     );
 
+    let head_start = resumed
+        .conservation()
+        .head()
+        .expect("head segment")
+        .interval()
+        .start()
+        .nanoseconds();
+    let mut equal_opened = raw.to_vec();
+    equal_opened[offset..offset + 8].copy_from_slice(&head_start.to_be_bytes());
+    assert_eq!(
+        Session::resume(&resealed(equal_opened), &identity, case.body(), &fresh, &store).err(),
+        Some(CheckpointError::Malformed),
+        "opened equal to head start at revision >= 2 must be refused"
+    );
+
     let mut shifted_opened = earlier.checkpoint.as_bytes().to_vec();
     let e_offset = trailer_offset(&shifted_opened);
     shifted_opened[e_offset..e_offset + 8].copy_from_slice(&1_u64.to_be_bytes());
@@ -713,9 +733,7 @@ fn the_flight_recorder_keeps_the_failing_span_on_closure_drift_and_rhythm_failur
         at(200 * SECOND),
         &drift_policy,
         &store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(20 * SECOND).expect("positive"),
-        },
+        rolling_config(20 * SECOND),
     )
     .expect("rolling");
     let fold_err = outcome.certificate.expect_err("drift must fail");
@@ -783,9 +801,7 @@ fn the_flight_recorder_keeps_the_failing_span_on_closure_drift_and_rhythm_failur
         at(100 * SECOND),
         &closure_policy,
         &closure_store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("positive"),
-        },
+        rolling_config(10 * SECOND),
     )
     .expect("rolling");
     let closure_err = closure_out.certificate.expect_err("closure must fail");
@@ -863,9 +879,7 @@ fn the_flight_recorder_keeps_the_failing_span_on_closure_drift_and_rhythm_failur
         at(40 * SECOND),
         &edge_policy,
         &edge_store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("positive"),
-        },
+        rolling_config(10 * SECOND),
     )
     .expect("rolling");
     let edge_err = edge_out.certificate.expect_err("edge drift fails");
@@ -912,9 +926,7 @@ fn the_flight_recorder_latches_on_engine_fault_store_failure_and_replay_divergen
         at(100 * SECOND),
         &policy,
         &fault_store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("positive"),
-        },
+        rolling_config(10 * SECOND),
     )
     .expect("rolling");
     assert!(matches!(fault_out.status, RollingStatus::Faulted(_)));
@@ -1039,16 +1051,7 @@ fn a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_
     let core = ReferenceIntegrator::new(3 * SECOND);
     let store = RollingStore::new();
     let session = case.admit(&core, &store).expect("admitted");
-    let outcome = run_rolling(
-        session,
-        end,
-        &policy,
-        &store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(30 * SECOND).expect("positive"),
-        },
-    )
-    .expect("rolling");
+    let outcome = run_rolling(session, end, &policy, &store, rolling_config(30 * SECOND)).expect("rolling");
     let orig_cert = outcome.certificate.expect("passed");
     assert!(outcome.listing.complete_link_revisions.is_empty());
     let RollingStatus::Completed(finished) = outcome.status else {
@@ -1068,20 +1071,21 @@ fn a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_
     let fresh = ReferenceIntegrator::new(3 * SECOND);
     let witnesses_before = store.listing().witness_count;
     let between_sink = MemoryStore::default();
-    let between = ReplayStore::new(&store, &between_sink);
+    let between = ReplayStore::from_rolling(&store, &between_sink);
     let from = prior_ckpt.revision as usize;
     let at_target = regenerate(
         case.body(),
         &fresh,
         &between,
         RegenerationSource {
-            build: "nightingale-nc95-test",
             from_checkpoint: &prior_ckpt.checkpoint,
             expected: &identity,
             expected_seals: &seals[from..target_rev as usize],
+            event_log: Some(&outcome.event_log),
         },
     )
     .expect("replayed between checkpoints from the checkpoint before it");
+    assert_eq!(at_target.build, "nightingale-nc95-test");
     assert_eq!(at_target.steps_verified, target_rev - prior_ckpt.revision);
     assert_eq!(at_target.session.record().revision(), target_rev);
     assert_eq!(
@@ -1094,16 +1098,16 @@ fn a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_
         perturb_after_s: 0,
     };
     let diverging_sink = MemoryStore::default();
-    let diverging_replay = ReplayStore::new(&store, &diverging_sink);
+    let diverging_replay = ReplayStore::from_rolling(&store, &diverging_sink);
     let refused = regenerate(
         case.body(),
         &diverging,
         &diverging_replay,
         RegenerationSource {
-            build: "nightingale-nc95-drifted",
             from_checkpoint: &prior_ckpt.checkpoint,
             expected: &identity,
             expected_seals: &seals[from..target_rev as usize],
+            event_log: Some(&outcome.event_log),
         },
     )
     .err();
@@ -1120,16 +1124,16 @@ fn a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_
     let rev0 = store.checkpoint_at_revision(0).expect("rev 0");
     let regen_store = MemoryStore::default();
     let regen_core = ReferenceIntegrator::new(3 * SECOND);
-    let regen_replay = ReplayStore::new(&store, &regen_store);
+    let regen_replay = ReplayStore::from_rolling(&store, &regen_store);
     let regenerated = regenerate(
         case.body(),
         &regen_core,
         &regen_replay,
         RegenerationSource {
-            build: "nightingale-nc95-test",
             from_checkpoint: &rev0.checkpoint,
             expected: &identity,
             expected_seals: &seals,
+            event_log: Some(&outcome.event_log),
         },
     )
     .expect("regenerated");
@@ -1156,23 +1160,23 @@ fn a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_
         perturb_after_s: 30,
     };
     let bad_store = MemoryStore::default();
-    let bad_replay = ReplayStore::new(&store, &bad_store);
+    let bad_replay = ReplayStore::from_rolling(&store, &bad_store);
     let err = regenerate(
         case.body(),
         &bad_core,
         &bad_replay,
         RegenerationSource {
-            build: "nightingale-nc95-drifted",
             from_checkpoint: &rev0.checkpoint,
             expected: &identity,
             expected_seals: &seals,
+            event_log: Some(&outcome.event_log),
         },
     )
     .err()
     .expect("diverging build must report a finding");
     match err {
         RegenerationError::Diverged(finding) => {
-            assert_eq!(finding.build, "nightingale-nc95-drifted");
+            assert_eq!(finding.build, "nightingale-nc95-test");
             assert!(finding.revision > 1);
             assert_ne!(finding.actual_seal, finding.expected_seal);
             assert_ne!(finding.actual_witness, finding.expected_witness);
@@ -1186,17 +1190,18 @@ fn a_revision_between_checkpoints_replays_forward_and_regeneration_checks_every_
         missing: Some(seals[4]),
     };
     let missing_sink = MemoryStore::default();
-    let missing_replay = ReplayStore::new(&missing_witnesses, &missing_sink);
+    let missing_replay =
+        ReplayStore::new(&missing_witnesses, &missing_sink).with_originating_build(store.build_id());
     assert_eq!(
         regenerate(
             case.body(),
             &regen_core,
             &missing_replay,
             RegenerationSource {
-                build: "nightingale-nc95-test",
                 from_checkpoint: &rev0.checkpoint,
                 expected: &identity,
                 expected_seals: &seals,
+                event_log: Some(&outcome.event_log),
             },
         )
         .err(),
@@ -1272,9 +1277,7 @@ fn an_engine_fault_keeps_the_links_of_the_window_open_at_the_fault() {
         at(100 * SECOND),
         &policy,
         &store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("positive"),
-        },
+        rolling_config(10 * SECOND),
     )
     .expect("rolling");
     assert!(matches!(out.status, RollingStatus::Faulted(_)));
@@ -1322,9 +1325,7 @@ fn a_complete_closure_passing_run_rechecks_loosened_drift_from_worst_drift_and_r
         at(120 * SECOND),
         &tight,
         &store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(30 * SECOND).expect("positive"),
-        },
+        rolling_config(30 * SECOND),
     )
     .expect("rolling");
     assert_eq!(
@@ -1346,17 +1347,17 @@ fn a_complete_closure_passing_run_rechecks_loosened_drift_from_worst_drift_and_r
     let rev0 = store.checkpoint_at_revision(0).expect("rev 0");
     let regen_store = MemoryStore::default();
     let regen_core = ReferenceIntegrator::new(2 * SECOND);
-    let regen_replay = ReplayStore::new(&store, &regen_store);
+    let regen_replay = ReplayStore::from_rolling(&store, &regen_store);
     let all_seals = store.witness_seals();
     let regen = regenerate(
         case.body(),
         &regen_core,
         &regen_replay,
         RegenerationSource {
-            build: "nc95-test",
             from_checkpoint: &rev0.checkpoint,
             expected: finished.record().identity(),
             expected_seals: &all_seals,
+            event_log: Some(&outcome.event_log),
         },
     )
     .expect("regenerated");
@@ -1519,9 +1520,7 @@ fn a_retained_span_refuses_tampered_prefix_witnesses_trimmed_span_links_and_repr
         at(30 * SECOND),
         &policy,
         &store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(5 * SECOND).expect("pos"),
-        },
+        rolling_config(5 * SECOND),
     )
     .expect("rolling");
     let RollingStatus::Completed(finished) = out.status else {
@@ -1662,9 +1661,7 @@ fn a_passing_settled_rhythm_run_does_not_latch_the_flight_recorder_and_trims_all
         at(40 * SECOND),
         &policy,
         &store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("pos"),
-        },
+        rolling_config(10 * SECOND),
     )
     .expect("rolling");
     assert!(out.certificate.is_ok(), "steady settled breathing passes");
@@ -1721,9 +1718,7 @@ fn a_flight_recorder_suffix_uses_its_last_edge_for_open_tails_and_never_falsely_
         at(30 * SECOND),
         &stop_policy,
         &stop_store,
-        RollingConfig {
-            checkpoint_every_ns: NonZeroU64::new(5 * SECOND).expect("pos"),
-        },
+        rolling_config(5 * SECOND),
     )
     .expect("rolling");
     let RollingStatus::Completed(stopped_session) = stop_out.status else {
@@ -1799,4 +1794,981 @@ fn a_flight_recorder_suffix_uses_its_last_edge_for_open_tails_and_never_falsely_
     let short_err = certify_flight_recorder(&retained_healthy, &short_fixed_policy)
         .expect_err("shorter than fixed window reports coverage, not stopped rhythm");
     assert_eq!(short_err.check(), CertificateCheck::Coverage);
+}
+
+#[test]
+fn a_custom_link_backend_runs_through_run_rolling_and_persists_or_trims_links() {
+    struct XorBackend {
+        frames: BTreeMap<(u64, Digest), Vec<u8>>,
+        puts: usize,
+        gets: usize,
+        removes: usize,
+        retains: usize,
+        fail_at_revision: Option<u64>,
+    }
+    impl XorBackend {
+        fn new(fail_at_revision: Option<u64>) -> Self {
+            Self {
+                frames: BTreeMap::new(),
+                puts: 0,
+                gets: 0,
+                removes: 0,
+                retains: 0,
+                fail_at_revision,
+            }
+        }
+        fn flip(bytes: &[u8]) -> Vec<u8> {
+            bytes.iter().map(|b| b ^ 0x5A).collect()
+        }
+    }
+    impl LinkBackend for XorBackend {
+        fn get(&self, revision: u64, seal: &Digest) -> Option<Vec<u8>> {
+            let _ = self.gets;
+            self.frames.get(&(revision, *seal)).map(|raw| Self::flip(raw))
+        }
+        fn put(&mut self, revision: u64, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+            self.puts += 1;
+            if self.fail_at_revision == Some(revision) {
+                return Err(CheckpointError::StoreFailed { seal });
+            }
+            self.frames.insert((revision, seal), Self::flip(link));
+            Ok(())
+        }
+        fn remove_below(&mut self, min_revision: u64) -> Vec<Digest> {
+            self.removes += 1;
+            let split = (min_revision, Digest::from_bytes([0; 32]));
+            let kept = self.frames.split_off(&split);
+            let dropped = core::mem::replace(&mut self.frames, kept);
+            dropped.into_keys().map(|(_, seal)| seal).collect()
+        }
+        fn retain_range(&mut self, revisions: Option<RangeInclusive<u64>>) -> Vec<Digest> {
+            self.retains += 1;
+            let mut removed = Vec::new();
+            match revisions {
+                Some(range) => self.frames.retain(|&(rev, seal), _| {
+                    let keep = range.contains(&rev);
+                    if !keep {
+                        removed.push(seal);
+                    }
+                    keep
+                }),
+                None => {
+                    let dropped = core::mem::take(&mut self.frames);
+                    removed.extend(dropped.into_keys().map(|(_, seal)| seal));
+                }
+            }
+            removed
+        }
+        fn stored_bytes(&self) -> usize {
+            self.frames.values().map(Vec::len).sum()
+        }
+        fn revisions(&self) -> Vec<u64> {
+            self.frames.keys().map(|&(rev, _)| rev).collect()
+        }
+        fn latest(&self) -> Option<(u64, Digest)> {
+            self.frames.keys().next_back().copied()
+        }
+    }
+
+    let case = TwoReservoirs::delivering(
+        [measure(500.0), measure(500.0)],
+        vec![delivery(b"sip", 12, 30, 0.5)],
+    )
+    .expect("case");
+    let policy = policy_for(case.body().conserved_basis(), 40, 160, 1e-9, 1e-12, 100.0);
+    let core = ReferenceIntegrator::new(2 * SECOND);
+    let store = RollingStore::with_backend(Box::new(XorBackend::new(None)));
+    let session = case.admit(&core, &store).expect("admitted");
+    let out = run_rolling(
+        session,
+        at(160 * SECOND),
+        &policy,
+        &store,
+        rolling_config(20 * SECOND),
+    )
+    .expect("rolling through custom backend");
+    assert!(out.certificate.is_ok());
+    assert!(out.listing.complete_link_revisions.is_empty());
+    assert_eq!(out.listing.complete_link_bytes, 0);
+    assert!(out.listing.witness_count > 64);
+
+    let fail_store = RollingStore::with_backend(Box::new(XorBackend::new(Some(5))));
+    let fail_session = case.admit(&core, &fail_store).expect("admitted");
+    let fail_id = fail_session.record().identity().clone();
+    let err = run_rolling(
+        fail_session,
+        at(10 * SECOND),
+        &policy,
+        &fail_store,
+        rolling_config(4 * SECOND),
+    )
+    .err()
+    .expect("persistent backend put failure surfaces StoreFailed");
+    assert!(matches!(
+        err,
+        RollingError::Checkpoint(CheckpointError::StoreFailed { .. })
+    ));
+    let fr = fail_store.flight_recorder().expect("latched");
+    assert!(matches!(fr.trigger, FlightRecorderTrigger::StoreFailure { .. }));
+    assert_eq!(fr.last_head_revision, 4);
+    assert!(
+        fail_store
+            .retained_flight_recorder(case.body(), &fail_id)
+            .expect("retained up to latest_kept")
+            .is_some()
+    );
+}
+
+fn sodium_body() -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let vessel = map.site::<VesselSegment>("vessel", origin());
+    map.contain(root.id(), vessel.id());
+    let bed = map.site::<CapillaryBed>("bed", origin()).id();
+    map.contain(root.id(), bed);
+    map.connect(Network::Vascular, vessel.id(), bed);
+    map.connect(Network::Vascular, bed, vessel.id());
+    let mut schema = Schema::new(map.finish().expect("map")).expect("schema");
+    schema.leave_out(Space::Plasma, "bed only");
+    schema.leave_out(Space::Cells, "bed only");
+    schema.leave_out(Space::Lumen, "no blood");
+    schema.carry::<Water, CapillaryBed>(Space::Interstitium);
+    schema.carry::<Sodium, CapillaryBed>(Space::Interstitium);
+    schema
+        .boundary::<Water>("gut water", BoundaryDirection::IntoBody, bed, Space::Interstitium)
+        .expect("water boundary");
+    schema
+        .boundary::<Sodium>(
+            "gut sodium",
+            BoundaryDirection::IntoBody,
+            bed,
+            Space::Interstitium,
+        )
+        .expect("sodium boundary");
+    let wave = RateClass::new(RateBand::Wave, 3_600 * SECOND).expect("class");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.boundary()?.parts();
+        let BoundaryRoute {
+            route: w_route,
+            drive: w_drive,
+        } = ports.route::<Water>("gut water")?;
+        let w_rate = laws.kernel(|mut k| {
+            let value = k.read(&w_drive);
+            k.finish(value, laws.every_mode(), wave)
+        });
+        laws.transfer(Transfer::new(&w_route, w_rate));
+        let BoundaryRoute { route, drive } = ports.route::<Sodium>("gut sodium")?;
+        let rate = laws.kernel(|mut k| {
+            let value = k.read(&drive);
+            k.finish(value, laws.every_mode(), wave)
+        });
+        laws.transfer(Transfer::new(&route, rate));
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let mut packet = ParameterPacket::new();
+    packet
+        .start(
+            RowKind::Amount {
+                site: bed,
+                space: Space::Interstitium,
+                species: Species::Water,
+            },
+            measure::<Water>(1_000.0),
+            "synthetic",
+        )
+        .expect("water start");
+    packet
+        .start(
+            RowKind::Amount {
+                site: bed,
+                space: Space::Interstitium,
+                species: Species::Sodium,
+            },
+            measure::<Sodium>(100.0),
+            "synthetic",
+        )
+        .expect("sodium start");
+    (body, packet)
+}
+
+#[test]
+fn a_charge_drift_failure_refuses_drift_recheck_pass_even_when_other_bounds_loosen() {
+    let (body, packet) = sodium_body();
+    let basis = body.conserved_basis();
+    let sodium_id = basis
+        .ids()
+        .find(|q| q.book() == Book::Of(Species::Sodium))
+        .expect("sodium");
+    let charge_id = basis.ids().find(|q| q.book() == Book::Charge).expect("charge");
+    let make_policy = |sodium_drift: f64| {
+        let quantities: Vec<QuantityPolicy> = basis
+            .ids()
+            .map(|q| match q.book() {
+                Book::Of(Species::Water) => {
+                    QuantityPolicy::new::<Water>(q, measure(1e-9), measure(1e-12), measure(100.0))
+                        .expect("water policy")
+                }
+                Book::Of(Species::Sodium) => {
+                    QuantityPolicy::new::<Sodium>(q, measure(1e-9), measure(1e-12), measure(sodium_drift))
+                        .expect("sodium policy")
+                }
+                Book::Charge => {
+                    QuantityPolicy::charge(q, measure(1e-9), measure(1e-12)).expect("charge policy")
+                }
+                other => panic!("unexpected book {other:?}"),
+            })
+            .collect();
+        let windows =
+            SlidingWindows::new(NonZeroU64::new(20 * SECOND).expect("pos"), 60 * SECOND).expect("windows");
+        CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows).expect("policy")
+    };
+    let tight = make_policy(0.25);
+    let loose = make_policy(100.0);
+    let events = vec![BoundaryEvent::new(
+        InputId::new(Digest::of_canonical(b"na-load")),
+        at(10 * SECOND),
+        BoundaryInput::Sodium(Delivered {
+            boundary: "gut sodium",
+            amount: measure::<Sodium>(2.0),
+            ends: at(50 * SECOND),
+        }),
+    )];
+    let core = ReferenceIntegrator::new(2 * SECOND);
+    let store = RollingStore::new();
+    let session = admit_fixture(
+        &body,
+        packet,
+        BoundaryPort::new(events).expect("port"),
+        &core,
+        &store,
+    )
+    .expect("admitted");
+    let outcome = run_rolling(
+        session,
+        at(60 * SECOND),
+        &tight,
+        &store,
+        rolling_config(20 * SECOND),
+    )
+    .expect("rolling");
+    assert_eq!(
+        outcome.certificate.expect_err("drift fails").check(),
+        CertificateCheck::Drift
+    );
+    let tally = outcome
+        .drift_tally
+        .expect("closure passed, so drift tally exists");
+    assert_eq!(
+        tally.recheck(&tight, &loose),
+        DriftRecheck::NeedsRerun { quantity: charge_id },
+        "loosening sodium drift must never mark a charge closure-bound drift failure as Passes"
+    );
+    let _ = sodium_id;
+}
+
+#[test]
+fn run_rolling_refuses_foreign_store_hash_mismatch_and_empty_or_mismatched_build_id() {
+    let case = TwoReservoirs::delivering([measure(500.0), measure(500.0)], Vec::new()).expect("case");
+    let policy = policy_for(case.body().conserved_basis(), 10, 20, 1e-9, 1e-12, 100.0);
+    let core = ReferenceIntegrator::new(2 * SECOND);
+
+    let store_a = RollingStore::new();
+    let store_b = RollingStore::new();
+    let foreign_session = case.admit(&core, &store_a).expect("admitted on a");
+    let err = run_rolling(
+        foreign_session,
+        at(20 * SECOND),
+        &policy,
+        &store_b,
+        rolling_config(10 * SECOND),
+    )
+    .err()
+    .expect("foreign store must be refused");
+    assert!(matches!(err, RollingError::ForeignStore));
+    assert_eq!(store_b.listing().checkpoint_revisions, Vec::<u64>::new());
+    assert_eq!(store_b.listing().witness_count, 0);
+
+    let sha_store = RollingStore::with_hash(RecordHash::Sha256);
+    let v2_session = case.admit(&core, &sha_store).expect("admitted");
+    let err = run_rolling(
+        v2_session,
+        at(20 * SECOND),
+        &policy,
+        &sha_store,
+        rolling_config(10 * SECOND),
+    )
+    .err()
+    .expect("V2 session on Sha256 rolling store must be refused");
+    assert!(matches!(err, RollingError::HashMismatch));
+
+    let empty_store = RollingStore::new();
+    let empty_session = case.admit(&core, &empty_store).expect("admitted");
+    let err = run_rolling(
+        empty_session,
+        at(20 * SECOND),
+        &policy,
+        &empty_store,
+        RollingConfig {
+            build_id: String::new(),
+            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("pos"),
+            late_inputs: Vec::new(),
+        },
+    )
+    .err()
+    .expect("empty build id must be refused");
+    assert!(matches!(err, RollingError::EmptyBuildId));
+
+    let shared_store = RollingStore::new();
+    let s1 = case.admit(&core, &shared_store).expect("s1");
+    let out1 = run_rolling(
+        s1,
+        at(20 * SECOND),
+        &policy,
+        &shared_store,
+        RollingConfig {
+            build_id: String::from("build-alpha"),
+            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("pos"),
+            late_inputs: Vec::new(),
+        },
+    )
+    .expect("run 1");
+    assert_eq!(out1.build_id, "build-alpha");
+    assert_eq!(shared_store.build_id().as_deref(), Some("build-alpha"));
+    assert_eq!(out1.listing.build_id.as_deref(), Some("build-alpha"));
+
+    let s2 = case.admit(&core, &shared_store).expect("s2");
+    let mismatch = run_rolling(
+        s2,
+        at(20 * SECOND),
+        &policy,
+        &shared_store,
+        RollingConfig {
+            build_id: String::from("build-beta"),
+            checkpoint_every_ns: NonZeroU64::new(10 * SECOND).expect("pos"),
+            late_inputs: Vec::new(),
+        },
+    )
+    .err()
+    .expect("mismatched build id on same store refused");
+    assert!(matches!(mismatch, RollingError::BuildMismatch));
+
+    let RollingStatus::Completed(finished) = out1.status else {
+        panic!("completed");
+    };
+    let rev0 = shared_store.checkpoint_at_revision(0).expect("rev 0");
+    let sink = MemoryStore::default();
+    let no_build = ReplayStore::new(&shared_store, &sink);
+    assert_eq!(
+        regenerate(
+            case.body(),
+            &core,
+            &no_build,
+            RegenerationSource {
+                from_checkpoint: &rev0.checkpoint,
+                expected: finished.record().identity(),
+                expected_seals: &shared_store.witness_seals(),
+                event_log: None,
+            },
+        )
+        .err(),
+        Some(RegenerationError::BuildMissing)
+    );
+}
+
+#[test]
+fn a_store_failure_on_the_final_step_flushes_or_fails_instead_of_claiming_zero_witnesses() {
+    let case = TwoReservoirs::delivering([measure(500.0), measure(500.0)], Vec::new()).expect("case");
+    let policy = policy_for(case.body().conserved_basis(), 2, 2, 1e-9, 1e-12, 100.0);
+    let core = ReferenceIntegrator::new(2 * SECOND);
+
+    let store = RollingStore::new();
+    let session = case.admit(&core, &store).expect("admitted");
+    store.fail_next_keep();
+    let outcome = run_rolling(
+        session,
+        at(2 * SECOND),
+        &policy,
+        &store,
+        rolling_config(10 * SECOND),
+    )
+    .expect("transient final-step failure flushes cleanly before finish");
+    let RollingStatus::Completed(finished) = outcome.status else {
+        panic!("completed");
+    };
+    assert_eq!(finished.record().oldest_unkept(), None);
+    assert_eq!(
+        outcome.listing.witness_count, 1,
+        "final step must be flushed into witnesses before finish"
+    );
+    assert!(matches!(
+        outcome.listing.flight_recorder.as_ref().map(|fr| fr.trigger),
+        Some(FlightRecorderTrigger::StoreFailure { .. })
+    ));
+    let retained = store
+        .retained_flight_recorder(case.body(), finished.record().identity())
+        .expect("valid")
+        .expect("present");
+    assert!(certify_flight_recorder(&retained, &policy).is_ok());
+}
+
+#[test]
+fn an_admit_withheld_run_logs_late_inputs_and_regenerates_from_any_checkpoint_using_its_event_log() {
+    let case = TwoReservoirs::delivering(
+        [measure(500.0), measure(500.0)],
+        vec![delivery(b"late-sip", 20, 40, 1.0)],
+    )
+    .expect("case");
+    let events = case.events().expect("case events");
+    assert_eq!(events.len(), 1);
+    let late =
+        AuthorizedInput::from_command_receipt(Digest::of_canonical(b"cmd-late-sip"), events[0].clone());
+    let policy = policy_for(case.body().conserved_basis(), 20, 60, 1e-9, 1e-12, 100.0);
+    let core = ReferenceIntegrator::new(2 * SECOND);
+    let store = RollingStore::new();
+    let session = case.admit_withheld(&core, &store).expect("admitted withheld");
+    let out = run_rolling(
+        session,
+        at(60 * SECOND),
+        &policy,
+        &store,
+        RollingConfig {
+            build_id: String::from("nightingale-event-log-test"),
+            checkpoint_every_ns: NonZeroU64::new(8 * SECOND).expect("pos"),
+            late_inputs: vec![ScheduledInput {
+                at_revision: 5,
+                input: late,
+            }],
+        },
+    )
+    .expect("rolling with late input");
+    assert!(out.certificate.is_ok());
+    assert_eq!(out.build_id, "nightingale-event-log-test");
+    let RollingStatus::Completed(finished) = out.status else {
+        panic!("completed");
+    };
+    let identity = finished.record().identity().clone();
+    assert_eq!(out.step_trace.len(), out.listing.witness_count);
+    assert_eq!(out.event_log.identity().digest(), identity.digest());
+    assert_eq!(out.event_log.events().len(), 1);
+    assert_eq!(out.event_log.events()[0].revision, 5);
+    assert_eq!(out.event_log.events()[0].input.event().at(), at(20 * SECOND));
+
+    let seals = store.witness_seals();
+    let rev0 = store.checkpoint_at_revision(0).expect("rev 0");
+    let ckpt4 = store
+        .checkpoint_at_revision(4)
+        .expect("ckpt at rev 4 before rev-5 input");
+
+    let sink_full = MemoryStore::default();
+    let replay_full = ReplayStore::from_rolling(&store, &sink_full);
+    let regen_full = regenerate(
+        case.body(),
+        &core,
+        &replay_full,
+        RegenerationSource {
+            from_checkpoint: &rev0.checkpoint,
+            expected: &identity,
+            expected_seals: &seals,
+            event_log: Some(&out.event_log),
+        },
+    )
+    .expect("full regeneration with event log reproduces every witness");
+    assert_eq!(regen_full.build, "nightingale-event-log-test");
+    assert_eq!(regen_full.session.record().digests(), finished.record().digests());
+
+    let sink_mid = MemoryStore::default();
+    let replay_mid = ReplayStore::from_rolling(&store, &sink_mid);
+    let regen_mid = regenerate(
+        case.body(),
+        &core,
+        &replay_mid,
+        RegenerationSource {
+            from_checkpoint: &ckpt4.checkpoint,
+            expected: &identity,
+            expected_seals: &seals[4..],
+            event_log: Some(&out.event_log),
+        },
+    )
+    .expect("mid-run checkpoint regeneration replays post-checkpoint input");
+    assert_eq!(regen_mid.session.record().digests(), finished.record().digests());
+
+    let sink_missing_log = MemoryStore::default();
+    let replay_missing_log = ReplayStore::from_rolling(&store, &sink_missing_log);
+    let omitted = regenerate(
+        case.body(),
+        &core,
+        &replay_missing_log,
+        RegenerationSource {
+            from_checkpoint: &ckpt4.checkpoint,
+            expected: &identity,
+            expected_seals: &seals[4..],
+            event_log: None,
+        },
+    )
+    .err()
+    .expect("omitting post-checkpoint event log diverges when delivery starts");
+    assert!(matches!(
+        omitted,
+        RegenerationError::Diverged(finding) if finding.build == "nightingale-event-log-test"
+    ));
+
+    let other_case = TwoReservoirs::delivering([measure(400.0), measure(600.0)], Vec::new()).expect("other");
+    let other_store = MemoryStore::default();
+    let other_id = other_case
+        .admit(&core, &other_store)
+        .expect("other")
+        .record()
+        .identity()
+        .clone();
+    let wrong_log = EventLog::new(other_id);
+    let sink_wrong = MemoryStore::default();
+    let replay_wrong = ReplayStore::from_rolling(&store, &sink_wrong);
+    assert_eq!(
+        regenerate(
+            case.body(),
+            &core,
+            &replay_wrong,
+            RegenerationSource {
+                from_checkpoint: &rev0.checkpoint,
+                expected: &identity,
+                expected_seals: &seals,
+                event_log: Some(&wrong_log),
+            },
+        )
+        .err(),
+        Some(RegenerationError::Checkpoint(CheckpointError::IdentityMismatch))
+    );
+}
+
+#[test]
+fn retained_span_streams_in_bounded_pages_and_refuses_invented_windows_on_one_window_suffix() {
+    let case = TwoReservoirs::delivering(
+        [measure(500.0), measure(500.0)],
+        vec![delivery(b"slow-drift", 20, 180, 1.0)],
+    )
+    .expect("case");
+    let policy = policy_for(case.body().conserved_basis(), 20, 180, 1e-9, 1e-12, 5.0);
+    let core = ReferenceIntegrator::new(SECOND);
+    let store = RollingStore::new();
+    let session = case.admit(&core, &store).expect("admitted");
+    let out = run_rolling(
+        session,
+        at(180 * SECOND),
+        &policy,
+        &store,
+        rolling_config(10 * SECOND),
+    )
+    .expect("rolling");
+    let fold_err = out.certificate.expect_err("drift fails");
+    let RollingStatus::Completed(finished) = out.status else {
+        panic!("completed");
+    };
+    let fr = out.listing.flight_recorder.expect("fr");
+    assert!(
+        fr.last_head_revision - fr.from_checkpoint_revision > 140,
+        "span crosses multiple 64-link pages"
+    );
+    let retained = store
+        .retained_flight_recorder(case.body(), finished.record().identity())
+        .expect("verified")
+        .expect("present");
+    let one_segment = retained
+        .from(retained.span().expect("span").start())
+        .next()
+        .expect("first")
+        .expect("ok")
+        .1
+        .heap_bytes();
+    assert!(
+        retained.memory_bytes() < one_segment * 10 + 4096,
+        "paged RetainedSpan holds marks + endpoints only, not all 150+ decoded chunks: {} bytes (segment {} bytes)",
+        retained.memory_bytes(),
+        one_segment
+    );
+    let local_err = certify_flight_recorder(&retained, &policy).expect_err("reproduces drift");
+    assert_eq!(local_err.check(), fold_err.check());
+    assert_eq!(local_err.window(), fold_err.window());
+
+    let one_window = policy_for(case.body().conserved_basis(), 10, 10, 1e-9, 1e-12, 5.0);
+    let ckpt20 = store.checkpoint_at_revision(20).expect("ckpt at 20s");
+    let suffix_past_admission = ng_record::retained_span(
+        case.body(),
+        finished.record().identity(),
+        &ckpt20.checkpoint,
+        finished.record().seal().digest(),
+        finished.record().revision(),
+        &store,
+    )
+    .expect("suffix past admission");
+    assert!(suffix_past_admission.from_revision() > 0);
+    let one_win_err = certify_flight_recorder(&suffix_past_admission, &one_window)
+        .expect_err("one-window policy on suffix past admission must not invent sliding windows");
+    assert_eq!(
+        one_win_err.check(),
+        CertificateCheck::Coverage,
+        "must report Coverage rather than inventing a sliding window Drift past admission"
+    );
+}
+
+#[test]
+fn a_shared_store_anchors_and_advances_the_flight_recorder_on_one_chain_only() {
+    let case = TwoReservoirs::delivering(
+        [measure(500.0), measure(500.0)],
+        vec![delivery(b"sip", 4, 30, 0.5)],
+    )
+    .expect("case");
+    let core_a = ReferenceIntegrator::new(2 * SECOND);
+    let core_b = PerturbedCore {
+        inner: ReferenceIntegrator::new(2 * SECOND),
+        perturb_after_s: 0,
+    };
+    let store = RollingStore::new();
+    let mut a = case.admit(&core_a, &store).expect("admitted");
+    store.record_checkpoint(&a).expect("rev 0");
+    let mut ckpt_at_5 = None;
+    for _ in 0..8 {
+        a = step_accepted(a);
+        if a.record().revision() == 5 {
+            ckpt_at_5 = Some(a.checkpoint().expect("ckpt 5"));
+        }
+        if a.record().revision() == 6 {
+            store.record_checkpoint(&a).expect("a rev 6");
+        }
+    }
+    let identity = a.record().identity().clone();
+    let mut b = Session::resume(
+        &ckpt_at_5.expect("ckpt 5"),
+        &identity,
+        case.body(),
+        &core_b,
+        &store,
+    )
+    .expect("resumed b");
+    for _ in 0..3 {
+        b = step_accepted(b);
+        if b.record().revision() == 6 {
+            store.record_checkpoint(&b).expect("b rev 6");
+        }
+    }
+    let b6_seal = store
+        .checkpoint_at_revision_and_seal(6, b.record().seal().digest())
+        .map(|c| c.seal);
+    let _ = b6_seal;
+    let b8_rev = b.record().revision();
+    let b8_seal = b.record().seal().digest();
+    let b6_time = store
+        .checkpoint_at_revision(6)
+        .expect("a6")
+        .time
+        .max(b.record().accepted().time());
+    let latched = store
+        .latch_flight_recorder(
+            FlightRecorderTrigger::ReplayDivergence,
+            Some(b6_time),
+            b8_rev,
+            b8_seal,
+        )
+        .expect("latched on b");
+    assert_eq!(latched.from_checkpoint_revision, 6);
+    assert_ne!(
+        latched.from_checkpoint_seal,
+        store.checkpoint_at_revision(6).expect("a's rev 6").seal,
+        "must anchor to b's rev-6 checkpoint, not a's rev-6 checkpoint"
+    );
+
+    a = step_accepted(a);
+    let a9_rev = a.record().revision();
+    let a9_seal = a.record().seal().digest();
+    let _ = store.latch_flight_recorder(
+        FlightRecorderTrigger::ReplayDivergence,
+        Some(a.record().accepted().time()),
+        a9_rev,
+        a9_seal,
+    );
+    let fr = store.flight_recorder().expect("still latched");
+    assert_eq!(
+        (fr.last_head_revision, fr.last_head_seal),
+        (b8_rev, b8_seal),
+        "a step or latch from another branch must not overwrite the flight recorder head"
+    );
+
+    let retained = store
+        .retained_flight_recorder(case.body(), &identity)
+        .expect("retained resolves b's (6, b6_seal) checkpoint cleanly")
+        .expect("present");
+    assert_eq!(retained.from_revision(), 6);
+    assert_eq!(retained.seal().base, b8_seal);
+}
+
+#[test]
+fn a_v1_sha256_run_imports_hashes_trims_and_resumes_ngcheck1_checkpoints_without_changing_format() {
+    const V1_CKPT_0: &str = concat!(
+        "6e67636865636b317eec50e01192ec46e1ad708a19df68054e7b5a9de08e5a533e0464b8d9e8150200000000",
+        "0000022ba1c6ba75453ca162c2f45bb119873c60aa461d311d3b5ba20434a4b0f99c6b250000000000000000",
+        "cc271c2eef942faa880aa857bdd7e44896ef41dba4f523f2d05f7508b0175e93000000000000000000000000",
+        "000001c300000000000000136e672d636f6e747261637420696d616765203100000000000000000000000000",
+        "000002411e8c50000000000000000000000000411e7cb0000000000000000000000000000000000000000000",
+        "00000000000000000000000000000000000000000000000000000000000000a88b7bcf57bfea7e58366db917",
+        "ca9c5fd0dafc1ce80c51bc6427ea54e75116e300000000000000000000000000000000000000000000000000",
+        "0000000000000000000000000000000000000000000001c96c6d5be8d08a12e7b5cdc1b207fa6b2430974c86",
+        "803d8891675e76fd992c2000000009502f9000000000000000000000000000000000086578746572696f7240",
+        "590000000000000000000df8475800000000000000000000000000000000000000000000000001bf6870b53f",
+        "d7c4e2b637b73fd906a4e2584c26516a6033c97fd4aac7bb0eb775a16338610d4e12a796c536301a21e90758",
+        "99055e98f9dd1f2dad6b4805c3c92c00000000000000033ff00000000000003ff00000000000003f50624dd2",
+        "f1a9fc0000000000000002411e8c5000000000411e7cb00000000000000000000000023ff00000000000003f",
+        "f00000000000000000000000000000a1c6ba75453ca162c2f45bb119873c60aa461d311d3b5ba20434a4b0f9",
+        "9c6b2500000000000000000000000000000001412e848000000000000000000000000077797bb700bdb46ebb",
+        "d4c246f6554d9cc633d75ad39c870f07440f238d632e1d",
+    );
+    let v1_bytes: Vec<u8> = V1_CKPT_0
+        .as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| {
+            ((pair[0] as char).to_digit(16).expect("hex") as u8) * 16
+                + ((pair[1] as char).to_digit(16).expect("hex") as u8)
+        })
+        .collect();
+    let v1_zero = Checkpoint::from_bytes(v1_bytes);
+    let case = TwoReservoirs::delivering(
+        [measure(500_500.0), measure(499_500.0)],
+        vec![Delivery {
+            id: b"input",
+            from: at(40 * SECOND),
+            to: at(60 * SECOND),
+            amount: measure(100.0),
+        }],
+    )
+    .expect("case")
+    .until(at(200 * SECOND));
+    let core = ReferenceIntegrator::new(8 * SECOND);
+    let tmp = MemoryStore::default();
+    let identity = case
+        .admit(&core, &tmp)
+        .expect("admitted")
+        .record()
+        .identity()
+        .clone();
+    let store = RollingStore::with_hash(RecordHash::Sha256);
+    let session = Session::resume(&v1_zero, &identity, case.body(), &core, &store).expect("resumed V1");
+    assert_eq!(session.record().record_hash(), RecordHash::Sha256);
+    let policy = policy_for(case.body().conserved_basis(), 40, 160, 1e-6, 1e-9, 200.0);
+    let out = run_rolling(
+        session,
+        at(160 * SECOND),
+        &policy,
+        &store,
+        rolling_config(40 * SECOND),
+    )
+    .expect("V1 rolling run");
+    assert!(out.certificate.is_ok());
+    assert!(out.listing.complete_link_revisions.is_empty());
+    let RollingStatus::Completed(finished) = out.status else {
+        panic!("completed");
+    };
+    let last_ckpt = store
+        .checkpoint_at_or_before_revision(finished.record().revision())
+        .expect("saved V1 ckpt");
+    assert!(last_ckpt.revision > 5);
+    assert_eq!(&last_ckpt.checkpoint.as_bytes()[..8], b"ngcheck1");
+    assert_eq!(
+        trailer_offset(last_ckpt.checkpoint.as_bytes()),
+        last_ckpt.checkpoint.as_bytes().len(),
+        "V1 ngcheck1 format stays untouched with no V2 trailer"
+    );
+
+    store.reset_resolve_calls();
+    let fresh = ReferenceIntegrator::new(8 * SECOND);
+    let resumed = Session::resume(&last_ckpt.checkpoint, &identity, case.body(), &fresh, &store)
+        .expect("trimmed V1 checkpoint resumes cleanly");
+    assert_eq!(resumed.record().revision(), last_ckpt.revision);
+    assert_eq!(resumed.record().seal().digest(), last_ckpt.seal);
+    assert_eq!(
+        store.resolve_calls(),
+        2,
+        "trimmed V1 restore resolves only head link + rev 1 opening link, verifying middle steps via witnesses"
+    );
+
+    let import_src = MemoryStore::default();
+    let mut s_v1 = Session::resume(&v1_zero, &identity, case.body(), &core, &import_src).expect("v1");
+    s_v1 = step_accepted(s_v1);
+    let seal1 = s_v1.record().seal().digest();
+    let raw1 = import_src.resolve(&seal1).expect("raw v1 link");
+    let imported = RollingStore::with_hash(RecordHash::Sha256);
+    imported.keep(seal1, &raw1).expect("imported via keep");
+    let w1 = imported.resolve_witness(&seal1).expect("sha256 witness");
+    assert_eq!(
+        w1.seal(RecordHash::Sha256, 1),
+        seal1,
+        "HistoryStore::keep must hash imported links with the store's RecordHash"
+    );
+}
+
+#[test]
+fn a_one_window_run_keeps_trimming_after_its_single_window_closes() {
+    let case = TwoReservoirs::delivering([measure(500.0), measure(500.0)], Vec::new()).expect("case");
+    let policy = policy_for(case.body().conserved_basis(), 20, 20, 1e-9, 1e-12, 100.0);
+    let core = ReferenceIntegrator::new(2 * SECOND);
+    let store = RollingStore::new();
+    let mut session = case.admit(&core, &store).expect("admitted");
+    store.record_checkpoint(&session).expect("rev 0");
+    let mut fold = CertificateFold::open(&session, &policy).expect("fold");
+    let mut next_ckpt = 20 * SECOND;
+    let mut trimmed_after_close = false;
+    while session.record().accepted().time() < at(100 * SECOND) {
+        session = step_accepted(session);
+        fold.advance(&session).expect("advance");
+        if session.record().accepted().time().nanoseconds() >= next_ckpt {
+            store.record_checkpoint(&session).expect("ckpt");
+            next_ckpt += 20 * SECOND;
+        }
+        store.trim_before(fold.oldest_open_window_start(), fold.oldest_retained_revision());
+        if session.record().accepted().time() >= at(60 * SECOND) {
+            assert_eq!(fold.oldest_open_window_start(), None);
+            assert_eq!(fold.oldest_retained_revision(), None);
+            if store.listing().complete_link_revisions.len() < 12 {
+                trimmed_after_close = true;
+            }
+        }
+    }
+    assert!(
+        trimmed_after_close,
+        "a one-window run must advance its trim floor to the latest checkpoint after its single window closes"
+    );
+    assert!(fold.certificate().is_ok());
+}
+
+#[test]
+fn run_rolling_with_replay_latches_replay_divergence_before_trimming() {
+    let case = TwoReservoirs::delivering([measure(500.0), measure(500.0)], Vec::new()).expect("case");
+    let policy = policy_for(case.body().conserved_basis(), 20, 100, 1e-9, 1e-12, 100.0);
+
+    let ok_primary_core = ReferenceIntegrator::new(2 * SECOND);
+    let ok_shadow_core = ReferenceIntegrator::new(2 * SECOND);
+    let ok_store = RollingStore::new();
+    let ok_shadow_store = MemoryStore::default();
+    let ok_primary = case.admit(&ok_primary_core, &ok_store).expect("primary");
+    let ok_shadow = case.admit(&ok_shadow_core, &ok_shadow_store).expect("shadow");
+    let ok_out = run_rolling_with_replay(
+        ok_primary,
+        ok_shadow,
+        at(100 * SECOND),
+        &policy,
+        &ok_store,
+        rolling_config(20 * SECOND),
+    )
+    .expect("matching live replay passes");
+    assert!(ok_out.certificate.is_ok());
+    assert_eq!(ok_out.listing.flight_recorder, None);
+    assert!(ok_out.listing.complete_link_revisions.is_empty());
+
+    let primary_core = ReferenceIntegrator::new(2 * SECOND);
+    let diverging_core = PerturbedCore {
+        inner: ReferenceIntegrator::new(2 * SECOND),
+        perturb_after_s: 40,
+    };
+    let div_store = RollingStore::new();
+    let div_shadow_store = MemoryStore::default();
+    let primary = case.admit(&primary_core, &div_store).expect("primary");
+    let shadow = case.admit(&diverging_core, &div_shadow_store).expect("shadow");
+    let id = primary.record().identity().clone();
+    let div_out = run_rolling_with_replay(
+        primary,
+        shadow,
+        at(100 * SECOND),
+        &policy,
+        &div_store,
+        rolling_config(20 * SECOND),
+    )
+    .expect("diverging live replay latches flight recorder");
+    let fr = div_out
+        .listing
+        .flight_recorder
+        .expect("live replay divergence must latch flight recorder before trimming");
+    assert_eq!(fr.trigger, FlightRecorderTrigger::ReplayDivergence);
+    assert!(fr.from_checkpoint_time <= at(20 * SECOND));
+    assert_eq!(
+        div_out.listing.complete_link_revisions,
+        (fr.from_checkpoint_revision + 1..=fr.last_head_revision).collect::<Vec<_>>()
+    );
+    assert!(
+        div_store
+            .retained_flight_recorder(case.body(), &id)
+            .expect("valid retained span")
+            .is_some()
+    );
+}
+
+#[test]
+fn checkpoint_before_never_falls_back_past_window_start_and_missing_base_surfaces_error() {
+    let case = TwoReservoirs::delivering(
+        [measure(500.0), measure(500.0)],
+        vec![delivery(b"drift", 10, 60, 1.0)],
+    )
+    .expect("case");
+    let core = ReferenceIntegrator::new(2 * SECOND);
+    let store = RollingStore::new();
+    let mut session = case.admit(&core, &store).expect("admitted");
+    while session.record().accepted().time() < at(20 * SECOND) {
+        session = step_accepted(session);
+    }
+    store.record_checkpoint(&session).expect("only checkpoint at 20s");
+    assert!(
+        store.checkpoint_before(at(10 * SECOND)).is_none(),
+        "checkpoint_before must return None rather than falling back to a later checkpoint"
+    );
+    let rev = session.record().revision();
+    let seal = session.record().seal().digest();
+    assert!(
+        store
+            .latch_flight_recorder(
+                FlightRecorderTrigger::CertificateFailure(CertificateCheck::Drift),
+                Some(at(10 * SECOND)),
+                rev,
+                seal,
+            )
+            .is_none(),
+        "latch must return None when no checkpoint covers window_start"
+    );
+    store.finish();
+    assert!(
+        !store.listing().complete_link_revisions.is_empty(),
+        "finish must not discard links when a latch failed for lack of a covering checkpoint"
+    );
+    assert!(matches!(
+        store.retained_flight_recorder(case.body(), session.record().identity()),
+        Err(CheckpointError::HistoryMissing { .. })
+    ));
+
+    let resumed_store = RollingStore::new();
+    let mut seed = case.admit(&core, &resumed_store).expect("seed");
+    while seed.record().accepted().time() < at(20 * SECOND) {
+        seed = step_accepted(seed);
+    }
+    let ckpt20 = seed.checkpoint().expect("ckpt at 20s");
+    let resumed = Session::resume(
+        &ckpt20,
+        seed.record().identity(),
+        case.body(),
+        &core,
+        &resumed_store,
+    )
+    .expect("resumed at 20s without saving rev 0 in store");
+    let tight_policy = policy_for(case.body().conserved_basis(), 20, 60, 1e-9, 1e-12, 5.0);
+    let err = run_rolling(
+        resumed,
+        at(60 * SECOND),
+        &tight_policy,
+        &resumed_store,
+        rolling_config(20 * SECOND),
+    )
+    .err()
+    .expect("missing covering checkpoint for pre-resume failing window must surface MissingCheckpoint");
+    assert!(matches!(
+        err,
+        RollingError::MissingCheckpoint { needed_at } if needed_at < at(20 * SECOND)
+    ));
 }

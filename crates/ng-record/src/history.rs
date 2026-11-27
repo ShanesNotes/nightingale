@@ -903,25 +903,32 @@ impl History {
             {
                 return Err(CheckpointError::Malformed);
             }
-            if opened > newest.chunk.interval.start() {
+            if opened >= newest.chunk.interval.start() {
                 return Err(CheckpointError::Malformed);
             }
             opened
         } else {
-            let walk = Walk {
+            let mut at = newest.previous;
+            let mut step_rev = revision - 1;
+            while step_rev > 1 {
+                let (previous, _) = verify_ancestor_step(store, hash, shape, at, step_rev)?;
+                at = previous;
+                step_rev -= 1;
+            }
+            let first = Walk {
                 store,
                 format,
                 shape,
                 origin: history.origin.seal,
-                at: newest.previous,
-                revision: revision - 1,
+                at,
+                revision: 1,
                 done: false,
-            };
-            let mut opened = None;
-            for walked in walk {
-                opened = Some(walked?.chunk.interval.start());
             }
-            opened.ok_or(CheckpointError::HistoryAltered { seal })?
+            .read()?;
+            if first.previous != history.origin.seal {
+                return Err(CheckpointError::HistoryAltered { seal: first.previous });
+            }
+            first.chunk.interval.start()
         };
         let Walked {
             chunk,
@@ -1809,15 +1816,22 @@ impl Curve<'_> {
 
 /// A verified contiguous span of complete links anchored to a verified checkpoint whose prefix chains back
 /// to admission through witnesses or links. Built without running any core so a flight recorder's span can
-/// be checked from the store alone.
-pub struct RetainedSpan<'m> {
+/// be checked from the store alone while streaming at `O(PAGE)` memory.
+pub struct RetainedSpan<'m, 's> {
     body: &'m CompiledBody,
+    store: &'s dyn HistoryStore,
+    format: RecordFormat,
+    shape: Shape,
+    origin: Digest,
     seal: HistorySeal,
     opened: SimTime,
     from_revision: u64,
-    segments: Vec<(u64, HistorySegment)>,
+    span: Option<Interval>,
+    base_head: Option<(u64, HistorySegment)>,
+    marks: Vec<Mark>,
+    head: Option<(u64, HistorySegment)>,
 }
-impl<'m> RetainedSpan<'m> {
+impl<'m, 's> RetainedSpan<'m, 's> {
     pub fn seal(&self) -> HistorySeal {
         self.seal
     }
@@ -1834,26 +1848,109 @@ impl<'m> RetainedSpan<'m> {
         self.from_revision
     }
     pub fn span(&self) -> Option<Interval> {
-        let first = self.segments.first()?.1.interval().start();
-        let last = self.segments.last()?.1.interval().end();
-        Interval::new(first, last)
+        self.span
     }
-    pub fn segments(&self) -> &[(u64, HistorySegment)] {
-        &self.segments
+    /// Each accepted segment in this span with its revision, oldest first, reading at most one `PAGE` of
+    /// links from the store at a time.
+    pub fn from(&self, instant: SimTime) -> RetainedCursor<'_> {
+        if self
+            .head
+            .as_ref()
+            .is_some_and(|(_, segment)| segment.interval().start() < instant)
+        {
+            return RetainedCursor {
+                span: self,
+                base_head: None,
+                page: self.marks.len(),
+                held: Vec::new(),
+                head: self.head.clone(),
+            };
+        }
+        let pos = self.marks.partition_point(|mark| mark.oldest_start < instant);
+        if pos > 0 {
+            RetainedCursor {
+                span: self,
+                base_head: None,
+                page: pos - 1,
+                held: Vec::new(),
+                head: self.head.clone(),
+            }
+        } else {
+            RetainedCursor {
+                span: self,
+                base_head: self.base_head.clone(),
+                page: 0,
+                held: Vec::new(),
+                head: self.head.clone(),
+            }
+        }
+    }
+    /// Heap and inline bytes held by this paged span index (excluding transient cursor pages).
+    pub fn memory_bytes(&self) -> usize {
+        size_of::<Self>()
+            + self.marks.capacity() * size_of::<Mark>()
+            + self.base_head.as_ref().map_or(0, |(_, seg)| seg.heap_bytes())
+            + self.head.as_ref().map_or(0, |(_, seg)| seg.heap_bytes())
     }
 }
 
-/// Verifies `from_checkpoint` and its chain back to admission through witnesses or links, then verifies and
-/// parses every complete link from `from_checkpoint` through `(head_seal, head_revision)` without running a
-/// core.
-pub fn retained_span<'m>(
+pub struct RetainedCursor<'t> {
+    span: &'t RetainedSpan<'t, 't>,
+    base_head: Option<(u64, HistorySegment)>,
+    page: usize,
+    held: Vec<(u64, HistorySegment)>,
+    head: Option<(u64, HistorySegment)>,
+}
+impl Iterator for RetainedCursor<'_> {
+    type Item = Result<(u64, HistorySegment), CheckpointError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(base) = self.base_head.take() {
+            return Some(Ok(base));
+        }
+        if let Some(held) = self.held.pop() {
+            return Some(Ok(held));
+        }
+        let span = self.span;
+        let Some(mark) = span.marks.get(self.page) else {
+            return self.head.take().map(Ok);
+        };
+        self.page += 1;
+        let walk = Walk {
+            store: span.store,
+            format: span.format,
+            shape: span.shape,
+            origin: span.origin,
+            at: mark.newest,
+            revision: mark.revision,
+            done: false,
+        };
+        let mut revision = mark.revision;
+        for walked in walk.take(usize::try_from(mark.links).unwrap_or(usize::MAX)) {
+            match walked {
+                Ok(walked) => self.held.push((revision, HistorySegment { chunk: walked.chunk })),
+                Err(error) => {
+                    (self.page, self.head) = (span.marks.len(), None);
+                    self.held.clear();
+                    return Some(Err(error));
+                }
+            }
+            revision -= 1;
+        }
+        self.held.pop().map(Ok)
+    }
+}
+
+/// Verifies `from_checkpoint` and its chain back to admission through witnesses or links, then verifies
+/// every complete link from `from_checkpoint` through `(head_seal, head_revision)` and indexes them in
+/// `PAGE`-sized marks without holding every decoded chunk in memory or running a core.
+pub fn retained_span<'m, 's>(
     body: &'m CompiledBody,
     expected: &RunIdentity,
     from_checkpoint: &Checkpoint,
     head_seal: Digest,
     head_revision: u64,
-    store: &dyn HistoryStore,
-) -> Result<RetainedSpan<'m>, CheckpointError> {
+    store: &'s dyn HistoryStore,
+) -> Result<RetainedSpan<'m, 's>, CheckpointError> {
     if expected.model() != body.model_hash() {
         return Err(CheckpointError::IdentityMismatch);
     }
@@ -1874,35 +1971,77 @@ pub fn retained_span<'m>(
         body.columns().len(),
         body.rhythms().len(),
     );
-    let mut after_base = Vec::new();
-    let mut at = head_seal;
-    let mut rev = head_revision;
-    while rev > base_revision {
-        let walked = Walk {
+    let mut marks = Vec::new();
+    let (head, span) = if head_revision == base_revision {
+        if head_seal != base_seal {
+            return Err(CheckpointError::HistoryAltered { seal: head_seal });
+        }
+        let span = base_head.as_ref().map(HistorySegment::interval);
+        (None, span)
+    } else {
+        let newest = Walk {
             store,
             format,
             shape,
             origin,
-            at,
-            revision: rev,
+            at: head_seal,
+            revision: head_revision,
             done: false,
         }
         .read()?;
-        after_base.push((rev, HistorySegment { chunk: walked.chunk }));
-        at = walked.previous;
-        rev -= 1;
-    }
-    if at != base_seal {
-        return Err(CheckpointError::HistoryAltered { seal: at });
-    }
-    after_base.reverse();
-    let mut segments = Vec::with_capacity(after_base.len() + usize::from(base_head.is_some()));
-    if let Some(head) = base_head {
-        segments.push((base_revision, head));
-    }
-    segments.extend(after_base);
+        let span_end = newest.chunk.interval.end();
+        let mut span_start = newest.chunk.interval.start();
+        let mut at = newest.previous;
+        let mut rev = head_revision - 1;
+        let head = Some((head_revision, HistorySegment { chunk: newest.chunk }));
+        let mut page: Option<Mark> = None;
+        while rev > base_revision {
+            let walked = Walk {
+                store,
+                format,
+                shape,
+                origin,
+                at,
+                revision: rev,
+                done: false,
+            }
+            .read()?;
+            let start = walked.chunk.interval.start();
+            span_start = start;
+            match &mut page {
+                Some(mark) if mark.links < PAGE => {
+                    mark.links += 1;
+                    mark.oldest_start = start;
+                }
+                _ => {
+                    marks.extend(page.take());
+                    page = Some(Mark {
+                        newest: at,
+                        revision: rev,
+                        links: 1,
+                        oldest_start: start,
+                    });
+                }
+            }
+            at = walked.previous;
+            rev -= 1;
+        }
+        marks.extend(page.take());
+        if at != base_seal {
+            return Err(CheckpointError::HistoryAltered { seal: at });
+        }
+        marks.reverse();
+        if let Some(seg) = &base_head {
+            span_start = seg.interval().start();
+        }
+        (head, Interval::new(span_start, span_end))
+    };
     Ok(RetainedSpan {
         body,
+        store,
+        format,
+        shape,
+        origin,
         seal: HistorySeal {
             run: expected.digest(),
             branch,
@@ -1910,7 +2049,10 @@ pub fn retained_span<'m>(
         },
         opened,
         from_revision: base_revision,
-        segments,
+        span,
+        base_head: base_head.map(|seg| (base_revision, seg)),
+        marks,
+        head,
     })
 }
 
