@@ -791,16 +791,12 @@ impl Elimination {
         }
         assert_eq!(lu.len(), columns.len());
         let mut scales: Option<(Vec<f64>, Vec<f64>)> = None;
-        let mut finite = true;
         for block in self.blocks.windows(2) {
             let (lo, hi) = (index(block[0]), index(block[1]));
             if lo + 1 == hi {
-                let (start, end) = (index(starts[lo]), index(starts[lo + 1]));
-                for &cell in &lu[start..end] {
-                    finite &= cell.is_finite();
-                }
                 let diagonal = lu[index(diagonals[lo])];
                 if diagonal == 0.0 || !diagonal.is_finite() {
+                    let finite = lu[..index(starts[lo + 1])].iter().all(|cell| cell.is_finite());
                     return Eliminated {
                         found: Err(lo),
                         finite,
@@ -809,21 +805,16 @@ impl Elimination {
                 continue;
             }
             for at in lo..hi {
-                let (start, intra, diag, end) = (
-                    index(starts[at]),
+                let (intra, diag, end) = (
                     index(intra_starts[at]),
                     index(diagonals[at]),
                     index(starts[at + 1]),
                 );
-                for &cell in &lu[start..intra] {
-                    finite &= cell.is_finite();
-                }
                 let mut row_max = 0.0;
                 let (done, rest) = lu.split_at_mut(intra);
                 let line = &mut rest[..end - intra];
                 let diagonal = if intra == diag {
                     for &cell in line.iter() {
-                        finite &= cell.is_finite();
                         let abs = cell.abs();
                         if abs > row_max {
                             row_max = abs;
@@ -844,20 +835,18 @@ impl Elimination {
                         let pivot_diag = index(diagonals[pivot]);
                         let factor = seen[pivot - lo] / done[pivot_diag];
                         *lower_cell = factor;
-                        finite &= factor.is_finite();
                         let tail = pivot_diag + 1..index(starts[pivot + 1]);
                         for (&cell, &column) in done[tail.clone()].iter().zip(&columns[tail]) {
                             seen[index(column) - lo] -= factor * cell;
                         }
                     }
                     for (cell, &column) in upper.iter_mut().zip(&columns[diag..end]) {
-                        let value = seen[index(column) - lo];
-                        *cell = value;
-                        finite &= value.is_finite();
+                        *cell = seen[index(column) - lo];
                     }
                     upper[0]
                 };
                 if bad_pivot(diagonal, at, row_max, pattern, values, &mut scales) {
+                    let finite = lu[..end].iter().all(|cell| cell.is_finite());
                     return Eliminated {
                         found: Err(at),
                         finite,
@@ -865,6 +854,7 @@ impl Elimination {
                 }
             }
         }
+        let finite = lu.iter().all(|cell| cell.is_finite());
         Eliminated {
             found: Ok(lu),
             finite,
@@ -878,6 +868,7 @@ pub struct Factors<'b> {
     lu: Vec<f64>,
 }
 pub(crate) const LANES: usize = 8;
+pub(crate) const RING_LANES: usize = 16;
 const NEGATIVE_ZERO: u64 = 0x8000_0000_0000_0000;
 
 impl Factors<'_> {
@@ -895,12 +886,11 @@ impl Factors<'_> {
         }
     }
     /// A sum ends as a negative zero only where its side was one, so a group with none needs no ghost.
+    fn has_negative_zero<const L: usize>(sides: &[[f64; L]]) -> bool {
+        (sides.as_flattened().iter()).fold(false, |found, value| found | (value.to_bits() == NEGATIVE_ZERO))
+    }
     fn ghosts<const L: usize>(&self, sides: &[[f64; L]]) -> Option<&Ghosts> {
-        let signed = || {
-            (sides.as_flattened().iter())
-                .fold(false, |found, value| found | (value.to_bits() == NEGATIVE_ZERO))
-        };
-        (!self.closed && signed()).then_some(&self.plan.ghosts)
+        (!self.closed && Self::has_negative_zero(sides)).then_some(&self.plan.ghosts)
     }
     /// Replaces a right side, one slot per row, with the update, one slot per unknown.
     pub fn solve(&self, side: &mut [f64]) {
@@ -1048,10 +1038,10 @@ impl Factors<'_> {
         reach: Option<&Reach>,
         spare: &mut [[f64; LANES]],
         marks: &mut Marks,
-    ) {
+    ) -> bool {
         if let Some(reach) = reach {
             if self.substitute_reached(group, reach, spare, marks) {
-                return;
+                return true;
             }
             group.fill([0.0; LANES]);
             for &at in &marks.seeds {
@@ -1081,6 +1071,250 @@ impl Factors<'_> {
                 }
             }
         }
+        false
+    }
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn solve_pivoted_wide_fallback(
+        &self,
+        group: &mut [[f64; RING_LANES]],
+        reach: Option<&Reach>,
+        marks: &mut Marks,
+    ) {
+        let size = group.len();
+        let mut half = vec![[0.0; LANES]; size];
+        let mut spare = vec![[0.0; LANES]; size];
+        for chunk in 0..(RING_LANES / LANES) {
+            let offset = chunk * LANES;
+            for (dst, src) in half.iter_mut().zip(group.iter()) {
+                dst.copy_from_slice(&src[offset..offset + LANES]);
+            }
+            self.solve_pivoted(&mut half, reach, &mut spare, marks);
+            for (dst, src) in group.iter_mut().zip(&half) {
+                dst[offset..offset + LANES].copy_from_slice(src);
+            }
+        }
+    }
+    pub(crate) fn solve_pivoted_wide(
+        &self,
+        group: &mut [[f64; RING_LANES]],
+        reach: Option<&Reach>,
+        spare: &mut [[f64; RING_LANES]],
+        marks: &mut Marks,
+    ) -> bool {
+        if let Some(reach) = reach {
+            let size = group.len();
+            marks.clear();
+            let mut neg_zero = false;
+            let mut seed_count = 0_usize;
+            {
+                let Marks {
+                    forward,
+                    live,
+                    seed_rows,
+                    ..
+                } = marks;
+                let forward = &mut forward[..size];
+                let live = &mut live[..size];
+                let seed_rows = &mut seed_rows[..size];
+                let spare = &mut spare[..size];
+                for (at, values) in group.iter().enumerate() {
+                    let mut any_bits = 0_u64;
+                    let mut row_neg_zero = false;
+                    for &v in values {
+                        let b = v.to_bits();
+                        any_bits |= b;
+                        row_neg_zero |= b == NEGATIVE_ZERO;
+                    }
+                    if any_bits != 0 {
+                        forward[at] = true;
+                        live[at] = true;
+                        seed_rows[seed_count] = at as u32;
+                        spare[seed_count] = *values;
+                        seed_count += 1;
+                        neg_zero |= row_neg_zero;
+                    }
+                }
+            }
+            if !neg_zero {
+                if self.substitute_reached_wide(group, reach, marks) {
+                    return true;
+                }
+                group.fill([0.0; RING_LANES]);
+                for (&at, &val) in marks.seed_rows[..seed_count].iter().zip(&spare[..seed_count]) {
+                    group[index(at)] = val;
+                }
+            }
+            self.solve_pivoted_wide_fallback(group, Some(reach), marks);
+        } else {
+            self.solve_pivoted_wide_fallback(group, None, marks);
+        }
+        false
+    }
+    /// Fast path when every entry outside `touched` is `+0.0` and no entry in `group` is `-0.0`
+    /// (guaranteed for `(+0.0) - term` under round-to-nearest-even). Returns `false` if a non-finite
+    /// value appears so the caller can rebuild `group` and invoke `solve_pivoted_wide_fallback`.
+    pub(crate) fn solve_pivoted_seeded_no_neg_zero(
+        &self,
+        group: &mut [[f64; RING_LANES]],
+        reach: &Reach,
+        marks: &mut Marks,
+        touched: &[u32],
+    ) -> bool {
+        let size = group.len();
+        marks.clear();
+        {
+            let Marks { forward, live, .. } = marks;
+            let forward = &mut forward[..size];
+            let live = &mut live[..size];
+            for &raw in touched {
+                let at = index(raw);
+                if forward[at] {
+                    continue;
+                }
+                if group[at].iter().any(|&v| v != 0.0) {
+                    forward[at] = true;
+                    live[at] = true;
+                }
+            }
+        }
+        self.substitute_reached_wide(group, reach, marks)
+    }
+    #[inline(never)]
+    fn substitute_reached_wide(
+        &self,
+        pivoted: &mut [[f64; RING_LANES]],
+        reach: &Reach,
+        marks: &mut Marks,
+    ) -> bool {
+        let size = pivoted.len();
+        let nz_starts = &reach.nz_starts[..=size];
+        let nz_intra_starts = &reach.nz_intra_starts[..size];
+        let nz_diagonals = &reach.nz_diagonals[..size];
+        let nz_columns = &reach.nz_columns;
+        let nz_lu = &reach.nz_lu;
+        assert_eq!(nz_lu.len(), nz_columns.len());
+        let Marks {
+            forward: fwd_marks,
+            back: back_marks,
+            live,
+            stack,
+            ..
+        } = marks;
+        let fwd_marks = &mut fwd_marks[..size];
+        let back_marks = &mut back_marks[..size];
+        let live = &mut live[..size];
+        let stack = &mut stack[..size];
+        for (block_idx, block) in self.plan.blocks.windows(2).enumerate() {
+            let (lo, hi) = (index(block[0]), index(block[1]));
+            if lo + 1 == hi {
+                if fwd_marks[lo] {
+                    back_marks[lo] = true;
+                    live[lo] = true;
+                    forward_nz(nz_starts, nz_diagonals, nz_columns, nz_lu, live, pivoted, lo);
+                    let pivot = nz_lu[index(nz_diagonals[lo])];
+                    for value in &mut pivoted[lo] {
+                        *value /= pivot;
+                    }
+                    for &reader in reach.off_readers(lo) {
+                        fwd_marks[index(reader)] = true;
+                    }
+                    continue;
+                }
+                if !reach.block_neg_diag[block_idx] {
+                    continue;
+                }
+            }
+            let mut any_count = 0_usize;
+            for (at, &marked) in fwd_marks.iter().enumerate().take(hi).skip(lo) {
+                if marked {
+                    stack[any_count] = at as u32;
+                    any_count += 1;
+                }
+            }
+            if any_count == 0 && !reach.block_neg_diag[block_idx] {
+                continue;
+            }
+            let block_len = hi - lo;
+            let mut full_back = false;
+            if any_count > 0 {
+                let fwd_count = spread(
+                    stack,
+                    any_count,
+                    fwd_marks,
+                    &reach.lower_starts,
+                    &reach.lower,
+                    any_count,
+                    block_len,
+                );
+                if fwd_count == block_len {
+                    for at in lo..hi {
+                        forward_nz_dense(
+                            (nz_starts, nz_intra_starts, nz_diagonals),
+                            nz_columns,
+                            nz_lu,
+                            live,
+                            pivoted,
+                            at,
+                        );
+                        live[at] = true;
+                    }
+                    back_marks[lo..hi].fill(true);
+                    for at in (lo..hi).rev() {
+                        back_nz_dense(nz_starts, nz_diagonals, nz_columns, nz_lu, pivoted, at);
+                    }
+                    for &reader in reach.block_off_readers(block_idx) {
+                        fwd_marks[index(reader)] = true;
+                    }
+                    continue;
+                }
+                let mut back_count = 0_usize;
+                for at in (lo..hi).filter(|&at| fwd_marks[at]) {
+                    forward_nz(nz_starts, nz_diagonals, nz_columns, nz_lu, live, pivoted, at);
+                    back_marks[at] = true;
+                    live[at] = true;
+                    stack[back_count] = at as u32;
+                    back_count += 1;
+                }
+                full_back = spread(
+                    stack,
+                    back_count,
+                    back_marks,
+                    &reach.upper_starts,
+                    &reach.upper,
+                    back_count,
+                    block_len,
+                ) == block_len;
+            }
+            if !full_back && reach.block_neg_diag[block_idx] {
+                for at in (lo..hi).filter(|&at| !back_marks[at]) {
+                    if reach.diag_neg[at] {
+                        pivoted[at] = [0.0 / nz_lu[index(nz_diagonals[at])]; RING_LANES];
+                        live[at] = true;
+                    }
+                }
+            }
+            if any_count > 0 {
+                for at in (lo..hi).rev().filter(|&at| back_marks[at]) {
+                    back_nz(nz_starts, nz_diagonals, nz_columns, nz_lu, live, pivoted, at);
+                    live[at] = true;
+                }
+                if full_back {
+                    for &reader in reach.block_off_readers(block_idx) {
+                        fwd_marks[index(reader)] = true;
+                    }
+                } else {
+                    for at in (lo..hi).filter(|&at| back_marks[at]) {
+                        for &reader in reach.off_readers(at) {
+                            fwd_marks[index(reader)] = true;
+                        }
+                    }
+                }
+            }
+        }
+        (0..size)
+            .filter(|&at| back_marks[at])
+            .all(|at| pivoted[at].iter().all(|v| v.is_finite()))
     }
     /// Walks only the rows a nonzero side reaches through a nonzero factor, block by block in the order a full walk
     /// takes them. A row whose side is a positive zero and whose nonzero factors read only such rows keeps that zero
@@ -1093,19 +1327,31 @@ impl Factors<'_> {
         spare: &mut [[f64; LANES]],
         marks: &mut Marks,
     ) -> bool {
-        match self.ghosts(pivoted) {
-            Some(ghosts) => self.substitute_reached_with(pivoted, reach, spare, marks, Some(ghosts)),
-            None => self.substitute_reached_with(pivoted, reach, spare, marks, None),
+        marks.clear();
+        for (at, values) in pivoted.iter().enumerate() {
+            if values.iter().any(|value| value.to_bits() != 0) {
+                marks.forward[at] = true;
+                marks.live[at] = true;
+                marks.seeds.push(at as u32);
+                spare[at] = *values;
+            }
+        }
+        let signed = Self::has_negative_zero(pivoted);
+        let ghosts = (!self.closed && signed).then_some(&self.plan.ghosts);
+        match (ghosts, !signed) {
+            (Some(ghosts), _) => self.substitute_reached_body(pivoted, reach, marks, Some(ghosts), false),
+            (None, true) => self.substitute_reached_body(pivoted, reach, marks, None, true),
+            (None, false) => self.substitute_reached_body(pivoted, reach, marks, None, false),
         }
     }
     #[inline(always)]
-    fn substitute_reached_with(
+    fn substitute_reached_body(
         &self,
         pivoted: &mut [[f64; LANES]],
         reach: &Reach,
-        spare: &mut [[f64; LANES]],
         marks: &mut Marks,
         ghosts: Option<&Ghosts>,
+        fast_nz: bool,
     ) -> bool {
         let pattern = self.pattern();
         let size = pivoted.len();
@@ -1113,57 +1359,161 @@ impl Factors<'_> {
         let diagonals = &pattern.diagonals[..size];
         let columns = &pattern.columns;
         assert_eq!(self.lu.len(), columns.len());
-        marks.clear();
-        for (at, values) in pivoted.iter().enumerate() {
-            if values.iter().any(|value| value.to_bits() != 0) {
-                marks.forward[at] = true;
-                marks.seeds.push(at as u32);
-                spare[at] = *values;
-            }
-        }
-        for (block_idx, block) in self.plan.blocks.windows(2).enumerate() {
-            let (lo, hi) = (index(block[0]), index(block[1]));
-            let mut any = false;
-            for at in lo..hi {
-                if marks.forward[at] {
-                    any = true;
-                    marks.stack.push(at as u32);
-                }
-            }
-            if !any && !reach.block_neg_diag[block_idx] {
-                continue;
-            }
-            if any {
+        let nz_starts = &reach.nz_starts[..=size];
+        let nz_intra_starts = &reach.nz_intra_starts[..size];
+        let nz_diagonals = &reach.nz_diagonals[..size];
+        let nz_columns = &reach.nz_columns;
+        let nz_lu = &reach.nz_lu;
+        assert_eq!(nz_lu.len(), nz_columns.len());
+        {
+            let Marks {
+                forward: fwd_marks,
+                back: back_marks,
+                live,
+                stack,
+                ..
+            } = marks;
+            let fwd_marks = &mut fwd_marks[..size];
+            let back_marks = &mut back_marks[..size];
+            let live = &mut live[..size];
+            let stack = &mut stack[..size];
+            for (block_idx, block) in self.plan.blocks.windows(2).enumerate() {
+                let (lo, hi) = (index(block[0]), index(block[1]));
                 if lo + 1 == hi {
-                    marks.stack.pop();
-                    marks.back[lo] = true;
-                    forward(starts, diagonals, columns, &self.lu, ghosts, pivoted, lo);
-                    back(starts, diagonals, columns, &self.lu, ghosts, pivoted, lo);
-                    for &reader in reach.off_readers(lo) {
-                        marks.forward[index(reader)] = true;
+                    if fwd_marks[lo] {
+                        back_marks[lo] = true;
+                        live[lo] = true;
+                        if fast_nz {
+                            forward_nz(nz_starts, nz_diagonals, nz_columns, nz_lu, live, pivoted, lo);
+                            let pivot = nz_lu[index(nz_diagonals[lo])];
+                            for value in &mut pivoted[lo] {
+                                *value /= pivot;
+                            }
+                        } else {
+                            forward(starts, diagonals, columns, &self.lu, ghosts, pivoted, lo);
+                            back(starts, diagonals, columns, &self.lu, ghosts, pivoted, lo);
+                        }
+                        for &reader in reach.off_readers(lo) {
+                            fwd_marks[index(reader)] = true;
+                        }
+                        continue;
                     }
+                    if !reach.block_neg_diag[block_idx] {
+                        continue;
+                    }
+                }
+                let mut any_count = 0_usize;
+                for (at, &marked) in fwd_marks.iter().enumerate().take(hi).skip(lo) {
+                    if marked {
+                        stack[any_count] = at as u32;
+                        any_count += 1;
+                    }
+                }
+                if any_count == 0 && !reach.block_neg_diag[block_idx] {
                     continue;
                 }
-                marks.spread(|marks| &mut marks.forward, &reach.lower_starts, &reach.lower);
-                for at in (lo..hi).filter(|&at| marks.forward[at]) {
-                    forward(starts, diagonals, columns, &self.lu, ghosts, pivoted, at);
-                    marks.back[at] = true;
-                    marks.stack.push(at as u32);
+                let block_len = hi - lo;
+                let mut full_back = false;
+                if any_count > 0 {
+                    let fwd_count = spread(
+                        stack,
+                        any_count,
+                        fwd_marks,
+                        &reach.lower_starts,
+                        &reach.lower,
+                        any_count,
+                        block_len,
+                    );
+                    if fwd_count == block_len {
+                        if fast_nz {
+                            for at in lo..hi {
+                                forward_nz_dense(
+                                    (nz_starts, nz_intra_starts, nz_diagonals),
+                                    nz_columns,
+                                    nz_lu,
+                                    live,
+                                    pivoted,
+                                    at,
+                                );
+                                live[at] = true;
+                            }
+                            back_marks[lo..hi].fill(true);
+                            for at in (lo..hi).rev() {
+                                back_nz_dense(nz_starts, nz_diagonals, nz_columns, nz_lu, pivoted, at);
+                            }
+                        } else {
+                            for (at, is_live) in live.iter_mut().enumerate().take(hi).skip(lo) {
+                                forward(starts, diagonals, columns, &self.lu, ghosts, pivoted, at);
+                                *is_live = true;
+                            }
+                            back_marks[lo..hi].fill(true);
+                            for at in (lo..hi).rev() {
+                                back(starts, diagonals, columns, &self.lu, ghosts, pivoted, at);
+                            }
+                        }
+                        for &reader in reach.block_off_readers(block_idx) {
+                            fwd_marks[index(reader)] = true;
+                        }
+                        continue;
+                    }
+                    let mut back_count = 0_usize;
+                    if fast_nz {
+                        for at in (lo..hi).filter(|&at| fwd_marks[at]) {
+                            forward_nz(nz_starts, nz_diagonals, nz_columns, nz_lu, live, pivoted, at);
+                            back_marks[at] = true;
+                            live[at] = true;
+                            stack[back_count] = at as u32;
+                            back_count += 1;
+                        }
+                    } else {
+                        for at in (lo..hi).filter(|&at| fwd_marks[at]) {
+                            forward(starts, diagonals, columns, &self.lu, ghosts, pivoted, at);
+                            back_marks[at] = true;
+                            live[at] = true;
+                            stack[back_count] = at as u32;
+                            back_count += 1;
+                        }
+                    }
+                    full_back = spread(
+                        stack,
+                        back_count,
+                        back_marks,
+                        &reach.upper_starts,
+                        &reach.upper,
+                        back_count,
+                        block_len,
+                    ) == block_len;
                 }
-                marks.spread(|marks| &mut marks.back, &reach.upper_starts, &reach.upper);
-            }
-            for at in (lo..hi).filter(|&at| !marks.back[at]) {
-                if self.lu[index(diagonals[at])].is_sign_negative() {
-                    pivoted[at] = [0.0 / self.lu[index(diagonals[at])]; LANES];
+                if !full_back && reach.block_neg_diag[block_idx] {
+                    for at in (lo..hi).filter(|&at| !back_marks[at]) {
+                        if reach.diag_neg[at] {
+                            pivoted[at] = [0.0 / self.lu[index(diagonals[at])]; LANES];
+                            live[at] = true;
+                        }
+                    }
                 }
-            }
-            if any {
-                for at in (lo..hi).rev().filter(|&at| marks.back[at]) {
-                    back(starts, diagonals, columns, &self.lu, ghosts, pivoted, at);
-                }
-                for at in (lo..hi).filter(|&at| marks.back[at]) {
-                    for &reader in reach.off_readers(at) {
-                        marks.forward[index(reader)] = true;
+                if any_count > 0 {
+                    if fast_nz {
+                        for at in (lo..hi).rev().filter(|&at| back_marks[at]) {
+                            back_nz(nz_starts, nz_diagonals, nz_columns, nz_lu, live, pivoted, at);
+                            live[at] = true;
+                        }
+                    } else {
+                        for at in (lo..hi).rev().filter(|&at| back_marks[at]) {
+                            back(starts, diagonals, columns, &self.lu, ghosts, pivoted, at);
+                            live[at] = true;
+                        }
+                    }
+                    if full_back {
+                        for &reader in reach.block_off_readers(block_idx) {
+                            fwd_marks[index(reader)] = true;
+                        }
+                    } else {
+                        for at in (lo..hi).filter(|&at| back_marks[at]) {
+                            for &reader in reach.off_readers(at) {
+                                fwd_marks[index(reader)] = true;
+                            }
+                        }
                     }
                 }
             }
@@ -1304,6 +1654,126 @@ fn back<const L: usize>(
     pivoted[at] = sum;
 }
 
+/// Forward pass over non-zero `lu` entries when `pivoted` holds no negative zero: any unreached column
+/// (`!live[col]`) holds `[+0.0; L]` and leaves `sum` bit-identical under round-to-nearest-even.
+#[inline(always)]
+fn forward_nz<const L: usize>(
+    starts: &[u32],
+    diagonals: &[u32],
+    columns: &[u32],
+    lu: &[f64],
+    live: &[bool],
+    pivoted: &mut [[f64; L]],
+    at: usize,
+) {
+    let (start, diag) = (index(starts[at]), index(diagonals[at]));
+    if start == diag {
+        return;
+    }
+    let mut sum = pivoted[at];
+    for (&cell, &column) in lu[start..diag].iter().zip(&columns[start..diag]) {
+        let col = index(column);
+        if !live[col] {
+            continue;
+        }
+        let read = pivoted[col];
+        for (value, read) in sum.iter_mut().zip(read) {
+            *value -= cell * read;
+        }
+    }
+    pivoted[at] = sum;
+}
+
+#[inline(always)]
+fn back_nz<const L: usize>(
+    starts: &[u32],
+    diagonals: &[u32],
+    columns: &[u32],
+    lu: &[f64],
+    live: &[bool],
+    pivoted: &mut [[f64; L]],
+    at: usize,
+) {
+    let (diag, end) = (index(diagonals[at]), index(starts[at + 1]));
+    let mut sum = pivoted[at];
+    if diag + 1 < end {
+        for (&cell, &column) in lu[diag + 1..end].iter().zip(&columns[diag + 1..end]) {
+            let col = index(column);
+            if !live[col] {
+                continue;
+            }
+            let read = pivoted[col];
+            for (value, read) in sum.iter_mut().zip(read) {
+                *value -= cell * read;
+            }
+        }
+    }
+    let pivot = lu[diag];
+    for value in &mut sum {
+        *value /= pivot;
+    }
+    pivoted[at] = sum;
+}
+
+#[inline(always)]
+fn forward_nz_dense<const L: usize>(
+    (starts, intra_starts, diagonals): (&[u32], &[u32], &[u32]),
+    columns: &[u32],
+    lu: &[f64],
+    live: &[bool],
+    pivoted: &mut [[f64; L]],
+    at: usize,
+) {
+    let (start, intra, diag) = (index(starts[at]), index(intra_starts[at]), index(diagonals[at]));
+    if start == diag {
+        return;
+    }
+    let mut sum = pivoted[at];
+    for (&cell, &column) in lu[start..intra].iter().zip(&columns[start..intra]) {
+        let col = index(column);
+        if !live[col] {
+            continue;
+        }
+        let read = pivoted[col];
+        for (value, read) in sum.iter_mut().zip(read) {
+            *value -= cell * read;
+        }
+    }
+    for (&cell, &column) in lu[intra..diag].iter().zip(&columns[intra..diag]) {
+        let read = pivoted[index(column)];
+        for (value, read) in sum.iter_mut().zip(read) {
+            *value -= cell * read;
+        }
+    }
+    pivoted[at] = sum;
+}
+
+#[inline(always)]
+fn back_nz_dense<const L: usize>(
+    starts: &[u32],
+    diagonals: &[u32],
+    columns: &[u32],
+    lu: &[f64],
+    pivoted: &mut [[f64; L]],
+    at: usize,
+) {
+    let (diag, end) = (index(diagonals[at]), index(starts[at + 1]));
+    let mut sum = pivoted[at];
+    if diag + 1 < end {
+        for (&cell, &column) in lu[diag + 1..end].iter().zip(&columns[diag + 1..end]) {
+            let read = pivoted[index(column)];
+            for (value, read) in sum.iter_mut().zip(read) {
+                *value -= cell * read;
+            }
+        }
+    }
+    let pivot = lu[diag];
+    for value in &mut sum {
+        *value /= pivot;
+    }
+    pivoted[at] = sum;
+}
+
 impl Ghosts {
     fn lower(&self, at: usize) -> &[u32] {
         &self.columns[index(self.starts[at])..index(self.splits[at])]
@@ -1334,16 +1804,27 @@ impl Ghosts {
 pub(crate) struct Reach {
     blocks: Vec<u32>,
     block_neg_diag: Vec<bool>,
+    diag_neg: Vec<bool>,
     off_starts: Vec<u32>,
     off: Vec<u32>,
+    block_off_starts: Vec<u32>,
+    block_off: Vec<u32>,
     lower_starts: Vec<u32>,
     lower: Vec<u32>,
     upper_starts: Vec<u32>,
     upper: Vec<u32>,
+    nz_starts: Vec<u32>,
+    nz_intra_starts: Vec<u32>,
+    nz_diagonals: Vec<u32>,
+    nz_columns: Vec<u32>,
+    nz_lu: Vec<f64>,
 }
 impl Reach {
     fn off_readers(&self, at: usize) -> &[u32] {
         &self.off[index(self.off_starts[at])..index(self.off_starts[at + 1])]
+    }
+    fn block_off_readers(&self, block_idx: usize) -> &[u32] {
+        &self.block_off[index(self.block_off_starts[block_idx])..index(self.block_off_starts[block_idx + 1])]
     }
     pub(crate) fn key(
         &self,
@@ -1352,42 +1833,83 @@ impl Reach {
         marks: &mut Marks,
     ) -> (usize, usize, usize, u64) {
         marks.clear();
-        for &row in rows {
-            marks.forward[at_row[row]] = true;
-        }
-        for block in self.blocks.windows(2) {
-            let (lo, hi) = (index(block[0]), index(block[1]));
-            if lo + 1 == hi {
-                if marks.forward[lo] {
-                    marks.back[lo] = true;
-                    for &reader in self.off_readers(lo) {
-                        marks.forward[index(reader)] = true;
+        let size = marks.forward.len();
+        {
+            let Marks {
+                forward, back, stack, ..
+            } = marks;
+            let forward = &mut forward[..size];
+            let back = &mut back[..size];
+            let stack = &mut stack[..size];
+            for &row in rows {
+                forward[at_row[row]] = true;
+            }
+            for (block_idx, block) in self.blocks.windows(2).enumerate() {
+                let (lo, hi) = (index(block[0]), index(block[1]));
+                if lo + 1 == hi {
+                    if forward[lo] {
+                        back[lo] = true;
+                        for &reader in self.off_readers(lo) {
+                            forward[index(reader)] = true;
+                        }
+                    }
+                    continue;
+                }
+                let mut count = 0_usize;
+                for (at, &marked) in forward.iter().enumerate().take(hi).skip(lo) {
+                    if marked {
+                        stack[count] = at as u32;
+                        count += 1;
                     }
                 }
-                continue;
-            }
-            let mut any = false;
-            for at in lo..hi {
-                if marks.forward[at] {
-                    any = true;
-                    marks.stack.push(at as u32);
+                if count == 0 {
+                    continue;
                 }
-            }
-            if !any {
-                continue;
-            }
-            marks.spread(|marks| &mut marks.forward, &self.lower_starts, &self.lower);
-            for at in lo..hi {
-                if marks.forward[at] {
-                    marks.back[at] = true;
-                    marks.stack.push(at as u32);
+                let block_len = hi - lo;
+                let fwd_count = spread(
+                    stack,
+                    count,
+                    forward,
+                    &self.lower_starts,
+                    &self.lower,
+                    count,
+                    block_len,
+                );
+                if fwd_count == block_len {
+                    back[lo..hi].fill(true);
+                    for &reader in self.block_off_readers(block_idx) {
+                        forward[index(reader)] = true;
+                    }
+                    continue;
                 }
-            }
-            marks.spread(|marks| &mut marks.back, &self.upper_starts, &self.upper);
-            for at in lo..hi {
-                if marks.back[at] {
-                    for &reader in self.off_readers(at) {
-                        marks.forward[index(reader)] = true;
+                let mut back_count = 0_usize;
+                for at in lo..hi {
+                    if forward[at] {
+                        back[at] = true;
+                        stack[back_count] = at as u32;
+                        back_count += 1;
+                    }
+                }
+                let back_total = spread(
+                    stack,
+                    back_count,
+                    back,
+                    &self.upper_starts,
+                    &self.upper,
+                    back_count,
+                    block_len,
+                );
+                if back_total == block_len {
+                    for &reader in self.block_off_readers(block_idx) {
+                        forward[index(reader)] = true;
+                    }
+                } else {
+                    for (at, &marked) in back.iter().enumerate().take(hi).skip(lo) {
+                        if marked {
+                            for &reader in self.off_readers(at) {
+                                forward[index(reader)] = true;
+                            }
+                        }
                     }
                 }
             }
@@ -1452,60 +1974,151 @@ impl Reach {
         let (upper_starts, upper) = transpose(size, &factors.lu, columns, |at| {
             index(diagonals[at]) + 1..index(starts[at + 1])
         });
+        let mut block_off_starts = Vec::with_capacity(factors.plan.blocks.len());
+        let mut block_off = Vec::new();
+        let mut scratch_off = Vec::new();
+        block_off_starts.push(0);
+        for block in factors.plan.blocks.windows(2) {
+            let (lo, hi) = (index(block[0]), index(block[1]));
+            if lo + 1 == hi {
+                block_off.extend_from_slice(&off[index(off_starts[lo])..index(off_starts[lo + 1])]);
+            } else {
+                scratch_off.clear();
+                for at in lo..hi {
+                    scratch_off.extend_from_slice(&off[index(off_starts[at])..index(off_starts[at + 1])]);
+                }
+                scratch_off.sort_unstable();
+                scratch_off.dedup();
+                block_off.extend_from_slice(&scratch_off);
+            }
+            block_off_starts.push(block_off.len() as u32);
+        }
+        let diag_neg: Vec<bool> = (0..size)
+            .map(|at| factors.lu[index(diagonals[at])].is_sign_negative())
+            .collect();
         let block_neg_diag: Vec<bool> = factors
             .plan
             .blocks
             .windows(2)
-            .map(|block| {
-                (index(block[0])..index(block[1]))
-                    .any(|at| factors.lu[index(diagonals[at])].is_sign_negative())
-            })
+            .map(|block| (index(block[0])..index(block[1])).any(|at| diag_neg[at]))
             .collect();
+        let mut nz_starts = Vec::with_capacity(size + 1);
+        let mut nz_intra_starts = Vec::with_capacity(size);
+        let mut nz_diagonals = Vec::with_capacity(size);
+        let mut nz_columns = Vec::with_capacity(columns.len());
+        let mut nz_lu = Vec::with_capacity(factors.lu.len());
+        nz_starts.push(0);
+        for at in 0..size {
+            let (start, intra, diag, end) = (
+                index(starts[at]),
+                index(intra_starts[at]),
+                index(diagonals[at]),
+                index(starts[at + 1]),
+            );
+            for (&col, &value) in columns[start..intra].iter().zip(&factors.lu[start..intra]) {
+                if value != 0.0 {
+                    nz_columns.push(col);
+                    nz_lu.push(value);
+                }
+            }
+            nz_intra_starts.push(nz_lu.len() as u32);
+            for (&col, &value) in columns[intra..diag].iter().zip(&factors.lu[intra..diag]) {
+                if value != 0.0 {
+                    nz_columns.push(col);
+                    nz_lu.push(value);
+                }
+            }
+            nz_diagonals.push(nz_lu.len() as u32);
+            nz_columns.push(columns[diag]);
+            nz_lu.push(factors.lu[diag]);
+            for (&col, &value) in columns[diag + 1..end].iter().zip(&factors.lu[diag + 1..end]) {
+                if value != 0.0 {
+                    nz_columns.push(col);
+                    nz_lu.push(value);
+                }
+            }
+            nz_starts.push(nz_lu.len() as u32);
+        }
         Some(Self {
             blocks: factors.plan.blocks.clone(),
             block_neg_diag,
+            diag_neg,
             off_starts,
             off,
+            block_off_starts,
+            block_off,
             lower_starts,
             lower,
             upper_starts,
             upper,
+            nz_starts,
+            nz_intra_starts,
+            nz_diagonals,
+            nz_columns,
+            nz_lu,
         })
     }
+}
+
+#[inline(always)]
+fn spread(
+    stack: &mut [u32],
+    mut top: usize,
+    marks: &mut [bool],
+    starts: &[u32],
+    readers: &[u32],
+    mut marked: usize,
+    limit: usize,
+) -> usize {
+    if marked >= limit {
+        return marked;
+    }
+    while top > 0 {
+        top -= 1;
+        let row = index(stack[top]);
+        for &reader in &readers[index(starts[row])..index(starts[row + 1])] {
+            let slot = index(reader);
+            if !marks[slot] {
+                marks[slot] = true;
+                marked += 1;
+                if marked >= limit {
+                    return marked;
+                }
+                stack[top] = reader;
+                top += 1;
+            }
+        }
+    }
+    marked
 }
 
 pub(crate) struct Marks {
     forward: Vec<bool>,
     back: Vec<bool>,
+    live: Vec<bool>,
     stack: Vec<u32>,
     seeds: Vec<u32>,
+    seed_rows: Vec<u32>,
 }
 impl Marks {
     pub(crate) fn new(size: usize) -> Self {
         Self {
             forward: vec![false; size],
             back: vec![false; size],
-            stack: Vec::with_capacity(size),
+            live: vec![false; size],
+            stack: vec![0; size],
             seeds: Vec::with_capacity(size),
+            seed_rows: vec![0; size],
         }
+    }
+    pub(crate) fn live_slice(&self) -> &[bool] {
+        &self.live
     }
     fn clear(&mut self) {
         self.forward.fill(false);
         self.back.fill(false);
-        self.stack.clear();
+        self.live.fill(false);
         self.seeds.clear();
-    }
-    fn spread(&mut self, set: impl Fn(&mut Self) -> &mut Vec<bool>, starts: &[u32], readers: &[u32]) {
-        while let Some(row) = self.stack.pop() {
-            let row = index(row);
-            for &reader in &readers[index(starts[row])..index(starts[row + 1])] {
-                let marked = &mut set(self)[index(reader)];
-                if !*marked {
-                    *marked = true;
-                    self.stack.push(reader);
-                }
-            }
-        }
     }
     #[cfg(test)]
     fn walked(&self) -> usize {
@@ -1515,7 +2128,7 @@ impl Marks {
 
 #[cfg(test)]
 mod tests {
-    use super::{Elimination, Factors, LANES, Marks};
+    use super::{Elimination, Factors, LANES, Marks, RING_LANES};
     use crate::body::{RowId, UnknownId};
 
     fn next(state: &mut u64) -> f64 {
@@ -1732,6 +2345,65 @@ mod tests {
                 .zip(&walked)
                 .all(|(one, other)| one.to_bits() == other.to_bits());
             assert!(same, "a short walk keeps every bit");
+        }
+        let (at_row, at_unknown) = factors.plan.places();
+        let reach = factors.reach().expect("reach");
+        let wide_sides: Vec<Vec<f64>> = (0..RING_LANES)
+            .map(|lane| {
+                (0..2 * part)
+                    .map(|row| {
+                        if row < part && row % 3 == lane % 3 {
+                            1.0 + lane as f64 * 0.125
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut slab = vec![[0.0; RING_LANES]; 2 * part];
+        let mut touched = Vec::new();
+        for (lane, side) in wide_sides.iter().enumerate() {
+            for (row, &value) in side.iter().enumerate() {
+                if value != 0.0 {
+                    let at = at_row[row];
+                    slab[at][lane] = value;
+                    touched.push(at as u32);
+                }
+            }
+        }
+        let mut spare = vec![[0.0; RING_LANES]; 2 * part];
+        let mut wide_slab = slab.clone();
+        assert!(
+            factors.solve_pivoted_wide(&mut wide_slab, Some(&reach), &mut spare, &mut marks),
+            "wide group takes the sparse reach walk"
+        );
+        assert_eq!(marks.walked(), part, "wide group walks only its own part's rows");
+        let mut seeded_slab = slab;
+        assert!(
+            factors.solve_pivoted_seeded_no_neg_zero(&mut seeded_slab, &reach, &mut marks, &touched),
+            "seeded wide group takes the sparse reach walk"
+        );
+        assert_eq!(
+            marks.walked(),
+            part,
+            "seeded wide group walks only its own part's rows"
+        );
+        for (lane, mut side) in wide_sides.into_iter().enumerate() {
+            factors.solve(&mut side);
+            for (unknown, &expected) in side.iter().enumerate() {
+                let at = at_unknown[unknown];
+                assert_eq!(
+                    expected.to_bits(),
+                    wide_slab[at][lane].to_bits(),
+                    "wide walk keeps every bit"
+                );
+                assert_eq!(
+                    expected.to_bits(),
+                    seeded_slab[at][lane].to_bits(),
+                    "seeded wide walk keeps every bit"
+                );
+            }
         }
     }
 

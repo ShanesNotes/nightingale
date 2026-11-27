@@ -7,11 +7,12 @@ use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::packet::{BoundAnchor, Fit, Owed};
 use crate::problem::Jacobian;
+use crate::ring::eliminate_flat;
 use crate::{
     AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Compensated,
     CompiledBody, ConservedRowId, DenseSegment, Digest, ErrorScales, ImageParts, InitializationProvenance,
     Lasting, LawName, Measure, MethodHistory, ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId,
-    RowKind, SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord, eliminate,
+    RowKind, SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord,
 };
 use core::ops::Range;
 
@@ -307,6 +308,9 @@ fn algebraic(kind: RowKind) -> bool {
 struct StagePattern {
     offsets: Vec<usize>,
     unknowns: Vec<UnknownId>,
+    diag_offset: Vec<Option<usize>>,
+    staged: Vec<bool>,
+    algebraic: Vec<bool>,
     plan: Elimination,
 }
 impl StagePattern {
@@ -314,6 +318,12 @@ impl StagePattern {
         let sparsity = body.sparsity();
         let size = body.rows().len();
         let (mut offsets, mut unknowns) = (vec![0], Vec::new());
+        let mut diag_offset = Vec::with_capacity(size);
+        let algebraic_flags: Vec<bool> = body.rows().iter().map(|row| algebraic(row.kind())).collect();
+        for row in 0..size {
+            let reads = &sparsity.unknowns()[sparsity.row_offsets()[row]..sparsity.row_offsets()[row + 1]];
+            diag_offset.push(reads.iter().position(|unknown| unknown.index() == row));
+        }
         for (own, other) in [(0, size), (size, 0)] {
             for row in 0..size {
                 let reads =
@@ -369,6 +379,9 @@ impl StagePattern {
         Self {
             offsets,
             unknowns,
+            diag_offset,
+            staged: is_staged,
+            algebraic: algebraic_flags,
             plan,
         }
     }
@@ -957,11 +970,22 @@ impl InitializationSystem<'_> {
             None
         };
         let mut lines = Vec::with_capacity(self.width());
+        let extra = usize::from(chained) * (fits.len() + 4);
         for &stage in self.stage_list() {
             for (at, row) in rows.iter().enumerate() {
                 let own = self.slots(leg, stage).start;
                 let reads = sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1];
-                let mut line = Vec::new();
+                let read_len = reads.end - reads.start;
+                let is_alg = algebraic(row.kind());
+                let is_staged = !is_alg && self.staged(at);
+                let cap = if is_alg {
+                    read_len + extra
+                } else if is_staged {
+                    2 * read_len + 2 + extra
+                } else {
+                    1
+                };
+                let mut line = Vec::with_capacity(cap);
                 // A stage's columns are its own slots, and each row reads one at most once, so none is in the line yet.
                 let read = |line: &mut Vec<(usize, f64)>, from: usize, scale: f64| {
                     let (entries, by_fit) = &slopes[from];
@@ -973,9 +997,9 @@ impl InitializationSystem<'_> {
                         add(line, border + fit, scale * slope[at]);
                     }
                 };
-                if algebraic(row.kind()) {
+                if is_alg {
                     read(&mut line, stage, 1.0);
-                } else if self.staged(at) {
+                } else if is_staged {
                     for from in [INTERIOR, END] {
                         read(&mut line, from, held.length * RADAU[stage][from]);
                     }
@@ -1156,16 +1180,6 @@ impl InitializationSystem<'_> {
             ),
         }
     }
-    fn local_block(&self, leg: usize, entry: impl Fn(usize, usize) -> f64) -> Jacobian {
-        let (offsets, unknowns) = self.pattern();
-        let first = leg * self.width();
-        let mut values = Vec::with_capacity(unknowns.len());
-        for row in 0..offsets.len() - 1 {
-            let pattern = &unknowns[offsets[row]..offsets[row + 1]];
-            values.extend(pattern.iter().map(|unknown| entry(row, first + unknown.index())));
-        }
-        Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), values)
-    }
     pub(crate) fn stage_plan(&self) -> Option<&Elimination> {
         self.pattern.as_ref().map(|pattern| &pattern.plan)
     }
@@ -1181,11 +1195,13 @@ impl InitializationSystem<'_> {
             factors.solve(&mut update);
             return Ok(update);
         }
-        let mut matrix = self.dense(block);
-        for (row, &residual) in matrix.iter_mut().zip(residuals) {
-            row[residuals.len()] = residual;
+        let size = residuals.len();
+        let stride = size + 1;
+        let mut flat = self.dense_flat(block);
+        for (row, &residual) in residuals.iter().enumerate() {
+            flat[row * stride + size] = residual;
         }
-        eliminate(matrix)
+        eliminate_flat(&mut flat, size)
     }
     pub fn stage(
         &self,
@@ -1194,22 +1210,59 @@ impl InitializationSystem<'_> {
     ) -> Result<(Vec<f64>, Jacobian), InitializationFailure> {
         self.check(workspace)?;
         let values = self.values(workspace);
-        let lines = self.leg_lines(workspace, &values, leg.index, Reach::Leg)?;
-        let first = leg.index * self.width();
-        let mut cells = vec![0.0; self.width()];
-        let (offsets, unknowns) = self.pattern();
-        let mut entries = Vec::with_capacity(unknowns.len());
-        for (row, line) in lines.iter().enumerate() {
-            for &(column, value) in line {
-                cells[column - first] = value;
+        let block = if let Some(pattern) = &self.pattern {
+            let held = &workspace.legs[leg.index];
+            let sparsity = self.body.sparsity();
+            let base_offsets = sparsity.row_offsets();
+            let size = self.body.rows().len();
+            let mut slopes: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
+            for &stage in self.stage_list() {
+                let inputs = self.inputs(held, &workspace.unknowns[self.slots(leg.index, stage)], &values);
+                slopes[stage] = self.body.jacobian(&inputs, 0.0).map_err(undefined)?;
             }
-            let pattern = &unknowns[offsets[row]..offsets[row + 1]];
-            entries.extend(pattern.iter().map(|unknown| cells[unknown.index()]));
-            for &(column, _) in line {
-                cells[column - first] = 0.0;
+            let mut entries = Vec::with_capacity(pattern.unknowns.len());
+            for (stage, other) in [(END, INTERIOR), (INTERIOR, END)] {
+                let s_own = held.length * RADAU[stage][stage];
+                let s_other = held.length * RADAU[stage][other];
+                for row in 0..size {
+                    let reads = base_offsets[row]..base_offsets[row + 1];
+                    if pattern.algebraic[row] {
+                        entries.extend_from_slice(&slopes[stage][reads]);
+                    } else if pattern.staged[row] {
+                        let start_pos = entries.len();
+                        entries.extend(slopes[stage][reads.clone()].iter().map(|&v| s_own * v));
+                        if let Some(diag) = pattern.diag_offset[row] {
+                            entries[start_pos + diag] += 1.0;
+                        }
+                        entries.extend(slopes[other][reads].iter().map(|&v| s_other * v));
+                    } else {
+                        let start_pos = entries.len();
+                        entries.resize(start_pos + (reads.end - reads.start), 0.0);
+                        if let Some(diag) = pattern.diag_offset[row] {
+                            entries[start_pos + diag] = 1.0;
+                        }
+                    }
+                }
             }
-        }
-        let block = Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), entries);
+            Jacobian::of_parts(pattern.offsets.clone(), pattern.unknowns.clone(), entries)
+        } else {
+            let lines = self.leg_lines(workspace, &values, leg.index, Reach::Leg)?;
+            let first = leg.index * self.width();
+            let mut cells = vec![0.0; self.width()];
+            let (offsets, unknowns) = self.pattern();
+            let mut entries = Vec::with_capacity(unknowns.len());
+            for (row, line) in lines.iter().enumerate() {
+                for &(column, value) in line.iter().rev() {
+                    cells[column - first] = value;
+                }
+                let pattern = &unknowns[offsets[row]..offsets[row + 1]];
+                entries.extend(pattern.iter().map(|unknown| cells[unknown.index()]));
+                for &(column, _) in line {
+                    cells[column - first] = 0.0;
+                }
+            }
+            Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), entries)
+        };
         let mut rows = Vec::with_capacity(self.width());
         self.stage_rows(workspace, &values, leg.index, &mut rows)?;
         Ok((rows, block))
@@ -1239,15 +1292,42 @@ impl InitializationSystem<'_> {
     /// One leg's own block of a `linearize`, in the pattern a `stage` block has, so a ring elimination factors it
     /// over the same plan. A cycle's last interval holds totals in place of rows, so its block is not this. Each entry
     /// is read by its column, because a row that states the packet's value holds fewer entries than the pattern.
-    pub fn block(&self, ring: &Jacobian, leg: usize) -> Jacobian {
+    pub(crate) fn block_values(&self, ring: &Jacobian, leg: usize, cells: &mut [f64], values: &mut Vec<f64>) {
         let view = ring.view();
-        let first = leg * self.width();
-        self.local_block(leg, |row, column| {
+        let width = self.width();
+        let first = leg * width;
+        let end = first + width;
+        let (offsets, unknowns) = self.pattern();
+        values.clear();
+        if values.capacity() < unknowns.len() {
+            values.reserve(unknowns.len() - values.capacity());
+        }
+        for row in 0..offsets.len() - 1 {
             let line = view.row_offsets()[first + row]..view.row_offsets()[first + row + 1];
-            (view.columns()[line.clone()].iter().zip(&view.values()[line]))
-                .find(|(at, _)| at.index() == column)
-                .map_or(0.0, |(_, value)| *value)
-        })
+            let cols = &view.columns()[line.clone()];
+            let vals = &view.values()[line];
+            for (&at, &val) in cols.iter().zip(vals).rev() {
+                let col = at.index();
+                if col >= first && col < end {
+                    cells[col - first] = val;
+                }
+            }
+            let pattern = &unknowns[offsets[row]..offsets[row + 1]];
+            values.extend(pattern.iter().map(|unknown| cells[unknown.index()]));
+            for &at in cols {
+                let col = at.index();
+                if col >= first && col < end {
+                    cells[col - first] = 0.0;
+                }
+            }
+        }
+    }
+    pub fn block(&self, ring: &Jacobian, leg: usize) -> Jacobian {
+        let (offsets, unknowns) = self.pattern();
+        let mut cells = vec![0.0; self.width()];
+        let mut values = Vec::with_capacity(unknowns.len());
+        self.block_values(ring, leg, &mut cells, &mut values);
+        Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), values)
     }
     /// Takes `share` of `correction` into `workspace`: each slot and each crossing time less its change. A time that
     /// would leave its interval or pass a neighbour stops short of it, by the clearance a leg keeps, and the result is
@@ -1302,27 +1382,31 @@ impl InitializationSystem<'_> {
     ) -> Result<Option<RowId>, InitializationFailure> {
         let size = self.width();
         let lines = self.leg_lines(workspace, values, 0, Reach::Leg)?;
-        let mut matrix = vec![vec![0.0; size + 1]; size];
-        for (cells, line) in matrix.iter_mut().zip(&lines) {
+        let stride = size + 1;
+        let mut flat = vec![0.0; size * stride];
+        for (row, line) in lines.iter().enumerate() {
+            let cells = &mut flat[row * stride..row * stride + stride];
             for &(column, value) in line.iter().filter(|(column, _)| *column < size) {
                 cells[column] += value;
             }
         }
-        Ok(eliminate(matrix)
+        Ok(eliminate_flat(&mut flat, size)
             .err()
             .map(|slot| RowId::at(slot % self.body.rows().len())))
     }
-    /// A system small enough to read whole: each row with a zero right side, as `eliminate` takes it.
-    fn dense(&self, lines: &Jacobian) -> Vec<Vec<f64>> {
+    /// A system small enough to read whole: each row with a zero right side, as `eliminate_flat` takes it.
+    fn dense_flat(&self, lines: &Jacobian) -> Vec<f64> {
         let view = lines.view();
         let size = view.row_offsets().len() - 1;
-        let mut matrix = vec![vec![0.0; size + 1]; size];
-        for (row, cells) in matrix.iter_mut().enumerate() {
+        let stride = size + 1;
+        let mut flat = vec![0.0; size * stride];
+        for row in 0..size {
+            let cells = &mut flat[row * stride..row * stride + stride];
             for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
                 cells[view.columns()[entry].index()] += view.values()[entry];
             }
         }
-        matrix
+        flat
     }
     /// One defect over its scale, `None` when the tolerance refuses it. What overflowed is refused, because `<=` is
     /// false on a NaN but true of two infinities, and a defect of zero holds even where an overflow leaves no scale.
