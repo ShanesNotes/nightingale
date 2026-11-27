@@ -117,9 +117,9 @@ fn apply_fused(
     }
 }
 
-/// `matrix` holds each row with its right side last. A row with no pivot left is named: it has no rank. A pivot is read
-/// beside its row and its column as given, and the smaller of the two: after elimination a row's own largest entry can be
-/// rounding, and a row and a column can each run at a scale of their own.
+/// `matrix` holds each row with its right side last. An unknown with no pivot left is named: it has no rank. A pivot
+/// is read beside its row and its column as given, and the smaller of the two: after elimination a row's own largest
+/// entry can be rounding, and a row and a column can each run at a scale of their own.
 pub fn eliminate(matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
     let size = matrix.len();
     if size == 0 {
@@ -161,7 +161,6 @@ fn reduced_flat(flat: &mut [f64], size: usize, sides: usize) -> Result<Vec<f64>,
         return Ok(Vec::new());
     }
     let stride = size + sides;
-    let mut slots: Vec<usize> = (0..size).collect();
     let mut across = vec![0.0_f64; size];
     let mut down = vec![0.0_f64; size];
     let mut has_neg_zero = false;
@@ -211,13 +210,12 @@ fn reduced_flat(flat: &mut [f64], size: usize, sides: usize) -> Result<Vec<f64>,
                 down[pivot]
             };
             if best_mag <= ROUNDING * reach {
-                return Err(slots[pivot]);
+                return Err(pivot);
             }
             if best != pivot {
                 let (top, bottom) = flat.split_at_mut(best * stride);
                 top[pivot * stride..(pivot + 1) * stride].swap_with_slice(&mut bottom[..stride]);
             }
-            slots.swap(pivot, best);
             across.swap(pivot, best);
             pending.swap(pivot, best);
             let (above, below) = flat.split_at_mut((pivot + 1) * stride);
@@ -612,7 +610,7 @@ impl InitializationSystem<'_> {
                 Ok(factors) => Block::Fixed(factors),
                 Err(_) => {
                     let block = system.block(ring, point);
-                    Block::Whole(inverse(&block)?)
+                    Block::Whole(inverse(&block).map_err(|at| point * size + at)?)
                 }
             };
             let (at_row, at_unknown) = match &lu {
@@ -1072,7 +1070,13 @@ impl InitializationSystem<'_> {
                 }
             }
         }
-        let answer = reduced_flat(&mut matrix, corner, 1)?;
+        let answer = reduced_flat(&mut matrix, corner, 1).map_err(|at| {
+            if at < size {
+                last * size + at
+            } else {
+                border + at - size
+            }
+        })?;
         let mut update = vec![0.0; right.len()];
         update[last * size..points * size].copy_from_slice(&answer[..size]);
         update[border..].copy_from_slice(&answer[size..]);
@@ -1098,7 +1102,6 @@ mod tests {
 
     fn reduced_by_pivot(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
         let size = matrix.len();
-        let mut slots: Vec<usize> = (0..size).collect();
         let largest = |most: f64, cell: f64| if cell.abs() > most { cell.abs() } else { most };
         let mut across: Vec<f64> = (matrix.iter())
             .map(|row| row[..size].iter().copied().fold(0.0, largest))
@@ -1119,10 +1122,9 @@ mod tests {
                 down[pivot]
             };
             if matrix[best][pivot].abs() <= ROUNDING * reach {
-                return Err(slots[pivot]);
+                return Err(pivot);
             }
             matrix.swap(pivot, best);
-            slots.swap(pivot, best);
             across.swap(pivot, best);
             let (above, below) = matrix.split_at_mut(pivot + 1);
             let leading = &above[pivot][pivot..];
@@ -1461,7 +1463,7 @@ mod tests {
             .collect();
         assert_eq!(
             hex,
-            "cf8a842fd3e17358f1d2980482d9999c17b4f452b6d2dd8eb7f2c537a3ecf10e"
+            "14cb548d51049e50ddb154b3f2990ce73c1faf38db65a372e8fbf1f6b3901ebb"
         );
     }
 
@@ -1513,5 +1515,16 @@ mod tests {
                 assert_eq!(value.to_bits(), group[at_unknown[unknown]][lane].to_bits());
             }
         }
+    }
+
+    #[test]
+    fn reduced_names_the_unknown_without_a_pivot_after_row_swaps() {
+        let matrix = vec![
+            vec![1.0, 0.0, 0.0, 0.0],
+            vec![2.0, 1.0, 1.0, 0.0],
+            vec![0.0, 1.0, 1.0, 0.0],
+        ];
+        assert_eq!(reduced(matrix.clone()), Err(2));
+        assert_eq!(reduced_by_pivot(matrix), Err(2));
     }
 }

@@ -1372,14 +1372,14 @@ impl InitializationSystem<'_> {
             Applied::Inside
         }
     }
-    /// The first row whose stage has no pivot at the start state: a coupling loop such as `x = y`, `y = x`, a pressure
-    /// with no gauge, or a closed row where no cycle gives its tangent. Structural matching cannot see these, and a
-    /// run from a consistent start would hold whatever the packet gave them. One dense elimination, once a run.
+    /// The first unknown whose stage has no pivot at the start state: a coupling loop such as `x = y`, `y = x`, a
+    /// pressure with no gauge, or a closed row where no cycle gives its tangent. Structural matching cannot see these,
+    /// and a run from a consistent start would hold whatever the packet gave them. One dense elimination, once a run.
     fn rankless(
         &self,
         workspace: &AdmissionWorkspace,
         values: &[f64],
-    ) -> Result<Option<RowId>, InitializationFailure> {
+    ) -> Result<Option<(RowId, usize)>, InitializationFailure> {
         let size = self.width();
         let lines = self.leg_lines(workspace, values, 0, Reach::Leg)?;
         let stride = size + 1;
@@ -1390,9 +1390,10 @@ impl InitializationSystem<'_> {
                 cells[column] += value;
             }
         }
+        let rows = self.body.rows().len();
         Ok(eliminate_flat(&mut flat, size)
             .err()
-            .map(|slot| RowId::at(slot % self.body.rows().len())))
+            .map(|slot| (RowId::at(slot % rows), slot / rows)))
     }
     /// A system small enough to read whole: each row with a zero right side, as `eliminate_flat` takes it.
     fn dense_flat(&self, lines: &Jacobian) -> Vec<f64> {
@@ -1586,7 +1587,7 @@ impl InitializationSystem<'_> {
             let row = slot % size;
             let judge = self.body.judged_at(row);
             let held = self.held(stages[slot].abs(), unknowns[slot - row + judge], sizes[judge]);
-            held.ok_or(inconsistent(body_row(row)))
+            held.ok_or_else(|| self.inconsistent_or_rank(workspace, &values, body_row(row)))
         };
         let replaced = |slot: &usize| {
             self.replaced(workspace).any(|(known, _)| known == *slot)
@@ -1612,7 +1613,11 @@ impl InitializationSystem<'_> {
             let row = AdmissionRow::Crossing { variable };
             let gap = self.root(workspace, &values, leg, guard)?;
             let (read, reach) = self.root_scale(workspace, &values, leg, guard)?;
-            note(row, self.held(gap.abs(), read, reach).ok_or(inconsistent(row))?);
+            let held = self.held(gap.abs(), read, reach);
+            note(
+                row,
+                held.ok_or_else(|| self.inconsistent_or_rank(workspace, &values, row))?,
+            );
         }
         // Every conserved total but charge, regulated or not: each stage's defect can pass while their sum over the
         // cycle does not. A net flow lands on the row its total replaced, so the flow is read first, to name it.
@@ -1648,51 +1653,105 @@ impl InitializationSystem<'_> {
                 anchor.value,
                 sizes[anchor.row.index()],
             );
-            note(row, held.ok_or(inconsistent(row))?);
+            note(
+                row,
+                held.ok_or_else(|| self.inconsistent_or_rank(workspace, &values, row))?,
+            );
         }
-        for (fit, &value) in owed.fits.iter().zip(self.fitted(workspace)) {
-            if !self.felt(workspace, &values, fit, value)? {
+        self.check_fits_felt(workspace, &values)?;
+        if self.interval.is_some() {
+            self.settled(workspace)?;
+            self.check_unpaced(workspace)?;
+        }
+        self.check_rank(workspace, &values)?;
+        Ok(worst)
+    }
+    fn check_fits_felt(
+        &self,
+        workspace: &AdmissionWorkspace,
+        values: &[f64],
+    ) -> Result<(), InitializationFailure> {
+        for (fit, &value) in self.parameters.owed.fits.iter().zip(self.fitted(workspace)) {
+            if !self.felt(workspace, values, fit, value)? {
                 let (key, binding) = (fit.key, fit.binding);
                 return Err(AdmissionError::FitUnread { key, binding }.into());
             }
         }
-        if self.interval.is_some() {
-            self.settled(workspace)?;
-            // Under drives that hold still all beat, a guard that fires on a periodic orbit times the beat itself, and
-            // only the grid's samples would say where it starts: such a beat must name its clock.
-            let still = self.frames.windows(2).all(|pair| pair[0] == pair[1]);
-            let fires = workspace.topology.knots.iter().any(|knot| !knot.is_empty());
-            if still && fires && self.period.is_none() {
-                return Err(InitializationFailure::Unpaced);
-            }
+        Ok(())
+    }
+    fn check_unpaced(&self, workspace: &AdmissionWorkspace) -> Result<(), InitializationFailure> {
+        if self.interval.is_none() {
+            return Ok(());
         }
-        if let Some(row) = self.rankless(workspace, &values)? {
-            return Err(InitializationFailure::NoRank { row });
+        // Under drives that hold still all beat, a guard that fires on a periodic orbit times the beat itself, and
+        // only the grid's samples would say where it starts: such a beat must name its clock.
+        let still = self.frames.windows(2).all(|pair| pair[0] == pair[1]);
+        let fires = workspace.topology.knots.iter().any(|knot| !knot.is_empty());
+        if still && fires && self.period.is_none() {
+            return Err(InitializationFailure::Unpaced);
+        }
+        Ok(())
+    }
+    fn check_rank(
+        &self,
+        workspace: &AdmissionWorkspace,
+        values: &[f64],
+    ) -> Result<(), InitializationFailure> {
+        if let Some((row, stage)) = self.rankless(workspace, values)? {
+            return Err(InitializationFailure::NoRank {
+                row,
+                stage: Some(stage),
+            });
         }
         // One stage can have rank while the whole system has a free level: a total nothing truly regulates, two fits
         // of one anchor's worth of information, or an autonomous cycle no clock fixes. The whole bordered ring is
         // factored, and a law with no slope here is refused, not passed over.
+        let rows = self.body.rows();
+        let size = rows.len();
+        let owed = &self.parameters.owed;
         let lines = self.lines(workspace)?;
-        let right = vec![0.0; unknowns.len() + workspace.topology.crossings.len()];
+        let right = vec![0.0; workspace.unknowns.len() + workspace.topology.crossings.len()];
         let free = self.ring(workspace, &lines, &right).err();
         if let Some(slot) = free {
             let border = workspace.fitted_slots().start;
             if slot < border {
+                let local = slot % self.width();
                 return Err(InitializationFailure::NoRank {
-                    row: rows[slot % size].id(),
+                    row: rows[local % size].id(),
+                    stage: Some(local / size),
                 });
             }
             let at = slot - border;
             if let Some(fit) = owed.fits.get(at) {
                 return Err(InitializationFailure::NoRank {
                     row: rows[owed.anchors[fit.anchor].row.index()].id(),
+                    stage: None,
                 });
             }
             let guard = workspace.topology.crossings[at - owed.fits.len()].guards[0];
             let variable = self.body.layout.modes[self.body.layout.guards[guard].variable].variable;
             return Err(InitializationFailure::CrossingRank { variable });
         }
-        Ok(worst)
+        Ok(())
+    }
+    /// When the ring solve stops with no pivot, `recheck` sees an unsolved workspace; check rank before
+    /// blaming the first row whose residual did not close.
+    fn inconsistent_or_rank(
+        &self,
+        workspace: &AdmissionWorkspace,
+        values: &[f64],
+        row: AdmissionRow,
+    ) -> InitializationFailure {
+        if let Err(failure) = self.check_fits_felt(workspace, values) {
+            return failure;
+        }
+        if let Err(failure) = self.check_unpaced(workspace) {
+            return failure;
+        }
+        if let Err(failure) = self.check_rank(workspace, values) {
+            return failure;
+        }
+        InitializationFailure::Inconsistent { row }
     }
     fn felt(
         &self,
@@ -2007,10 +2066,12 @@ pub enum InitializationFailure {
     SecondWrap,
     /// A cycle under drives that hold still all beat whose guards fire, so it times itself, with no clock named.
     Unpaced,
-    /// A row with no pivot on the solved workspace, in its own stage or on the ring, which structural
-    /// matching cannot see.
+    /// An unknown with no pivot on the workspace, in its own stage or on the ring, which structural
+    /// matching cannot see. `stage` is the leg stage (`0` end or instant, `1` interior), or `None`
+    /// when a fitted parameter has no pivot and `row` names its anchor's row.
     NoRank {
         row: RowId,
+        stage: Option<usize>,
     },
     CrossingRank {
         variable: Slot,
