@@ -2739,8 +2739,6 @@ fn the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_th
 const MIXING: f64 = 3_240.0;
 const WATER_VOLUME: f64 = 24_000.0;
 
-/// The room's water share of its dry gas, `h P_r / (P_B - h P_r)`, with `P_r = P_ref exp(a - b / (T + c))` read at
-/// the room's air from the respiratory card's own vapour keys.
 fn room_water(start: &Start, room: &Weather) -> f64 {
     let value = |name| lead(parameter(start, name));
     let exponent = value("rs.vapour-a") - value("rs.vapour-b") / (room.air + value("rs.vapour-c"));
@@ -3840,7 +3838,6 @@ fn each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_wate
     .assert_eq(&report);
 }
 
-/// The respiratory card's keys that share a design value with the metabolism card's, each with its twin.
 const TWINS: [(&str, &str); 5] = [
     ("rs.latent-heat", "mt.latent-heat"),
     ("rs.vapour-reference", "mt.vapour-reference"),
@@ -3849,8 +3846,7 @@ const TWINS: [(&str, &str); 5] = [
     ("rs.vapour-c", "mt.vapour-c"),
 ];
 
-/// The lining's rate by research 11's form in a room, `V'_A (σ - i) / v_w`, with `σ = P_H2O / (P_B - P_H2O)`. It reads
-/// no state.
+/// The lining's rate by research 11's form in a room, `V'_A (σ - i) / v_w`, with `σ = P_H2O / (P_B - P_H2O)`.
 fn lining_form(start: &Start, room: &Weather) -> f64 {
     let value = |name| lead(parameter(start, name));
     let vapour = value("rs.water-vapour-pressure");
@@ -3858,9 +3854,6 @@ fn lining_form(start: &Start, room: &Weather) -> f64 {
     value("rs.alveolar-ventilation") * (saturated - room_water(start, room)) / value("rs.water-volume")
 }
 
-/// The airway's heat by its form at a session's state in a room, `lambda (W_out - W_in)`: the dead space's water carried
-/// out at `(g h- + M s) s_w / v_w` and the room's carried in at `(g h+ + M s) i / v_w`, with `h+` and `h-` the smoothed
-/// parts of the dead space's head, `s` the mixing share and `s_w` the dead space's water share of its dry gas.
 fn airway_heat_form(start: &Start, session: &Session<'_, Running>, room: &Weather) -> f64 {
     let value = |name| lead(parameter(start, name));
     let view = session.record().accepted();
@@ -3888,7 +3881,6 @@ fn airway_heat_form(start: &Start, session: &Session<'_, Running>, room: &Weathe
     value("rs.latent-heat") * (leaving - entering)
 }
 
-/// The lining's, the expired water's and the airway heat's mean rates over the millisecond from `at`.
 fn airway_rates(start: &Start, session: &Session<'_, Running>, at: u64) -> [f64; 3] {
     let body = &start.body;
     let columns = every_column(body);
@@ -3919,13 +3911,9 @@ fn airway_rates(start: &Start, session: &Session<'_, Running>, at: u64) -> [f64;
     ]
 }
 
-/// Ticket 12's first box for the airway: the lining's room share and the airway's latent heat match their forms at
-/// stated points, the body's room at 1 s and a warmer, drier room from 1.001 s, each a mean over a millisecond, and the
-/// airway's heat is the net water the breath carries out times the latent heat, held against the heat's magnitude,
-/// since the net water may change sign within a breath. The lining reads no state, so its mean is its form; the
-/// airway's heat reads the dead space's gas, so its mean is held between its form's values at the window's two ends.
-/// The respiratory card's latent heat and vapour keys equal their metabolism twins bit for bit, so one room gives the
-/// skin and the airway one vapour pressure.
+/// Ticket 12's first box for the airway. The heat is held against its own magnitude, since the net water may change
+/// sign within a breath. The lining reads no state, so its mean is its form; the airway's heat reads the dead space's
+/// gas, so its mean is held between its form's values at the window's two ends.
 #[test]
 fn the_airway_loses_the_latent_heat_of_its_net_water_and_the_lining_reads_the_room_in_two_rooms() {
     let start = Start::admitted();

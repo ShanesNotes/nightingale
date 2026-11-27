@@ -153,7 +153,6 @@ mod placement {
 
     type Moved = (&'static str, Species, Space, i64);
 
-    /// Each column of `card`'s laws named in `laws`, with the pools it moves, sorted.
     fn placed(body: &CompiledBody, card: &str, laws: &[&str]) -> Vec<(&'static str, Vec<Moved>)> {
         let mut placed: Vec<(&str, Vec<Moved>)> = (body.columns().iter())
             .filter(|column| column.origin().owner == card && laws.contains(&column.origin().local))
@@ -171,10 +170,6 @@ mod placement {
         placed
     }
 
-    /// Ticket 12's placement for 12e: with the contract unchanged and the respiratory card's hold on airway heat
-    /// released, the whole body compiles with the airway's heat leaving the airway store from a law that reads the
-    /// expired water's pools and the room's inputs, and the card keeps a declaration that holds nothing, for the
-    /// pleural fluid.
     #[test]
     fn the_airway_heat_leaves_the_airway_store_beside_the_water_it_follows() -> Result<(), AdmissionError> {
         let body = whole_body()?;

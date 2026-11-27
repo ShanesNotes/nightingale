@@ -24,7 +24,6 @@ fn water_volume<'b>(laws: &mut FragmentBuilder<'b, Respiratory>) -> PerWater<'b>
     laws.parameter(ParameterKey::new("rs.water-volume"), Admissible::positive())
 }
 
-/// The dead space's gases and water, which the expired water's route leaves.
 fn held_by<'b>(out: &Pair<'b, Respiratory, Water>) -> Held<'b> {
     (out.amount(), out.amount(), out.amount(), out.amount())
 }
@@ -492,7 +491,6 @@ impl<'b> Ventilation<'b> {
         Ok(())
     }
 
-    /// What the dead space's water carries to the room and what the room gives back.
     fn exhaled<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Respiratory>,
