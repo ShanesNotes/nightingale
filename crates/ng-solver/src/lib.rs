@@ -1,9 +1,9 @@
 use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, ArithmeticProfile, CoupledProblem, CoupledSolver, DeclaredResolution, Digest,
-    EngineFaultKind, ErrorScales, Factors, Increment, Measure, MethodHistory, NumericalRefusal, Ratio,
-    RowKind, SolveWorkspace, SparseView, StageEvaluation, StageJacobian, StageScheme, StageSet, StageTime,
-    StepProposal, StepTicket, TrialFailure, eliminate,
+    EngineFaultKind, ErrorScales, EvaluationScratch, Factors, Increment, Measure, MethodHistory,
+    NumericalRefusal, Ratio, RowKind, SolveWorkspace, SparseView, StageEvaluation, StageJacobian,
+    StageScheme, StageSet, StageTime, StepProposal, StepTicket, TrialFailure, eliminate,
 };
 
 const ABSOLUTE: f64 = 0.1;
@@ -225,18 +225,13 @@ impl<'p> Trend<'p> {
             };
         };
         let length = interval.length_ns();
-        let rows = problem.body().rows();
-        let mut earlier = Vec::with_capacity(rows.len());
-        let mut complete = true;
-        for row in rows {
-            let Some(held) = segment.sample(row.id(), interval.start()) else {
-                complete = false;
-                break;
-            };
-            earlier.push(f64::from_bits(held.bits()[0]));
-        }
-        let earlier = complete.then_some((-(length as f64), earlier));
-        let midpoint = (midpoint.len() == rows.len() && length >= 2)
+        let row_count = problem.body().rows().len();
+        let starts = segment.start_values();
+        let earlier = (starts.len() == row_count).then(|| {
+            let values: Vec<f64> = starts.iter().map(|held| f64::from_bits(held.bits()[0])).collect();
+            (-(length as f64), values)
+        });
+        let midpoint = (midpoint.len() == row_count && length >= 2)
             .then_some((-((length - length / 2) as f64), midpoint));
         Self { earlier, midpoint }
     }
@@ -329,13 +324,15 @@ struct Scratch {
     guess: Vec<f64>,
     before: Vec<f64>,
     correction: Vec<f64>,
+    eval: EvaluationScratch,
 }
 impl Scratch {
-    fn new(rows: usize) -> Self {
+    fn new(problem: &CoupledProblem<'_>, rows: usize) -> Self {
         Self {
             guess: vec![0.0; rows],
             before: vec![0.0; rows],
             correction: vec![0.0; rows],
+            eval: problem.evaluation_scratch(),
         }
     }
 }
@@ -363,7 +360,7 @@ impl<'a, 'p> Stages<'a, 'p> {
         let mut workspace = problem.workspace();
         let start = workspace.unknowns_mut().to_vec();
         let trend = Trend::of(problem, ticket, midpoint);
-        let mut scratch = Scratch::new(start.len());
+        let mut scratch = Scratch::new(problem, start.len());
         let mut quadrature = problem.quadrature(ticket);
         let mut linear = None;
         let midpoint = match set {
@@ -447,29 +444,54 @@ impl<'a, 'p> Stages<'a, 'p> {
     /// The record's stage defect, each row judged at its own value: the record judges a row that closes a store
     /// at that store, which a core cannot name.
     fn defect(&self, residuals: &[f64], unknowns: &[f64]) -> f64 {
+        const SKIP_MARGIN: f64 = 1.0 - 1e-12;
         let seconds = self.ticket.length_ns() as f64 / NANOSECONDS_PER_SECOND;
         let mut worst = 0.0;
+        let mut limit = 0.0;
         for at in 0..self.differential_end {
-            let normalized = (seconds * residuals[at].abs()) / scale(unknowns[at], self.problem.row_size(at));
+            let mag = seconds * residuals[at].abs();
+            let s = scale(unknowns[at], self.problem.row_size(at));
+            let bound = limit * s;
+            if mag < bound && bound < f64::INFINITY {
+                continue;
+            }
+            let normalized = mag / s;
             if normalized > worst {
                 worst = normalized;
+                limit = worst * SKIP_MARGIN;
             }
         }
         for at in self.differential_end..residuals.len() {
-            let normalized = residuals[at].abs() / scale(unknowns[at], self.problem.row_size(at));
+            let mag = residuals[at].abs();
+            let s = scale(unknowns[at], self.problem.row_size(at));
+            let bound = limit * s;
+            if mag < bound && bound < f64::INFINITY {
+                continue;
+            }
+            let normalized = mag / s;
             if normalized > worst {
                 worst = normalized;
+                limit = worst * SKIP_MARGIN;
             }
         }
         worst
     }
 
     fn norm(&self, correction: &[f64], unknowns: &[f64]) -> f64 {
+        const SKIP_MARGIN: f64 = 1.0 - 1e-12;
         let mut worst = 0.0;
+        let mut limit = 0.0;
         for (at, (change, value)) in correction.iter().zip(unknowns).enumerate() {
-            let normalized = change.abs() / scale(*value, self.problem.row_size(at));
+            let mag = change.abs();
+            let s = scale(*value, self.problem.row_size(at));
+            let bound = limit * s;
+            if mag < bound && bound < f64::INFINITY {
+                continue;
+            }
+            let normalized = mag / s;
             if normalized > worst {
                 worst = normalized;
+                limit = worst * SKIP_MARGIN;
             }
         }
         worst
@@ -518,7 +540,6 @@ impl<'a, 'p> Stages<'a, 'p> {
         residuals: &[f64],
         unknowns: &[f64],
     ) -> Option<Vec<f64>> {
-        let body_rows = self.problem.body().rows();
         let rows = residuals.len();
         let seconds = self.ticket.length_ns() as f64 / NANOSECONDS_PER_SECOND;
         let weights: Vec<f64> = (0..rows)
@@ -532,21 +553,20 @@ impl<'a, 'p> Stages<'a, 'p> {
             })
             .collect();
         let view = held.jacobian.view();
+        let (offsets, cols, vals) = (view.row_offsets(), view.columns(), view.values());
         let shift = per_second - held.per_second;
-        let operate = |direction: &[f64]| -> Vec<f64> {
-            (0..rows)
-                .map(|row| {
-                    let entries = view.row_offsets()[row]..view.row_offsets()[row + 1];
-                    let mut sum = 0.0;
-                    for entry in entries {
-                        sum += view.values()[entry] * direction[view.columns()[entry].index()];
-                    }
-                    if row < self.differential_end {
-                        sum += shift * direction[body_rows[row].unknown().index()];
-                    }
-                    sum * weights[row]
-                })
-                .collect()
+        let operate = |direction: &[f64], out: &mut [f64]| {
+            for (row, slot) in out.iter_mut().enumerate() {
+                let entries = offsets[row]..offsets[row + 1];
+                let mut sum = 0.0;
+                for (&value, &col) in vals[entries.clone()].iter().zip(&cols[entries]) {
+                    sum += value * direction[col.index()];
+                }
+                if row < self.differential_end {
+                    sum += shift * direction[row];
+                }
+                *slot = sum * weights[row];
+            }
         };
         let dot = |a: &[f64], b: &[f64]| -> f64 { a.iter().zip(b).map(|(x, y)| x * y).sum() };
         let start: Vec<f64> = residuals
@@ -561,15 +581,15 @@ impl<'a, 'p> Stages<'a, 'p> {
         let mut basis = vec![start.iter().map(|value| value / beta).collect::<Vec<f64>>()];
         let (mut lifted, mut columns, mut rotations) = (Vec::new(), Vec::new(), Vec::new());
         let mut projected = vec![beta];
+        let mut unweighted = vec![0.0; rows];
+        let mut next = vec![0.0; rows];
         for _ in 0..KRYLOV_LIMIT {
             let latest = basis.last().expect("one direction at least");
-            let unweighted: Vec<f64> = latest
-                .iter()
-                .zip(&weights)
-                .map(|(value, weight)| value / weight)
-                .collect();
+            for ((slot, &value), &weight) in unweighted.iter_mut().zip(latest).zip(&weights) {
+                *slot = value / weight;
+            }
             let lift = held.solve(&unweighted)?;
-            let mut next = operate(&lift);
+            operate(&lift, &mut next);
             let mut column = Vec::with_capacity(basis.len() + 1);
             for direction in &basis {
                 let along = dot(&next, direction);
@@ -655,7 +675,10 @@ impl<'a, 'p> Stages<'a, 'p> {
             {
                 *tangent = ((was - share * change) - then) * per_second;
             }
-            match self.problem.reevaluate(&workspace.point(time), evaluation) {
+            match self
+                .problem
+                .reevaluate_in(&workspace.point(time), evaluation, &mut scratch.eval)
+            {
                 Err(failure) if share > 0.2 && in_domain(&failure) => share *= 0.5,
                 outcome => return outcome,
             }
