@@ -65,7 +65,8 @@ const SIN_SERIES: [f64; 10] = [
     1.0,
 ];
 
-fn horner(series: &[f64], x: f64) -> f64 {
+#[inline(always)]
+fn horner<const N: usize>(series: &[f64; N], x: f64) -> f64 {
     series.iter().fold(0.0, |sum, &term| sum * x + term)
 }
 
@@ -134,13 +135,8 @@ pub(crate) fn expm1(x: f64) -> f64 {
     }
 }
 
-pub(crate) fn ln(x: f64) -> Option<f64> {
-    if x.is_nan() || x <= 0.0 {
-        return None;
-    }
-    if x.is_infinite() {
-        return Some(x);
-    }
+#[inline]
+pub(crate) fn ln_positive_finite(x: f64) -> f64 {
     let (x, shift) = if x < f64::MIN_POSITIVE {
         (x * TWO_54, -54)
     } else {
@@ -159,7 +155,17 @@ pub(crate) fn ln(x: f64) -> Option<f64> {
     let half_square = 0.5 * f * f;
     let tail = s * (half_square + 2.0 * (z * horner(&ATANH_SERIES, z)));
     let k = f64::from(exponent);
-    Some(k * LN2_HI - ((half_square - (tail + k * LN2_LO)) - f))
+    k * LN2_HI - ((half_square - (tail + k * LN2_LO)) - f)
+}
+
+pub(crate) fn ln(x: f64) -> Option<f64> {
+    if x.is_nan() || x <= 0.0 {
+        return None;
+    }
+    if x.is_infinite() {
+        return Some(x);
+    }
+    Some(ln_positive_finite(x))
 }
 
 pub(crate) fn turn(k: u64, eighth: NonZeroU64) -> (f64, f64) {

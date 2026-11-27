@@ -1,7 +1,7 @@
 use crate::body::{RowKind, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::chance::{Chance, Trigger, period_ns};
-use crate::evaluate::{Inputs, PublishedEval, Undefined};
+use crate::evaluate::{Inputs, PublishedEval, Undefined, all_finite};
 use crate::head::HeadDigest;
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::{StageEvaluation, VerifiedStep};
@@ -36,6 +36,7 @@ pub struct CoupledProblem<'r> {
     pub(crate) coordinates: Vec<f64>,
     pub(crate) first_memory: usize,
     pub(crate) first_algebraic: usize,
+    pub(crate) clean_fixed: bool,
     pub(crate) provenance: Option<ProblemSeal>,
 }
 impl<'r> CoupledProblem<'r> {
@@ -51,16 +52,19 @@ impl<'r> CoupledProblem<'r> {
         let first_memory = rows.partition_point(|row| matches!(row.kind(), RowKind::Amount { .. }));
         let first_algebraic = first_memory
             + rows[first_memory..].partition_point(|row| matches!(row.kind(), RowKind::Memory(_)));
+        let chance = Chance::at(body, identity.seed(), accepted.state());
+        let clean_fixed = body.tape.clean_fixed(&parameters.values, chance.draws());
         Self {
             body,
             parameters,
             identity,
             accepted,
             base,
-            chance: Chance::at(body, identity.seed(), accepted.state()),
+            chance,
             coordinates,
             first_memory,
             first_algebraic,
+            clean_fixed,
             provenance: None,
         }
     }
@@ -110,13 +114,16 @@ impl<'r> CoupledProblem<'r> {
         if point.layout != self.layout() || point.unknowns.len() != rows || point.derivative.len() != rows {
             return Err(ticket.mismatch().into());
         }
-        let bad = |values: &[f64]| values.iter().position(|value| !value.is_finite());
-        match bad(point.unknowns).or_else(|| bad(point.derivative)) {
-            None => Ok(()),
-            Some(at) => Err(ticket.refuse(NumericalRefusal::TrialDomain {
-                source: self.body.row_source(self.body.rows()[at].id()),
-            })),
+        if all_finite(point.unknowns) && all_finite(point.derivative) {
+            return Ok(());
         }
+        let bad = |values: &[f64]| values.iter().position(|value| !value.is_finite());
+        let at = bad(point.unknowns)
+            .or_else(|| bad(point.derivative))
+            .expect("all_finite returned false");
+        Err(ticket.refuse(NumericalRefusal::TrialDomain {
+            source: self.body.row_source(self.body.rows()[at].id()),
+        }))
     }
     fn undefined(&self, ticket: &StepTicket, undefined: Undefined) -> TrialFailure {
         ticket.refuse(NumericalRefusal::TrialDomain {
@@ -128,6 +135,7 @@ impl<'r> CoupledProblem<'r> {
         let ticket = point.time.ticket;
         let factors = self.factors(point);
         let modes = &self.accepted.state().modes;
+        let clean = self.clean_fixed && self.body.tape.clean_factors(&factors, point.unknowns.len());
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
@@ -138,7 +146,7 @@ impl<'r> CoupledProblem<'r> {
         };
         let stage = self
             .body
-            .evaluate_stage(&inputs, point.derivative)
+            .evaluate_stage_checked(&inputs, point.derivative, clean)
             .map_err(|undefined| self.undefined(ticket, undefined))?;
         Ok(RawEvaluation {
             columns: stage.columns,
@@ -199,12 +207,17 @@ impl<'r> CoupledProblem<'r> {
         if unknowns.len() != self.body.rows().len() {
             return Err(ticket.mismatch().into());
         }
-        if let Some(at) = unknowns.iter().position(|value| !value.is_finite()) {
+        if !all_finite(unknowns) {
+            let at = unknowns
+                .iter()
+                .position(|value| !value.is_finite())
+                .expect("all_finite returned false");
             return Err(ticket.refuse(NumericalRefusal::TrialDomain {
                 source: self.body.row_source(self.body.rows()[at].id()),
             }));
         }
         let factors = self.end_factors(ticket);
+        let clean = self.clean_fixed && self.body.tape.clean_factors(&factors, unknowns.len());
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
@@ -215,13 +228,14 @@ impl<'r> CoupledProblem<'r> {
         };
         (self
             .body
-            .evaluate_published(&inputs, self.first_algebraic, ticket.interval().end()))
+            .evaluate_published_checked(&inputs, self.first_algebraic, ticket.interval().end(), clean))
         .map_err(|undefined| self.undefined(ticket, undefined))
     }
     fn linearize_values(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Vec<f64>, TrialFailure> {
         self.check(point)?;
         let ticket = point.time.ticket;
         let factors = self.factors(point);
+        let clean = self.clean_fixed && self.body.tape.clean_factors(&factors, point.unknowns.len());
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
@@ -230,7 +244,8 @@ impl<'r> CoupledProblem<'r> {
             draws: self.chance.draws(),
             factors: &factors,
         };
-        (self.body.jacobian(&inputs, shift.per_second)).map_err(|undefined| self.undefined(ticket, undefined))
+        (self.body.jacobian_checked(&inputs, shift.per_second, clean))
+            .map_err(|undefined| self.undefined(ticket, undefined))
     }
     /// `dF/dy + shift * dF/dy'` by fixed-order forward differentiation over the compiled sparsity.
     pub fn linearize(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Jacobian, TrialFailure> {
