@@ -508,7 +508,7 @@ The nervous card's memory between zero and its peak that sets the pump's pressur
 _Avoid_: activation (the heart's)
 
 **Release share**:
-At a junction that holds acetylcholine, the share of each traffic that releases it: the vagal traffic's and the pump drive's, each a site parameter. The sinoatrial junction takes the vagal traffic alone and the respiratory pump's junction the pump drive alone.
+At a junction, the share of each traffic or command that releases a transmitter there, each a site parameter. Acetylcholine answers the vagal traffic, the pump drive and the sudomotor command in their shares: the sinoatrial junction takes the vagal traffic alone, the respiratory pump's junction the pump drive alone and the skin junction the sudomotor command alone. Norepinephrine answers the sympathetic traffic, whose share is one at every junction, and the constrictor command, whose share is one at the skin junction and zero at every other.
 
 **Drive scale**:
 The nervous card's factor on the breath's rate: its rest, plus the peripheral sensor's deviation and less the central sensor's, each over its width and times its gain. It is one in the admitted beat's mean, since admission solves each set point to its sensor's mean over the beat. In non-REM sleep the wake drive leaves its rest and each gain falls by the gain's fall. Gains of zero hold it at its rest, less the wake drive asleep, exactly. Only the breath's phase reads it.
@@ -524,6 +524,21 @@ What sleep takes from the drive scale's rest, a parameter of the nervous card. A
 
 **Gain's fall**:
 The share of each chemoreflex gain that sleep removes, a parameter of the nervous card between zero and one. Asleep, each arm's gain is one less the gain's fall of its awake value, so the drive scale answers each sensor less.
+
+**Thermostat**:
+The nervous card's control of the body's heat: the core's set point and three commands, the sudomotor, constrictor and shiver commands. Each command is a weighted sum of how far the core stands from the set point and how far the skin thermoreceptor's store stands from the skin reference, each over a width of its own, taken against a threshold of its own and smoothed at zero. The set point follows a fixed mean at a declared speed until the clock and sleep move it. No law of the thermostat writes a temperature.
+
+**Sudomotor command**:
+The thermostat's warm command: it rises as its weighted sum passes its threshold. It reaches the skin only as acetylcholine released at the skin junction in that junction's sudomotor share.
+
+**Constrictor command**:
+The thermostat's cold command for the skin's vessels: it rises as its weighted sum falls below its threshold. It reaches the skin only as norepinephrine released at the skin junction in that junction's constrictor share, beside the sympathetic traffic.
+
+**Shiver command**:
+The thermostat's cold command for shivering, with its own weights and threshold. Arrow 87's shiver drive is the command smoothly capped at one, shifted so that a zero command gives a zero drive and scaled so that the drive stays under one.
+
+**Skin reference**:
+The fixed skin temperature, a parameter of the body, that the thermostat compares the skin thermoreceptor's store with. Unlike the core's set point, it never moves.
 
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site. A projected field is the exception: it has no row of its own, and its receiver reads it through a read grant from its sender's rows.

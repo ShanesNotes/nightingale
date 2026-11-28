@@ -12,8 +12,8 @@ use ng_validate::*;
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
 const LONGEST_STEP: u64 = 10 * MILLISECOND;
-const PACKET: &str = "b398e0dceda3abb2a5db93d1001dff8919e64116749b4b50886f531fce3c438c";
-const ADMITTED_SEAL: &str = "3c1798742af6bb6d28bcc50aaf6b3e64471fbf5799b0151523525eb0183f8c8d";
+const PACKET: &str = "3673a33a5054ab97273d08147376fce58ff948de0d2c7d2a25fa4fd76207fd78";
+const ADMITTED_SEAL: &str = "48398f38d0a4ead333cf1367d67bea69a340c67d854f136ab731d99d3d356464";
 
 struct Counted {
     core: ng_solver::Core,
@@ -316,7 +316,7 @@ fn the_body_admits_at_06_55(start: &Start) {
     assert_eq!(hex(start.identity.packet().digest()), PACKET);
     assert_eq!(hex(start.session().record().seal().digest()), ADMITTED_SEAL);
     expect![[r#"
-        aortic valve shuts 0.285419956 s into the beat, leg veins 0.284243101 s
+        aortic valve shuts 0.285420004 s into the beat, leg veins 0.284246334 s
     "#]]
     .assert_eq(&closings(&start.provenance));
     let force = value(start, &start.session(), field("MS", "pump_force", Context::Body));
@@ -935,7 +935,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11662, quantities 396, held routes 83
+        steps 11662, quantities 397, held routes 83
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -1229,7 +1229,7 @@ fn line(worst: f64, figures: &Figures) -> String {
     )
 }
 
-const ADMITTED_CLOSINGS: &str = "aortic valve shuts 0.285419956 s into the beat, leg veins 0.284243101 s\n";
+const ADMITTED_CLOSINGS: &str = "aortic valve shuts 0.285420004 s into the beat, leg veins 0.284246334 s\n";
 
 /// No rest law reads the drive scale, so both admissions shut each valve at the same instants, and every row but the
 /// scale and every parameter admission calibrates, matched by key and binding, admits within admission's tolerance of
@@ -2161,12 +2161,12 @@ fn at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak
         leaking body at 0.25 a second: with its gate shut it passes each leak's own policy over 40 s; its rows' mean change from 20.001 s to 36.001 s
         Element(Oxygen) moves -4.3428e0 a second; its leak, +5.82e0 a second of oxygen gas into the arteries' blood, nets +5.9990e1 from 20.001 s to 32.001 s against its size +6e1
         Element(Carbon) moves -3.5238e0 a second; its leak, +5.39e1 a second of carbon dioxide into the arteries' blood, nets +4.9959e1 from 20.001 s to 32.001 s against its size +5e1
-        Of(NitrogenGas) moves -7.0099e-1 a second; its leak, +1.73e2 a second of nitrogen gas into the pulmonary bed's gas, nets +2.9971e1 from 20.001 s to 32.001 s against its size +3e1
-        Of(Vasopressin) moves +1.2497e-4 a second; its leak, -7e-3 a second of vasopressin into the central veins' blood, nets -6.9593e-3 from 20.001 s to 32.001 s against its size -7e-3
+        Of(NitrogenGas) moves -7.0098e-1 a second; its leak, +1.73e2 a second of nitrogen gas into the pulmonary bed's gas, nets +2.9971e1 from 20.001 s to 32.001 s against its size +3e1
+        Of(Vasopressin) moves +1.2492e-4 a second; its leak, -7e-3 a second of vasopressin into the central veins' blood, nets -6.9593e-3 from 20.001 s to 32.001 s against its size -7e-3
         Element(Oxygen) refused between edges from 20.001 s to 32.001 s: changed +6.6873e2 against 4.8001e2
         Element(Carbon) refused between edges from 20.001 s to 32.001 s: changed +5.5719e2 against 3.6000e2
         Of(NitrogenGas) refused between edges from 20.001 s to 32.001 s: changed +3.5081e2 against 2.4000e2
-        Of(Vasopressin) refused between edges from 20.001 s to 32.001 s: changed -8.2138e-2 against 6.0001e-2
+        Of(Vasopressin) refused between edges from 20.001 s to 32.001 s: changed -8.2139e-2 against 6.0001e-2
         held run at 0.25 a second: passes the body's policy over 60 s, 12 windows between edges
     "#]].assert_eq(&report);
 }
@@ -2357,23 +2357,23 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet b398e0dceda3abb2a5db93d1001dff8919e64116749b4b50886f531fce3c438c
-        seal 7dfc286bc5453b808b402d0767773e12a45be7193561a74cb60f9afdb68f35bd
+        packet 3673a33a5054ab97273d08147376fce58ff948de0d2c7d2a25fa4fd76207fd78
+        seal 9fa4aec43abb56d4abb73db1a55ed976146e0aebdcc3c109c442ccd92f18dd22
         steps 198
-        viscosity over its reference at the start 1.001312401
+        viscosity over its reference at the start 1.001314079
     "#]]
     .assert_eq(&pin);
     expect![[r#"
-         100.369145 ms  arterial pressure 134.744847  right atrial pressure 2.921149  portal vein pressure 6.261652  leg vein pressure 3.582341  heart rate 1.064052  sympathetic traffic 0.786865  filtration 1.663741  urine 0.016084  wall power 24733.567714  aortic flow 0.000000
-         201.235562 ms  arterial pressure 127.085620  right atrial pressure 3.358924  portal vein pressure 6.398386  leg vein pressure 3.745309  heart rate 1.081305  sympathetic traffic 0.085622  filtration 2.116597  urine 0.016084  wall power 15645.621296  aortic flow 39.593953
-         302.675763 ms  arterial pressure 118.743493  right atrial pressure 3.773116  portal vein pressure 6.181375  leg vein pressure 3.933772  heart rate 1.047372  sympathetic traffic 0.016287  filtration 2.356671  urine 0.016084  wall power 38314.795238  aortic flow 0.000000
-         402.870305 ms  arterial pressure 109.436050  right atrial pressure 3.281021  portal vein pressure 5.934674  leg vein pressure 4.283162  heart rate 1.004739  sympathetic traffic 0.012256  filtration 2.419453  urine 0.016084  wall power 14061.807033  aortic flow 0.000000
-         503.861859 ms  arterial pressure 100.961223  right atrial pressure 1.542218  portal vein pressure 5.682571  leg vein pressure 3.982767  heart rate 0.970407  sympathetic traffic 0.023049  filtration 2.353641  urine 0.016084  wall power 12060.470741  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.009679  right atrial pressure 0.941003  portal vein pressure 5.388683  leg vein pressure 3.283589  heart rate 0.947577  sympathetic traffic 0.075148  filtration 2.192257  urine 0.016084  wall power 8656.482051  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.012162  right atrial pressure 0.861754  portal vein pressure 5.164077  leg vein pressure 2.707578  heart rate 0.940682  sympathetic traffic 0.263760  filtration 1.990355  urine 0.016084  wall power 6314.398095  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.566571  right atrial pressure 1.029542  portal vein pressure 5.152261  leg vein pressure 2.461060  heart rate 0.952625  sympathetic traffic 0.644892  filtration 1.772083  urine 0.016084  wall power 4923.002463  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.643115  right atrial pressure 1.280251  portal vein pressure 5.426289  leg vein pressure 2.554469  heart rate 0.982983  sympathetic traffic 0.905842  filtration 1.553274  urine 0.016084  wall power 3952.771611  aortic flow 0.000000
-        1000.437588 ms  arterial pressure 68.610151  right atrial pressure 1.513795  portal vein pressure 5.789890  leg vein pressure 2.745122  heart rate 1.021879  sympathetic traffic 0.977888  filtration 1.359867  urine 0.016084  wall power 3079.338833  aortic flow 0.000000
+         100.368973 ms  arterial pressure 134.744426  right atrial pressure 2.921087  portal vein pressure 6.261588  leg vein pressure 3.582282  heart rate 1.064052  sympathetic traffic 0.786863  filtration 1.663743  urine 0.016084  wall power 24733.081223  aortic flow 0.000000
+         201.235360 ms  arterial pressure 127.085338  right atrial pressure 3.358846  portal vein pressure 6.398306  leg vein pressure 3.745238  heart rate 1.081304  sympathetic traffic 0.085624  filtration 2.116594  urine 0.016084  wall power 15645.377539  aortic flow 39.593729
+         302.675871 ms  arterial pressure 118.743299  right atrial pressure 3.773033  portal vein pressure 6.181295  leg vein pressure 3.933688  heart rate 1.047372  sympathetic traffic 0.016287  filtration 2.356667  urine 0.016084  wall power 38314.485962  aortic flow 0.000000
+         402.870779 ms  arterial pressure 109.435935  right atrial pressure 3.280936  portal vein pressure 5.934593  leg vein pressure 4.283072  heart rate 1.004739  sympathetic traffic 0.012256  filtration 2.419449  urine 0.016084  wall power 14061.626469  aortic flow 0.000000
+         503.862864 ms  arterial pressure 100.961162  right atrial pressure 1.542141  portal vein pressure 5.682489  leg vein pressure 3.982676  heart rate 0.970407  sympathetic traffic 0.023050  filtration 2.353637  urine 0.016084  wall power 12060.286631  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.009778  right atrial pressure 0.940943  portal vein pressure 5.388610  leg vein pressure 3.283509  heart rate 0.947577  sympathetic traffic 0.075149  filtration 2.192256  urine 0.016084  wall power 8656.381503  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.012327  right atrial pressure 0.861700  portal vein pressure 5.164012  leg vein pressure 2.707505  heart rate 0.940682  sympathetic traffic 0.263759  filtration 1.990356  urine 0.016084  wall power 6314.338483  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.566792  right atrial pressure 1.029492  portal vein pressure 5.152205  leg vein pressure 2.460994  heart rate 0.952625  sympathetic traffic 0.644887  filtration 1.772086  urine 0.016084  wall power 4922.970578  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.643380  right atrial pressure 1.280201  portal vein pressure 5.426239  leg vein pressure 2.554409  heart rate 0.982983  sympathetic traffic 0.905838  filtration 1.553278  urine 0.016084  wall power 3952.756804  aortic flow 0.000000
+        1000.437591 ms  arterial pressure 68.610447  right atrial pressure 1.513745  portal vein pressure 5.789845  leg vein pressure 2.745067  heart rate 1.021878  sympathetic traffic 0.977887  filtration 1.359874  urine 0.016084  wall power 3079.334804  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -3532,41 +3532,41 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     the_lining_moves_research_11s_form_over_the_first_minute(&start, &minute);
     report += &each_gas_closes_on_the_airway_the_room_and_the_membrane_over_two_whole_breaths(&start, minute);
     expect![[r#"
-        over the 11 whole breaths from 5.006 s to 59.430 s: the lung's interstitial water +7.7000e-5 a second, the pulmonary lymph +2.7520e-4 off its admitted 5.286423e-3
+        over the 11 whole breaths from 5.006 s to 59.430 s: the lung's interstitial water +7.7000e-5 a second, the pulmonary lymph +2.7519e-4 off its admitted 5.286288e-3
         before the first breath edge: alveolar oxygen 101.292, carbon dioxide 28.358, venous return 77.48
         breath from 5.006 s: alveolar oxygen 100.749 swinging 3.062, carbon dioxide 28.707 swinging 1.991, venous return's beat means 74.26 to 84.66 around 77.98, tidal volume 11021.6
         breath from 10.037 s: alveolar oxygen 100.407 swinging 3.058, carbon dioxide 28.847 swinging 1.932, venous return's beat means 74.15 to 84.61 around 77.78, tidal volume 11026.2
-        breath from 15.074 s: alveolar oxygen 100.130 swinging 3.150, carbon dioxide 28.912 swinging 1.945, venous return's beat means 74.16 to 84.55 around 77.95, tidal volume 11016.7
-        breath from 20.091 s: alveolar oxygen 99.914 swinging 3.202, carbon dioxide 28.936 swinging 1.966, venous return's beat means 74.18 to 84.53 around 78.26, tidal volume 11001.8
+        breath from 15.074 s: alveolar oxygen 100.130 swinging 3.150, carbon dioxide 28.912 swinging 1.945, venous return's beat means 74.16 to 84.55 around 77.94, tidal volume 11016.7
+        breath from 20.091 s: alveolar oxygen 99.914 swinging 3.202, carbon dioxide 28.936 swinging 1.966, venous return's beat means 74.18 to 84.53 around 78.25, tidal volume 11001.8
         breath from 25.078 s: alveolar oxygen 99.748 swinging 3.214, carbon dioxide 28.941 swinging 1.962, venous return's beat means 74.20 to 84.52 around 78.54, tidal volume 10987.4
         breath from 30.036 s: alveolar oxygen 99.620 swinging 3.184, carbon dioxide 28.938 swinging 1.938, venous return's beat means 74.31 to 84.53 around 78.55, tidal volume 10974.4
         breath from 34.970 s: alveolar oxygen 99.519 swinging 3.083, carbon dioxide 28.935 swinging 1.909, venous return's beat means 74.29 to 84.55 around 78.44, tidal volume 10957.4
         breath from 39.886 s: alveolar oxygen 99.436 swinging 3.017, carbon dioxide 28.931 swinging 1.923, venous return's beat means 74.26 to 84.46 around 78.28, tidal volume 10948.0
-        breath from 44.787 s: alveolar oxygen 99.368 swinging 3.018, carbon dioxide 28.928 swinging 1.973, venous return's beat means 74.26 to 84.00 around 77.75, tidal volume 10941.3
-        breath from 49.676 s: alveolar oxygen 99.311 swinging 3.139, carbon dioxide 28.926 swinging 2.019, venous return's beat means 74.27 to 83.42 around 76.80, tidal volume 10937.2
+        breath from 44.787 s: alveolar oxygen 99.368 swinging 3.018, carbon dioxide 28.928 swinging 1.973, venous return's beat means 74.25 to 84.00 around 77.75, tidal volume 10941.3
+        breath from 49.676 s: alveolar oxygen 99.311 swinging 3.139, carbon dioxide 28.926 swinging 2.019, venous return's beat means 74.26 to 83.42 around 76.80, tidal volume 10937.2
         breath from 54.556 s: alveolar oxygen 99.263 swinging 3.243, carbon dioxide 28.924 swinging 2.049, venous return's beat means 74.28 to 83.77 around 75.90, tidal volume 10933.9
         highest alveolar oxygen 102.522 (4.101 times P50) at 2.024 s: plasma oxygen pressure 100.889 (4.036 times P50), bound 0.971006 of capacity
         work of breathing: stated 5331.3, over two whole breaths from 49.676 s 5368.6
         alveolar water over whole breaths from 20.091 s: 1.02134 of the saturated vapour share
-        drive scale at admission 1.007432476415; over the first beat, to 0.998959746 s, 0.999997825842 by the trapezoid and 1.000013962255 from the set points
+        drive scale at admission 1.007432389321; over the first beat, to 0.998959742 s, 0.999997825817 by the trapezoid and 1.000013967518 from the set points
         Energy: worst 6.1093e5, from admission 5.1454e5, steady 6.1446e5, inside a breath 5.0542e5
-        Element(Carbon): worst 6.6522e1, from admission 3.8495e1, steady 5.0153e1, inside a breath 2.0101e2
+        Element(Carbon): worst 6.6521e1, from admission 3.8495e1, steady 5.0153e1, inside a breath 2.0101e2
         Element(Oxygen): worst 1.8723e3, from admission 1.8463e3, steady 1.0409e3, inside a breath 4.4955e3
-        Element(Hydrogen): worst 3.1946e-5, from admission 7.5268e-6, steady 3.1985e-5, inside a breath 1.5690e-5
+        Element(Hydrogen): worst 3.1946e-5, from admission 7.5267e-6, steady 3.1985e-5, inside a breath 1.5690e-5
         Of(NitrogenGas): worst 3.4954e3, from admission 3.4596e3, steady 2.0741e3, inside a breath 8.6197e3
         Of(Water): worst 2.8493e-2, from admission 2.3456e-2, steady 2.8654e-2, inside a breath 2.3152e-2
-        Of(Vasopressin): worst 3.4065e-3, from admission 3.1126e-4, steady 2.7390e-3, inside a breath 2.0050e-2
-        controlled admission: aortic valve shuts 0.285419956 s into the beat, leg veins 0.284243101 s
-        held admission: aortic valve shuts 0.285419956 s into the beat, leg veins 0.284243101 s
-        largest difference over every row but the drive scale 1.139e-8, 8.543e-3 of admission's tolerance, at Some(Amount { site: SiteId { key: "muscle bed", class: CapillaryBed }, space: Interstitium, species: Potassium }); over the 3 calibrated parameters 5.855e-12, 2.142e-14 of its value and 2.066e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
+        Of(Vasopressin): worst 3.4063e-3, from admission 3.1154e-4, steady 2.7382e-3, inside a breath 2.0050e-2
+        controlled admission: aortic valve shuts 0.285420004 s into the beat, leg veins 0.284246334 s
+        held admission: aortic valve shuts 0.285420004 s into the beat, leg veins 0.284246334 s
+        largest difference over every row but the drive scale 3.543e-10, 1.034e-2 of admission's tolerance, at Some(Amount { site: SiteId { key: "collecting duct", class: VesselSegment }, space: Lumen, species: Chloride }); over the 3 calibrated parameters 3.240e-12, 1.185e-14 of its value and 1.143e-4 of admission's tolerance, at Some(Parameter { key: ParameterKey { key: "rn.sodium-capacity" }, binding: Edge { from: SiteId { key: "renal tubule", class: VesselSegment }, to: SiteId { key: "peritubular bed", class: CapillaryBed } } })
         held run: the drive scale is its rest's bits at all 11660 accepted steps
         held Energy: worst 5.1410e5, from admission 5.1409e5, steady 4.9301e5, inside a breath 5.0992e5
         held Element(Carbon): worst 4.6075e1, from admission 3.8270e1, steady 4.3073e1, inside a breath 2.0152e2
-        held Element(Oxygen): worst 1.8509e3, from admission 1.8470e3, steady 5.5603e1, inside a breath 4.4964e3
-        held Element(Hydrogen): worst 3.3690e-5, from admission 7.4961e-6, steady 3.3720e-5, inside a breath 1.6927e-5
-        held Of(NitrogenGas): worst 3.4629e3, from admission 3.4605e3, steady 8.1407e1, inside a breath 8.6213e3
+        held Element(Oxygen): worst 1.8509e3, from admission 1.8470e3, steady 5.5607e1, inside a breath 4.4964e3
+        held Element(Hydrogen): worst 3.3690e-5, from admission 7.4960e-6, steady 3.3720e-5, inside a breath 1.6927e-5
+        held Of(NitrogenGas): worst 3.4629e3, from admission 3.4605e3, steady 8.1401e1, inside a breath 8.6213e3
         held Of(Water): worst 2.3437e-2, from admission 2.3436e-2, steady 2.3168e-2, inside a breath 2.3334e-2
-        held Of(Vasopressin): worst 3.0398e-3, from admission 2.4334e-4, steady 1.4005e-3, inside a breath 2.0337e-2
+        held Of(Vasopressin): worst 3.0396e-3, from admission 2.4361e-4, steady 1.4010e-3, inside a breath 2.0337e-2
         sign walk over whole breaths from 30 s to 60 s: 6 controlled breaths, 5 held
         under-ventilation to the central sensor: acidity -3.374e-4 from its set point
         under-ventilation to the peripheral sensor: x_p +1.677e-2 from its set point
@@ -3574,7 +3574,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         the drive scale to the breath: 4.8989 s a breath against the period 5.0000 s, held 5.0000 s
         the breath to ventilation: 2234.91 a second against held 2201.41
         ventilation to alveolar carbon dioxide: 28.9305 against held 28.9680; alveolar oxygen 99.4201 against held 99.3652
-        alveolar to arterial carbon dioxide: over the clock from 30 s to 60 s, 29.9988 s and 29.9984 s, 30.0076 against held 30.0167, by -9.158e-3 where the cut breaths reach 2.663e-3; from 25 s by -7.007e-3, from 35 s by -1.190e-2; arterial oxygen pressure 90.1315 against held 90.1142, saturation 0.958911 against held 0.958874
+        alveolar to arterial carbon dioxide: over the clock from 30 s to 60 s, 29.9988 s and 29.9984 s, 30.0076 against held 30.0167, by -9.158e-3 where the cut breaths reach 2.663e-3; from 25 s by -7.007e-3, from 35 s by -1.190e-2; arterial oxygen pressure 90.1315 against held 90.1141, saturation 0.958911 against held 0.958874
         asleep from 30 s, branched at 29.990216 s; over whole breaths from 40 s to 60 s, 3 breaths asleep and 3 awake
         asleep the drive scale 0.874233 and the breath 5.7193 s, awake 1.024350 and 4.8811 s
         ventilation 1983.13 a second asleep against 2240.77 awake, by -2.576e2 where the cut pieces reach 5.773e0; from 35 s by -2.629e2, from 45 s by -2.538e2
@@ -3583,28 +3583,28 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         asleep Energy: worst 7.1677e5 from 48.985 s to 58.985 s; from 30 s any ten seconds 7.1676e5, inside a breath 5.5098e5
         asleep Element(Carbon): worst 3.3725e2 from 34.185 s to 44.185 s; from 30 s any ten seconds 3.3730e2, inside a breath 2.1645e2
         asleep Element(Oxygen): worst 4.2635e3 from 31.802 s to 41.802 s; from 30 s any ten seconds 4.2551e3, inside a breath 4.6606e3
-        asleep Element(Hydrogen): worst 5.3612e-5 from 49.838 s to 59.838 s; from 30 s any ten seconds 5.3642e-5, inside a breath 3.1402e-5
+        asleep Element(Hydrogen): worst 5.3611e-5 from 49.838 s to 59.838 s; from 30 s any ten seconds 5.3642e-5, inside a breath 3.1402e-5
         asleep Of(NitrogenGas): worst 8.3405e3 from 34.104 s to 44.104 s; from 30 s any ten seconds 8.3377e3, inside a breath 8.9314e3
         asleep Of(Water): worst 3.3227e-2 from 48.985 s to 58.985 s; from 30 s any ten seconds 3.3226e-2, inside a breath 2.5195e-2
-        asleep Of(Vasopressin): worst 1.4348e-2 from 44.214 s to 54.214 s; from 30 s any ten seconds 1.4308e-2, inside a breath 2.4729e-2
+        asleep Of(Vasopressin): worst 1.4348e-2 from 44.214 s to 54.214 s; from 30 s any ten seconds 1.4307e-2, inside a breath 2.4729e-2
         awake again from 150 s to 300 s; over whole breaths from 160 s, 29 breaths, the drive scale 1.057410 and the breath 4.7285 s, against 1.024350 and 4.8811 s awake and 0.874233 and 5.7193 s asleep
         reference run: 59 breath edges from 5.006 s to 298.787 s, 56 windows between edges, the widest gap 5.8267 s to 35.870 s, the widest stretch 5.8267 s to 35.870 s
         Energy: ten seconds 1.0884e6 from 150.092 s, inside a breath 5.8654e5; between edges 7.0103e4 a second from 147.616 s to 161.661 s, before the settling time 3.9815e4 from 15.074 s to 25.078 s
         Element(Carbon): ten seconds 3.3725e2 from 34.185 s, inside a breath 2.1645e2; between edges 1.0707e1 a second from 30.043 s to 41.672 s, before the settling time 4.8557e0 from 5.006 s to 15.074 s
         Element(Oxygen): ten seconds 4.2635e3 from 31.802 s, inside a breath 4.6606e3; between edges 1.8624e1 a second from 147.616 s to 161.661 s, before the settling time 3.4762e0 from 5.006 s to 15.074 s
-        Element(Hydrogen): ten seconds 6.9678e-5 from 60.359 s, inside a breath 3.8740e-5; between edges 6.8249e-6 a second from 64.476 s to 75.698 s, before the settling time 8.4375e-7 from 5.006 s to 15.074 s
-        Element(Hydrogen) at a payer: ten seconds 1.9372e-1 from 158.536 s; between edges 1.5789e-2 a second from 157.107 s to 170.846 s, before the settling time 9.3037e-3 from 5.006 s to 15.074 s
+        Element(Hydrogen): ten seconds 6.9687e-5 from 60.359 s, inside a breath 3.8745e-5; between edges 6.8250e-6 a second from 64.476 s to 75.698 s, before the settling time 8.4378e-7 from 5.006 s to 15.074 s
+        Element(Hydrogen) at a payer: ten seconds 1.9372e-1 from 158.536 s; between edges 1.5789e-2 a second from 157.107 s to 170.846 s, before the settling time 9.3036e-3 from 5.006 s to 15.074 s
         Of(NitrogenGas): ten seconds 8.3405e3 from 34.104 s, inside a breath 8.9314e3; between edges 5.9207e0 a second from 35.870 s to 47.433 s, before the settling time 3.6586e0 from 15.074 s to 25.078 s
         Of(Water): ten seconds 5.1853e-2 from 150.092 s, inside a breath 2.7194e-2; between edges 3.4293e-3 a second from 152.569 s to 166.237 s, before the settling time 1.8315e-3 from 15.074 s to 25.078 s
-        Of(Sodium): ten seconds 2.7252e-3 from 290.004 s; between edges 2.6763e-4 a second from 284.506 s to 298.787 s, before the settling time 4.5734e-6 from 15.074 s to 25.078 s
-        Of(Chloride): ten seconds 2.8615e-3 from 290.004 s; between edges 2.8101e-4 a second from 284.506 s to 298.787 s, before the settling time 4.8021e-6 from 15.074 s to 25.078 s
-        Of(Potassium): ten seconds 1.3626e-4 from 290.004 s; between edges 1.3381e-5 a second from 284.506 s to 298.787 s, before the settling time 2.2867e-7 from 15.074 s to 25.078 s
-        Of(Vasopressin): ten seconds 2.1136e-2 from 287.815 s, inside a breath 2.4729e-2; between edges 2.1662e-3 a second from 284.506 s to 298.787 s, before the settling time 1.3631e-4 from 15.074 s to 25.078 s
+        Of(Sodium): ten seconds 2.7253e-3 from 290.004 s; between edges 2.6764e-4 a second from 284.506 s to 298.787 s, before the settling time 4.5728e-6 from 15.074 s to 25.078 s
+        Of(Chloride): ten seconds 2.8616e-3 from 290.004 s; between edges 2.8102e-4 a second from 284.506 s to 298.787 s, before the settling time 4.8015e-6 from 15.074 s to 25.078 s
+        Of(Potassium): ten seconds 1.3627e-4 from 290.004 s; between edges 1.3382e-5 a second from 284.506 s to 298.787 s, before the settling time 2.2864e-7 from 15.074 s to 25.078 s
+        Of(Vasopressin): ten seconds 2.1133e-2 from 287.815 s, inside a breath 2.4729e-2; between edges 2.1659e-3 a second from 284.506 s to 298.787 s, before the settling time 1.3635e-4 from 15.074 s to 25.078 s
         heat made less heat lost over whole breaths, as a share of heat made: worst -5.3401e-2 from 147.616 s to 161.661 s over 53 windows
         two breaths from 64.298 s to 74.022 s
-        Oxygen: in 4559.5945, out 3636.6819, across 899.3316, along 922.0472, gained 2.3581e1
-        CarbonDioxide: in 8.6849, out 679.6929, across -667.7697, along -671.3351, gained -3.2383e0
-        NitrogenGas: in 17144.0752, out 17137.7190, across 0.0000, along 0.0394, gained 6.3562e0
+        Oxygen: in 4559.5943, out 3636.6820, across 899.3313, along 922.0469, gained 2.3581e1
+        CarbonDioxide: in 8.6849, out 679.6927, across -667.7695, along -671.3350, gained -3.2383e0
+        NitrogenGas: in 17144.0747, out 17137.7186, across 0.0000, along 0.0393, gained 6.3561e0
         Water: in 0.0000, out 0.0389, across -0.0392, along -0.0389, gained 3.0017e-4
     "#]].assert_eq(&report);
     let mut minute = format!(
@@ -3618,7 +3618,7 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
     expect![[r#"
-        steps 11662, solves 14416: ordinary 12353, landing 2063
+        steps 11662, solves 14415: ordinary 12353, landing 2062
         refused 75 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
         refused 242 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
         refused 313 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
@@ -3835,8 +3835,8 @@ fn each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_wate
         skin evaporative heat at 1.000 s: 2.175644e5 a second
         conduction to the skin at 1.001 s: 1.225919e6 a second
         conduction to the airway at 1.001 s: 8.799565e4 a second
-        dry heat loss at 1.001 s: 4.634335e5 a second
-        skin evaporative heat at 1.001 s: 4.202316e5 a second
+        dry heat loss at 1.001 s: 4.634332e5 a second
+        skin evaporative heat at 1.001 s: 4.202315e5 a second
     "#]]
     .assert_eq(&report);
 }
@@ -4118,9 +4118,9 @@ fn over_admissions_cycle_each_tissue_heat_stores_transfers_net_within_its_tolera
         MethodHistory::new(core.resolution().policy(), at, Vec::new()),
     )?;
     expect![[r#"
-        body: nets +1.488e-10 over the cycle against 1.31441e-1
-        skin heat site: nets -1.819e-10 over the cycle against 2e-3
-        conducting airway: nets -7.414e-11 over the cycle against 2e-3
+        body: nets +1.760e-10 over the cycle against 1.31441e-1
+        skin heat site: nets -1.383e-10 over the cycle against 2e-3
+        conducting airway: nets -7.016e-11 over the cycle against 2e-3
     "#]]
     .assert_eq(&report);
     Ok(())
@@ -4215,4 +4215,476 @@ fn the_reference_run_loses_the_heat_it_makes_over_whole_breaths(
         seconds(closed),
         shares.len()
     )
+}
+
+fn smooth_min(a: f64, b: f64, width: f64) -> f64 {
+    0.5 * (a + b - ((a - b) * (a - b) + width * width).sqrt())
+}
+
+/// The packet's error scale at a value, which judges each row the body solves.
+fn error_scale(value: f64) -> f64 {
+    1e-9 + 1e-10 * value.abs()
+}
+
+/// One thermostat command: its row, whether it answers warmth, and the packet's `D_c`, `D_s` and `theta` for it.
+struct Command {
+    name: &'static str,
+    row: RowId,
+    warm: bool,
+    core_width: f64,
+    skin_width: f64,
+    threshold: f64,
+}
+
+/// The thermostat's rows and the packet's values, so each command's form and the set point's rate come from the
+/// packet and the accepted state.
+struct Thermostat {
+    core: RowId,
+    skin: RowId,
+    set_point: RowId,
+    commands: [Command; 3],
+    reference: f64,
+    width: f64,
+    target: f64,
+    speed: f64,
+}
+
+impl Thermostat {
+    fn of(start: &Start) -> Self {
+        let value = |name| lead(parameter(start, name));
+        let row = |kind: RowKind| {
+            (start.body.rows().iter())
+                .find(|row| row.kind() == kind)
+                .unwrap_or_else(|| panic!("no row {kind:?}"))
+                .id()
+        };
+        let command = |name, warm, [core, skin, threshold]: [&'static str; 3]| Command {
+            name,
+            row: named(start, "NS", name),
+            warm,
+            core_width: value(core),
+            skin_width: value(skin),
+            threshold: value(threshold),
+        };
+        let skin = Context::Site(site::<TissueSite>("skin heat site"));
+        Self {
+            core: row(field("MT", "core_temperature", Context::Body)),
+            skin: row(field("MT", "tissue_temperature", skin)),
+            set_point: named(start, "NS", "thermostat set point"),
+            commands: [
+                command(
+                    "sudomotor command",
+                    true,
+                    [
+                        "ns.sudomotor-core-width",
+                        "ns.sudomotor-skin-width",
+                        "ns.sudomotor-threshold",
+                    ],
+                ),
+                command(
+                    "constrictor command",
+                    false,
+                    [
+                        "ns.constrictor-core-width",
+                        "ns.constrictor-skin-width",
+                        "ns.constrictor-threshold",
+                    ],
+                ),
+                command(
+                    "shiver command",
+                    false,
+                    [
+                        "ns.shiver-core-width",
+                        "ns.shiver-skin-width",
+                        "ns.shiver-threshold",
+                    ],
+                ),
+            ],
+            reference: value("ns.skin-reference"),
+            width: value("ns.command-width"),
+            target: value("ns.thermostat-target"),
+            speed: value("ns.thermostat-speed"),
+        }
+    }
+    /// Research 12's warm or cold form at the accepted state: the core against the set point over `D_c` and the skin
+    /// thermoreceptor's store against the skin reference over `D_s`, against `theta`, smoothed at zero.
+    fn form(&self, command: &Command, view: &AcceptedStateView<'_>) -> f64 {
+        let at = |row| lead(view.value(row));
+        let load = (at(self.core) - at(self.set_point)) / command.core_width
+            + (at(self.skin) - self.reference) / command.skin_width;
+        let past = if command.warm {
+            load - command.threshold
+        } else {
+            command.threshold - load
+        };
+        smooth_max(past, 0.0, self.width)
+    }
+}
+
+/// Ticket 12's PR 12b, the thermostat on the body, at the admitted start and a second on: each command against
+/// research 12's warm or cold form from the packet and the accepted state, within the packet's error scale, and the
+/// set point's change over a millisecond against its rate toward the target's mean, `k_set (M - T_set)`, at the
+/// window's two ends, which the speed times the set point's own error scale bounds. With no carriage yet the core
+/// admits far above the set point, so the sudomotor command stands far from rest and the two cold commands near zero.
+#[test]
+fn the_thermostats_set_point_and_each_command_meet_their_forms_at_the_admitted_start_and_a_second_on() {
+    let start = Start::admitted();
+    let thermostat = Thermostat::of(&start);
+    let zero = lead(parameter(&start, "mt.thermal-zero"));
+    let mut report = String::new();
+    let mut session = start.session();
+    for at in [0, SECOND] {
+        if at > 0 {
+            session = until(session, at);
+        }
+        let from = {
+            let view = session.record().accepted();
+            let now = seconds(view.time().nanoseconds());
+            let temperatures =
+                [thermostat.core, thermostat.skin, thermostat.set_point].map(|row| lead(view.value(row)));
+            writeln!(
+                report,
+                "at {now:.3} s: core {:.6}, skin {:.6}, set point {:.6} degrees above the thermal zero",
+                temperatures[0] - zero,
+                temperatures[1] - zero,
+                temperatures[2] - zero
+            )
+            .expect("a string takes it");
+            for command in &thermostat.commands {
+                let (held, form) = (lead(view.value(command.row)), thermostat.form(command, &view));
+                assert!(
+                    (held - form).abs() <= error_scale(form),
+                    "the {} is {held:e} at {now} s, its form {form:e}",
+                    command.name
+                );
+                writeln!(report, "{} at {now:.3} s: {held:.6e}", command.name).expect("a string takes it");
+            }
+            view.value(thermostat.set_point)
+        };
+        session = until(session, at + HEAT_WINDOW);
+        let to = session.record().accepted().value(thermostat.set_point);
+        let moved = lead(to.minus(from)) / (HEAT_WINDOW as f64 / SECOND as f64);
+        let [first, last] = [from, to].map(|value| thermostat.speed * (thermostat.target - lead(value)));
+        let (low, high) = if first < last {
+            (first, last)
+        } else {
+            (last, first)
+        };
+        let slack = thermostat.speed * error_scale(thermostat.target);
+        assert!(
+            low - slack <= moved && moved <= high + slack,
+            "the set point moves {moved:e} a second from {at} ns, its form {first:e} to {last:e}"
+        );
+    }
+    expect![[r#"
+        at 0.000 s: core 41.904951, skin 33.148389, set point 37.000000 degrees above the thermal zero
+        sudomotor command at 0.000 s: 3.820445e0
+        constrictor command at 0.000 s: 4.814609e-4
+        shiver command at 0.000 s: 4.391753e-4
+        at 1.000 s: core 41.904951, skin 33.148150, set point 37.000000 degrees above the thermal zero
+        sudomotor command at 1.000 s: 3.820421e0
+        constrictor command at 1.000 s: 4.814664e-4
+        shiver command at 1.000 s: 4.391799e-4
+    "#]]
+    .assert_eq(&report);
+}
+
+/// The commands a fixture states to its shiver drive, from zero to far above two.
+const SHIVER_COMMANDS: [f64; 9] = [0.0, 1e-3, 0.05, 0.3, 1.0, 1.7, 2.0, 5.0, 1e3];
+const SHIVER_WIDTH: f64 = 0.1;
+const SHIVER_NOTE: &str = "shiver drive fixture: synthetic";
+
+/// The nervous card alone, with a shiver command a parameter states and arrow 87's shiver drive on it.
+fn shiver_fixture() -> Result<CompiledBody, AdmissionError> {
+    let origin = Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?);
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", origin);
+    let schema = Schema::new(map.finish()?)?;
+    assemble(schema, |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, SECOND)?;
+        let command = ns.algebraic::<Dimensionless>("shiver command", Admissible::nonnegative());
+        let stated = ns.parameter::<Dimensionless>(
+            ParameterKey::new("fixture.shiver-command"),
+            Admissible::nonnegative(),
+        );
+        let residual = ns.kernel(|mut k| {
+            let (held, value) = (k.algebraic(&command), k.parameter(&stated));
+            let residual = k.subtract(held, value);
+            k.finish(residual, ns.every_mode(), class)
+        });
+        ns.residual(&command, residual);
+        ng_nervous::shiver_drive(&mut ns, &command)?;
+        body.add(ns.finish());
+        body.compile()
+    })
+}
+
+/// The fixture's shiver drive at each stated command, a cap of one and the fixture's width.
+fn stated_shiver_drives() -> Result<[f64; 9], InitializationFailure> {
+    let body = shiver_fixture()?;
+    let drive = (body.rows().iter())
+        .find(|row| matches!(row.kind(), RowKind::Algebraic(slot) if slot.law.local == "shiver_drive"))
+        .expect("the shiver drive's row")
+        .id();
+    let mut drives = [0.0; 9];
+    for (at, command) in SHIVER_COMMANDS.into_iter().enumerate() {
+        let mut packet = ParameterPacket::new();
+        for (key, value) in [
+            ("fixture.shiver-command", command),
+            ("ns.shiver-cap", 1.0),
+            ("ns.shiver-cap-width", SHIVER_WIDTH),
+        ] {
+            let value = Measure::<Dimensionless>::new(value)?;
+            packet.synthetic(ParameterKey::new(key), Binding::Body, value, SHIVER_NOTE)?;
+        }
+        packet.start_rest(&body, |_| 0.0, SHIVER_NOTE)?;
+        packet.within(ErrorScales::uniform(Measure::new(1e-12)?, Measure::new(1e-13)?)?);
+        let core = ng_solver::Core::new(SECOND / 1_000);
+        let store = MemoryStore::default();
+        let lens = body.lens(Vec::new(), NonZeroU64::MIN.saturating_add(SECOND - 1))?;
+        let port = BoundaryPort::new(Vec::new())?;
+        let session = admit_solved(&body, packet, port, &core, &lens, &store)?.session;
+        drives[at] = lead(session.record().accepted().value(drive));
+    }
+    Ok(drives)
+}
+
+/// Ticket 12's ruling on the shiver drive, a model default that departs from research 12's `smooth_min(u, 1, w)`:
+/// `(smooth_min(u, 1, w) - s_0) / (1 - s_0)` with `s_0 = smooth_min(0, 1, w)`. On a fixture that states its own
+/// command, the drive stands at or above zero, rises with the command and stays under one, a command far above two
+/// among the points. On the body at its admitted start it meets that form on the shiver command, within the packet's
+/// error scale, and stands at or above zero.
+#[test]
+fn the_shiver_drive_rises_from_zero_stays_under_one_and_meets_its_form_at_the_admitted_start()
+-> Result<(), InitializationFailure> {
+    let drives = stated_shiver_drives()?;
+    for (command, drive) in SHIVER_COMMANDS.into_iter().zip(drives) {
+        assert!(
+            (0.0..1.0).contains(&drive),
+            "at a command of {command} the shiver drive is {drive:e}, outside zero to under one"
+        );
+    }
+    for (at, pair) in drives.windows(2).enumerate() {
+        assert!(
+            pair[1] > pair[0],
+            "the shiver drive falls from {:e} to {:e} as its command rises from {} to {}",
+            pair[0],
+            pair[1],
+            SHIVER_COMMANDS[at],
+            SHIVER_COMMANDS[at + 1]
+        );
+    }
+    let start = Start::admitted();
+    let (cap, width) = (
+        lead(parameter(&start, "ns.shiver-cap")),
+        lead(parameter(&start, "ns.shiver-cap-width")),
+    );
+    let session = start.session();
+    let view = session.record().accepted();
+    let (command, drive) = (
+        lead(view.value(named(&start, "NS", "shiver command"))),
+        lead(view.value(named(&start, "NS", "shiver_drive"))),
+    );
+    let at_zero = smooth_min(0.0, cap, width);
+    let form = (smooth_min(command, cap, width) - at_zero) / (cap - at_zero);
+    assert!(
+        drive >= 0.0 && (drive - form).abs() <= error_scale(form),
+        "the shiver drive admits at {drive:e} on a shiver command of {command:e}, its form {form:e}"
+    );
+    expect![[r#"
+        shiver drive at admission 4.369953e-4 on a shiver command of 4.391753e-4
+    "#]]
+    .assert_eq(&format!(
+        "shiver drive at admission {drive:.6e} on a shiver command of {command:.6e}\n"
+    ));
+    Ok(())
+}
+
+/// A junction's parameter: its own binding where the packet states one, else the junctions' class value.
+fn junction_parameter(start: &Start, name: &'static str, junction: SiteId) -> f64 {
+    let bound = |binding: Binding| {
+        (start.provenance.values().iter()).find_map(|record| match record.name {
+            ValueName::Parameter { key, binding: at } if key == ParameterKey::new(name) && at == binding => {
+                Some(record.value)
+            }
+            _ => None,
+        })
+    };
+    let value = bound(Binding::Site(junction)).or_else(|| bound(Binding::Class(Class::Junction)));
+    lead(value.unwrap_or_else(|| panic!("no {name} at {}", junction.key())))
+}
+
+/// One transmitter's release at one junction, `q_i V` times each traffic in its share, with the share's key or one.
+struct Release {
+    name: String,
+    column: usize,
+    vesicle: RowId,
+    speed: f64,
+    traffics: Vec<(f64, RowId)>,
+}
+
+impl Release {
+    fn at(
+        start: &Start,
+        junction: &'static str,
+        species: Species,
+        traffics: &[(Option<&'static str>, RowId)],
+    ) -> Self {
+        let body = &start.body;
+        let at = site::<Junction>(junction);
+        let vesicle = (body.rows().iter())
+            .find(|row| {
+                row.kind()
+                    == RowKind::Amount {
+                        site: at,
+                        species,
+                        space: Space::Vesicle,
+                    }
+            })
+            .expect("a vesicle")
+            .id();
+        let column = (body.columns().iter().enumerate())
+            .find(|(_, column)| column.origin().owner == "NS" && column.terms().contains(&(vesicle, -1)))
+            .expect("a release")
+            .0;
+        let key = match species {
+            Species::Acetylcholine => "ns.release-ach",
+            _ => "ns.release-ne",
+        };
+        Self {
+            name: format!("{species:?} at the {junction}"),
+            column,
+            vesicle,
+            speed: junction_parameter(start, key, at),
+            traffics: (traffics.iter())
+                .map(|&(share, row)| {
+                    (
+                        share.map_or(1.0, |share| junction_parameter(start, share, at)),
+                        row,
+                    )
+                })
+                .collect(),
+        }
+    }
+    fn form(&self, view: &AcceptedStateView<'_>) -> f64 {
+        let at = |row| lead(view.value(row));
+        let traffic: f64 = self.traffics.iter().map(|&(share, row)| share * at(row)).sum();
+        self.speed * at(self.vesicle) * traffic
+    }
+}
+
+/// Ticket 12's PR 12b, the skin junction: acetylcholine leaves its vesicle by the sudomotor command in its share, the
+/// vagal and motor shares zero there, and norepinephrine by the sympathetic traffic and the constrictor command, each in
+/// its share, as `q_i V` times the shared traffics, from the packet and the accepted state. Every other junction keeps
+/// the base's release: the sinoatrial junction releases acetylcholine by the vagal traffic and the pump drive in their
+/// shares, and norepinephrine by the sympathetic traffic alone. Each rate is a mean over a millisecond from 1 s, held
+/// between its form at the window's two ends.
+#[test]
+fn the_skin_junction_releases_by_its_shares_and_the_sinoatrial_junction_as_on_the_base() {
+    let start = Start::admitted();
+    let traffic = |name| named(&start, "NS", name);
+    let (vagal, pump, sympathetic) = (
+        traffic("vagal traffic"),
+        traffic("pump drive"),
+        traffic("sympathetic traffic"),
+    );
+    let (sudomotor, constrictor) = (traffic("sudomotor command"), traffic("constrictor command"));
+    let (ach, ne) = (Species::Acetylcholine, Species::Norepinephrine);
+    let (vagal_share, motor_share) = (Some("ns.vagal-share"), Some("ns.motor-share"));
+    let releases = [
+        Release::at(
+            &start,
+            "skin junction",
+            ach,
+            &[
+                (vagal_share, vagal),
+                (motor_share, pump),
+                (Some("ns.sudomotor-share"), sudomotor),
+            ],
+        ),
+        Release::at(
+            &start,
+            "skin junction",
+            ne,
+            &[
+                (Some("ns.sympathetic-share"), sympathetic),
+                (Some("ns.constrictor-share"), constrictor),
+            ],
+        ),
+        Release::at(
+            &start,
+            "sinoatrial junction",
+            ach,
+            &[(vagal_share, vagal), (motor_share, pump)],
+        ),
+        Release::at(&start, "sinoatrial junction", ne, &[(None, sympathetic)]),
+    ];
+    let columns = every_column(&start.body);
+    let mut session = until(start.session(), SECOND);
+    let early = releases
+        .each_ref()
+        .map(|release| release.form(&session.record().accepted()));
+    session = until(session, SECOND + HEAT_WINDOW);
+    let late = releases
+        .each_ref()
+        .map(|release| release.form(&session.record().accepted()));
+    let from = anchor_moment().nanoseconds() + SECOND;
+    let (before, after) = (
+        extents(&session, &columns, from),
+        extents(&session, &columns, from + HEAT_WINDOW),
+    );
+    let mut report = String::new();
+    for ((release, first), last) in releases.iter().zip(early).zip(late) {
+        let moved = (after[release.column] - before[release.column]) / (HEAT_WINDOW as f64 / SECOND as f64);
+        let (low, high) = if first < last {
+            (first, last)
+        } else {
+            (last, first)
+        };
+        let slack = 1e-5 * (first.abs() + last.abs());
+        assert!(
+            low - slack <= moved && moved <= high + slack,
+            "{} is released at {moved:e} a second from 1 s, its form {first:e} to {last:e}",
+            release.name
+        );
+        writeln!(
+            report,
+            "{} released at 1.000 s: {moved:.6e} a second",
+            release.name
+        )
+        .expect("a string takes it");
+    }
+    let skin = site::<Junction>("skin junction");
+    for space in [Space::Vesicle, Space::Cleft, Space::Bound] {
+        let kind = RowKind::Amount {
+            site: skin,
+            species: ach,
+            space,
+        };
+        writeln!(
+            report,
+            "skin junction acetylcholine {space:?} at 1.001 s: {:.6e}",
+            value(&start, &session, kind)
+        )
+        .expect("a string takes it");
+    }
+    let effect = field(Receptor::CARD, "effect acetylcholine", Context::Site(skin));
+    writeln!(
+        report,
+        "skin junction acetylcholine effect at 1.001 s: {:.6e}",
+        value(&start, &session, effect)
+    )
+    .expect("a string takes it");
+    expect![[r#"
+        Acetylcholine at the skin junction released at 1.000 s: 1.421443e1 a second
+        Norepinephrine at the skin junction released at 1.000 s: 4.884340e-1 a second
+        Acetylcholine at the sinoatrial junction released at 1.000 s: 1.253759e-1 a second
+        Norepinephrine at the sinoatrial junction released at 1.000 s: 4.881999e-1 a second
+        skin junction acetylcholine Vesicle at 1.001 s: 9.301611e1
+        skin junction acetylcholine Cleft at 1.001 s: 7.107234e0
+        skin junction acetylcholine Bound at 1.001 s: 8.766534e-1
+        skin junction acetylcholine effect at 1.001 s: 9.342731e-1
+    "#]]
+    .assert_eq(&report);
 }

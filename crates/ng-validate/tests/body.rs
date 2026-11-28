@@ -242,6 +242,15 @@ fn body_01() -> Vec<Row> {
             ]],
         ),
         row(
+            "ticket 12's sudomotor command, released as acetylcholine at the skin junction",
+            &[Acetylcholine],
+            &[&[
+                (&["skin junction"], Space::Vesicle),
+                (&["skin junction"], Space::Cleft),
+                (&["skin junction"], Space::Bound),
+            ]],
+        ),
+        row(
             "the slice's body stores, 01:568 skin heat store, 06:31 the airway's heat store, 01:165 each bed's heat",
             &[Energy],
             &[&[
@@ -347,7 +356,7 @@ fn the_whole_body_holds_its_sites_and_pools() -> Result<(), AdmissionError> {
         pooled.len(),
         pools.len()
     );
-    expect!["sites 43, sites with a pool 38, pools 1251, by space {Plasma: 352, Interstitium: 300, Cells: 160, Lumen: 386, Fluid: 2, Vesicle: 9, Cleft: 9, Bound: 10, Elastic: 1, Thermal: 14, Gas: 8}"]
+    expect!["sites 43, sites with a pool 38, pools 1254, by space {Plasma: 352, Interstitium: 300, Cells: 160, Lumen: 386, Fluid: 2, Vesicle: 10, Cleft: 10, Bound: 11, Elastic: 1, Thermal: 14, Gas: 8}"]
     .assert_eq(&pin);
     Ok(())
 }
@@ -891,6 +900,54 @@ fn the_coronary_bed_pays_the_stroke_work_and_the_muscle_bed_the_walls_so_none_en
     Ok(())
 }
 
+/// Record 0011's consequence 43 on the body: both skin heat exits leave one store, and the thermostat's three commands
+/// read that store's temperature through the skin thermoreceptor. Compile lands the thermoreceptor's read only on a
+/// heat store a skin bed sits in, so that store is the one the skin bed sits in.
+#[test]
+fn both_skin_heat_exits_and_the_skin_thermoreceptor_are_the_store_the_skin_bed_sits_in()
+-> Result<(), AdmissionError> {
+    let body = whole_body()?;
+    let leaves = |local: &str| -> Vec<(&'static str, i64)> {
+        (body.columns().iter())
+            .filter(|column| column.origin().owner == "MT" && column.origin().local == local)
+            .flat_map(|column| column.terms().iter())
+            .map(|&(row, sign)| match pool_of(&body, row) {
+                (site, Space::Thermal, Species::Energy) => (site.key(), sign),
+                other => panic!("{local} moves {other:?}"),
+            })
+            .collect()
+    };
+    let (offsets, unknowns) = (body.sparsity().row_offsets(), body.sparsity().unknowns());
+    let senses = |local: &'static str| -> Vec<&'static str> {
+        let row = (body.rows().iter())
+            .find(|row| matches!(row.kind(), RowKind::Algebraic(slot) if slot.law == LawName { owner: "NS", local }))
+            .unwrap_or_else(|| panic!("no row {local}"));
+        let at = row.id().index();
+        let reads = &unknowns[offsets[at]..offsets[at + 1]];
+        (body.rows().iter())
+            .filter(|read| reads.contains(&read.unknown()))
+            .filter_map(|read| match read.kind() {
+                RowKind::Algebraic(slot)
+                    if slot.law.owner == "MT" && slot.law.local == "tissue_temperature" =>
+                {
+                    match slot.at {
+                        Context::Site(store) => Some(store.key()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let store = "skin heat site";
+    assert_eq!(leaves("dry heat loss"), [(store, -1)]);
+    assert_eq!(leaves("skin evaporative heat"), [(store, -1)]);
+    for command in ["sudomotor command", "constrictor command", "shiver command"] {
+        assert_eq!(senses(command), [store], "the {command} senses the skin's store");
+    }
+    Ok(())
+}
+
 #[test]
 fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionError> {
     let body = whole_body()?;
@@ -924,10 +981,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1468 {"algebraic": 199, "amount": 1251, "memory": 18}, columns 1463, jacobian nonzeros 10176, blocks 414, largest block 674, parameter slots 764, conserved combinations 396, held pools 318, held route columns 83
-        model hash b5275f40097e63df73744f1fc6d9e6546110d7c26ba74e67ad8ab1b226098a1b
-        conserved basis d32be123062bf6a1028dca58c8e5339b9bbaf40f9fdd406ef121274a3f468d13
-        stated packet 02e6d2606bcafa2416fa252bf1201a87f82ff0cd8ae4108ebd73eb1e48b00674
+        rows 1477 {"algebraic": 204, "amount": 1254, "memory": 19}, columns 1466, jacobian nonzeros 10224, blocks 419, largest block 676, parameter slots 804, conserved combinations 397, held pools 318, held route columns 83
+        model hash 3249748c1c2108df47234cf8cf97f463a05f4b5fc760a49a61f5a419757b5504
+        conserved basis 0e6e0f27bfc44a86823234366c4e47a1ac8ab45c9df8aff91ad3dea9978d3cd0
+        stated packet a21bbaed11fe09ad6be067036b1ce572a4b1869156c3fe7af634597e3306a97c
     "#]].assert_eq(&pin);
     Ok(())
 }

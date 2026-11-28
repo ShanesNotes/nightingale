@@ -324,6 +324,7 @@ fn start_guess(row: RowKind) -> f64 {
         RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "pump drive" => BODY_RHYTHM.mean_drive(),
         RowKind::Memory(slot) if slot.law.local == "breath work memory" => BODY_RHYTHM.work(),
+        RowKind::Memory(slot) if slot.law.local == "thermostat set point" => CORE_REFERENCE,
         RowKind::Memory(_) => 0.0,
         RowKind::Algebraic(slot) => {
             let bed = match slot.at {
@@ -344,6 +345,7 @@ fn start_guess(row: RowKind) -> f64 {
                 "core_temperature" => CORE_REFERENCE,
                 "tissue_temperature" if bed == "skin heat site" => SKIN_REFERENCE,
                 "tissue_temperature" => CORE_REFERENCE,
+                "sudomotor command" | "constrictor command" | "shiver command" | "shiver_drive" => 0.0,
                 _ => 1.0,
             }
         }
@@ -708,6 +710,7 @@ fn packet_of(
     oxygen_per_lactate(&mut packet, body)?;
     tissue_heat(&mut packet, evaporation_amplitude)?;
     twins(&mut packet)?;
+    thermostat(&mut packet)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -999,6 +1002,13 @@ fn table(
     set::<Dimensionless>(packet, "ns.motor-share", pump, 1.0)?;
     set::<Rate<Dimensionless>>(packet, "ns.release-ach", pump, PUMP.release)?;
     set::<Rate<Dimensionless>>(packet, "ns.reuptake-ach", pump, PUMP.reuptake)?;
+    let skin = Binding::Site(site::<Junction>("skin junction")?);
+    set::<Dimensionless>(packet, "ns.vagal-share", skin, 0.0)?;
+    set::<Dimensionless>(packet, "ns.sympathetic-share", junctions, 1.0)?;
+    for share in ["ns.sudomotor-share", "ns.constrictor-share"] {
+        set::<Dimensionless>(packet, share, junctions, 0.0)?;
+        set::<Dimensionless>(packet, share, skin, 1.0)?;
+    }
     set::<Acetylcholine>(packet, "rc.ach-sites", pump, PUMP.sites)?;
     set::<Affinity<Acetylcholine>>(packet, "rc.ach-on", pump, PUMP.on)?;
     set::<Rate<Dimensionless>>(packet, "rc.ach-off", pump, PUMP.off)?;
@@ -1164,6 +1174,43 @@ fn twins(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
         set::<Temperature>(packet, key, body, 235.0 - THERMAL_ZERO)?;
     }
     Ok(())
+}
+
+/// The thermostat's packet, every value synthetic. Each key maps to research 16: the skin reference `T_s_ref` (NS-046),
+/// the target's mean `M` (NS-047, with the sudomotor command's threshold fixed by convention) and the set point's speed
+/// `k_set` (NS-053), each command's core width `D_c`, skin width `D_s` and threshold `theta` (sudomotor NS-037 to
+/// NS-039, constrictor NS-040 to NS-042, shiver NS-043 to NS-045), the commands' smoothing width (NS-055) and the shiver
+/// drive's (NS-056). Model defaults with no row: the shiver drive's cap of one, and each junction's sudomotor,
+/// sympathetic and constrictor shares, set with the junctions'.
+fn thermostat(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    set::<Reference<Temperature>>(packet, "ns.skin-reference", body, SKIN_REFERENCE)?;
+    set::<Temperature>(packet, "ns.thermostat-target", body, CORE_REFERENCE)?;
+    set::<Rate<Dimensionless>>(packet, "ns.thermostat-speed", body, 1e-4)?;
+    for ((core_key, core), (skin_key, skin), (threshold_key, threshold)) in [
+        (
+            ("ns.sudomotor-core-width", 1.0),
+            ("ns.sudomotor-skin-width", 10.0),
+            ("ns.sudomotor-threshold", 1.0),
+        ),
+        (
+            ("ns.constrictor-core-width", 1.0),
+            ("ns.constrictor-skin-width", 4.0),
+            ("ns.constrictor-threshold", -0.5),
+        ),
+        (
+            ("ns.shiver-core-width", 1.0),
+            ("ns.shiver-skin-width", 4.0),
+            ("ns.shiver-threshold", -1.0),
+        ),
+    ] {
+        set::<Deviation<Temperature>>(packet, core_key, body, core)?;
+        set::<Deviation<Temperature>>(packet, skin_key, body, skin)?;
+        set::<Dimensionless>(packet, threshold_key, body, threshold)?;
+    }
+    set::<Dimensionless>(packet, "ns.command-width", body, 0.1)?;
+    set::<Dimensionless>(packet, "ns.shiver-cap", body, 1.0)?;
+    set::<Dimensionless>(packet, "ns.shiver-cap-width", body, 0.1)
 }
 
 /// The debt's oxygen to each lactate is the lactate burn's own counts, read from the compiled body.
