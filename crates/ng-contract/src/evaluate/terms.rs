@@ -523,7 +523,8 @@ fn with_no_vein_marked_the_refusal_sources_are_mains_and_list_each_law_once() {
 }
 
 /// Ruling 4 and interrogation finding 4: a term's invalid read is refused at a site of its set even where the host
-/// throws the sum away, as main refuses a kernel's unused input.
+/// throws the sum away, as main refuses a kernel's unused input. Where the variant uses the read, the refusal names
+/// the term; an unused read has no op in `Code::origins` and stays named by the host.
 #[test]
 fn a_terms_unused_invalid_read_is_still_refused() {
     let refused = |marks: &'static [usize], host| {
@@ -535,12 +536,16 @@ fn a_terms_unused_invalid_read_is_still_refused() {
         })
         .err()
     };
-    let absent = AdmissionError::Compile(CompileDefect::UnemittedField {
+    let named_term = AdmissionError::Compile(CompileDefect::UnemittedField {
+        law: cv("collapse"),
+        field: cv("absent"),
+    });
+    let named_host = AdmissionError::Compile(CompileDefect::UnemittedField {
         law: cv("echo"),
         field: cv("absent"),
     });
-    assert_eq!(refused(&[0], Host::Plain), Some(absent));
-    assert_eq!(refused(&[0], Host::Discarded), Some(absent));
+    assert_eq!(refused(&[0], Host::Plain), Some(named_term));
+    assert_eq!(refused(&[0], Host::Discarded), Some(named_host));
     assert!(refused(&[], Host::Discarded).is_none());
 }
 
@@ -554,6 +559,16 @@ fn a_read_main_refuses_by_hand_is_refused_through_a_term() {
             read: Read::Draw,
             ..case
         });
+        for instance in body.instances() {
+            let program = &body.programs()[instance.program().index()];
+            let expected = program
+                .code
+                .ops
+                .iter()
+                .filter(|op| matches!(op, Op::Input(_)))
+                .count();
+            assert_eq!(instance.inputs.len(), expected);
+        }
         let mut packet = packet(&body, 0.5);
         packet.start_mode(cv("rhythm"), "a", "synthetic").expect("once");
         body.bind(packet).err()
@@ -1249,6 +1264,14 @@ mod forms {
             }),
             unread_forcing
         );
+        assert_eq!(
+            refused(&Fix {
+                marks: vec![0],
+                veins: term("collapse", t_ln_level),
+                ..unread
+            }),
+            unread_forcing
+        );
     }
 
     /// Ruling 1: a volume a term uses needs a partial volume where a site of its set runs the term. One it never uses
@@ -1670,5 +1693,89 @@ mod forms {
         assert!(unscaled(&fix(vec![0], t_param, bt_clock)));
         assert!(unscaled(&fix(vec![0], t_clock_bare, bt_param)));
         assert_eq!(refused(&fix(vec![], t_clock_bare, bt_param)), None);
+    }
+
+    fn t_exp_zero<'b, 'k>(k: &mut K<'b, 'k, Veins>, _: &Decl<'b>) -> X<'b, 'k> {
+        let zero = k.zero::<Dimensionless>();
+        k.exp(zero)
+    }
+    fn h_exp_zero<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let zero = k.zero::<Dimensionless>();
+        let constant = k.exp(zero);
+        plus(k, d, constant)
+    }
+    fn h_volume<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let water = k.at_site(&d.water);
+        let volume = k.volume(water);
+        let base = k.at_site(&d.x);
+        let per = k.divide(base, volume);
+        let back = k.multiply(per, volume);
+        let back = k.as_dimension(back);
+        plus(k, d, back)
+    }
+
+    #[test]
+    fn a_terms_used_unbacked_constant_names_the_term() {
+        let bind_err = |fix: &Fix| {
+            let (body, _) = build(fix).expect("compiled");
+            body.bind(packet(&body, 0.5)).err()
+        };
+        let marked = Fix {
+            marks: vec![0],
+            veins: term("collapse", t_exp_zero),
+            hosts: two(h_level),
+            ..Fix::default()
+        };
+        assert_eq!(
+            bind_err(&marked),
+            Some(AdmissionError::UnbackedConstant { law: cv("collapse") })
+        );
+        let unmarked = Fix {
+            marks: Vec::new(),
+            ..marked.clone()
+        };
+        assert_eq!(bind_err(&unmarked), None);
+        let shared = Fix {
+            hosts: two(h_exp_zero),
+            ..marked
+        };
+        assert_eq!(
+            bind_err(&shared),
+            Some(AdmissionError::UnbackedConstant { law: cv("echo") })
+        );
+    }
+
+    #[test]
+    fn an_unread_forcing_beside_a_second_defect_names_the_forcing_when_no_site_is_in_the_terms_set() {
+        let unread = Some(CompileDefect::UnreadForcing {
+            forcing: cv("wobble"),
+        });
+        let main = Fix {
+            marks: Vec::new(),
+            no_partial: true,
+            forcing: true,
+            hosts: two(h_volume),
+            ..Fix::default()
+        };
+        let with_empty_term = Fix {
+            veins: term("collapse", t_forcing),
+            ..main.clone()
+        };
+        assert_eq!(refused(&main), unread);
+        assert_eq!(refused(&with_empty_term), unread);
+        let with_active_term = Fix {
+            marks: vec![0],
+            no_partial: false,
+            ..with_empty_term.clone()
+        };
+        assert_eq!(refused(&with_active_term), None);
+        let active_with_second_defect = Fix {
+            marks: vec![0],
+            ..with_empty_term
+        };
+        assert!(matches!(
+            refused(&active_with_second_defect),
+            Some(CompileDefect::MissingPartialVolume { .. })
+        ));
     }
 }

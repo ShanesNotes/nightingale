@@ -459,6 +459,14 @@ pub enum CompileDefect {
     PayerHoldsNoHeat { site: SiteId },
     /// A work a law requests and a bed is named to pay, with no elastic store at the root for it to end at.
     PaidWorkHasNoStore { work: crate::Work },
+    /// A route whose family requires both endpoint pools, where the schema holds no pool at an endpoint or no root
+    /// tissue site for a body energy store.
+    RouteEndpoint {
+        law: LawName,
+        site: Option<SiteId>,
+        space: Space,
+        species: Species,
+    },
     /// A site where a reaction stands without the energy pool its energy goes to.
     ReactionEndpoint {
         law: LawName,
