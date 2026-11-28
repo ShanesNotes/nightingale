@@ -1828,9 +1828,7 @@ fn the_reference_run_passes_the_bodys_policy_and_rule_holds_each_figure_to_it(
     report
 }
 
-/// Sodium and chloride into the body, the gut's less what urine and the sweat take, a second: over the first minute,
-/// and over the reference run from the anchor to its end, a whole period of evaporation's forcing. Measured and held
-/// by no assertion: one seed, and a run that sleeps on the way.
+/// Measured and held by no assertion: one seed, and a run that sleeps on the way.
 fn the_salts_into_the_body_over_the_first_minute_and_a_period_of_evaporations_forcing(
     start: &Start,
     minute: &Session<'_, Running>,
@@ -3730,14 +3728,11 @@ fn weather(at: u64, room: &Weather) -> BoundaryEvent {
     BoundaryEvent::new(id, SimTime::from_ns(anchor_moment().nanoseconds() + at), input)
 }
 
-/// What the tissue heat laws read at an instant: the three stores' heat and the sweat rate's row.
 struct Held {
     stores: [f64; 3],
     sweat: f64,
 }
 
-/// Each tissue heat law's rate by its form, at the held state, the evaporation's forcing factor and a room, with the
-/// packet's values, beside the evaporative capacity `E_max` and the secreted sweat's heat `E_rsw`.
 struct HeatForms {
     sweat: f64,
     to_skin: f64,
@@ -3948,14 +3943,9 @@ fn humid_room(start: &Start, held: &Held) -> Weather {
     room(humidity)
 }
 
-/// Ticket 12's first box over three rooms from one admission, each for a millisecond from 1 s on: the body's own room,
-/// a windier, drier and more clothed one, and a hot, humid one in which the skin can take only half the heat its
-/// secreted sweat would carry, `0 < E_max < E_rsw`. Each room's input cuts the step at its instant, so each form is
-/// claimed where its sample landed. At each end of each millisecond the sweat rate's row meets its form, and each law's
-/// mean over the millisecond lies inside its form's values at the two ends, `factors` the evaporation's forcing factor
-/// there: the stores move inside the millisecond, so a mean is held between its ends rather than to either.
-/// Evaporation posts water and heat in one proportion, the latent heat, and in the humid room the secreted sweat the
-/// skin takes outweighs the diffusion term.
+/// Ticket 12's first box over three rooms from one admission, each for a millisecond from 1 s on. Each room's input
+/// cuts the step at its instant, so each form is claimed where its sample landed. The stores move inside the
+/// millisecond, so each law's mean is held between its form's values at the two ends rather than to either.
 fn tissue_heat_forms_in_three_rooms(start: &Start, factors: [f64; 4]) -> String {
     let latent = lead(parameter(start, "mt.latent-heat"));
     let mut session = start.session();
@@ -4050,8 +4040,7 @@ fn tissue_heat_forms_in_three_rooms(start: &Start, factors: [f64; 4]) -> String 
     report
 }
 
-/// Ticket 12's first box with the forcing's amplitude at zero, so its factor is one: each tissue heat law and the sweat
-/// in three rooms, as `tissue_heat_forms_in_three_rooms` states them.
+/// Ticket 12's first box with the forcing's amplitude at zero, so its factor is one.
 #[test]
 fn each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion()
 {
@@ -4091,9 +4080,8 @@ fn each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_wate
 
 const FACTOR_NOTE: &str = "the evaporation's forcing fixture: synthetic";
 
-/// A fixture whose one row is the factor of MT's forcing named as the evaporation's, on the evaporation's period and
-/// amplitude keys, beside a still circulation. A forcing's knots are keyed by its owner and name under the run's seed
-/// alone, so under the whole body's seed it draws the knots the whole body's evaporation reads.
+/// A forcing's knots are keyed by its owner and name under the run's seed alone, so under the whole body's seed this
+/// fixture draws the knots the whole body's evaporation reads.
 fn evaporations_forcing() -> Result<(CompiledBody, RowId), AdmissionError> {
     let origin = || -> Result<Position, AdmissionError> {
         Ok(Position::new(
@@ -4147,9 +4135,7 @@ fn evaporations_forcing() -> Result<(CompiledBody, RowId), AdmissionError> {
     Ok((body, row))
 }
 
-/// The evaporation's forcing factor at each instant of `at` after the whole body's anchor: the fixture's row, with the
-/// whole body's period and amplitude, admitted at the anchor under the whole body's seed and run on millisecond steps,
-/// so each sample lands on its instant.
+/// Run on millisecond steps, so each sample lands on its instant.
 fn evaporation_factors(start: &Start, at: [u64; 4]) -> [f64; 4] {
     let (body, row) = evaporations_forcing().expect("the fixture compiles");
     let mut packet = ParameterPacket::new();
@@ -4221,7 +4207,7 @@ fn evaporation_factors(start: &Start, at: [u64; 4]) -> [f64; 4] {
 /// Ticket 12's fourth ruling on the body's own packet, whose evaporation's forcing is on: after admission its factor
 /// differs from one, and in the hot, humid room the secreted sweat the skin takes outweighs the diffusion term, so each
 /// tissue heat law's form, with the factor on the diffusion term alone, holds evaporation where a factor on the sweat
-/// term would show. The factor is read from a fixture under the whole body's seed (`evaporation_factors`).
+/// term would show.
 #[test]
 fn evaporation_bears_its_forcing_on_the_diffusion_term_alone_where_the_sweat_term_outweighs_it() {
     let start = Start::admitted();
@@ -4660,7 +4646,6 @@ fn error_scale(value: f64) -> f64 {
     1e-9 + 1e-10 * value.abs()
 }
 
-/// One thermostat command: its row, whether it answers warmth, and the packet's `D_c`, `D_s` and `theta` for it.
 struct Command {
     name: &'static str,
     row: RowId,
@@ -4670,8 +4655,6 @@ struct Command {
     threshold: f64,
 }
 
-/// The thermostat's rows and the packet's values, so each command's form and the set point's rate come from the
-/// packet and the accepted state.
 struct Thermostat {
     core: RowId,
     skin: RowId,
@@ -4758,8 +4741,7 @@ impl Thermostat {
 /// Ticket 12's PR 12b, the thermostat on the body, at the admitted start and a second on: each command against
 /// research 12's warm or cold form from the packet and the accepted state, within the packet's error scale, and the
 /// set point's change over a millisecond against its rate toward the target's mean, `k_set (M - T_set)`, at the
-/// window's two ends, which the speed times the set point's own error scale bounds. With blood's carriage and the
-/// sweat, the core admits near the set point and each command near rest.
+/// window's two ends, which the speed times the set point's own error scale bounds.
 #[test]
 fn the_thermostats_set_point_and_each_command_meet_their_forms_at_the_admitted_start_and_a_second_on() {
     let start = Start::admitted();
@@ -4823,12 +4805,10 @@ fn the_thermostats_set_point_and_each_command_meet_their_forms_at_the_admitted_s
     .assert_eq(&report);
 }
 
-/// The commands a fixture states to its shiver drive, from zero to far above two.
 const SHIVER_COMMANDS: [f64; 9] = [0.0, 1e-3, 0.05, 0.3, 1.0, 1.7, 2.0, 5.0, 1e3];
 const SHIVER_WIDTH: f64 = 0.1;
 const SHIVER_NOTE: &str = "shiver drive fixture: synthetic";
 
-/// The nervous card alone, with a shiver command a parameter states and arrow 87's shiver drive on it.
 fn shiver_fixture() -> Result<CompiledBody, AdmissionError> {
     let origin = Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?);
     let mut map = AnatomyBuilder::new();
@@ -4854,7 +4834,6 @@ fn shiver_fixture() -> Result<CompiledBody, AdmissionError> {
     })
 }
 
-/// The fixture's shiver drive at each stated command, a cap of one and the fixture's width.
 fn stated_shiver_drives() -> Result<[f64; 9], InitializationFailure> {
     let body = shiver_fixture()?;
     let drive = (body.rows().iter())
@@ -4885,10 +4864,7 @@ fn stated_shiver_drives() -> Result<[f64; 9], InitializationFailure> {
 }
 
 /// Ticket 12's ruling on the shiver drive, a model default that departs from research 12's `smooth_min(u, 1, w)`:
-/// `(smooth_min(u, 1, w) - s_0) / (1 - s_0)` with `s_0 = smooth_min(0, 1, w)`. On a fixture that states its own
-/// command, the drive stands at or above zero, rises with the command and stays under one, a command far above two
-/// among the points. On the body at its admitted start it meets that form on the shiver command, within the packet's
-/// error scale, and stands at or above zero.
+/// `(smooth_min(u, 1, w) - s_0) / (1 - s_0)` with `s_0 = smooth_min(0, 1, w)`.
 #[test]
 fn the_shiver_drive_rises_from_zero_stays_under_one_and_meets_its_form_at_the_admitted_start()
 -> Result<(), InitializationFailure> {
@@ -4935,7 +4911,6 @@ fn the_shiver_drive_rises_from_zero_stays_under_one_and_meets_its_form_at_the_ad
     Ok(())
 }
 
-/// A junction's parameter: its own binding where the packet states one, else the junctions' class value.
 fn junction_parameter(start: &Start, name: &'static str, junction: SiteId) -> f64 {
     let bound = |binding: Binding| {
         (start.provenance.values().iter()).find_map(|record| match record.name {
@@ -4949,7 +4924,6 @@ fn junction_parameter(start: &Start, name: &'static str, junction: SiteId) -> f6
     lead(value.unwrap_or_else(|| panic!("no {name} at {}", junction.key())))
 }
 
-/// One transmitter's release at one junction, `q_i V` times each traffic in its share, with the share's key or one.
 struct Release {
     name: String,
     column: usize,
@@ -5008,12 +4982,8 @@ impl Release {
     }
 }
 
-/// Ticket 12's PR 12b, the skin junction: acetylcholine leaves its vesicle by the sudomotor command in its share, the
-/// vagal and motor shares zero there, and norepinephrine by the sympathetic traffic and the constrictor command, each in
-/// its share, as `q_i V` times the shared traffics, from the packet and the accepted state. Every other junction keeps
-/// the base's release: the sinoatrial junction releases acetylcholine by the vagal traffic and the pump drive in their
-/// shares, and norepinephrine by the sympathetic traffic alone. Each rate is a mean over a millisecond from 1 s, held
-/// between its form at the window's two ends.
+/// Ticket 12's PR 12b, the skin junction. Each rate is a mean over a millisecond from 1 s, held between its form at the
+/// window's two ends.
 #[test]
 fn the_skin_junction_releases_by_its_shares_and_the_sinoatrial_junction_as_on_the_base() {
     let start = Start::admitted();
@@ -5126,7 +5096,6 @@ fn the_skin_junction_releases_by_its_shares_and_the_sinoatrial_junction_as_on_th
 /// The schema's partial volume, which `volume_flow` converts the bed inflow by (`body_schema`).
 const PARTIAL_VOLUME: f64 = 1.0;
 
-/// A parameter's value at the first of `bindings` the packet binds it at.
 fn bound_at(start: &Start, name: &'static str, bindings: &[Binding]) -> f64 {
     let at = |binding: &Binding| {
         (start.provenance.values().iter()).find_map(|record| match record.name {
@@ -5146,8 +5115,6 @@ fn bound_at(start: &Start, name: &'static str, bindings: &[Binding]) -> f64 {
     )
 }
 
-/// Blood's carriage at the skin bed by its form: `c_bl` times the bed inflow, the flow of its one feeder from the
-/// systemic arteries, as a volume flow, times the core's temperature less the skin store's.
 struct Carriage {
     blood: f64,
     inflow: RowId,
@@ -5354,9 +5321,6 @@ const WARM_ENDS: u64 = 30 * SECOND;
 /// hundredth, many times the sweat rate's own drift over a breath at rest (0.42% over the first minute).
 const RISE: f64 = 1e-2;
 
-/// The skin bed's feeder, the sweat rate's row, the skin's and the core's temperatures, the thermostat's three
-/// commands and the skin junction's two effects, read from each accepted state, beside the packet's values that the
-/// feeder's resistance form takes.
 struct SkinBed {
     phase: RowId,
     flow: RowId,
@@ -5476,10 +5440,6 @@ impl SkinBed {
             debt: at(self.debt),
         }
     }
-    /// The six terms of the feeder's resistance form at a moment, as the arteriole test states it: the base
-    /// resistance, the constrictor's `1 + S_c E_a`, viscosity over its reference, the share the bed's oxygen debt
-    /// keeps, the dilator's `1 + S_d E_d` and the warmth's `exp(L2 e_s / b_v)`. The form is the first four's product
-    /// over the last two's.
     fn terms(&self, moment: &SkinMoment) -> [f64; 6] {
         let owed = moment.debt;
         [
@@ -5497,8 +5457,6 @@ impl SkinBed {
     }
 }
 
-/// Every accepted step of a pass from its session's head until `end` after admission, one step at a time as `beats`
-/// takes them.
 fn skin_pass(bed: &SkinBed, mut session: Session<'_, Running>, end: u64) -> Vec<SkinMoment> {
     let anchor = anchor_moment().nanoseconds();
     let mut moments = vec![bed.see(&session)];
@@ -5510,8 +5468,6 @@ fn skin_pass(bed: &SkinBed, mut session: Session<'_, Running>, end: u64) -> Vec<
     moments
 }
 
-/// One whole breath of a pass, between two of the breath phase's edges, each quantity its trapezoid mean over the
-/// breath as `Watch::mean` takes it, the resistance the mean of the head over the flow.
 struct Breath {
     edges: [usize; 2],
     window: [u64; 2],
@@ -5526,7 +5482,6 @@ struct Breath {
     terms: [f64; 6],
 }
 
-/// A pass's whole breaths that open at or after `from` and close by `end`.
 fn whole_breaths(bed: &SkinBed, moments: &[SkinMoment], from: u64, end: u64) -> Vec<Breath> {
     let edges: Vec<usize> = (1..moments.len())
         .filter(|&at| moments[at].phase < moments[at - 1].phase)
@@ -5558,32 +5513,23 @@ fn whole_breaths(bed: &SkinBed, moments: &[SkinMoment], from: u64, end: u64) -> 
         .collect()
 }
 
-/// A quantity of a breath, by name, with the sign of the way the warmth moves it.
 type Quantity = (&'static str, fn(&Breath) -> f64, f64);
 
-/// The most a quantity's breath mean moves between neighbouring breaths of the base pass.
 fn breath_spread(breaths: &[Breath], of: fn(&Breath) -> f64) -> f64 {
     (breaths.windows(2))
         .map(|pair| (of(&pair[1]) - of(&pair[0])).abs())
         .fold(0.0, larger)
 }
 
-/// One paired breath's two windows and the skin bed's flow over each, the base pass's first.
 struct Pair {
     windows: [[u64; 2]; 2],
     flows: [f64; 2],
 }
 
-/// What the warm pass shows against the base pass, paired breath by breath by ordinal from the step on.
 struct WarmRoom {
     report: String,
     pairs: Vec<Pair>,
-    /// For each of the skin's temperature, the feeder's resistance, the skin bed's flow and the sweat rate: the least,
-    /// over the paired breaths, of the warm pass's difference from the base pass in the direction the warmth moves it,
-    /// over the base pass's spread, and the breath it falls at.
     margins: [(&'static str, f64, usize); 4],
-    /// The feeder's resistance, its head over its flow, beside its form, at the warm pass's first breath edge after the
-    /// step and its last.
     forms: [(u64, f64, f64); 2],
 }
 
@@ -5723,23 +5669,14 @@ fn warm_room(bed: &SkinBed, base: &[SkinMoment], warm: &[SkinMoment], room: &Wea
 }
 
 /// Ticket 12's third box on the whole body: the skin's vessels in a warm room, against the sweat (record 0011's "the
-/// skin's vessels changing before sweat starts in a warm room"). Two passes from one admission, both under the packet's
-/// forcing: the base pass in the body's own room, and the warm pass, whose one weather event at `WARM_STEP` raises the
-/// room's air and radiant temperatures (`WARM_ROOM`). Each runs to `WARM_ENDS`. Whole breaths from the step on are
-/// paired by their ordinal, each pair's two windows agreeing at both edges within a millisecond. On every pair the warm
-/// pass's skin is warmer, the skin bed's feeder's resistance (its head over its flow) lower and the sweat rate higher,
-/// each by more than the base pass's breath-to-breath spread of that quantity, and the bed's flow is higher. The flow
-/// is held by direction alone, its margin reported: it pulses with each beat, so its mean over a breath carries the
-/// beat's phase at the window's edges, which pairing cancels only while the two windows coincide, and over 300 s the
-/// base pass's breath means moved 3.4% between neighbours, a spread the first breath's rise stays under. At the warm
-/// pass's first breath edge after the step and at its last, the feeder's resistance meets its whole form, as the
-/// arteriole test states it, within a millionth. The report gives the form's terms, the head, the flow and the sweat
-/// rate as ratios at stated breaths, each command and effect in both passes, and the order: the first paired breath at
-/// which the flow's ratio passes `RISE`, and the first at which the sweat rate's does. Evaporation's forcing is keyed
-/// by simulated time, so both passes see one factor at one instant, and pairing fixes its realization without taking it
-/// out of the difference: evaporation carries the factor times the wettedness times the evaporative capacity, and the
-/// capacity differs between the rooms. The warm pass is not certified here: the body's policy is sized on the reference
-/// run.
+/// skin's vessels changing before sweat starts in a warm room"). Whole breaths from the step on are paired by their
+/// ordinal, each pair's two windows agreeing at both edges within a millisecond. The bed's flow is held by direction
+/// alone: it pulses with each beat, so its mean over a breath carries the beat's phase at the window's edges, which
+/// pairing cancels only while the two windows coincide, and over 300 s the base pass's breath means moved 3.4% between
+/// neighbours, a spread the first breath's rise stays under. Evaporation's forcing is keyed by simulated time, so both
+/// passes see one factor at one instant, and pairing fixes its realization without taking it out of the difference:
+/// evaporation carries the factor times the wettedness times the evaporative capacity, and the capacity differs between
+/// the rooms. The warm pass is not certified here: the body's policy is sized on the reference run.
 #[test]
 fn in_a_warm_room_the_skin_warms_its_feeder_opens_and_its_bed_takes_more_blood_and_sweats_more_than_in_the_bodys_room()
  {

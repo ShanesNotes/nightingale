@@ -77,8 +77,6 @@ pub fn breathing<'b>(
     breathing_with(ns, ports, (vagal, scale), None)
 }
 
-/// As `breathing`, and in the whole body acetylcholine's release also answers the thermostat's sudomotor command in
-/// each junction's share.
 fn breathing_with<'b>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     ports: &NervousPorts<'b>,

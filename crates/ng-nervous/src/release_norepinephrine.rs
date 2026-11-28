@@ -10,8 +10,6 @@ pub(crate) fn declare<'b>(
     release::<Norepinephrine>(ns, ports, sympathetic, "ns.release-ne", reflex);
 }
 
-/// The whole body's release: the sympathetic traffic and the thermostat's constrictor command, each in its junction's
-/// share, so a junction whose constrictor share is zero keeps its release.
 pub(crate) fn declare_with_the_constrictor<'b>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     ports: &NervousPorts<'b>,

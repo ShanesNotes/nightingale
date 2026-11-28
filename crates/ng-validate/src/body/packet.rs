@@ -29,7 +29,6 @@ const CORE_REFERENCE: f64 = 310.15;
 const SKIN_REFERENCE: f64 = 307.15;
 /// The skin's evaporative heat the start guesses, near where the body admits in its room.
 const EVAPORATION_AT_REST: f64 = 2.2e5;
-/// Each salt's concentration on the secreted sweat at no sweat, and its rise per share of the gland's maximal rate.
 const SWEAT_FLOOR: f64 = 10.0;
 const SWEAT_SLOPE: f64 = 40.0;
 const EVAPORATION_AMPLITUDE: f64 = 0.5;

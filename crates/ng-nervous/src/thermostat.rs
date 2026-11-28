@@ -1,7 +1,6 @@
 use ng_contract::catalog::{CoreTemperature, Defines, Reads, ShiverDrive, SkinThermoreceptor};
 use ng_contract::*;
 
-/// The thermostat's commands that release a transmitter at the skin junction.
 pub(crate) struct Commands<'b> {
     pub(crate) sudomotor: AlgebraicSlot<'b, Nervous, Dimensionless>,
     pub(crate) constrictor: AlgebraicSlot<'b, Nervous, Dimensionless>,
@@ -21,7 +20,6 @@ enum Side {
     Cold,
 }
 
-/// A command's row and the keys of its core width `D_c`, skin width `D_s` and threshold `theta`.
 #[derive(Clone, Copy)]
 struct Command {
     row: &'static str,

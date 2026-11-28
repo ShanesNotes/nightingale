@@ -311,7 +311,6 @@ impl<'b> Evaporative<'b> {
     }
 }
 
-/// The secreted sweat's heat `E_rsw = lambda m_sw`, and what of it the skin can take, `smooth_min(E_rsw, E_max, w)`.
 fn taken<'b, 'k>(
     k: &mut Kernel<'b, 'k, Mt>,
     sweat: &AlgebraicSlot<'b, Mt, Rate<Water>>,
@@ -326,8 +325,6 @@ fn taken<'b, 'k>(
     (secreting, taken)
 }
 
-/// The routes evaporation and the sweat post on: heat out of the skin store, and out of the skin bed the evaporated
-/// water, the unevaporated sweat and the two salts the sweat carries.
 struct SkinRoutes<'r, 'b> {
     heat: &'r Pair<'b, Mt, Energy>,
     water: &'r Pair<'b, Mt, Water>,
@@ -404,7 +401,6 @@ fn evaporation_and_sweat<'b>(
     salt(laws, routes.chloride, (secreted, &sweat.most), chloride, class);
 }
 
-/// The water a salt rides on and the sweat gland's maximal rate, which its concentration's share is of.
 type Carrier<'r, 'b> = (
     &'r AlgebraicSlot<'b, Mt, Rate<Water>>,
     &'r Parameter<'b, Mt, Rate<Water>>,

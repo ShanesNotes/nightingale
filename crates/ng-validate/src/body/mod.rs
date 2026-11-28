@@ -188,9 +188,7 @@ mod placement {
         Ok(())
     }
 
-    /// Ticket 12's placement: with the contract unchanged, the whole body compiles with conduction from the core
-    /// to the skin and airway stores, the skin's losses out of the skin store and the skin bed, the unevaporated sweat
-    /// and its two salts out of the skin bed, and blood's carriage from the core store to the skin store.
+    /// Ticket 12's placement.
     #[test]
     fn each_heat_law_moves_the_stores_ticket_12_places_it_on() -> Result<(), AdmissionError> {
         let body = whole_body()?;
