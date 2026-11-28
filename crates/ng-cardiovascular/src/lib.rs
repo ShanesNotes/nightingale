@@ -16,6 +16,7 @@ use ng_contract::*;
 mod afferents;
 mod blood_pressure;
 mod capillary_fields;
+mod carriage;
 mod circulation;
 mod rhythm;
 mod shared;
@@ -37,8 +38,9 @@ pub fn declare<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardio
 }
 
 /// As `declare`, and each plain edge's resistance also scales by viscosity (line 114) over a reference and by the oxygen
-/// debt of the bed it feeds (line 90), and the heart's work goes to metabolism (line 78). Only the whole body's root
-/// calls it, so the slice keeps its model.
+/// debt of the bed it feeds (line 90), and the heart's work goes to metabolism (line 78). The skin arteriole's
+/// resistance also scales by the dilator and the skin's warmth, and blood carries heat from the core store into the
+/// skin store at the skin bed's inflow. Only the whole body's root calls it, so the slice keeps its model.
 pub fn declare_in_the_whole_body<'b>(
     scope: CardiovascularScope<'b>,
 ) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
@@ -66,5 +68,9 @@ fn declare_with<'b>(
     afferents(&mut cv, &pressure, &head, wave)?;
     capillary_fields(&mut cv, &pressure, wave);
     walls.energy(&mut cv, &ports, &heart, &head, wave, whole_body)?;
+    if whole_body {
+        let carried = ports.heat_carried(&mut cv);
+        carriage::carriage(&mut cv, carried, wave);
+    }
     Ok(cv.finish())
 }

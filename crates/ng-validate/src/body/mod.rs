@@ -188,8 +188,7 @@ mod placement {
         Ok(())
     }
 
-    /// Ticket 12's placement: with the contract unchanged, the whole body compiles with conduction from the core
-    /// to the skin and airway stores, and the skin's losses out of the skin store and the skin bed.
+    /// Ticket 12's placement.
     #[test]
     fn each_heat_law_moves_the_stores_ticket_12_places_it_on() -> Result<(), AdmissionError> {
         let body = whole_body()?;
@@ -198,8 +197,12 @@ mod placement {
             "dry heat loss",
             "skin evaporation",
             "skin evaporative heat",
+            "sweat chloride",
+            "sweat sodium",
+            "sweat water",
         ];
         let thermal = |site, sign| (site, Species::Energy, Space::Thermal, sign);
+        let skin_bed = |species| ("skin bed", species, Space::Interstitium, -1);
         assert_eq!(
             placed(&body, Metabolism::CARD, &laws),
             [
@@ -212,12 +215,19 @@ mod placement {
                     vec![thermal("body", -1), thermal("skin heat site", 1)]
                 ),
                 ("dry heat loss", vec![thermal("skin heat site", -1)]),
-                (
-                    "skin evaporation",
-                    vec![("skin bed", Species::Water, Space::Interstitium, -1)]
-                ),
+                ("skin evaporation", vec![skin_bed(Species::Water)]),
                 ("skin evaporative heat", vec![thermal("skin heat site", -1)]),
+                ("sweat chloride", vec![skin_bed(Species::Chloride)]),
+                ("sweat sodium", vec![skin_bed(Species::Sodium)]),
+                ("sweat water", vec![skin_bed(Species::Water)]),
             ]
+        );
+        assert_eq!(
+            placed(&body, Cardiovascular::CARD, &["heat carried by blood"]),
+            [(
+                "heat carried by blood",
+                vec![thermal("body", -1), thermal("skin heat site", 1)]
+            )]
         );
         Ok(())
     }

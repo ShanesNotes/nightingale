@@ -5531,10 +5531,11 @@ test = "-p ng-validate --test viscosity the_chest_rests_at_the_pressure_its_beds
 
 
 [[mutant]]
-name = "conduction-reads-the-core-capacity-at-its-site"
+name = "conduction-carries-twice-its-gap"
 path = "crates/ng-metabolism/src/heat.rs"
-old = '''        let here = stores.temperature(&mut k, here, &stores.shell);'''
-new = '''        let here = stores.temperature(&mut k, here, &stores.core);'''
+old = '''        let gap = k.subtract(core, here);'''
+new = '''        let gap = k.subtract(core, here);
+        let gap = k.add(gap, gap);'''
 test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
 budget = 1000
 

@@ -17,15 +17,20 @@ const HEMOGLOBIN: f64 = 2.0;
 /// (research 11, Nunn pp. 244 to 245).
 const SHUNT: f64 = 0.09 * 0.98 / 0.02;
 
-/// The thermal zero is 0 degrees Celsius on the room's absolute scale (ticket 12's second ruling). The skin store's
-/// capacity serves the conducting airway's store too, as a model default.
+/// The thermal zero is 0 degrees Celsius on the room's absolute scale (ticket 12's second ruling). The conducting
+/// airway's store has its own capacity, a labelled synthetic model default with no research 16 row until a reviewed
+/// value or an admissible inference exists (record 0011, consequence 42), unequal to the skin's so that a temperature
+/// published on the other store's capacity shows.
 const THERMAL_ZERO: f64 = 273.15;
 const CORE_CAPACITY: f64 = 4e9;
 const SKIN_CAPACITY: f64 = 1.7e8;
+const AIRWAY_CAPACITY: f64 = 2e7;
 const CORE_REFERENCE: f64 = 310.15;
 const SKIN_REFERENCE: f64 = 307.15;
 /// The skin's evaporative heat the start guesses, near where the body admits in its room.
 const EVAPORATION_AT_REST: f64 = 2.2e5;
+const SWEAT_FLOOR: f64 = 10.0;
+const SWEAT_SLOPE: f64 = 40.0;
 const EVAPORATION_AMPLITUDE: f64 = 0.5;
 
 /// The viscosity the packet's edge resistances are stated at. It was read once, at 08a's admitted start from an
@@ -275,7 +280,7 @@ fn start_guess(row: RowKind) -> f64 {
             let (capacity, reference) = match site.key() {
                 "body" => (CORE_CAPACITY, CORE_REFERENCE),
                 "skin heat site" => (SKIN_CAPACITY, SKIN_REFERENCE),
-                _ => (SKIN_CAPACITY, CORE_REFERENCE),
+                _ => (AIRWAY_CAPACITY, CORE_REFERENCE),
             };
             capacity * (reference - THERMAL_ZERO)
         }
@@ -321,6 +326,7 @@ fn start_guess(row: RowKind) -> f64 {
         RowKind::Memory(slot) if slot.law.local == "mixing share" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "pump drive" => BODY_RHYTHM.mean_drive(),
         RowKind::Memory(slot) if slot.law.local == "breath work memory" => BODY_RHYTHM.work(),
+        RowKind::Memory(slot) if slot.law.local == "thermostat set point" => CORE_REFERENCE,
         RowKind::Memory(_) => 0.0,
         RowKind::Algebraic(slot) => {
             let bed = match slot.at {
@@ -338,6 +344,15 @@ fn start_guess(row: RowKind) -> f64 {
                 "pump_force" => BODY_RHYTHM.rest_force(),
                 "work_of_breathing" => BODY_RHYTHM.work(),
                 "evaporation" => EVAPORATION_AT_REST,
+                "core_temperature" => CORE_REFERENCE,
+                "tissue_temperature" if bed == "skin heat site" => SKIN_REFERENCE,
+                "tissue_temperature" => CORE_REFERENCE,
+                "sudomotor command"
+                | "constrictor command"
+                | "shiver command"
+                | "shiver_drive"
+                | "sweat rate" => 0.0,
+                "skin arteriole exponent" => 0.0,
                 _ => 1.0,
             }
         }
@@ -528,9 +543,6 @@ const ZERO_STAND_INS: &[(&str, Zero)] = &[
     ("hp.albumin-synthesis", zero::<Albumin>),
     ("hp.fixed-acid-made", zero::<FixedAcid>),
     ("hp.insulin-first-pass", zero::<Insulin>),
-    ("mt.sweat-chloride", zero::<Chloride>),
-    ("mt.sweat-sodium", zero::<Sodium>),
-    ("mt.sweat-water", zero::<Water>),
     ("rs.expired-carbon-dioxide", zero::<CarbonDioxide>),
     ("rs.expired-nitrogen-gas", zero::<NitrogenGas>),
     ("rs.expired-oxygen", zero::<Oxygen>),
@@ -702,6 +714,9 @@ fn packet_of(
     oxygen_per_lactate(&mut packet, body)?;
     tissue_heat(&mut packet, evaporation_amplitude)?;
     twins(&mut packet)?;
+    thermostat(&mut packet)?;
+    skin_bed(&mut packet)?;
+    sweat(&mut packet)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -993,6 +1008,13 @@ fn table(
     set::<Dimensionless>(packet, "ns.motor-share", pump, 1.0)?;
     set::<Rate<Dimensionless>>(packet, "ns.release-ach", pump, PUMP.release)?;
     set::<Rate<Dimensionless>>(packet, "ns.reuptake-ach", pump, PUMP.reuptake)?;
+    let skin = Binding::Site(site::<Junction>("skin junction")?);
+    set::<Dimensionless>(packet, "ns.vagal-share", skin, 0.0)?;
+    set::<Dimensionless>(packet, "ns.sympathetic-share", junctions, 1.0)?;
+    for share in ["ns.sudomotor-share", "ns.constrictor-share"] {
+        set::<Dimensionless>(packet, share, junctions, 0.0)?;
+        set::<Dimensionless>(packet, share, skin, 1.0)?;
+    }
     set::<Acetylcholine>(packet, "rc.ach-sites", pump, PUMP.sites)?;
     set::<Affinity<Acetylcholine>>(packet, "rc.ach-on", pump, PUMP.on)?;
     set::<Rate<Dimensionless>>(packet, "rc.ach-off", pump, PUMP.off)?;
@@ -1105,19 +1127,22 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
 /// conductance `K_min A` (MT-020, MT-021), radiation's `h_r A` (MT-021, MT-022), still air's `h_c0 A` (MT-021,
 /// MT-023), still air's speed `v_0` (MT-024) and its width (MT-025), the Lewis relation (MT-026), the skin's
 /// wettedness from diffusion (MT-027). The room's air speed is its ratio to 0.1 m/s, so still air reads 1.
-/// Model defaults with no row: the thermal zero (ticket 12's second ruling), the airway store's conductance, the air
-/// speed's exponent (Stolwijk's square root), one clo's conductance over the body's surface for dry heat (Gagge's
-/// 0.155 m2 C/W a clo) and for vapour (0.143), and the evaporation's forcing, which keeps the period and amplitude of
-/// the skin water loss it replaces.
+/// Model defaults with no row: the thermal zero (ticket 12's second ruling), the airway store's capacity and its
+/// conductance, the air speed's exponent (Stolwijk's square root), one clo's conductance over the body's surface for
+/// dry heat (Gagge's 0.155 m2 C/W a clo) and for vapour (0.143), and the evaporation's forcing, which keeps the period
+/// and amplitude of the skin water loss it replaces.
 fn tissue_heat(packet: &mut ParameterPacket<SyntheticFixture>, amplitude: f64) -> Result<(), AdmissionError> {
     type HeatConductance = Quotient<Rate<Energy>, Temperature>;
     let body = Binding::Body;
     set::<Temperature>(packet, "mt.thermal-zero", body, THERMAL_ZERO)?;
     set::<Quotient<Energy, Temperature>>(packet, "mt.core-capacity", body, CORE_CAPACITY)?;
-    set::<Quotient<Energy, Temperature>>(packet, "mt.skin-capacity", body, SKIN_CAPACITY)?;
-    for (store, conductance) in [("skin heat site", 1.4e5), ("conducting airway", 1e5)] {
+    for (store, conductance, capacity) in [
+        ("skin heat site", 1.4e5, SKIN_CAPACITY),
+        ("conducting airway", 1e5, AIRWAY_CAPACITY),
+    ] {
         let at = Binding::Site(site::<TissueSite>(store)?);
         set::<HeatConductance>(packet, "mt.heat-conductance", at, conductance)?;
+        set::<Quotient<Energy, Temperature>>(packet, "mt.tissue-capacity", at, capacity)?;
     }
     set::<HeatConductance>(packet, "mt.radiant-conductance", body, 1.4e5)?;
     set::<HeatConductance>(packet, "mt.convective-conductance", body, 7.6e4)?;
@@ -1155,6 +1180,74 @@ fn twins(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
         set::<Temperature>(packet, key, body, 235.0 - THERMAL_ZERO)?;
     }
     Ok(())
+}
+
+/// The thermostat's packet, every value synthetic. Each key maps to research 16: the skin reference `T_s_ref` (NS-046),
+/// the target's mean `M` (NS-047, with the sudomotor command's threshold fixed by convention) and the set point's speed
+/// `k_set` (NS-053), each command's core width `D_c`, skin width `D_s` and threshold `theta` (sudomotor NS-037 to
+/// NS-039, constrictor NS-040 to NS-042, shiver NS-043 to NS-045), the commands' smoothing width (NS-055) and the shiver
+/// drive's (NS-056). Model defaults with no row: the shiver drive's cap of one, and each junction's sudomotor,
+/// sympathetic and constrictor shares, set with the junctions'.
+fn thermostat(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    set::<Reference<Temperature>>(packet, "ns.skin-reference", body, SKIN_REFERENCE)?;
+    set::<Temperature>(packet, "ns.thermostat-target", body, CORE_REFERENCE)?;
+    set::<Rate<Dimensionless>>(packet, "ns.thermostat-speed", body, 1e-4)?;
+    for ((core_key, core), (skin_key, skin), (threshold_key, threshold)) in [
+        (
+            ("ns.sudomotor-core-width", 1.0),
+            ("ns.sudomotor-skin-width", 10.0),
+            ("ns.sudomotor-threshold", 1.0),
+        ),
+        (
+            ("ns.constrictor-core-width", 1.0),
+            ("ns.constrictor-skin-width", 4.0),
+            ("ns.constrictor-threshold", -0.5),
+        ),
+        (
+            ("ns.shiver-core-width", 1.0),
+            ("ns.shiver-skin-width", 4.0),
+            ("ns.shiver-threshold", -1.0),
+        ),
+    ] {
+        set::<Deviation<Temperature>>(packet, core_key, body, core)?;
+        set::<Deviation<Temperature>>(packet, skin_key, body, skin)?;
+        set::<Dimensionless>(packet, threshold_key, body, threshold)?;
+    }
+    set::<Dimensionless>(packet, "ns.command-width", body, 0.1)?;
+    set::<Dimensionless>(packet, "ns.shiver-cap", body, 1.0)?;
+    set::<Dimensionless>(packet, "ns.shiver-cap-width", body, 0.1)
+}
+
+/// The skin bed's heat keys, every value synthetic. Each maps to research 16: blood's heat per volume per kelvin `c_bl`
+/// (CV-082), at the body, and at the skin bed the skin arteriole's dilator gain `S_d` (CV-083) and its width `b_v`
+/// against the skin's temperature (CV-084). Model defaults with no row: the skin arteriole's `ln 2` and its one.
+fn skin_bed(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    type BloodHeat = Quotient<Quotient<Rate<Energy>, Temperature>, Rate<Volume>>;
+    let (body, bed) = (Binding::Body, Binding::Site(site::<CapillaryBed>("skin bed")?));
+    set::<BloodHeat>(packet, "cv.blood-heat", body, 1e5)?;
+    set::<Dimensionless>(packet, "cv.skin-dilator-gain", bed, 9.0)?;
+    set::<Deviation<Temperature>>(packet, "cv.skin-width", bed, 4.0)?;
+    set::<Dimensionless>(packet, "cv.ln-two", body, core::f64::consts::LN_2)?;
+    set::<Dimensionless>(packet, "cv.unit", body, 1.0)
+}
+
+/// The sweat's keys, every value synthetic. Each maps to research 16: the sweat gland's maximal rate `m_max` (MT-035)
+/// and its width `b_sw` against the skin's temperature (MT-036), the width `w` of `smooth_min(E_rsw, E_max, w)`
+/// (MT-029), and the concentration each salt rides at on the secreted sweat, its floor `c_0` and slope `k_c`, sodium's
+/// (MT-037, MT-038) and chloride's (MT-039, MT-040). Model defaults: the sweat gland's `ln 2`, with no row, and
+/// chloride's floor and slope at sodium's values, so the sweat carries no net charge, as the gut's salts carry none and
+/// the body's charge holds to its closure.
+fn sweat(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    set::<Rate<Water>>(packet, "mt.sweat-gland-maximal-rate", body, 0.1)?;
+    set::<Deviation<Temperature>>(packet, "mt.sweat-width", body, 4.0)?;
+    set::<Dimensionless>(packet, "mt.ln-two", body, core::f64::consts::LN_2)?;
+    set::<Rate<Energy>>(packet, "mt.evaporation-width", body, 1e3)?;
+    set::<Quotient<Sodium, Water>>(packet, "mt.sweat-sodium-floor", body, SWEAT_FLOOR)?;
+    set::<Quotient<Sodium, Water>>(packet, "mt.sweat-sodium-slope", body, SWEAT_SLOPE)?;
+    set::<Quotient<Chloride, Water>>(packet, "mt.sweat-chloride-floor", body, SWEAT_FLOOR)?;
+    set::<Quotient<Chloride, Water>>(packet, "mt.sweat-chloride-slope", body, SWEAT_SLOPE)
 }
 
 /// The debt's oxygen to each lactate is the lactate burn's own counts, read from the compiled body.
@@ -1252,11 +1345,13 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// the widest gap between edges, each rounded up to one significant figure. The onset is pinned at 30 s because the
 /// figures are taken there, inside the admission's own fall of energy, which puts energy's above a settled onset's, so
 /// moving the onset moves them. The salts' excess grows to the run's end, so a longer run leaves their bounds (body
-/// ticket 17). Energy's figures are sized by native-contract 85's rule from the reference run, which includes the
-/// airway's latent heat (body ticket 12), and are sized again when body tickets 13 to 16 land. The payers of the stroke
-/// work and of the work of breathing take a hydrogen bound of their own, since their cells settle as their works do,
-/// and each is judged on its own. Oxygen and carbon dioxide as species keep only held pools that never move, so the
-/// slice's bound for an unmoved species holds them.
+/// ticket 17). Their figures carry the sweat's salts, which follow the skin as evaporation's forcing leaves the mean
+/// that admission holds it at, and vasopressin's drift and settling rate carry the sweat's water (body ticket 12).
+/// Energy's figures are sized by native-contract 85's rule from the reference run, which includes the airway's latent
+/// heat (body ticket 12), and are sized again when body tickets 13 to 16 land. The payers of the stroke work and of the
+/// work of breathing take a hydrogen bound of their own, since their cells settle as their works do, and each is judged
+/// on its own. Oxygen and carbon dioxide as species keep only held pools that never move, so the slice's bound for an
+/// unmoved species holds them.
 const ELEMENT_BOUNDS: [(Element, f64, f64, f64); 3] = [
     (Element::Carbon, 7e2, 3e1, 1e1),
     (Element::Hydrogen, 2e-4, 2e-5, 2e-6),
@@ -1267,10 +1362,10 @@ const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
 const SPECIES_BOUNDS: [(Species, f64, f64, f64); 7] = [
     (Species::Energy, 3e6, 2e5, 8e4),
     (Species::Water, 2e-1, 7e-3, 4e-3),
-    (Species::Sodium, 6e-3, 6e-4, 1e-5),
-    (Species::Chloride, 6e-3, 6e-4, 1e-5),
+    (Species::Sodium, 9e-3, 9e-4, 4e-5),
+    (Species::Chloride, 9e-3, 9e-4, 4e-5),
     (Species::Potassium, 3e-4, 3e-5, 5e-7),
-    (Species::Vasopressin, 5e-2, 5e-3, 3e-4),
+    (Species::Vasopressin, 6e-2, 5e-3, 4e-4),
     (Species::NitrogenGas, 2e4, 2e1, 8.0),
 ];
 const SETTLING_TIME: u64 = 20 * SECOND;

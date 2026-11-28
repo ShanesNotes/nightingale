@@ -17,7 +17,8 @@ pub(crate) fn declare_with_the_pump<'b>(
         &AlgebraicSlot<'b, Nervous, Dimensionless>,
         &StateSlot<'b, Nervous, Dimensionless>,
     ),
+    sudomotor: Option<&AlgebraicSlot<'b, Nervous, Dimensionless>>,
     reflex: RateClass,
 ) {
-    release_by_shares::<Acetylcholine>(ns, ports, traffics, "ns.release-ach", reflex);
+    release_by_shares::<Acetylcholine>(ns, ports, traffics, sudomotor, "ns.release-ach", reflex);
 }

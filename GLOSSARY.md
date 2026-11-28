@@ -369,6 +369,13 @@ The skin store's heat to the room by radiation and convection, a rate. It reads 
 **Skin evaporative heat**:
 The skin store's heat that leaves with the water evaporating from the skin, a rate. The water leaves the skin bed at that rate over the latent heat, so the two stand in one fixed proportion.
 
+**Sweat rate**:
+The water the sweat glands secrete, a rate. MT defines it as a row of the body from one kernel at the skin bed: the glands' maximal rate, times the acetylcholine effect at the skin junction, times e raised to ln 2 times the skin store's temperature above the skin reference over a width. So it rises with that effect and as the skin warms. The skin evaporates what it can of the sweat, and the sweat's sodium and chloride ride on all of it, at a concentration that rises with the sweat rate.
+
+**Unevaporated sweat**:
+The sweat the skin cannot evaporate, a rate, which leaves the skin bed as water alone. It is the heat the sweat would carry off if all of it evaporated, less the part of that heat the skin can take, over the latent heat. The part the skin can take is that heat smoothly capped at the most the skin can evaporate in its room.
+_Avoid_: drip
+
 **Left-out space**:
 A space the schema states this body does not model, with its reason, such as cell water in a bench with no cell-water law. Its pools are not amounts, and no law may move or read them. Every other pool is an amount some transfer must move or a held declaration holds; one that neither covers is an orphan pool, which compilation refuses.
 
@@ -508,7 +515,7 @@ The nervous card's memory between zero and its peak that sets the pump's pressur
 _Avoid_: activation (the heart's)
 
 **Release share**:
-At a junction that holds acetylcholine, the share of each traffic that releases it: the vagal traffic's and the pump drive's, each a site parameter. The sinoatrial junction takes the vagal traffic alone and the respiratory pump's junction the pump drive alone.
+At a junction, the share of each traffic or command that releases a transmitter there, each a site parameter. Acetylcholine answers the vagal traffic, the pump drive and the sudomotor command in their shares: the sinoatrial junction takes the vagal traffic alone, the respiratory pump's junction the pump drive alone and the skin junction the sudomotor command alone. Norepinephrine answers the sympathetic traffic, whose share is one at every junction, and the constrictor command, whose share is one at the skin junction and zero at every other.
 
 **Drive scale**:
 The nervous card's factor on the breath's rate: its rest, plus the peripheral sensor's deviation and less the central sensor's, each over its width and times its gain. It is one in the admitted beat's mean, since admission solves each set point to its sensor's mean over the beat. In non-REM sleep the wake drive leaves its rest and each gain falls by the gain's fall. Gains of zero hold it at its rest, less the wake drive asleep, exactly. Only the breath's phase reads it.
@@ -524,6 +531,24 @@ What sleep takes from the drive scale's rest, a parameter of the nervous card. A
 
 **Gain's fall**:
 The share of each chemoreflex gain that sleep removes, a parameter of the nervous card between zero and one. Asleep, each arm's gain is one less the gain's fall of its awake value, so the drive scale answers each sensor less.
+
+**Thermostat**:
+The nervous card's control of the body's heat: the core's set point and three commands, the sudomotor, constrictor and shiver commands. Each command is a weighted sum of how far the core stands from the set point and how far the skin thermoreceptor's store stands from the skin reference, each over a width of its own, taken against a threshold of its own and smoothed at zero. The set point follows a fixed mean at a declared speed until the clock and sleep move it. No law of the thermostat writes a temperature.
+
+**Sudomotor command**:
+The thermostat's warm command: it rises as its weighted sum passes its threshold. It reaches the skin only as acetylcholine released at the skin junction in that junction's sudomotor share.
+
+**Constrictor command**:
+The thermostat's cold command for the skin's vessels: it rises as its weighted sum falls below its threshold. It reaches the skin only as norepinephrine released at the skin junction in that junction's constrictor share, beside the sympathetic traffic.
+
+**Shiver command**:
+The thermostat's cold command for shivering, with its own weights and threshold. Arrow 87's shiver drive is the command smoothly capped at one, shifted so that a zero command gives a zero drive and scaled so that the drive stays under one.
+
+**Skin reference**:
+The fixed skin temperature, a parameter of the body, that the thermostat compares the skin thermoreceptor's store with. Unlike the core's set point, it never moves. CV's skin arteriole exponent reads it too, against the skin store's temperature, and so does MT's sweat rate, against the temperature of the store the skin bed sits in.
+
+**Skin arteriole exponent**:
+An algebraic row CV defines at each skin bed. The skin arteriole's resistance, the resistance of the plain edge into that bed, is multiplied by e raised to it. It is minus the log of one plus the dilator gain times the acetylcholine effect at the skin junction, less ln 2 times the skin store's temperature above the skin reference over a width. So the skin arteriole opens as that effect rises and as the skin warms. An edge into any other site reads zero and keeps its resistance.
 
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site. A projected field is the exception: it has no row of its own, and its receiver reads it through a read grant from its sender's rows.

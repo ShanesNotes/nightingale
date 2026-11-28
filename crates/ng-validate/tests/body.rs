@@ -242,6 +242,15 @@ fn body_01() -> Vec<Row> {
             ]],
         ),
         row(
+            "ticket 12's sudomotor command, released as acetylcholine at the skin junction",
+            &[Acetylcholine],
+            &[&[
+                (&["skin junction"], Space::Vesicle),
+                (&["skin junction"], Space::Cleft),
+                (&["skin junction"], Space::Bound),
+            ]],
+        ),
+        row(
             "the slice's body stores, 01:568 skin heat store, 06:31 the airway's heat store, 01:165 each bed's heat",
             &[Energy],
             &[&[
@@ -347,7 +356,7 @@ fn the_whole_body_holds_its_sites_and_pools() -> Result<(), AdmissionError> {
         pooled.len(),
         pools.len()
     );
-    expect!["sites 43, sites with a pool 38, pools 1251, by space {Plasma: 352, Interstitium: 300, Cells: 160, Lumen: 386, Fluid: 2, Vesicle: 9, Cleft: 9, Bound: 10, Elastic: 1, Thermal: 14, Gas: 8}"]
+    expect!["sites 43, sites with a pool 38, pools 1254, by space {Plasma: 352, Interstitium: 300, Cells: 160, Lumen: 386, Fluid: 2, Vesicle: 10, Cleft: 10, Bound: 11, Elastic: 1, Thermal: 14, Gas: 8}"]
     .assert_eq(&pin);
     Ok(())
 }
@@ -501,9 +510,6 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         BC Pool(AminoAcids, Cells, Tissue(Tubule)) Ticket(18, "RN") 01:209
         BC Pool(DietBase, Interstitium, Class(CapillaryBed)) Ticket(18, "FL") 01:546, 881
         BC Pool(FixedAcid, Interstitium, Class(CapillaryBed)) Ticket(18, "FL") 01:253, 881
-        MT Route("sweat water") Ticket(12, "MT") 01:62
-        MT Route("sweat sodium") Ticket(12, "MT") 01:82
-        MT Route("sweat chloride") Ticket(12, "MT") 01:115
         MT Route("pulmonary bed glucose feed") Ticket(16, "MT") 01:190
         MT Route("pulmonary bed fatty acid feed") Ticket(16, "MT") 01:200
         MT Route("pulmonary bed cell water out") Ticket(17, "FL") 01:58, 880
@@ -613,9 +619,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 142: routes 83, pools 59
-        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 14, "MT": 41}
-        by ticket {"09": 3, "12": 3, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 139: routes 80, pools 59
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 14, "MT": 38}
+        by ticket {"09": 3, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -891,6 +897,54 @@ fn the_coronary_bed_pays_the_stroke_work_and_the_muscle_bed_the_walls_so_none_en
     Ok(())
 }
 
+/// Record 0011's consequence 43 on the body: both skin heat exits leave one store, and the thermostat's three commands
+/// read that store's temperature through the skin thermoreceptor. Compile lands the thermoreceptor's read only on a
+/// heat store a skin bed sits in, so that store is the one the skin bed sits in.
+#[test]
+fn both_skin_heat_exits_and_the_skin_thermoreceptor_are_the_store_the_skin_bed_sits_in()
+-> Result<(), AdmissionError> {
+    let body = whole_body()?;
+    let leaves = |local: &str| -> Vec<(&'static str, i64)> {
+        (body.columns().iter())
+            .filter(|column| column.origin().owner == "MT" && column.origin().local == local)
+            .flat_map(|column| column.terms().iter())
+            .map(|&(row, sign)| match pool_of(&body, row) {
+                (site, Space::Thermal, Species::Energy) => (site.key(), sign),
+                other => panic!("{local} moves {other:?}"),
+            })
+            .collect()
+    };
+    let (offsets, unknowns) = (body.sparsity().row_offsets(), body.sparsity().unknowns());
+    let senses = |local: &'static str| -> Vec<&'static str> {
+        let row = (body.rows().iter())
+            .find(|row| matches!(row.kind(), RowKind::Algebraic(slot) if slot.law == LawName { owner: "NS", local }))
+            .unwrap_or_else(|| panic!("no row {local}"));
+        let at = row.id().index();
+        let reads = &unknowns[offsets[at]..offsets[at + 1]];
+        (body.rows().iter())
+            .filter(|read| reads.contains(&read.unknown()))
+            .filter_map(|read| match read.kind() {
+                RowKind::Algebraic(slot)
+                    if slot.law.owner == "MT" && slot.law.local == "tissue_temperature" =>
+                {
+                    match slot.at {
+                        Context::Site(store) => Some(store.key()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let store = "skin heat site";
+    assert_eq!(leaves("dry heat loss"), [(store, -1)]);
+    assert_eq!(leaves("skin evaporative heat"), [(store, -1)]);
+    for command in ["sudomotor command", "constrictor command", "shiver command"] {
+        assert_eq!(senses(command), [store], "the {command} senses the skin's store");
+    }
+    Ok(())
+}
+
 #[test]
 fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionError> {
     let body = whole_body()?;
@@ -924,10 +978,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1465 {"algebraic": 196, "amount": 1251, "memory": 18}, columns 1463, jacobian nonzeros 10167, blocks 414, largest block 671, parameter slots 763, conserved combinations 396, held pools 318, held route columns 83
-        model hash 7079446c2128f12b9537b0a2f64601666589a8a5e8594560b0fe16d72a042b4f
-        conserved basis d32be123062bf6a1028dca58c8e5339b9bbaf40f9fdd406ef121274a3f468d13
-        stated packet 1b4ff884fff2a2e4ededd0ef13d1b1eb073fab240571233b1202b124b4872e0c
+        rows 1479 {"algebraic": 206, "amount": 1254, "memory": 19}, columns 1467, jacobian nonzeros 10238, blocks 417, largest block 682, parameter slots 814, conserved combinations 397, held pools 318, held route columns 80
+        model hash 1921a8f674b67c89940285032e62867bea5fcbaf1e04d915470be7fd87f08a0f
+        conserved basis 02e124038ff982ed095bbd65e46b53b21d6c198aa27e828b1efeb328bedb666f
+        stated packet d280289bfa0b20873d80a9f0c169ffefb3d657a78c6cd3aa73e143039178ac26
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -1042,10 +1096,10 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
         species: [
             (Species::Energy, 3e6),
             (Species::Water, 2e-1),
-            (Species::Sodium, 6e-3),
-            (Species::Chloride, 6e-3),
+            (Species::Sodium, 9e-3),
+            (Species::Chloride, 9e-3),
             (Species::Potassium, 3e-4),
-            (Species::Vasopressin, 5e-2),
+            (Species::Vasopressin, 6e-2),
             (Species::NitrogenGas, 2e4),
         ],
         elements: [

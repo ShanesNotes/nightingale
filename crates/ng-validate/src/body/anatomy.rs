@@ -88,7 +88,6 @@ pub fn body_anatomy() -> Result<Anatomy, AdmissionError> {
         brain.id(),
         liver.id(),
         fat.id(),
-        skin.id(),
         bone.id(),
         pump.id(),
         skin_junction.id(),
@@ -97,6 +96,7 @@ pub fn body_anatomy() -> Result<Anatomy, AdmissionError> {
     ] {
         map.contain(body.id(), site);
     }
+    map.contain(skin_heat.id(), skin.id());
     for site in [
         right_atrium.id(),
         right_ventricle.id(),
