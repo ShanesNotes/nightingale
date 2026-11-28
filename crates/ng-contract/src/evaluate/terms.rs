@@ -1264,6 +1264,14 @@ mod forms {
             }),
             unread_forcing
         );
+        assert_eq!(
+            refused(&Fix {
+                marks: vec![0],
+                veins: term("collapse", t_ln_level),
+                ..unread
+            }),
+            unread_forcing
+        );
     }
 
     /// Ruling 1: a volume a term uses needs a partial volume where a site of its set runs the term. One it never uses
