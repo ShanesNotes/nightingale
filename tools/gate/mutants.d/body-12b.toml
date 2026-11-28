@@ -112,6 +112,14 @@ test = "-p ng-validate --test body_run the_skin_arteriole_opens_with_the_dilator
 budget = 1000
 
 [[mutant]]
+name = "the-skin-arteriole-narrows-as-the-room-warms"
+path = "crates/ng-cardiovascular/src/circulation.rs"
+old = '''        let both = k.add(dilated, warmed);'''
+new = '''        let both = k.subtract(dilated, warmed);'''
+test = "-p ng-validate --test body_run in_a_warm_room_the_skin_warms_its_feeder_opens_and_its_bed_takes_more_blood_and_sweats_more_than_in_the_bodys_room"
+budget = 1000
+
+[[mutant]]
 name = "the-sweat-rate-falls-as-the-skin-warms"
 path = "crates/ng-metabolism/src/heat.rs"
 old = '''        let doublings = k.scale(widths, ln_two);'''
