@@ -689,7 +689,7 @@ impl<'b> PerfusionTemperatures<'b> {
 /// ```
 impl<'b> SkinThermoreceptor<'b> {
     /// The temperature of the store at the landmark's sampled site, never its height site. Compile refuses a sampled
-    /// site that is no tissue heat store a skin bed sits in.
+    /// site that is no tissue heat store a skin bed sits in. Only a body kernel may sample it.
     /// ```compile_fail,E0308
     /// use ng_contract::{catalog::*, *};
     /// fn wrong<'b, 'k>(s: &SkinThermoreceptor<'b>, k: &mut Kernel<'b, 'k, Nervous, Junction>) {

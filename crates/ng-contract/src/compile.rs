@@ -2110,13 +2110,16 @@ fn check_granted(
                 return Err(CompileDefect::UnwiredRead { law, field });
             }
             Source::TissueTemperature(read) => granted(law, read, place, context, places)?,
-            Source::Field(field) if field.owner == crate::Receptor::CARD => {
-                effect_granted(law, field, place, lenient, context, places)?;
-            }
             Source::Field(name) => {
+                if name.owner == crate::Receptor::CARD {
+                    effect_granted(law, name, place, lenient, context, places)?;
+                }
                 for field in places.fields.iter().filter(|field| field.name == name) {
                     let landed = context.and_then(|context| place_of(place, context, places.anatomy));
                     check_granted(field.name, field.kernel, landed.map(Context::Site), places)?;
+                    if let Some(site) = landed {
+                        check_wired(field.name, field.kernel, Context::Site(site), places)?;
+                    }
                 }
             }
             _ => {}

@@ -1,0 +1,31 @@
+[[mutant]]
+name = "plain-tissue-read-body-first"
+path = "crates/ng-contract/src/compile.rs"
+old = '''TISSUE_TEMPERATURE if store_temperature(field) => rows.exactly(field, at),'''
+new = '''TISSUE_TEMPERATURE if store_temperature(field) => rows.defined(field, at),'''
+test = "-p ng-contract --lib publication::a_site_temperature_read_finds_its_own_row_and_never_the_bodys_of_that_name"
+
+[[mutant]]
+name = "explicit-field-speciation-read-unchecked"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+                    if let Some(site) = landed {
+                        check_wired(field.name, field.kernel, Context::Site(site), places)?;
+                    }'''
+new = '''
+                    let _ = landed;'''
+test = "-p ng-contract --lib speciated::a_speciation_read_inside_another_cards_explicit_field_is_held_to_the_table"
+
+[[mutant]]
+name = "receptor-explicit-field-skips-speciation-check"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+                if name.owner == crate::Receptor::CARD {
+                    effect_granted(law, name, place, lenient, context, places)?;
+                }'''
+new = '''
+                if name.owner == crate::Receptor::CARD {
+                    effect_granted(law, name, place, lenient, context, places)?;
+                    continue;
+                }'''
+test = "-p ng-contract --lib speciated::a_speciation_read_inside_another_cards_explicit_field_is_held_to_the_table"

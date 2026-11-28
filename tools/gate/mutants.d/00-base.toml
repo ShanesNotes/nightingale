@@ -4476,7 +4476,7 @@ name = "thermoreceptor-reads-at-the-height-site"
 path = "crates/ng-contract/src/compile.rs"
 old = '''Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.0),'''
 new = '''Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.1),'''
-test = "-p ng-contract --lib publication::the_carriages_tissue_end_the_skin_thermoreceptor_and_the_skin_exit_read_the_one_skin_row"
+test = "-p ng-contract --lib publication::the_thermoreceptor_reads_the_landmarks_sampled_store_and_never_its_height_store"
 
 [[mutant]]
 name = "projection-read-by-the-wrong-reader"
@@ -4555,7 +4555,7 @@ name = "skin-edge-reads-every-downstream-site"
 path = "crates/ng-contract/src/law.rs"
 old = '''self.read_at(port.source, Where::DownIn(D::SET))'''
 new = '''self.read_at(port.source, Where::Down)'''
-test = "-p ng-contract --lib skin_vessels::the_skin_edge_scales_its_resistance_by_the_exponential_of_the_field_and_every_other_edge_is_unmoved"
+test = "-p ng-contract --lib skin_vessels::downstream_if_in_reads_only_sites_in_its_set_even_when_every_end_holds_a_row"
 
 [[mutant]]
 name = "guard-place-unchecked"
