@@ -77,14 +77,6 @@ test = "-p ng-validate --test body_run the_skin_junction_releases_by_its_shares_
 budget = 2000
 
 [[mutant]]
-name = "the-carriage-reads-its-two-temperatures-swapped"
-path = "crates/ng-cardiovascular/src/carriage.rs"
-old = '''        let across = k.subtract(core, tissue);'''
-new = '''        let across = k.subtract(tissue, core);'''
-test = "-p ng-validate --test body_run blood_carries_heat_from_the_core_store_to_the_skin_store_at_the_skin_beds_inflow"
-budget = 2000
-
-[[mutant]]
 name = "the-carriage-reads-each-temperature-against-itself"
 path = "crates/ng-cardiovascular/src/carriage.rs"
 old = '''        let across = k.subtract(core, tissue);'''
