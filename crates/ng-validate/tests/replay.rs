@@ -1368,6 +1368,16 @@ fn a_missing_or_altered_link_is_refused_by_its_seal() {
     }
 }
 
+fn trailer_offset(bytes: &[u8]) -> usize {
+    let image_len = u64::from_be_bytes(*bytes[HEADER..].first_chunk().expect("image length")) as usize;
+    let branch_start = HEADER + 8 + image_len;
+    let forks = u64::from_be_bytes(*bytes[branch_start + 32..].first_chunk().expect("fork count")) as usize;
+    let opening_start = branch_start + 32 + 8 + forks * 48;
+    let opening_count =
+        u64::from_be_bytes(*bytes[opening_start..].first_chunk().expect("opening count")) as usize;
+    opening_start + 8 + opening_count * 16 + 32
+}
+
 fn relinked(store: &Store, saved: &Checkpoint, image: &[u8], chunk: &[u8]) -> (Digest, Checkpoint) {
     let (_, link) = store.link(0);
     let revision = u64::from_be_bytes(*saved.as_bytes()[80..].first_chunk().expect("a revision"));
@@ -1377,8 +1387,14 @@ fn relinked(store: &Store, saved: &Checkpoint, image: &[u8], chunk: &[u8]) -> (D
     chained.extend_from_slice(Digest::for_record(chunk, RecordHash::Blake2b).as_bytes());
     let seal = Digest::for_record(&chained, RecordHash::Blake2b);
     let stored = [&link[..32], image, chunk].concat();
-    store.replace(seal, stored);
-    let mut named = saved.as_bytes().to_vec();
+    store.replace(seal, stored.clone());
+    let raw = saved.as_bytes();
+    let trailer = trailer_offset(raw);
+    let mut named = raw[..trailer + 8].to_vec();
+    named.extend_from_slice(&(stored.len() as u64).to_be_bytes());
+    named.extend_from_slice(&stored);
+    let body_len = (named.len() - HEADER) as u64;
+    named[40..48].copy_from_slice(&body_len.to_be_bytes());
     named[88..120].copy_from_slice(seal.as_bytes());
     (seal, resealed(named))
 }
@@ -1430,7 +1446,7 @@ fn a_chain_that_misses_the_opening_is_refused() {
     let (session, saved) = saved_at(case.admit(&core, &store).expect("admitted"), at(8));
     let identity = session.record().identity();
     let mut bytes = saved.as_bytes().to_vec();
-    let opening_end = bytes.len() - 32;
+    let opening_end = trailer_offset(&bytes) - 32;
     bytes[opening_end - 1] ^= 1;
     let refused = Session::resume(&resealed(bytes), identity, case.body(), &core, &store).err();
     assert!(

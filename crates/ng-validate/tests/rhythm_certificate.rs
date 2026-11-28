@@ -1401,3 +1401,109 @@ fn a_certificate_prints_as_its_derive_did_and_adds_its_rhythm_only_where_one_was
         assert_eq!(format!("{paced:#?}"), derived(&fields, true));
     });
 }
+
+fn assert_fold_matches_oracle(
+    session: &ng_record::Session<'_, ng_record::Running>,
+    fold: &CertificateFold<'_, '_>,
+    ledger: &Ledger,
+    label: &str,
+) {
+    let want = certified(&session.conservation(), ledger);
+    let got = fold.certificate();
+    match (got, want) {
+        (Ok(a), Ok(b)) => assert_eq!(format!("{a:?}"), format!("{b:?}"), "{label}: ok"),
+        (Err(a), Err(b)) => assert_eq!(
+            (
+                a.check(),
+                a.quantity(),
+                a.window(),
+                a.residual().bits(),
+                a.allowance().map(Compensated::bits),
+            ),
+            (
+                b.check(),
+                b.quantity(),
+                b.window(),
+                b.residual().bits(),
+                b.allowance().map(Compensated::bits),
+            ),
+            "{label}: err"
+        ),
+        (a, b) => panic!("{label}: mismatch fold={a:?} certify/oracle={b:?}"),
+    }
+}
+
+#[test]
+fn the_live_fold_matches_certify_and_the_oracle_on_every_window_between_edges() {
+    let body = breathing(true).expect("compiled");
+    let basis = body.conserved_basis();
+    let cases = [
+        (
+            "passing standard",
+            Course::standard(2 * SECOND, None),
+            0,
+            None,
+            WIDEST,
+        ),
+        (
+            "passing with settling",
+            Course::standard(4 * SECOND, None),
+            10 * SECOND,
+            Some(2.0),
+            WIDEST,
+        ),
+        (
+            "edge drift oxygen",
+            Course::standard(4 * SECOND, Some((Leak::Oxygen, 20.0))),
+            0,
+            None,
+            WIDEST,
+        ),
+        (
+            "edge drift pre-settling nitrogen",
+            Course {
+                end: 40 * SECOND,
+                ..Course::standard(2 * SECOND, Some((Leak::Nitrogen, 20.0)))
+            },
+            12 * SECOND,
+            Some(0.5),
+            WIDEST,
+        ),
+        (
+            "rhythm stopped mid-run",
+            Course::standard(2 * SECOND, None),
+            0,
+            None,
+            8 * SECOND,
+        ),
+    ];
+    for (label, course, settling, early, widest) in cases {
+        let (core, store) = (ReferenceIntegrator::new(STEP), MemoryStore::default());
+        let port = BoundaryPort::new(course.events()).expect("a course");
+        let mut session = admit_fixture(&body, course.packet(), port, &core, &store).expect("admitted");
+        let rated = rates(basis, early);
+        let ledger = Ledger::sliding(basis, LENGTH, 20 * SECOND, 1e-6, 1e-9, LOOSE).between_edges(
+            clock(),
+            (settling, LENGTH, widest),
+            &rated,
+        );
+        let mut fold = CertificateFold::open(&session, &ledger.policy).expect("opened");
+        let mut steps = 0u64;
+        while session.record().accepted().time() < at(course.end) {
+            let mut attempt = session.step();
+            session = loop {
+                match attempt {
+                    ng_record::Step::Accepted(next, _) => break next,
+                    ng_record::Step::Refused(retrying) => attempt = retrying.retry(),
+                    ng_record::Step::Faulted(stopped) => panic!("{label}: faulted {:?}", stopped.fault()),
+                }
+            };
+            fold.advance(&session).expect("same session");
+            steps += 1;
+            if steps.is_multiple_of(40) {
+                assert_fold_matches_oracle(&session, &fold, &ledger, label);
+            }
+        }
+        assert_fold_matches_oracle(&session, &fold, &ledger, label);
+    }
+}

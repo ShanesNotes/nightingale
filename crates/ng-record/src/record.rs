@@ -5,8 +5,9 @@ use crate::checkpoint::{
 use crate::history::{ConservationFeed, ConservationView, History, HistorySeal, LedgerChunk, Link};
 use ng_contract::{
     AcceptedHead, AcceptedStateView, AdmissionError, Attempt, BoundaryEvent, CompiledBody, CoupledProblem,
-    CoupledSolver, Digest, Fired, InitialRevision, InputId, NextHead, NumericalRefusal, RunIdentity, SimTime,
-    SplitRejected, StepExtents, TraceDraw, TrialFailure, ValidityExcursion, VerifiedStep,
+    CoupledSolver, Digest, Fired, InitialRevision, InputId, NextHead, NumericalRefusal, RecordHash,
+    RunIdentity, SimTime, SplitRejected, StepExtents, TraceDraw, TrialFailure, ValidityExcursion,
+    VerifiedStep,
 };
 
 /// The chained seal of one accepted revision: the previous seal, the revision, the image's digests and the
@@ -87,6 +88,12 @@ impl<'m> PatientRecord<'m> {
         Seal {
             digest: self.history.seal(),
         }
+    }
+    pub fn record_hash(&self) -> RecordHash {
+        self.history.format().hash()
+    }
+    pub fn oldest_unkept(&self) -> Option<Digest> {
+        self.history.oldest_unkept()
     }
     pub fn accepted(&self) -> AcceptedStateView<'_> {
         self.image.view()
@@ -276,6 +283,7 @@ impl StepReceipt {
 }
 
 /// A durable input reference from an authorized command's receipt, never a speculative request.
+#[derive(Clone)]
 pub struct AuthorizedInput {
     command: Digest,
     event: BoundaryEvent,
@@ -291,6 +299,9 @@ impl AuthorizedInput {
     /// bits. A host's own log pairs the two.
     pub fn command(&self) -> Digest {
         self.command
+    }
+    pub fn event(&self) -> &BoundaryEvent {
+        &self.event
     }
 }
 

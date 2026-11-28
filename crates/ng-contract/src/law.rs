@@ -292,6 +292,49 @@ impl Family {
             | Family::Heat(_) => None,
         }
     }
+    pub(crate) fn missing_pool(self, owner: &'static str) -> MissingPool {
+        match self {
+            Family::Release(_) | Family::Reuptake(_) => MissingPool::DropEither,
+            Family::Across(Wall::Cell, Sites::Class(crate::Class::CapillaryBed), Species::Iron)
+                if owner == crate::Hematology::CARD =>
+            {
+                MissingPool::DropEither
+            }
+            Family::Binding(..) | Family::Heat(HeatRoute::Conduction | HeatRoute::CarriedByBlood) => {
+                MissingPool::SelectBy(End::To)
+            }
+            Family::Circulation
+            | Family::Valves
+            | Family::Sinusoids
+            | Family::Starling
+            | Family::Lymph
+            | Family::Filtration
+            | Family::Tubular
+            | Family::Reclaim(_)
+            | Family::Exchange(_)
+            | Family::StrokeWork
+            | Family::GravityWork
+            | Family::WallWork
+            | Family::Dissipation
+            | Family::Across(Wall::Cell | Wall::Alveolar | Wall::Lining | Wall::Endothelium, ..)
+            | Family::Along(
+                Passage::Airway
+                | Passage::Transit
+                | Passage::Absorption
+                | Passage::Chyle
+                | Passage::Shedding
+                | Passage::Secretion,
+                _,
+            )
+            | Family::Heat(HeatRoute::FromBeds | HeatRoute::Pumps) => MissingPool::Refuse,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MissingPool {
+    Refuse,
+    DropEither,
+    SelectBy(End),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Crossed {
@@ -874,6 +917,11 @@ impl KernelData {
                 .collect(),
             ..self.clone()
         })
+    }
+    pub(crate) fn has_placed_term(&self, has_site: impl Fn(Sites) -> bool) -> bool {
+        self.placing
+            .as_ref()
+            .is_some_and(|placing| placing.any_inside(&has_site))
     }
     /// `value`, negated, so one body row's laws add to `row - sum`.
     fn summing(mut self) -> Self {

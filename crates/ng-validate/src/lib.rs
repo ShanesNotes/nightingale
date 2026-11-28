@@ -383,6 +383,20 @@
 //!     arena.score(|| ng_solver::Core::new(10_000_000), || ng_solver::Core::new(5_000_000), clock, store)
 //! }
 //! ```
+//! A flight recorder's suffix certificate covers only a retained span and cannot produce a whole-run drift tally.
+//! ```compile_fail,E0599
+//! use ng_validate::*;
+//! fn tally(suffix: &SuffixCertificate) -> DriftTally {
+//!     suffix.drift_tally()
+//! }
+//! ```
+//! ```
+//! use ng_contract::Interval;
+//! use ng_validate::*;
+//! fn covered(suffix: &SuffixCertificate) -> Interval {
+//!     suffix.span()
+//! }
+//! ```
 
 extern crate alloc;
 
@@ -402,6 +416,7 @@ mod run;
 mod score;
 mod slice;
 mod split;
+mod trim;
 mod window;
 
 pub use accuracy::{
@@ -417,9 +432,9 @@ pub use body::{
 };
 pub use burning::BurningBeds;
 pub use certificate::{
-    Certificate, CertificateCheck, CertificateFailure, CertificateFold, CertificatePolicy, EdgeRate,
-    EdgeResult, EdgeWindows, ExpectedDrift, HeldSupport, QuantityPolicy, QuantityResult, RhythmResult,
-    SlidingWindows, certify,
+    Certificate, CertificateCheck, CertificateFailure, CertificateFold, CertificatePolicy, DriftRecheck,
+    DriftTally, EdgeRate, EdgeResult, EdgeWindows, ExpectedDrift, HeldSupport, QuantityPolicy,
+    QuantityResult, RhythmResult, SlidingWindows, SuffixCertificate, certify, certify_flight_recorder,
 };
 pub use day::{
     DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict, day_checks,
@@ -446,6 +461,12 @@ pub use slice::{
     hold_outside_slice,
 };
 pub use split::{SplitFailure, draw_split_trace, split_gate};
+pub use trim::{
+    EventLog, FlightRecorderSpan, FlightRecorderTrigger, LinkBackend, LoggedEvent, MemoryLinks, Regenerated,
+    RegenerationError, RegenerationFinding, RegenerationSource, ReplayStore, RollingConfig, RollingError,
+    RollingOutcome, RollingStatus, RollingStore, SavedCheckpoint, ScheduledInput, StepTrace, StoreListing,
+    WitnessEntry, regenerate, run_rolling, run_rolling_with_replay,
+};
 pub use window::{Compared, SliceWindow, WindowPolicy};
 
 pub(crate) const HEART_PHASE: ng_contract::RowKind = ng_contract::RowKind::Memory(ng_contract::Slot {
