@@ -6,6 +6,7 @@ new = '''        let (heat, own) = (k.at_site(&stores.tissue_heat), k.site_param
         let (core, none) = (k.parameter(&core), k.subtract(own, own));
         let capacity = k.add(core, none);'''
 test = "-p ng-validate --test body_run each_tissue_heat_store_publishes_the_thermal_zero_plus_its_heat_over_its_own_capacity"
+budget = 1000
 
 [[mutant]]
 name = "the-thermostats-set-point-follows-the-core"
@@ -15,6 +16,7 @@ new = '''        let (target, current) = (k.parameter(&target), k.state(&sensed.
         let (core, none) = (k.read(&sensed.core.core_temperature), k.subtract(target, target));
         let target = k.add(core, none);'''
 test = "-p ng-validate --test body_run the_thermostats_set_point_and_each_command_meet_their_forms_at_the_admitted_start_and_a_second_on"
+budget = 1000
 
 [[mutant]]
 name = "the-sudomotor-command-answers-cold"
@@ -22,6 +24,7 @@ path = "crates/ng-nervous/src/thermostat.rs"
 old = '''    let sudomotor = command(ns, &sensed, (Side::Warm, SUDOMOTOR), reflex);'''
 new = '''    let sudomotor = command(ns, &sensed, (Side::Cold, SUDOMOTOR), reflex);'''
 test = "-p ng-validate --test body_run the_thermostats_set_point_and_each_command_meet_their_forms_at_the_admitted_start_and_a_second_on"
+budget = 1000
 
 [[mutant]]
 name = "the-constrictor-command-answers-warmth"
@@ -29,6 +32,7 @@ path = "crates/ng-nervous/src/thermostat.rs"
 old = '''    let constrictor = command(ns, &sensed, (Side::Cold, CONSTRICTOR), reflex);'''
 new = '''    let constrictor = command(ns, &sensed, (Side::Warm, CONSTRICTOR), reflex);'''
 test = "-p ng-validate --test body_run the_thermostats_set_point_and_each_command_meet_their_forms_at_the_admitted_start_and_a_second_on"
+budget = 1000
 
 [[mutant]]
 name = "the-shiver-command-answers-warmth"
@@ -36,6 +40,7 @@ path = "crates/ng-nervous/src/thermostat.rs"
 old = '''    let shiver = command(ns, &sensed, (Side::Cold, SHIVER), reflex);'''
 new = '''    let shiver = command(ns, &sensed, (Side::Warm, SHIVER), reflex);'''
 test = "-p ng-validate --test body_run the_thermostats_set_point_and_each_command_meet_their_forms_at_the_admitted_start_and_a_second_on"
+budget = 1000
 
 [[mutant]]
 name = "the-shiver-drive-keeps-the-caps-dip-below-zero"
@@ -43,6 +48,7 @@ path = "crates/ng-nervous/src/thermostat.rs"
 old = '''        let raised = k.subtract(capped, at_zero);'''
 new = '''        let raised = capped;'''
 test = "-p ng-validate --test body_run the_shiver_drive_rises_from_zero_stays_under_one_and_meets_its_form_at_the_admitted_start"
+budget = 1000
 
 [[mutant]]
 name = "the-shiver-drive-is-not-divided-and-passes-one"
@@ -52,6 +58,7 @@ old = '''        let share = k.divide(raised, span);
 new = '''        let _ = span;
         let value = raised;'''
 test = "-p ng-validate --test body_run the_shiver_drive_rises_from_zero_stays_under_one_and_meets_its_form_at_the_admitted_start"
+budget = 1000
 
 [[mutant]]
 name = "the-skin-junction-releases-acetylcholine-by-the-vagal-traffic"
@@ -59,6 +66,7 @@ path = "crates/ng-nervous/src/shared.rs"
 old = '''                let (command, share) = (k.algebraic(command), k.site_parameter(share));'''
 new = '''                let (command, share) = (k.algebraic(traffic), k.site_parameter(share));'''
 test = "-p ng-validate --test body_run the_skin_junction_releases_by_its_shares_and_the_sinoatrial_junction_as_on_the_base"
+budget = 2000
 
 [[mutant]]
 name = "the-constrictor-share-releases-by-the-sympathetic-traffic"
@@ -66,3 +74,38 @@ path = "crates/ng-nervous/src/shared.rs"
 old = '''        let (one, two) = (k.algebraic(first.0), k.algebraic(second.0));'''
 new = '''        let (one, two) = (k.algebraic(first.0), k.algebraic(first.0));'''
 test = "-p ng-validate --test body_run the_skin_junction_releases_by_its_shares_and_the_sinoatrial_junction_as_on_the_base"
+budget = 2000
+
+[[mutant]]
+name = "the-carriage-reads-its-two-temperatures-swapped"
+path = "crates/ng-cardiovascular/src/carriage.rs"
+old = '''        let across = k.subtract(core, tissue);'''
+new = '''        let across = k.subtract(tissue, core);'''
+test = "-p ng-validate --test body_run blood_carries_heat_from_the_core_store_to_the_skin_store_at_the_skin_beds_inflow"
+budget = 2000
+
+[[mutant]]
+name = "the-carriage-reads-twice-the-skin-beds-inflow"
+path = "crates/ng-cardiovascular/src/carriage.rs"
+old = '''        let flow = k.volume_flow(water);'''
+new = '''        let twice = k.add(water, water);
+        let flow = k.volume_flow(twice);'''
+test = "-p ng-validate --test body_run blood_carries_heat_from_the_core_store_to_the_skin_store_at_the_skin_beds_inflow"
+budget = 2000
+
+[[mutant]]
+name = "the-skin-arteriole-drops-its-dilator-gain"
+path = "crates/ng-cardiovascular/src/circulation.rs"
+old = '''        let opened = k.scale(felt, gain);'''
+new = '''        let _ = gain;
+        let opened = felt;'''
+test = "-p ng-validate --test body_run the_skin_arteriole_opens_with_the_dilator_and_the_skins_warmth_and_no_other_edge_reads_either"
+budget = 1000
+
+[[mutant]]
+name = "the-skin-arteriole-narrows-as-the-skin-warms"
+path = "crates/ng-cardiovascular/src/circulation.rs"
+old = '''        let both = k.add(dilated, warmed);'''
+new = '''        let both = k.subtract(dilated, warmed);'''
+test = "-p ng-validate --test body_run the_skin_arteriole_opens_with_the_dilator_and_the_skins_warmth_and_no_other_edge_reads_either"
+budget = 1000

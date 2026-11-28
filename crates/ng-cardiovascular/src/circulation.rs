@@ -1,5 +1,7 @@
 use crate::shared::drive;
-use ng_contract::catalog::{BloodViscosity, OxygenDebtPerBed, Reads, TubuloglomerularFeedback};
+use ng_contract::catalog::{
+    BloodViscosity, OxygenDebtPerBed, PerfusionTemperatures, Reads, TubuloglomerularFeedback,
+};
 use ng_contract::*;
 
 pub(crate) fn plain_edges<'b>(
@@ -36,6 +38,7 @@ pub(crate) fn plain_edges<'b>(
         let half = cv.end_parameter::<Oxygen>(ParameterKey::new("cv.debt-half"), Admissible::positive());
         (line.oxygen_debt_per_bed, share, half)
     });
+    let skin = whole_body.then(|| skin_arteriole_exponent(cv, ports.effect::<Acetylcholine>(), wave));
     let flow = cv.edge_kernel(|mut k| {
         let head_across = drive(&mut k, pressure, head);
         let base = k.edge_parameter(&resistance);
@@ -72,12 +75,64 @@ pub(crate) fn plain_edges<'b>(
             }
             None => total,
         };
+        let total = match &skin {
+            Some(exponent) => {
+                let exponent = k.downstream_if_in(exponent);
+                let factor = k.exp(exponent);
+                k.scale(total, factor)
+            }
+            None => total,
+        };
         let quotient = k.divide(head_across, total);
         let flow = k.as_dimension(quotient);
         k.finish(flow, cv.every_mode(), wave)
     });
     cv.transfer_along(route, flow);
     Ok(())
+}
+
+/// The exponent of e that scales the skin arteriole's resistance at each skin bed, `-ln((1 + S_d E_d) exp(L2 e_s /
+/// b_v))`: `E_d` the acetylcholine effect at the junction supplying the bed and `e_s` the temperature of the store it
+/// sits in against the skin reference (research 12, the row 'Skin vessels'). An edge into a skin bed scales its
+/// resistance by its exponential, and every other edge reads zero (record 0011, consequence 26).
+fn skin_arteriole_exponent<'b>(
+    cv: &mut FragmentBuilder<'b, Cardiovascular>,
+    dilator: ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>>,
+    wave: RateClass,
+) -> ReadPort<'b, Cardiovascular, PerSite<Beds<Skin>, Dimensionless>> {
+    let key = ParameterKey::new;
+    let temperatures: PerfusionTemperatures<'b> = cv.receive();
+    let reference = cv.parameter::<Reference<Temperature>>(key("ns.skin-reference"), Admissible::finite());
+    let gain = cv
+        .site_parameter::<Beds<Skin>, Dimensionless>(key("cv.skin-dilator-gain"), Admissible::nonnegative());
+    let width =
+        cv.site_parameter::<Beds<Skin>, Deviation<Temperature>>(key("cv.skin-width"), Admissible::positive());
+    let ln_two = cv.parameter::<Dimensionless>(key("cv.ln-two"), Admissible::positive());
+    let unit = cv.parameter::<Dimensionless>(key("cv.unit"), Admissible::positive());
+    let (out, read) =
+        cv.site_field::<Beds<Skin>, Dimensionless>("skin arteriole exponent", Admissible::finite());
+    let value = cv.site_kernel(|mut k| {
+        let (felt, gain, one) = (
+            k.at_junction(&dilator),
+            k.site_parameter(&gain),
+            k.parameter(&unit),
+        );
+        let opened = k.scale(felt, gain);
+        let dilation = k.add(one, opened);
+        let dilated = k.ln(dilation);
+        let (skin, reference) = (temperatures.tissue(&mut k), k.parameter(&reference));
+        let (warmth, width) = (k.deviation(skin, reference), k.site_parameter(&width));
+        let quotient = k.divide(warmth, width);
+        let widths: Expr<'_, '_, Cardiovascular, Dimensionless> = k.as_dimension(quotient);
+        let ln_two = k.parameter(&ln_two);
+        let warmed = k.scale(widths, ln_two);
+        let both = k.add(dilated, warmed);
+        let zero = k.zero();
+        let value = k.subtract(zero, both);
+        k.finish(value, cv.every_mode(), wave)
+    });
+    cv.define_at(&out, value);
+    read
 }
 
 /// A bed's resistance over its resistance with no oxygen debt, `1 - S d / (d + K)`, written as `(K + (d - S d)) / (d + K)`

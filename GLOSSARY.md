@@ -538,7 +538,10 @@ The thermostat's cold command for the skin's vessels: it rises as its weighted s
 The thermostat's cold command for shivering, with its own weights and threshold. Arrow 87's shiver drive is the command smoothly capped at one, shifted so that a zero command gives a zero drive and scaled so that the drive stays under one.
 
 **Skin reference**:
-The fixed skin temperature, a parameter of the body, that the thermostat compares the skin thermoreceptor's store with. Unlike the core's set point, it never moves.
+The fixed skin temperature, a parameter of the body, that the thermostat compares the skin thermoreceptor's store with. Unlike the core's set point, it never moves. CV's skin arteriole exponent reads it too, against the skin store's temperature.
+
+**Skin arteriole exponent**:
+An algebraic row CV defines at each skin bed. The skin arteriole's resistance, the resistance of the plain edge into that bed, is multiplied by e raised to it. It is minus the log of one plus the dilator gain times the acetylcholine effect at the skin junction, less ln 2 times the skin store's temperature above the skin reference over a width. So the skin arteriole opens as that effect rises and as the skin warms. An edge into any other site reads zero and keeps its resistance.
 
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site. A projected field is the exception: it has no row of its own, and its receiver reads it through a read grant from its sender's rows.

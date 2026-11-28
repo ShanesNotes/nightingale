@@ -981,10 +981,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1477 {"algebraic": 204, "amount": 1254, "memory": 19}, columns 1466, jacobian nonzeros 10224, blocks 419, largest block 676, parameter slots 804, conserved combinations 397, held pools 318, held route columns 83
-        model hash 3249748c1c2108df47234cf8cf97f463a05f4b5fc760a49a61f5a419757b5504
-        conserved basis 0e6e0f27bfc44a86823234366c4e47a1ac8ab45c9df8aff91ad3dea9978d3cd0
-        stated packet a21bbaed11fe09ad6be067036b1ce572a4b1869156c3fe7af634597e3306a97c
+        rows 1478 {"algebraic": 205, "amount": 1254, "memory": 19}, columns 1467, jacobian nonzeros 10230, blocks 417, largest block 681, parameter slots 809, conserved combinations 397, held pools 318, held route columns 83
+        model hash 1affbee8e59345f9315cbb2db0a94a1ba98776a2b7e4221811b7f8bc58142e66
+        conserved basis 1c607f0740d783c1105f5ebd43e20e578d7561ef92b15d06ed878c67b01451c7
+        stated packet 321466d4b556102ea1a0de9db54ff8e5a5ada55393938f8bb1f219dff969537a
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -1099,7 +1099,7 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
         species: [
             (Species::Energy, 3e6),
             (Species::Water, 2e-1),
-            (Species::Sodium, 6e-3),
+            (Species::Sodium, 5e-3),
             (Species::Chloride, 6e-3),
             (Species::Potassium, 3e-4),
             (Species::Vasopressin, 5e-2),

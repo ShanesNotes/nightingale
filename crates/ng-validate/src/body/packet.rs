@@ -346,6 +346,7 @@ fn start_guess(row: RowKind) -> f64 {
                 "tissue_temperature" if bed == "skin heat site" => SKIN_REFERENCE,
                 "tissue_temperature" => CORE_REFERENCE,
                 "sudomotor command" | "constrictor command" | "shiver command" | "shiver_drive" => 0.0,
+                "skin arteriole exponent" => 0.0,
                 _ => 1.0,
             }
         }
@@ -711,6 +712,7 @@ fn packet_of(
     tissue_heat(&mut packet, evaporation_amplitude)?;
     twins(&mut packet)?;
     thermostat(&mut packet)?;
+    skin_bed(&mut packet)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -1213,6 +1215,19 @@ fn thermostat(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admi
     set::<Dimensionless>(packet, "ns.shiver-cap-width", body, 0.1)
 }
 
+/// The skin bed's heat keys, every value synthetic. Each maps to research 16: blood's heat per volume per kelvin `c_bl`
+/// (CV-082), at the body, and at the skin bed the skin arteriole's dilator gain `S_d` (CV-083) and its width `b_v`
+/// against the skin's temperature (CV-084). Model defaults with no row: the skin arteriole's `ln 2` and its one.
+fn skin_bed(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    type BloodHeat = Quotient<Quotient<Rate<Energy>, Temperature>, Rate<Volume>>;
+    let (body, bed) = (Binding::Body, Binding::Site(site::<CapillaryBed>("skin bed")?));
+    set::<BloodHeat>(packet, "cv.blood-heat", body, 1e5)?;
+    set::<Dimensionless>(packet, "cv.skin-dilator-gain", bed, 9.0)?;
+    set::<Deviation<Temperature>>(packet, "cv.skin-width", bed, 4.0)?;
+    set::<Dimensionless>(packet, "cv.ln-two", body, core::f64::consts::LN_2)?;
+    set::<Dimensionless>(packet, "cv.unit", body, 1.0)
+}
+
 /// The debt's oxygen to each lactate is the lactate burn's own counts, read from the compiled body.
 fn oxygen_per_lactate(
     packet: &mut ParameterPacket<SyntheticFixture>,
@@ -1323,8 +1338,8 @@ const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
 const SPECIES_BOUNDS: [(Species, f64, f64, f64); 7] = [
     (Species::Energy, 3e6, 2e5, 8e4),
     (Species::Water, 2e-1, 7e-3, 4e-3),
-    (Species::Sodium, 6e-3, 6e-4, 1e-5),
-    (Species::Chloride, 6e-3, 6e-4, 1e-5),
+    (Species::Sodium, 5e-3, 5e-4, 9e-6),
+    (Species::Chloride, 6e-3, 5e-4, 1e-5),
     (Species::Potassium, 3e-4, 3e-5, 5e-7),
     (Species::Vasopressin, 5e-2, 5e-3, 3e-4),
     (Species::NitrogenGas, 2e4, 2e1, 8.0),
