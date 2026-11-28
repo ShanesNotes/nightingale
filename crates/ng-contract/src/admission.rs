@@ -7,11 +7,12 @@ use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::packet::{BoundAnchor, Fit, Owed};
 use crate::problem::Jacobian;
+use crate::ring::eliminate_flat;
 use crate::{
     AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Compensated,
     CompiledBody, ConservedRowId, DenseSegment, Digest, ErrorScales, ImageParts, InitializationProvenance,
     Lasting, LawName, Measure, MethodHistory, ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId,
-    RowKind, SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord, eliminate,
+    RowKind, SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord,
 };
 use core::ops::Range;
 
@@ -307,6 +308,9 @@ fn algebraic(kind: RowKind) -> bool {
 struct StagePattern {
     offsets: Vec<usize>,
     unknowns: Vec<UnknownId>,
+    diag_offset: Vec<Option<usize>>,
+    staged: Vec<bool>,
+    algebraic: Vec<bool>,
     plan: Elimination,
 }
 impl StagePattern {
@@ -314,6 +318,12 @@ impl StagePattern {
         let sparsity = body.sparsity();
         let size = body.rows().len();
         let (mut offsets, mut unknowns) = (vec![0], Vec::new());
+        let mut diag_offset = Vec::with_capacity(size);
+        let algebraic_flags: Vec<bool> = body.rows().iter().map(|row| algebraic(row.kind())).collect();
+        for row in 0..size {
+            let reads = &sparsity.unknowns()[sparsity.row_offsets()[row]..sparsity.row_offsets()[row + 1]];
+            diag_offset.push(reads.iter().position(|unknown| unknown.index() == row));
+        }
         for (own, other) in [(0, size), (size, 0)] {
             for row in 0..size {
                 let reads =
@@ -369,6 +379,9 @@ impl StagePattern {
         Self {
             offsets,
             unknowns,
+            diag_offset,
+            staged: is_staged,
+            algebraic: algebraic_flags,
             plan,
         }
     }
@@ -957,11 +970,22 @@ impl InitializationSystem<'_> {
             None
         };
         let mut lines = Vec::with_capacity(self.width());
+        let extra = usize::from(chained) * (fits.len() + 4);
         for &stage in self.stage_list() {
             for (at, row) in rows.iter().enumerate() {
                 let own = self.slots(leg, stage).start;
                 let reads = sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1];
-                let mut line = Vec::new();
+                let read_len = reads.end - reads.start;
+                let is_alg = algebraic(row.kind());
+                let is_staged = !is_alg && self.staged(at);
+                let cap = if is_alg {
+                    read_len + extra
+                } else if is_staged {
+                    2 * read_len + 2 + extra
+                } else {
+                    1
+                };
+                let mut line = Vec::with_capacity(cap);
                 // A stage's columns are its own slots, and each row reads one at most once, so none is in the line yet.
                 let read = |line: &mut Vec<(usize, f64)>, from: usize, scale: f64| {
                     let (entries, by_fit) = &slopes[from];
@@ -973,9 +997,9 @@ impl InitializationSystem<'_> {
                         add(line, border + fit, scale * slope[at]);
                     }
                 };
-                if algebraic(row.kind()) {
+                if is_alg {
                     read(&mut line, stage, 1.0);
-                } else if self.staged(at) {
+                } else if is_staged {
                     for from in [INTERIOR, END] {
                         read(&mut line, from, held.length * RADAU[stage][from]);
                     }
@@ -1156,16 +1180,6 @@ impl InitializationSystem<'_> {
             ),
         }
     }
-    fn local_block(&self, leg: usize, entry: impl Fn(usize, usize) -> f64) -> Jacobian {
-        let (offsets, unknowns) = self.pattern();
-        let first = leg * self.width();
-        let mut values = Vec::with_capacity(unknowns.len());
-        for row in 0..offsets.len() - 1 {
-            let pattern = &unknowns[offsets[row]..offsets[row + 1]];
-            values.extend(pattern.iter().map(|unknown| entry(row, first + unknown.index())));
-        }
-        Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), values)
-    }
     pub(crate) fn stage_plan(&self) -> Option<&Elimination> {
         self.pattern.as_ref().map(|pattern| &pattern.plan)
     }
@@ -1181,11 +1195,13 @@ impl InitializationSystem<'_> {
             factors.solve(&mut update);
             return Ok(update);
         }
-        let mut matrix = self.dense(block);
-        for (row, &residual) in matrix.iter_mut().zip(residuals) {
-            row[residuals.len()] = residual;
+        let size = residuals.len();
+        let stride = size + 1;
+        let mut flat = self.dense_flat(block);
+        for (row, &residual) in residuals.iter().enumerate() {
+            flat[row * stride + size] = residual;
         }
-        eliminate(matrix)
+        eliminate_flat(&mut flat, size)
     }
     pub fn stage(
         &self,
@@ -1194,22 +1210,59 @@ impl InitializationSystem<'_> {
     ) -> Result<(Vec<f64>, Jacobian), InitializationFailure> {
         self.check(workspace)?;
         let values = self.values(workspace);
-        let lines = self.leg_lines(workspace, &values, leg.index, Reach::Leg)?;
-        let first = leg.index * self.width();
-        let mut cells = vec![0.0; self.width()];
-        let (offsets, unknowns) = self.pattern();
-        let mut entries = Vec::with_capacity(unknowns.len());
-        for (row, line) in lines.iter().enumerate() {
-            for &(column, value) in line {
-                cells[column - first] = value;
+        let block = if let Some(pattern) = &self.pattern {
+            let held = &workspace.legs[leg.index];
+            let sparsity = self.body.sparsity();
+            let base_offsets = sparsity.row_offsets();
+            let size = self.body.rows().len();
+            let mut slopes: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
+            for &stage in self.stage_list() {
+                let inputs = self.inputs(held, &workspace.unknowns[self.slots(leg.index, stage)], &values);
+                slopes[stage] = self.body.jacobian(&inputs, 0.0).map_err(undefined)?;
             }
-            let pattern = &unknowns[offsets[row]..offsets[row + 1]];
-            entries.extend(pattern.iter().map(|unknown| cells[unknown.index()]));
-            for &(column, _) in line {
-                cells[column - first] = 0.0;
+            let mut entries = Vec::with_capacity(pattern.unknowns.len());
+            for (stage, other) in [(END, INTERIOR), (INTERIOR, END)] {
+                let s_own = held.length * RADAU[stage][stage];
+                let s_other = held.length * RADAU[stage][other];
+                for row in 0..size {
+                    let reads = base_offsets[row]..base_offsets[row + 1];
+                    if pattern.algebraic[row] {
+                        entries.extend_from_slice(&slopes[stage][reads]);
+                    } else if pattern.staged[row] {
+                        let start_pos = entries.len();
+                        entries.extend(slopes[stage][reads.clone()].iter().map(|&v| s_own * v));
+                        if let Some(diag) = pattern.diag_offset[row] {
+                            entries[start_pos + diag] += 1.0;
+                        }
+                        entries.extend(slopes[other][reads].iter().map(|&v| s_other * v));
+                    } else {
+                        let start_pos = entries.len();
+                        entries.resize(start_pos + (reads.end - reads.start), 0.0);
+                        if let Some(diag) = pattern.diag_offset[row] {
+                            entries[start_pos + diag] = 1.0;
+                        }
+                    }
+                }
             }
-        }
-        let block = Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), entries);
+            Jacobian::of_parts(pattern.offsets.clone(), pattern.unknowns.clone(), entries)
+        } else {
+            let lines = self.leg_lines(workspace, &values, leg.index, Reach::Leg)?;
+            let first = leg.index * self.width();
+            let mut cells = vec![0.0; self.width()];
+            let (offsets, unknowns) = self.pattern();
+            let mut entries = Vec::with_capacity(unknowns.len());
+            for (row, line) in lines.iter().enumerate() {
+                for &(column, value) in line.iter().rev() {
+                    cells[column - first] = value;
+                }
+                let pattern = &unknowns[offsets[row]..offsets[row + 1]];
+                entries.extend(pattern.iter().map(|unknown| cells[unknown.index()]));
+                for &(column, _) in line {
+                    cells[column - first] = 0.0;
+                }
+            }
+            Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), entries)
+        };
         let mut rows = Vec::with_capacity(self.width());
         self.stage_rows(workspace, &values, leg.index, &mut rows)?;
         Ok((rows, block))
@@ -1239,15 +1292,42 @@ impl InitializationSystem<'_> {
     /// One leg's own block of a `linearize`, in the pattern a `stage` block has, so a ring elimination factors it
     /// over the same plan. A cycle's last interval holds totals in place of rows, so its block is not this. Each entry
     /// is read by its column, because a row that states the packet's value holds fewer entries than the pattern.
-    pub fn block(&self, ring: &Jacobian, leg: usize) -> Jacobian {
+    pub(crate) fn block_values(&self, ring: &Jacobian, leg: usize, cells: &mut [f64], values: &mut Vec<f64>) {
         let view = ring.view();
-        let first = leg * self.width();
-        self.local_block(leg, |row, column| {
+        let width = self.width();
+        let first = leg * width;
+        let end = first + width;
+        let (offsets, unknowns) = self.pattern();
+        values.clear();
+        if values.capacity() < unknowns.len() {
+            values.reserve(unknowns.len() - values.capacity());
+        }
+        for row in 0..offsets.len() - 1 {
             let line = view.row_offsets()[first + row]..view.row_offsets()[first + row + 1];
-            (view.columns()[line.clone()].iter().zip(&view.values()[line]))
-                .find(|(at, _)| at.index() == column)
-                .map_or(0.0, |(_, value)| *value)
-        })
+            let cols = &view.columns()[line.clone()];
+            let vals = &view.values()[line];
+            for (&at, &val) in cols.iter().zip(vals).rev() {
+                let col = at.index();
+                if col >= first && col < end {
+                    cells[col - first] = val;
+                }
+            }
+            let pattern = &unknowns[offsets[row]..offsets[row + 1]];
+            values.extend(pattern.iter().map(|unknown| cells[unknown.index()]));
+            for &at in cols {
+                let col = at.index();
+                if col >= first && col < end {
+                    cells[col - first] = 0.0;
+                }
+            }
+        }
+    }
+    pub fn block(&self, ring: &Jacobian, leg: usize) -> Jacobian {
+        let (offsets, unknowns) = self.pattern();
+        let mut cells = vec![0.0; self.width()];
+        let mut values = Vec::with_capacity(unknowns.len());
+        self.block_values(ring, leg, &mut cells, &mut values);
+        Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), values)
     }
     /// Takes `share` of `correction` into `workspace`: each slot and each crossing time less its change. A time that
     /// would leave its interval or pass a neighbour stops short of it, by the clearance a leg keeps, and the result is
@@ -1292,37 +1372,42 @@ impl InitializationSystem<'_> {
             Applied::Inside
         }
     }
-    /// The first row whose stage has no pivot at the start state: a coupling loop such as `x = y`, `y = x`, a pressure
-    /// with no gauge, or a closed row where no cycle gives its tangent. Structural matching cannot see these, and a
-    /// run from a consistent start would hold whatever the packet gave them. One dense elimination, once a run.
+    /// The first unknown whose stage has no pivot at the start state: a coupling loop such as `x = y`, `y = x`, a
+    /// pressure with no gauge, or a closed row where no cycle gives its tangent. Structural matching cannot see these,
+    /// and a run from a consistent start would hold whatever the packet gave them. One dense elimination, once a run.
     fn rankless(
         &self,
         workspace: &AdmissionWorkspace,
         values: &[f64],
-    ) -> Result<Option<RowId>, InitializationFailure> {
+    ) -> Result<Option<(RowId, usize)>, InitializationFailure> {
         let size = self.width();
         let lines = self.leg_lines(workspace, values, 0, Reach::Leg)?;
-        let mut matrix = vec![vec![0.0; size + 1]; size];
-        for (cells, line) in matrix.iter_mut().zip(&lines) {
+        let stride = size + 1;
+        let mut flat = vec![0.0; size * stride];
+        for (row, line) in lines.iter().enumerate() {
+            let cells = &mut flat[row * stride..row * stride + stride];
             for &(column, value) in line.iter().filter(|(column, _)| *column < size) {
                 cells[column] += value;
             }
         }
-        Ok(eliminate(matrix)
+        let rows = self.body.rows().len();
+        Ok(eliminate_flat(&mut flat, size)
             .err()
-            .map(|slot| RowId::at(slot % self.body.rows().len())))
+            .map(|slot| (RowId::at(slot % rows), slot / rows)))
     }
-    /// A system small enough to read whole: each row with a zero right side, as `eliminate` takes it.
-    fn dense(&self, lines: &Jacobian) -> Vec<Vec<f64>> {
+    /// A system small enough to read whole: each row with a zero right side, as `eliminate_flat` takes it.
+    fn dense_flat(&self, lines: &Jacobian) -> Vec<f64> {
         let view = lines.view();
         let size = view.row_offsets().len() - 1;
-        let mut matrix = vec![vec![0.0; size + 1]; size];
-        for (row, cells) in matrix.iter_mut().enumerate() {
+        let stride = size + 1;
+        let mut flat = vec![0.0; size * stride];
+        for row in 0..size {
+            let cells = &mut flat[row * stride..row * stride + stride];
             for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
                 cells[view.columns()[entry].index()] += view.values()[entry];
             }
         }
-        matrix
+        flat
     }
     /// One defect over its scale, `None` when the tolerance refuses it. What overflowed is refused, because `<=` is
     /// false on a NaN but true of two infinities, and a defect of zero holds even where an overflow leaves no scale.
@@ -1502,7 +1587,7 @@ impl InitializationSystem<'_> {
             let row = slot % size;
             let judge = self.body.judged_at(row);
             let held = self.held(stages[slot].abs(), unknowns[slot - row + judge], sizes[judge]);
-            held.ok_or(inconsistent(body_row(row)))
+            held.ok_or_else(|| self.inconsistent_or_rank(workspace, &values, body_row(row)))
         };
         let replaced = |slot: &usize| {
             self.replaced(workspace).any(|(known, _)| known == *slot)
@@ -1528,7 +1613,11 @@ impl InitializationSystem<'_> {
             let row = AdmissionRow::Crossing { variable };
             let gap = self.root(workspace, &values, leg, guard)?;
             let (read, reach) = self.root_scale(workspace, &values, leg, guard)?;
-            note(row, self.held(gap.abs(), read, reach).ok_or(inconsistent(row))?);
+            let held = self.held(gap.abs(), read, reach);
+            note(
+                row,
+                held.ok_or_else(|| self.inconsistent_or_rank(workspace, &values, row))?,
+            );
         }
         // Every conserved total but charge, regulated or not: each stage's defect can pass while their sum over the
         // cycle does not. A net flow lands on the row its total replaced, so the flow is read first, to name it.
@@ -1564,51 +1653,107 @@ impl InitializationSystem<'_> {
                 anchor.value,
                 sizes[anchor.row.index()],
             );
-            note(row, held.ok_or(inconsistent(row))?);
+            note(
+                row,
+                held.ok_or_else(|| self.inconsistent_or_rank(workspace, &values, row))?,
+            );
         }
-        for (fit, &value) in owed.fits.iter().zip(self.fitted(workspace)) {
-            if !self.felt(workspace, &values, fit, value)? {
+        self.check_fits_felt(workspace, &values)?;
+        if self.interval.is_some() {
+            self.settled(workspace)?;
+            self.check_unpaced(workspace)?;
+        }
+        self.check_rank(workspace, &values)?;
+        Ok(worst)
+    }
+    fn check_fits_felt(
+        &self,
+        workspace: &AdmissionWorkspace,
+        values: &[f64],
+    ) -> Result<(), InitializationFailure> {
+        for (fit, &value) in self.parameters.owed.fits.iter().zip(self.fitted(workspace)) {
+            if !self.felt(workspace, values, fit, value)? {
                 let (key, binding) = (fit.key, fit.binding);
                 return Err(AdmissionError::FitUnread { key, binding }.into());
             }
         }
-        if self.interval.is_some() {
-            self.settled(workspace)?;
-            // Under drives that hold still all beat, a guard that fires on a periodic orbit times the beat itself, and
-            // only the grid's samples would say where it starts: such a beat must name its clock.
-            let still = self.frames.windows(2).all(|pair| pair[0] == pair[1]);
-            let fires = workspace.topology.knots.iter().any(|knot| !knot.is_empty());
-            if still && fires && self.period.is_none() {
-                return Err(InitializationFailure::Unpaced);
-            }
+        Ok(())
+    }
+    fn check_unpaced(&self, workspace: &AdmissionWorkspace) -> Result<(), InitializationFailure> {
+        if self.interval.is_none() {
+            return Ok(());
         }
-        if let Some(row) = self.rankless(workspace, &values)? {
-            return Err(InitializationFailure::NoRank { row });
+        // Under drives that hold still all beat, a guard that fires on a periodic orbit times the beat itself, and
+        // only the grid's samples would say where it starts: such a beat must name its clock.
+        let still = self.frames.windows(2).all(|pair| pair[0] == pair[1]);
+        let fires = workspace.topology.knots.iter().any(|knot| !knot.is_empty());
+        if still && fires && self.period.is_none() {
+            return Err(InitializationFailure::Unpaced);
         }
-        // One stage can have rank while the whole system has a free level: a total nothing truly regulates, two fits
-        // of one anchor's worth of information, or an autonomous cycle no clock fixes. The whole bordered ring is
-        // factored, and a law with no slope here is refused, not passed over.
+        Ok(())
+    }
+    fn check_ring_rank(&self, workspace: &AdmissionWorkspace) -> Result<(), InitializationFailure> {
+        let rows = self.body.rows();
+        let size = rows.len();
+        let owed = &self.parameters.owed;
         let lines = self.lines(workspace)?;
-        let right = vec![0.0; unknowns.len() + workspace.topology.crossings.len()];
+        let right = vec![0.0; workspace.unknowns.len() + workspace.topology.crossings.len()];
         let free = self.ring(workspace, &lines, &right).err();
         if let Some(slot) = free {
             let border = workspace.fitted_slots().start;
             if slot < border {
                 return Err(InitializationFailure::NoRank {
                     row: rows[slot % size].id(),
+                    stage: Some(slot / size),
                 });
             }
             let at = slot - border;
             if let Some(fit) = owed.fits.get(at) {
                 return Err(InitializationFailure::NoRank {
                     row: rows[owed.anchors[fit.anchor].row.index()].id(),
+                    stage: None,
                 });
             }
             let guard = workspace.topology.crossings[at - owed.fits.len()].guards[0];
             let variable = self.body.layout.modes[self.body.layout.guards[guard].variable].variable;
             return Err(InitializationFailure::CrossingRank { variable });
         }
-        Ok(worst)
+        Ok(())
+    }
+    fn check_rank(
+        &self,
+        workspace: &AdmissionWorkspace,
+        values: &[f64],
+    ) -> Result<(), InitializationFailure> {
+        if let Some((row, stage)) = self.rankless(workspace, values)? {
+            return Err(InitializationFailure::NoRank {
+                row,
+                stage: Some(stage),
+            });
+        }
+        // One stage can have rank while the whole system has a free level: a total nothing truly regulates, two fits
+        // of one anchor's worth of information, or an autonomous cycle no clock fixes. The whole bordered ring is
+        // factored, and a law with no slope here is refused, not passed over.
+        self.check_ring_rank(workspace)
+    }
+    /// When the ring solve stops with no pivot, `recheck` sees an unsolved workspace; check full-ring rank before
+    /// blaming the first row whose residual did not close.
+    fn inconsistent_or_rank(
+        &self,
+        workspace: &AdmissionWorkspace,
+        values: &[f64],
+        row: AdmissionRow,
+    ) -> InitializationFailure {
+        if let Err(rank_failure) = self.check_ring_rank(workspace) {
+            if let Err(failure) = self.check_fits_felt(workspace, values) {
+                return failure;
+            }
+            if let Err(failure) = self.check_unpaced(workspace) {
+                return failure;
+            }
+            return rank_failure;
+        }
+        InitializationFailure::Inconsistent { row }
     }
     fn felt(
         &self,
@@ -1923,10 +2068,13 @@ pub enum InitializationFailure {
     SecondWrap,
     /// A cycle under drives that hold still all beat whose guards fire, so it times itself, with no clock named.
     Unpaced,
-    /// A row with no pivot on the solved workspace, in its own stage or on the ring, which structural
-    /// matching cannot see.
+    /// An unknown with no pivot on the workspace, in its own stage or on the ring, which structural
+    /// matching cannot see. `stage` is the global stage index `slot / rows` (`0` for an instant solve,
+    /// `2 * leg` for leg `leg`'s end stage and `2 * leg + 1` for its interior stage on a periodic ring),
+    /// or `None` when a fitted parameter has no pivot and `row` names its anchor's row.
     NoRank {
         row: RowId,
+        stage: Option<usize>,
     },
     CrossingRank {
         variable: Slot,

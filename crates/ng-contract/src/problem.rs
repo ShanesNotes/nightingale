@@ -1,7 +1,7 @@
 use crate::body::{RowKind, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::chance::{Chance, Trigger, period_ns};
-use crate::evaluate::{Inputs, PublishedEval, Undefined};
+use crate::evaluate::{Inputs, PublishedEval, StageValues, Undefined, all_finite};
 use crate::head::HeadDigest;
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::{StageEvaluation, VerifiedStep};
@@ -36,6 +36,7 @@ pub struct CoupledProblem<'r> {
     pub(crate) coordinates: Vec<f64>,
     pub(crate) first_memory: usize,
     pub(crate) first_algebraic: usize,
+    pub(crate) clean_fixed: bool,
     pub(crate) provenance: Option<ProblemSeal>,
 }
 impl<'r> CoupledProblem<'r> {
@@ -51,16 +52,19 @@ impl<'r> CoupledProblem<'r> {
         let first_memory = rows.partition_point(|row| matches!(row.kind(), RowKind::Amount { .. }));
         let first_algebraic = first_memory
             + rows[first_memory..].partition_point(|row| matches!(row.kind(), RowKind::Memory(_)));
+        let chance = Chance::at(body, identity.seed(), accepted.state());
+        let clean_fixed = body.tape.clean_fixed(&parameters.values, chance.draws());
         Self {
             body,
             parameters,
             identity,
             accepted,
             base,
-            chance: Chance::at(body, identity.seed(), accepted.state()),
+            chance,
             coordinates,
             first_memory,
             first_algebraic,
+            clean_fixed,
             provenance: None,
         }
     }
@@ -101,6 +105,13 @@ impl<'r> CoupledProblem<'r> {
     pub fn workspace(&self) -> SolveWorkspace {
         SolveWorkspace::seeded(self.body, self.coordinates.clone())
     }
+    /// Reusable stage evaluation buffers for `reevaluate_in`.
+    pub fn evaluation_scratch(&self) -> EvaluationScratch {
+        EvaluationScratch(StageValues::with_capacity(
+            self.body.columns().len(),
+            self.body.rows().len(),
+        ))
+    }
     pub(crate) fn layout(&self) -> Digest {
         self.body.model_hash().digest()
     }
@@ -110,24 +121,32 @@ impl<'r> CoupledProblem<'r> {
         if point.layout != self.layout() || point.unknowns.len() != rows || point.derivative.len() != rows {
             return Err(ticket.mismatch().into());
         }
-        let bad = |values: &[f64]| values.iter().position(|value| !value.is_finite());
-        match bad(point.unknowns).or_else(|| bad(point.derivative)) {
-            None => Ok(()),
-            Some(at) => Err(ticket.refuse(NumericalRefusal::TrialDomain {
-                source: self.body.row_source(self.body.rows()[at].id()),
-            })),
+        if all_finite(point.unknowns) && all_finite(point.derivative) {
+            return Ok(());
         }
+        let bad = |values: &[f64]| values.iter().position(|value| !value.is_finite());
+        let at = bad(point.unknowns)
+            .or_else(|| bad(point.derivative))
+            .expect("all_finite returned false");
+        Err(ticket.refuse(NumericalRefusal::TrialDomain {
+            source: self.body.row_source(self.body.rows()[at].id()),
+        }))
     }
     fn undefined(&self, ticket: &StepTicket, undefined: Undefined) -> TrialFailure {
         ticket.refuse(NumericalRefusal::TrialDomain {
             source: self.body.undefined_source(undefined),
         })
     }
-    pub(crate) fn evaluate_raw(&self, point: &StagePoint<'_, '_>) -> Result<RawEvaluation, TrialFailure> {
+    fn evaluate_raw_into(
+        &self,
+        point: &StagePoint<'_, '_>,
+        out: &mut StageValues,
+    ) -> Result<(), TrialFailure> {
         self.check(point)?;
         let ticket = point.time.ticket;
         let factors = self.factors(point);
         let modes = &self.accepted.state().modes;
+        let clean = self.clean_fixed && self.body.tape.clean_factors(&factors, point.unknowns.len());
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
@@ -136,10 +155,17 @@ impl<'r> CoupledProblem<'r> {
             draws: self.chance.draws(),
             factors: &factors,
         };
-        let stage = self
-            .body
-            .evaluate_stage(&inputs, point.derivative)
-            .map_err(|undefined| self.undefined(ticket, undefined))?;
+        self.body
+            .evaluate_stage_into(&inputs, point.derivative, clean, out)
+            .map_err(|undefined| self.undefined(ticket, undefined))
+    }
+    pub(crate) fn evaluate_raw(&self, point: &StagePoint<'_, '_>) -> Result<RawEvaluation, TrialFailure> {
+        let mut stage = StageValues {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            residuals: Vec::new(),
+        };
+        self.evaluate_raw_into(point, &mut stage)?;
         Ok(RawEvaluation {
             columns: stage.columns,
             rows: stage.rows,
@@ -191,6 +217,29 @@ impl<'r> CoupledProblem<'r> {
         evaluation.residuals = residuals;
         Ok(())
     }
+    /// Evaluates `point` into an existing `StageEvaluation`, swapping stage buffers with `scratch` to avoid
+    /// reallocating stage vectors across repeated Newton updates (forcing evaluation may still allocate when
+    /// forcings are active). On error `evaluation` stays unchanged.
+    pub fn reevaluate_in(
+        &self,
+        point: &StagePoint<'_, '_>,
+        evaluation: &mut StageEvaluation,
+        scratch: &mut EvaluationScratch,
+    ) -> Result<(), TrialFailure> {
+        self.evaluate_raw_into(point, &mut scratch.0)?;
+        evaluation.layout = point.layout;
+        evaluation.ticket = point.time.ticket.digest;
+        evaluation.offset_ns = point.time.offset_ns;
+        evaluation.provenance = self.provenance;
+        evaluation.unknowns.clear();
+        evaluation.unknowns.extend_from_slice(point.unknowns);
+        evaluation.derivative.clear();
+        evaluation.derivative.extend_from_slice(point.derivative);
+        core::mem::swap(&mut evaluation.columns, &mut scratch.0.columns);
+        core::mem::swap(&mut evaluation.rows, &mut scratch.0.rows);
+        core::mem::swap(&mut evaluation.residuals, &mut scratch.0.residuals);
+        Ok(())
+    }
     pub(crate) fn evaluate_published(
         &self,
         ticket: &StepTicket,
@@ -199,12 +248,17 @@ impl<'r> CoupledProblem<'r> {
         if unknowns.len() != self.body.rows().len() {
             return Err(ticket.mismatch().into());
         }
-        if let Some(at) = unknowns.iter().position(|value| !value.is_finite()) {
+        if !all_finite(unknowns) {
+            let at = unknowns
+                .iter()
+                .position(|value| !value.is_finite())
+                .expect("all_finite returned false");
             return Err(ticket.refuse(NumericalRefusal::TrialDomain {
                 source: self.body.row_source(self.body.rows()[at].id()),
             }));
         }
         let factors = self.end_factors(ticket);
+        let clean = self.clean_fixed && self.body.tape.clean_factors(&factors, unknowns.len());
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
@@ -215,13 +269,14 @@ impl<'r> CoupledProblem<'r> {
         };
         (self
             .body
-            .evaluate_published(&inputs, self.first_algebraic, ticket.interval().end()))
+            .evaluate_published_checked(&inputs, self.first_algebraic, ticket.interval().end(), clean))
         .map_err(|undefined| self.undefined(ticket, undefined))
     }
     fn linearize_values(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Vec<f64>, TrialFailure> {
         self.check(point)?;
         let ticket = point.time.ticket;
         let factors = self.factors(point);
+        let clean = self.clean_fixed && self.body.tape.clean_factors(&factors, point.unknowns.len());
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
@@ -230,7 +285,8 @@ impl<'r> CoupledProblem<'r> {
             draws: self.chance.draws(),
             factors: &factors,
         };
-        (self.body.jacobian(&inputs, shift.per_second)).map_err(|undefined| self.undefined(ticket, undefined))
+        (self.body.jacobian_checked(&inputs, shift.per_second, clean))
+            .map_err(|undefined| self.undefined(ticket, undefined))
     }
     /// `dF/dy + shift * dF/dy'` by fixed-order forward differentiation over the compiled sparsity.
     pub fn linearize(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Jacobian, TrialFailure> {
@@ -603,6 +659,9 @@ pub struct StageTime<'t> {
     pub(crate) offset_ns: u64,
 }
 
+/// Reusable stage buffers passed to `CoupledProblem::reevaluate_in`.
+pub struct EvaluationScratch(StageValues);
+
 /// Solver-writable trial coordinates. A problem's holds row `i` at slot `i`, and an admission system states its own.
 pub struct SolveWorkspace {
     layout: Digest,
@@ -705,5 +764,140 @@ impl<'a> SparseView<'a> {
     }
     pub fn values(&self) -> &'a [f64] {
         self.values
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::*;
+
+    fn measure<U>(value: f64) -> Measure<U> {
+        Measure::new(value).expect("finite")
+    }
+
+    #[test]
+    fn reevaluate_in_matches_reevaluate_and_keeps_previous_on_error() {
+        let at = || Position::new(measure(0.0), measure(0.0), measure(0.0));
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at());
+        let a = map.site::<VesselSegment>("artery", at());
+        let b = map.site::<VesselSegment>("vein", at());
+        map.contain(root.id(), a.id());
+        map.contain(root.id(), b.id());
+        map.unsupplied(&[a.id(), b.id()]);
+        map.connect(Network::Vascular, a.id(), b.id());
+        map.connect(Network::Vascular, b.id(), a.id());
+        let mut schema = Schema::new(map.finish().expect("anatomy")).expect("schema");
+        schema.partial_volume(measure(0.018)).expect("partial volume");
+        for space in [Space::Cells, Space::Interstitium] {
+            schema.leave_out(space, "bench");
+        }
+        let body = assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Minutes, 1_000_000_000)?;
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let flow = cv.edge_parameter::<VascularEdge, Rate<Water>>(
+                ParameterKey::new("cv.flow"),
+                Admissible::finite(),
+            );
+            let circulation = ports.circulation(&mut cv);
+            let law = cv.edge_kernel(|mut k| {
+                let rate = k.edge_parameter(&flow);
+                k.finish(rate, cv.every_mode(), class)
+            });
+            cv.transfer_along(&circulation, law);
+            body.add(cv.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let mut packet = ParameterPacket::new();
+        for (from, to, rate) in [(a.id(), b.id(), 2.0), (b.id(), a.id(), -0.5)] {
+            packet
+                .synthetic(
+                    ParameterKey::new("cv.flow"),
+                    Binding::Edge { from, to },
+                    measure::<Rate<Water>>(rate),
+                    "synthetic",
+                )
+                .expect("flow");
+        }
+        packet.start_rest(&body, |_| 10.0, "synthetic").expect("start");
+        let bound = body.bind(packet).expect("bound");
+        let system = body
+            .initialization(
+                bound,
+                BoundaryPort::new(Vec::new()).expect("port"),
+                InitializationRequest::at(SimTime::from_ns(0)),
+            )
+            .expect("system");
+        let solved = system.workspace();
+        let history = MethodHistory::new(Digest::of_canonical(b"test"), SimTime::from_ns(0), Vec::new());
+        let origin = system.admit(solved, history).expect("admitted");
+        let scales = ErrorScales::uniform(measure(1.0), measure(1e-3)).expect("scales");
+        let resolution = DeclaredResolution::new(
+            Digest::of_canonical(b"test core"),
+            NonZeroU64::new(100_000).expect("nonzero"),
+            4,
+            ArithmeticProfile::contract_v1(),
+            StageScheme::backward_euler_halved(),
+            scales,
+        );
+        let identity = RunIdentity::new(
+            body.model_hash(),
+            origin.packet_hash(),
+            Seed::new([7, 8, 9, 10]),
+            resolution,
+        );
+        let head = AcceptedHead::admitted(origin, RecordHash::Blake2b);
+        let base = Digest::of_canonical(b"base");
+        let span_ns = 10_000_000;
+        let Err(failure) = head.attempt(
+            &body,
+            &identity,
+            base,
+            Attempt::First { span_ns },
+            |problem, ticket| {
+                let mut ws = problem.workspace();
+                let mut scratch = problem.evaluation_scratch();
+                let time = ticket.at(span_ns)?;
+                let mut via_reeval = problem.evaluate(&ws.point(time))?;
+                let mut via_scratch = problem.evaluate(&ws.point(time))?;
+                for step in 1..=3 {
+                    ws.derivative_mut()[0] = step as f64;
+                    ws.derivative_mut()[1] = -(step as f64);
+                    problem.reevaluate(&ws.point(time), &mut via_reeval)?;
+                    problem.reevaluate_in(&ws.point(time), &mut via_scratch, &mut scratch)?;
+                    assert_eq!(
+                        via_scratch
+                            .residuals()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .collect::<Vec<_>>(),
+                        via_reeval
+                            .residuals()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .collect::<Vec<_>>(),
+                    );
+                }
+                let before_bits: Vec<u64> = via_scratch.residuals().iter().map(|v| v.to_bits()).collect();
+                ws.unknowns_mut()[0] = f64::NAN;
+                assert!(
+                    problem
+                        .reevaluate_in(&ws.point(time), &mut via_scratch, &mut scratch)
+                        .is_err()
+                );
+                let after_bits: Vec<u64> = via_scratch.residuals().iter().map(|v| v.to_bits()).collect();
+                assert_eq!(after_bits, before_bits);
+                Err(ticket.refuse(NumericalRefusal::IterationLimit))
+            },
+            |_| Ok(()),
+        ) else {
+            panic!("probe refuses after verifying reevaluate_in");
+        };
+        assert!(
+            matches!(failure, TrialFailure::Refused(refused) if refused.reason() == NumericalRefusal::IterationLimit),
+            "unexpected failure: {failure:?}"
+        );
     }
 }

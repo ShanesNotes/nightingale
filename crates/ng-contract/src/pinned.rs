@@ -12,6 +12,8 @@ const EXPM1_FLOOR: f64 = f64::from_bits(0xC043_687A_9F1A_F2B1);
 const TWO_NEG_54: f64 = f64::from_bits(0x3C90_0000_0000_0000);
 const MANTISSA: u64 = 0x000F_FFFF_FFFF_FFFF;
 const ONE_BITS: u64 = 0x3FF0_0000_0000_0000;
+/// `0.5 - 2^-54`, so adding it before truncation matches `f64::round` on small arguments without calling libm.
+const HALF_DOWN: f64 = f64::from_bits(0x3FDF_FFFF_FFFF_FFFF);
 
 const EXP_SERIES: [f64; 11] = [
     1.0 / 6_227_020_800.0,
@@ -65,10 +67,17 @@ const SIN_SERIES: [f64; 10] = [
     1.0,
 ];
 
-fn horner(series: &[f64], x: f64) -> f64 {
-    series.iter().fold(0.0, |sum, &term| sum * x + term)
+#[inline(always)]
+fn horner<const N: usize>(series: &[f64; N], x: f64) -> f64 {
+    series[1..].iter().fold(series[0], |sum, &term| sum * x + term)
 }
 
+#[inline(always)]
+fn round_small(y: f64) -> i32 {
+    (if y >= 0.0 { y + HALF_DOWN } else { y - HALF_DOWN }) as i32
+}
+
+#[inline(always)]
 fn power_of_two(exponent: i32) -> f64 {
     f64::from_bits(((exponent + 1023) as u64) << 52)
 }
@@ -76,6 +85,7 @@ fn power_of_two(exponent: i32) -> f64 {
 /// `e^x` within one unit in the last place: Cody-Waite reduction by a split `ln 2`, then a degree 13
 /// Taylor polynomial. `exp(0)` is exactly 1, the result is `+inf` past the overflow threshold and `+0`
 /// past the underflow threshold, and `NaN` returns `NaN`.
+#[inline]
 pub fn exp(x: f64) -> f64 {
     if x.is_nan() {
         return x;
@@ -86,16 +96,16 @@ pub fn exp(x: f64) -> f64 {
     if x < EXP_UNDERFLOW {
         return 0.0;
     }
-    let k = (x * INV_LN2).round();
+    let k_int = round_small(x * INV_LN2);
+    let k = f64::from(k_int);
     let high = x - k * LN2_HI;
     let low = k * LN2_LO;
     let r = high - low;
     let tail = r * r * (0.5 + r * horner(&EXP_SERIES, r));
     let y = 1.0 + (high + (tail - low));
-    let k = k as i32;
-    let half = k / 2;
+    let half = k_int / 2;
     // The first factor is exact, so a subnormal result rounds once, at the second.
-    y * power_of_two(half) * power_of_two(k - half)
+    y * power_of_two(half) * power_of_two(k_int - half)
 }
 
 /// `e^x - 1` within one unit in the last place, by `exp`'s reduction and polynomial with the reduction's rounding
@@ -112,14 +122,15 @@ pub(crate) fn expm1(x: f64) -> f64 {
     if x < EXPM1_FLOOR {
         return -1.0;
     }
-    let k = (x * INV_LN2).round();
+    let k_int = round_small(x * INV_LN2);
+    let k = f64::from(k_int);
     let high = x - k * LN2_HI;
     let low = k * LN2_LO;
     let r = high - low;
     let carried = (high - r) - low;
     let tail = r * r * (0.5 + r * horner(&EXP_SERIES, r));
     let s = tail + carried * (1.0 + r);
-    let k = k as i32;
+    let k = k_int;
     match k {
         0 => r + s,
         -1 => 0.5 * (r + s) - 0.5,
@@ -134,13 +145,8 @@ pub(crate) fn expm1(x: f64) -> f64 {
     }
 }
 
-pub(crate) fn ln(x: f64) -> Option<f64> {
-    if x.is_nan() || x <= 0.0 {
-        return None;
-    }
-    if x.is_infinite() {
-        return Some(x);
-    }
+#[inline]
+pub(crate) fn ln_positive_finite(x: f64) -> f64 {
     let (x, shift) = if x < f64::MIN_POSITIVE {
         (x * TWO_54, -54)
     } else {
@@ -159,7 +165,17 @@ pub(crate) fn ln(x: f64) -> Option<f64> {
     let half_square = 0.5 * f * f;
     let tail = s * (half_square + 2.0 * (z * horner(&ATANH_SERIES, z)));
     let k = f64::from(exponent);
-    Some(k * LN2_HI - ((half_square - (tail + k * LN2_LO)) - f))
+    k * LN2_HI - ((half_square - (tail + k * LN2_LO)) - f)
+}
+
+pub(crate) fn ln(x: f64) -> Option<f64> {
+    if x.is_nan() || x <= 0.0 {
+        return None;
+    }
+    if x.is_infinite() {
+        return Some(x);
+    }
+    Some(ln_positive_finite(x))
 }
 
 pub(crate) fn turn(k: u64, eighth: NonZeroU64) -> (f64, f64) {
@@ -413,5 +429,29 @@ mod tests {
         assert_eq!(ln(f64::NEG_INFINITY), None);
         assert_eq!(ln(f64::NAN), None);
         assert_eq!(ln(f64::INFINITY), Some(f64::INFINITY));
+    }
+
+    #[test]
+    fn round_small_matches_f64_round_at_every_half_integer_boundary() {
+        for n in -1076..=1026 {
+            for half in [n as f64 + 0.5, n as f64] {
+                let bits = half.to_bits();
+                for delta in -2_i64..=2 {
+                    let y = f64::from_bits(bits.wrapping_add(delta as u64));
+                    if y.is_finite() {
+                        assert_eq!(
+                            super::round_small(y),
+                            y.round() as i32,
+                            "y={y:?} ({:#x})",
+                            y.to_bits()
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(super::round_small(0.0), 0);
+        assert_eq!(super::round_small(-0.0), 0);
+        assert_eq!(super::round_small(-1e-300), 0);
+        assert_eq!(super::round_small(1e-300), 0);
     }
 }

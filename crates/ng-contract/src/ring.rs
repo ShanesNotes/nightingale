@@ -1,37 +1,207 @@
 use crate::admission::{AdmissionWorkspace, Correction};
-use crate::elimination::{Factors, LANES, Marks, Reach};
+use crate::elimination::{Factors, LANES, Marks, RING_LANES, Reach};
 use crate::{InitializationSystem, Jacobian};
 
 const ROUNDING: f64 = 8.0 * f64::EPSILON;
 const PANEL: usize = 16;
+const TILE_W: usize = 64;
+const ROW_BLOCK: usize = 8;
+const NEGATIVE_ZERO: u64 = 0x8000_0000_0000_0000;
 
-/// `matrix` holds each row with its right side last. A row with no pivot left is named: it has no rank. A pivot is read
-/// beside its row and its column as given, and the smaller of the two: after elimination a row's own largest entry can be
-/// rounding, and a row and a column can each run at a scale of their own.
+#[inline(always)]
+fn sub_fused<const K: usize>(cells: &mut [f64], leads: [&[f64]; K], factors: [f64; K]) {
+    let n = cells.len();
+    for lead in leads {
+        assert!(lead.len() >= n);
+    }
+    let mut base = 0;
+    while base + 8 <= n {
+        let mut acc = [0.0_f64; 8];
+        acc.copy_from_slice(&cells[base..base + 8]);
+        for k in 0..K {
+            let lead = &leads[k][base..base + 8];
+            let f = factors[k];
+            for i in 0..8 {
+                acc[i] -= f * lead[i];
+            }
+        }
+        cells[base..base + 8].copy_from_slice(&acc);
+        base += 8;
+    }
+    while base < n {
+        let mut acc = cells[base];
+        for k in 0..K {
+            acc -= factors[k] * leads[k][base];
+        }
+        cells[base] = acc;
+        base += 1;
+    }
+}
+
+#[inline(always)]
+fn apply_fused(
+    cells: &mut [f64],
+    above: &[f64],
+    start: usize,
+    stride: usize,
+    lead_col: usize,
+    width: usize,
+    factors: &[(u8, f64)],
+) {
+    let lead_at = |k: u8| -> &[f64] {
+        let base = (start + k as usize) * stride + lead_col;
+        &above[base..base + width]
+    };
+    let mut pos = 0;
+    while pos + 8 <= factors.len() {
+        sub_fused(
+            cells,
+            [
+                lead_at(factors[pos].0),
+                lead_at(factors[pos + 1].0),
+                lead_at(factors[pos + 2].0),
+                lead_at(factors[pos + 3].0),
+                lead_at(factors[pos + 4].0),
+                lead_at(factors[pos + 5].0),
+                lead_at(factors[pos + 6].0),
+                lead_at(factors[pos + 7].0),
+            ],
+            [
+                factors[pos].1,
+                factors[pos + 1].1,
+                factors[pos + 2].1,
+                factors[pos + 3].1,
+                factors[pos + 4].1,
+                factors[pos + 5].1,
+                factors[pos + 6].1,
+                factors[pos + 7].1,
+            ],
+        );
+        pos += 8;
+    }
+    if pos + 4 <= factors.len() {
+        sub_fused(
+            cells,
+            [
+                lead_at(factors[pos].0),
+                lead_at(factors[pos + 1].0),
+                lead_at(factors[pos + 2].0),
+                lead_at(factors[pos + 3].0),
+            ],
+            [
+                factors[pos].1,
+                factors[pos + 1].1,
+                factors[pos + 2].1,
+                factors[pos + 3].1,
+            ],
+        );
+        pos += 4;
+    }
+    match factors.len() - pos {
+        3 => sub_fused(
+            cells,
+            [
+                lead_at(factors[pos].0),
+                lead_at(factors[pos + 1].0),
+                lead_at(factors[pos + 2].0),
+            ],
+            [factors[pos].1, factors[pos + 1].1, factors[pos + 2].1],
+        ),
+        2 => sub_fused(
+            cells,
+            [lead_at(factors[pos].0), lead_at(factors[pos + 1].0)],
+            [factors[pos].1, factors[pos + 1].1],
+        ),
+        1 => sub_fused(cells, [lead_at(factors[pos].0)], [factors[pos].1]),
+        _ => {}
+    }
+}
+
+/// `matrix` holds each row with its right side last. An unknown with no pivot left is named: it has no rank. A pivot
+/// is read beside its row and its column as given, and the smaller of the two: after elimination a row's own largest
+/// entry can be rounding, and a row and a column can each run at a scale of their own.
 pub fn eliminate(matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
-    Ok(reduced(matrix)?.into_iter().map(|answers| answers[0]).collect())
+    let size = matrix.len();
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let stride = size + 1;
+    let mut flat = Vec::with_capacity(size * stride);
+    for row in matrix {
+        flat.extend_from_slice(&row[..stride]);
+    }
+    eliminate_flat(&mut flat, size)
+}
+
+pub(crate) fn eliminate_flat(flat: &mut [f64], size: usize) -> Result<Vec<f64>, usize> {
+    reduced_flat(flat, size, 1)
 }
 
 /// Each row holds its entries and then any number of right sides, and each row of the answer one value per side.
-fn reduced(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
+#[cfg(test)]
+fn reduced(matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
     let size = matrix.len();
-    let mut slots: Vec<usize> = (0..size).collect();
-    let largest = |most: f64, cell: f64| if cell.abs() > most { cell.abs() } else { most };
-    let mut across: Vec<f64> = (matrix.iter())
-        .map(|row| row[..size].iter().copied().fold(0.0, largest))
-        .collect();
-    let down: Vec<f64> = (0..size)
-        .map(|column| matrix.iter().map(|row| row[column]).fold(0.0, largest))
-        .collect();
-    // Each cell takes the same terms in the same order as a pivot at a time gives it.
+    let sides = matrix.first().map_or(0, |row| row.len() - size);
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let stride = size + sides;
+    let mut flat = Vec::with_capacity(size * stride);
+    for row in matrix {
+        flat.extend_from_slice(&row[..stride]);
+    }
+    let flat_answers = reduced_flat(&mut flat, size, sides)?;
+    Ok(flat_answers.chunks(sides).map(|row| row.to_vec()).collect())
+}
+
+/// Flat row-major Gaussian elimination with partial pivoting and L1-tiled panel updates.
+/// Every cell takes the exact same terms in the exact same pivot order as one pivot at a time.
+fn reduced_flat(flat: &mut [f64], size: usize, sides: usize) -> Result<Vec<f64>, usize> {
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let stride = size + sides;
+    let mut across = vec![0.0_f64; size];
+    let mut down = vec![0.0_f64; size];
+    let mut has_neg_zero = false;
+    for row in 0..size {
+        let cells = &flat[row * stride..row * stride + stride];
+        for &cell in cells {
+            if cell.to_bits() == NEGATIVE_ZERO {
+                has_neg_zero = true;
+            }
+        }
+        let mut row_max = 0.0;
+        for (column, &cell) in cells[..size].iter().enumerate() {
+            let mag = cell.abs();
+            if mag > row_max {
+                row_max = mag;
+            }
+            if mag > down[column] {
+                down[column] = mag;
+            }
+        }
+        across[row] = row_max;
+    }
+    struct ActiveRow {
+        row: usize,
+        mask: u16,
+        count: usize,
+        factors: [(u8, f64); PANEL],
+    }
     let mut pending: Vec<[Option<f64>; PANEL]> = vec![[None; PANEL]; size];
+    let mut active_rows: Vec<ActiveRow> = Vec::with_capacity(size);
+    let mut tile_masks: Vec<u16> = vec![0; stride.div_ceil(TILE_W)];
     for start in (0..size).step_by(PANEL) {
         let end = (start + PANEL).min(size);
         for pivot in start..end {
             let mut best = pivot;
+            let mut best_mag = flat[pivot * stride + pivot].abs();
             for row in pivot + 1..size {
-                if matrix[row][pivot].abs() > matrix[best][pivot].abs() {
+                let mag = flat[row * stride + pivot].abs();
+                if mag > best_mag {
                     best = row;
+                    best_mag = mag;
                 }
             }
             let reach = if across[best] < down[pivot] {
@@ -39,48 +209,159 @@ fn reduced(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
             } else {
                 down[pivot]
             };
-            if matrix[best][pivot].abs() <= ROUNDING * reach {
-                return Err(slots[pivot]);
+            if best_mag <= ROUNDING * reach {
+                return Err(pivot);
             }
-            matrix.swap(pivot, best);
-            slots.swap(pivot, best);
+            if best != pivot {
+                let (top, bottom) = flat.split_at_mut(best * stride);
+                top[pivot * stride..(pivot + 1) * stride].swap_with_slice(&mut bottom[..stride]);
+            }
             across.swap(pivot, best);
             pending.swap(pivot, best);
-            let (above, below) = matrix.split_at_mut(pivot + 1);
-            let leading = &above[pivot][pivot..end];
-            for (row, waiting) in below.iter_mut().zip(&mut pending[pivot + 1..]) {
+            let (above, below) = flat.split_at_mut((pivot + 1) * stride);
+            let leading = &above[pivot * stride + pivot..pivot * stride + end];
+            let lead_diag = leading[0];
+            let panel_width = end - pivot;
+            for (offset, waiting) in pending[pivot + 1..].iter_mut().enumerate() {
+                let row = &mut below[offset * stride + pivot..offset * stride + end];
                 // A row with nothing under the pivot keeps its cells; a zero factor would only rewrite a zero's sign.
-                if row[pivot] == 0.0 {
+                if row[0] == 0.0 {
                     continue;
                 }
-                let factor = row[pivot] / leading[0];
+                let factor = row[0] / lead_diag;
                 waiting[pivot - start] = Some(factor);
-                for (cell, lead) in row[pivot..end].iter_mut().zip(leading) {
-                    *cell -= factor * lead;
+                for at in 0..panel_width {
+                    row[at] -= factor * leading[at];
                 }
             }
         }
+        active_rows.clear();
+        let mut all_factors_finite = true;
         for (row, waiting) in pending.iter().enumerate().skip(start + 1) {
-            let (above, below) = matrix.split_at_mut(row);
-            let cells = &mut below[0][end..];
+            let mut list = [(0_u8, 0.0_f64); PANEL];
+            let mut count = 0_usize;
+            let mut mask = 0_u16;
             for pivot in start..end.min(row) {
                 if let Some(factor) = waiting[pivot - start] {
-                    for (cell, lead) in cells.iter_mut().zip(&above[pivot][end..]) {
-                        *cell -= factor * lead;
+                    let k = (pivot - start) as u8;
+                    list[count] = (k, factor);
+                    mask |= 1_u16 << k;
+                    count += 1;
+                    all_factors_finite &= factor.is_finite();
+                }
+            }
+            if count > 0 {
+                active_rows.push(ActiveRow {
+                    row,
+                    mask,
+                    count,
+                    factors: list,
+                });
+            }
+        }
+        if !active_rows.is_empty() && end < stride {
+            let split = active_rows.partition_point(|active| active.row < end);
+            for active in &active_rows[..split] {
+                let (above, below) = flat.split_at_mut(active.row * stride);
+                let cells = &mut below[end..stride];
+                for &(k, factor) in &active.factors[..active.count] {
+                    let lead =
+                        &above[(start + k as usize) * stride + end..(start + k as usize) * stride + stride];
+                    for (cell, &l) in cells.iter_mut().zip(lead) {
+                        *cell -= factor * l;
+                    }
+                }
+            }
+            let trailing = &active_rows[split..];
+            if !trailing.is_empty() {
+                let skip_zeros = !has_neg_zero && all_factors_finite;
+                let panel_rows = end - start;
+                let rem = stride - end;
+                let num_tiles = rem.div_ceil(TILE_W);
+                let (above, below) = flat.split_at_mut(end * stride);
+                if skip_zeros {
+                    tile_masks[..num_tiles].fill(0);
+                    for k in 0..panel_rows {
+                        let bit = 1_u16 << k;
+                        let lead = &above[(start + k) * stride + end..(start + k) * stride + stride];
+                        for (t, tmask) in tile_masks[..num_tiles].iter_mut().enumerate() {
+                            let col = t * TILE_W;
+                            let width = (rem - col).min(TILE_W);
+                            if lead[col..col + width].iter().any(|v| v.to_bits() != 0) {
+                                *tmask |= bit;
+                            }
+                        }
+                    }
+                } else {
+                    let all_bits = if panel_rows == PANEL {
+                        u16::MAX
+                    } else {
+                        (1_u16 << panel_rows) - 1
+                    };
+                    tile_masks[..num_tiles].fill(all_bits);
+                }
+                let mut filtered = [(0_u8, 0.0_f64); PANEL];
+                for row_group in trailing.chunks(ROW_BLOCK) {
+                    let group_mask = row_group.iter().fold(0_u16, |acc, active| acc | active.mask);
+                    for (t, &tmask) in tile_masks[..num_tiles].iter().enumerate() {
+                        if (group_mask & tmask) == 0 {
+                            continue;
+                        }
+                        let col = t * TILE_W;
+                        let width = (rem - col).min(TILE_W);
+                        let lead_col = end + col;
+                        for active in row_group {
+                            let active_mask = active.mask & tmask;
+                            if active_mask == 0 {
+                                continue;
+                            }
+                            let cell_start = (active.row - end) * stride + lead_col;
+                            let cells = &mut below[cell_start..cell_start + width];
+                            if active_mask == active.mask {
+                                apply_fused(
+                                    cells,
+                                    above,
+                                    start,
+                                    stride,
+                                    lead_col,
+                                    width,
+                                    &active.factors[..active.count],
+                                );
+                            } else {
+                                let mut n = 0;
+                                for &(k, factor) in &active.factors[..active.count] {
+                                    if (tmask & (1_u16 << k)) != 0 {
+                                        filtered[n] = (k, factor);
+                                        n += 1;
+                                    }
+                                }
+                                apply_fused(cells, above, start, stride, lead_col, width, &filtered[..n]);
+                            }
+                        }
                     }
                 }
             }
         }
         pending.fill([None; PANEL]);
     }
-    let sides = matrix.first().map_or(0, |row| row.len() - size);
-    let mut answers = vec![vec![0.0; sides]; size];
+    let mut answers = vec![0.0_f64; size * sides];
     for row in (0..size).rev() {
-        for side in 0..sides {
-            let known: f64 = (row + 1..size)
-                .map(|column| matrix[row][column] * answers[column][side])
+        let row_slice = &flat[row * stride..row * stride + stride];
+        let diag = row_slice[row];
+        if sides == 1 {
+            let known: f64 = row_slice[row + 1..size]
+                .iter()
+                .zip(&answers[row + 1..size])
+                .map(|(&a, &b)| a * b)
                 .sum();
-            answers[row][side] = (matrix[row][size + side] - known) / matrix[row][row];
+            answers[row] = (row_slice[size] - known) / diag;
+        } else {
+            for side in 0..sides {
+                let known: f64 = (row + 1..size)
+                    .map(|column| row_slice[column] * answers[column * sides + side])
+                    .sum();
+                answers[row * sides + side] = (row_slice[size + side] - known) / diag;
+            }
         }
     }
     Ok(answers)
@@ -99,26 +380,57 @@ impl Block<'_> {
     }
     fn solve_group(
         &self,
-        group: &mut [[f64; LANES]],
+        group: &mut [[f64; RING_LANES]],
+        active_lanes: usize,
         reach: Option<&Reach>,
         (at_row, at_unknown): (&[usize], &[usize]),
-        spare: &mut [[f64; LANES]],
+        spare: &mut [[f64; RING_LANES]],
         marks: &mut Marks,
-    ) {
+    ) -> bool {
         match self {
-            Block::Fixed(factors) => factors.solve_pivoted(group, reach, spare, marks),
+            Block::Fixed(factors) => factors.solve_pivoted_wide(group, reach, spare, marks),
             Block::Whole(_) => {
-                let mut sides: Vec<Vec<f64>> = (0..LANES)
+                let mut sides: Vec<Vec<f64>> = (0..active_lanes)
                     .map(|lane| at_row.iter().map(|&at| group[at][lane]).collect())
                     .collect();
                 for side in &mut sides {
                     self.solve(side);
                 }
                 for (unknown, &at) in at_unknown.iter().enumerate() {
-                    for (cell, side) in group[at].iter_mut().zip(&sides) {
+                    for (cell, side) in group[at][..active_lanes].iter_mut().zip(&sides) {
                         *cell = side[unknown];
                     }
                 }
+                false
+            }
+        }
+    }
+    fn solve_group_seeded_no_neg_zero(
+        &self,
+        (group, active_lanes): (&mut [[f64; RING_LANES]], usize),
+        reach: Option<&Reach>,
+        places: (&[usize], &[usize]),
+        marks: &mut Marks,
+        touched: &[u32],
+        rebuild: impl FnOnce(&mut [[f64; RING_LANES]]),
+    ) -> bool {
+        match (self, reach) {
+            (Block::Fixed(factors), Some(reach)) => {
+                if factors.solve_pivoted_seeded_no_neg_zero(group, reach, marks, touched) {
+                    return true;
+                }
+                group.fill([0.0; RING_LANES]);
+                rebuild(group);
+                factors.solve_pivoted_wide_fallback(group, Some(reach), marks);
+                false
+            }
+            (Block::Fixed(factors), None) => {
+                factors.solve_pivoted_wide_fallback(group, None, marks);
+                false
+            }
+            (Block::Whole(_), _) => {
+                let mut unused = Vec::new();
+                self.solve_group(group, active_lanes, reach, places, &mut unused, marks)
             }
         }
     }
@@ -140,14 +452,17 @@ impl Block<'_> {
 fn inverse(block: &Jacobian) -> Result<Vec<Vec<f64>>, usize> {
     let view = block.view();
     let size = view.row_offsets().len() - 1;
-    let mut matrix = vec![vec![0.0; 2 * size]; size];
-    for (row, cells) in matrix.iter_mut().enumerate() {
+    let stride = 2 * size;
+    let mut flat = vec![0.0; size * stride];
+    for row in 0..size {
+        let cells = &mut flat[row * stride..row * stride + stride];
         for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
             cells[view.columns()[entry].index()] += view.values()[entry];
         }
         cells[size + row] = 1.0;
     }
-    reduced(matrix)
+    let flat_answers = reduced_flat(&mut flat, size, size)?;
+    Ok(flat_answers.chunks(size).map(|row| row.to_vec()).collect())
 }
 
 impl InitializationSystem<'_> {
@@ -180,14 +495,17 @@ impl InitializationSystem<'_> {
         let (size, points) = (system.width(), workspace.leg_count());
         let plan = system.stage_plan().filter(|_| points > 1 && size > 0);
         let Some(plan) = plan else {
-            let mut matrix = vec![vec![0.0; right.len() + 1]; right.len()];
-            for (row, cells) in matrix.iter_mut().enumerate() {
+            let n = right.len();
+            let stride = n + 1;
+            let mut matrix = vec![0.0; n * stride];
+            for row in 0..n {
+                let cells = &mut matrix[row * stride..row * stride + stride];
                 for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
                     cells[view.columns()[entry].index()] += view.values()[entry];
                 }
-                cells[right.len()] = right[row];
+                cells[n] = right[row];
             }
-            return eliminate(matrix);
+            return eliminate_flat(&mut matrix, n);
         };
         let border = points * size;
         let fits = right.len() - border;
@@ -210,13 +528,12 @@ impl InitializationSystem<'_> {
         let seeds = read.len() + fits;
         let width = seeds + 1;
         let mut factors = Vec::with_capacity(last);
-        let groups = width.div_ceil(LANES);
+        let group_size = if width > RING_LANES { RING_LANES } else { LANES };
+        let groups = width.div_ceil(group_size);
         let base_places = plan.places();
-        let (mut first_unknown, mut prev_unknown): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
         let (mut order, mut slot_of): (Vec<usize>, Vec<usize>) = ((0..width).collect(), (0..width).collect());
-        let (mut before, mut first): (Vec<[f64; LANES]>, Vec<[f64; LANES]>) = (Vec::new(), Vec::new());
         let mut anchors = vec![vec![0.0; width]; fits];
-        let mut spare = vec![[0.0; LANES]; size];
+        let mut spare = vec![[0.0; RING_LANES]; size];
         let mut marks = Marks::new(size);
         let target = |place: usize| {
             if place >= border {
@@ -225,22 +542,91 @@ impl InitializationSystem<'_> {
                 read.binary_search(&(place - last * size))
             }
         };
+
+        let mut needed_from_prev: Vec<Vec<usize>> = (0..points).map(|_| Vec::new()).collect();
+        let mut needed_from_first: Vec<usize> = Vec::new();
+        let mut point_needs_dense_all = vec![false; points];
+        for p in 1..points {
+            let prev_range = own(p - 1);
+            let mut needed = Vec::new();
+            let mut nonfinite = false;
+            for row in 0..size {
+                for (place, value) in line(p * size + row) {
+                    if !own(p).contains(&place) {
+                        if !value.is_finite() {
+                            nonfinite = true;
+                        }
+                        if p == last && place < size {
+                            needed_from_first.push(place);
+                        } else if prev_range.contains(&place) {
+                            needed.push(place - (p - 1) * size);
+                        }
+                    }
+                }
+            }
+            needed.sort_unstable();
+            needed.dedup();
+            needed_from_prev[p] = needed;
+            point_needs_dense_all[p] = nonfinite;
+        }
+        needed_from_first.sort_unstable();
+        needed_from_first.dedup();
+        let mut first_pos = vec![0_usize; size];
+        for (idx, &local) in needed_from_first.iter().enumerate() {
+            first_pos[local] = idx;
+        }
+        let mut last_pos = vec![0_usize; size];
+        for (idx, &local) in needed_from_prev[last].iter().enumerate() {
+            last_pos[local] = idx;
+        }
+
+        let mut first_by_unknown = vec![0.0_f64; needed_from_first.len() * width];
+        let mut last_by_unknown = vec![0.0_f64; needed_from_prev[last].len() * width];
+        let mut cells = vec![[0.0; RING_LANES]; size];
+        let mut foreign: Vec<Vec<(usize, f64)>> = vec![Vec::new(); size];
+        let mut reads: Vec<Vec<(usize, f64)>> = vec![Vec::new(); size];
+        let mut terms: Vec<Vec<(usize, usize, usize, f64)>> = vec![Vec::new(); groups];
+        let mut anchor_entries: Vec<Vec<(usize, f64)>> = vec![Vec::new(); fits];
+        let mut prev_pos = vec![0_usize; size];
+        let mut readers_offsets: Vec<usize> = Vec::new();
+        let mut readers_data: Vec<(u32, f64)> = Vec::new();
+        let mut prev_scratch: Vec<[f64; RING_LANES]> = Vec::new();
+        let mut touched: Vec<u32> = Vec::with_capacity(size);
+
+        let mut cur_sparse_offsets: Vec<usize> = vec![0; groups + 1];
+        let mut cur_sparse_idx: Vec<u32> = Vec::new();
+        let mut cur_sparse_val: Vec<[f64; RING_LANES]> = Vec::new();
+        let mut cur_dense: Vec<[f64; RING_LANES]> = Vec::new();
+        let mut next_sparse_offsets: Vec<usize> = vec![0; groups + 1];
+        let mut next_sparse_idx: Vec<u32> = Vec::new();
+        let mut next_sparse_val: Vec<[f64; RING_LANES]> = Vec::new();
+        let mut next_dense: Vec<[f64; RING_LANES]> = Vec::new();
+
+        let mut block_cells = vec![0.0_f64; size];
+        let mut block_values = Vec::new();
         for point in 0..last {
-            let block = system.block(ring, point);
-            let lu = match system.factor(&block) {
+            system.block_values(ring, point, &mut block_cells, &mut block_values);
+            let lu = match plan.factor(&block_values) {
                 Ok(factors) => Block::Fixed(factors),
-                Err(_) => Block::Whole(inverse(&block)?),
+                Err(_) => {
+                    let block = system.block(ring, point);
+                    Block::Whole(inverse(&block).map_err(|at| point * size + at)?)
+                }
             };
             let (at_row, at_unknown) = match &lu {
                 Block::Fixed(factors) => factors.places(),
                 Block::Whole(_) => base_places.clone(),
             };
             let reach = lu.reach();
-            let foreign: Vec<Vec<(usize, f64)>> = (0..size)
-                .map(|row| {
-                    (line(point * size + row).filter(|(place, _)| !own(point).contains(place))).collect()
-                })
-                .collect();
+            let own_range = own(point);
+            for (row, list) in foreign.iter_mut().enumerate() {
+                list.clear();
+                for (place, value) in line(point * size + row) {
+                    if !own_range.contains(&place) {
+                        list.push((place, value));
+                    }
+                }
+            }
             let seeded = |place: usize| place >= border || point == 0;
             if let (0, Some(reach)) = (point, &reach) {
                 let mut rows: Vec<Vec<usize>> = vec![Vec::new(); width];
@@ -261,27 +647,112 @@ impl InitializationSystem<'_> {
             }
             let general =
                 (foreign.iter().flatten()).any(|&(place, value)| seeded(place) && !value.is_finite());
-            let mut reads: Vec<Vec<(usize, f64)>> = vec![Vec::new(); size];
-            let mut terms: Vec<Vec<(usize, usize, usize, f64)>> = vec![Vec::new(); groups];
+            let prev_needed = &needed_from_prev[point];
+            let prev_count = prev_needed.len();
+            for (idx, &local) in prev_needed.iter().enumerate() {
+                prev_pos[local] = idx;
+            }
+            for list in &mut terms {
+                list.clear();
+            }
+            let mut max_reads_per_row = 0_usize;
+            let mut any_nonfinite_read = false;
             for (row, entries) in foreign.iter().enumerate() {
+                let row_reads = &mut reads[row];
+                row_reads.clear();
                 for &(place, value) in entries {
                     if !seeded(place) {
-                        reads[row].push((prev_unknown[place - (point - 1) * size], value));
+                        let compact = prev_pos[place - (point - 1) * size];
+                        row_reads.push((compact, value));
+                        if !value.is_finite() {
+                            any_nonfinite_read = true;
+                        }
                     } else if let Ok(column) = target(place) {
                         let slot = slot_of[column];
-                        terms[slot / LANES].push((row, reads[row].len(), slot % LANES, value));
+                        terms[slot / group_size].push((row, row_reads.len(), slot % group_size, value));
+                    }
+                }
+                if row_reads.len() > max_reads_per_row {
+                    max_reads_per_row = row_reads.len();
+                }
+            }
+            let single_read_fast = point > 0 && max_reads_per_row <= 1 && !any_nonfinite_read;
+            if single_read_fast {
+                readers_offsets.clear();
+                readers_offsets.resize(prev_count + 1, 0);
+                for row_reads in &reads {
+                    if let Some(&(compact, _)) = row_reads.first() {
+                        readers_offsets[compact + 1] += 1;
+                    }
+                }
+                for c in 0..prev_count {
+                    readers_offsets[c + 1] += readers_offsets[c];
+                }
+                let total_readers = readers_offsets[prev_count];
+                readers_data.clear();
+                readers_data.resize(total_readers, (0, 0.0));
+                let mut fill = readers_offsets.clone();
+                for (row, row_reads) in reads.iter().enumerate() {
+                    if let Some(&(compact, value)) = row_reads.first() {
+                        let dst = fill[compact];
+                        readers_data[dst] = (at_row[row] as u32, value);
+                        fill[compact] = dst + 1;
                     }
                 }
             }
-            let mut walked = vec![[0.0; LANES]; groups * size];
-            for (group, cells) in walked.chunks_mut(size).enumerate() {
-                let lanes = &order[group * LANES..((group + 1) * LANES).min(width)];
-                let holds_right = group == slot_of[seeds] / LANES;
-                if holds_right || general {
+            for (fit, entries) in anchor_entries.iter_mut().enumerate() {
+                entries.clear();
+                for (place, value) in line(border + fit) {
+                    if own_range.contains(&place) {
+                        entries.push((at_unknown[place - point * size], value));
+                    }
+                }
+            }
+
+            let cur_has_dense_all = point_needs_dense_all[point];
+            let next_needed = &needed_from_prev[point + 1];
+            let next_count = next_needed.len();
+            let next_has_dense_all = point + 1 < last && point_needs_dense_all[point + 1];
+            let next_unknown: Vec<usize> = next_needed.iter().map(|&local| at_unknown[local]).collect();
+            let first_unknown_at: Vec<usize> = if point == 0 {
+                needed_from_first.iter().map(|&local| at_unknown[local]).collect()
+            } else {
+                Vec::new()
+            };
+            if point + 1 < last {
+                next_sparse_offsets.clear();
+                next_sparse_offsets.push(0);
+                next_sparse_idx.clear();
+                next_sparse_val.clear();
+                let dense_len = if next_has_dense_all {
+                    groups * next_count
+                } else {
+                    next_count
+                };
+                next_dense.resize(dense_len, [0.0; RING_LANES]);
+            }
+            if prev_scratch.len() < prev_count {
+                prev_scratch.resize(prev_count, [0.0; RING_LANES]);
+            }
+
+            let right_group = slot_of[seeds] / group_size;
+            let right_lane = slot_of[seeds] % group_size;
+            for group in 0..groups {
+                let lanes = &order[group * group_size..((group + 1) * group_size).min(width)];
+                let holds_right = group == right_group;
+                let used_reach = if holds_right || general {
+                    let use_dense = holds_right || cur_has_dense_all;
+                    let dense_base = if cur_has_dense_all { group * prev_count } else { 0 };
+                    if !use_dense && point > 0 {
+                        let span = cur_sparse_offsets[group]..cur_sparse_offsets[group + 1];
+                        for (&idx, &val) in cur_sparse_idx[span.clone()].iter().zip(&cur_sparse_val[span]) {
+                            prev_scratch[idx as usize] = val;
+                        }
+                    }
                     for (row, entries) in foreign.iter().enumerate() {
                         let sides = &mut cells[at_row[row]];
                         if holds_right {
-                            sides[slot_of[seeds] % LANES] = right[point * size + row];
+                            sides[right_lane] = right[point * size + row];
                         }
                         for &(place, value) in entries {
                             if seeded(place) {
@@ -290,8 +761,9 @@ impl InitializationSystem<'_> {
                                     // A side for a column `read` names or for a fit is a positive zero or not zero,
                                     // so a finite term leaves every side but its own and the right side's as it is.
                                     for at in column.ok().into_iter().chain([seeds]) {
-                                        if slot_of[at] / LANES == group {
-                                            sides[slot_of[at] % LANES] -= value * f64::from(column == Ok(at));
+                                        if slot_of[at] / group_size == group {
+                                            sides[slot_of[at] % group_size] -=
+                                                value * f64::from(column == Ok(at));
                                         }
                                     }
                                 } else {
@@ -300,8 +772,12 @@ impl InitializationSystem<'_> {
                                     }
                                 }
                             } else {
-                                let earlier =
-                                    &before[group * size + prev_unknown[place - (point - 1) * size]];
+                                let compact = prev_pos[place - (point - 1) * size];
+                                let earlier = if use_dense {
+                                    &cur_dense[dense_base + compact]
+                                } else {
+                                    &prev_scratch[compact]
+                                };
                                 // A side for a column `read` names or for a fit is a positive zero or not zero, so a
                                 // finite term over a zero read leaves it as it is. The right side's can be a negative
                                 // zero, and takes every term.
@@ -317,7 +793,107 @@ impl InitializationSystem<'_> {
                             }
                         }
                     }
+                    if !use_dense && point > 0 {
+                        let span = cur_sparse_offsets[group]..cur_sparse_offsets[group + 1];
+                        for &idx in &cur_sparse_idx[span] {
+                            prev_scratch[idx as usize] = [0.0; RING_LANES];
+                        }
+                    }
+                    lu.solve_group(
+                        &mut cells,
+                        lanes.len(),
+                        reach.as_ref(),
+                        (&at_row, &at_unknown),
+                        &mut spare,
+                        &mut marks,
+                    )
+                } else if point == 0 {
+                    touched.clear();
+                    for &(row, _, lane, value) in &terms[group] {
+                        let r = at_row[row];
+                        cells[r][lane] -= value;
+                        touched.push(r as u32);
+                    }
+                    lu.solve_group_seeded_no_neg_zero(
+                        (&mut cells, lanes.len()),
+                        reach.as_ref(),
+                        (&at_row, &at_unknown),
+                        &mut marks,
+                        &touched,
+                        |rebuilt| {
+                            for &(row, _, lane, value) in &terms[group] {
+                                rebuilt[at_row[row]][lane] -= value;
+                            }
+                        },
+                    )
+                } else if single_read_fast && terms[group].is_empty() {
+                    touched.clear();
+                    let span = cur_sparse_offsets[group]..cur_sparse_offsets[group + 1];
+                    let lanes_len = lanes.len();
+                    if lanes_len == RING_LANES {
+                        for (&compact, earlier) in cur_sparse_idx[span.clone()]
+                            .iter()
+                            .zip(&cur_sparse_val[span.clone()])
+                        {
+                            let c = compact as usize;
+                            for &(row_at, value) in &readers_data[readers_offsets[c]..readers_offsets[c + 1]]
+                            {
+                                let r = row_at as usize;
+                                let mut sides = cells[r];
+                                for (side, &val) in sides.iter_mut().zip(earlier) {
+                                    *side -= value * val;
+                                }
+                                cells[r] = sides;
+                                touched.push(row_at);
+                            }
+                        }
+                    } else {
+                        for (&compact, earlier) in cur_sparse_idx[span.clone()]
+                            .iter()
+                            .zip(&cur_sparse_val[span.clone()])
+                        {
+                            let c = compact as usize;
+                            for &(row_at, value) in &readers_data[readers_offsets[c]..readers_offsets[c + 1]]
+                            {
+                                let sides = &mut cells[row_at as usize];
+                                for lane in 0..lanes_len {
+                                    sides[lane] -= value * earlier[lane];
+                                }
+                                touched.push(row_at);
+                            }
+                        }
+                    }
+                    lu.solve_group_seeded_no_neg_zero(
+                        (&mut cells, lanes_len),
+                        reach.as_ref(),
+                        (&at_row, &at_unknown),
+                        &mut marks,
+                        &touched,
+                        |rebuilt| {
+                            for (&compact, earlier) in cur_sparse_idx[span.clone()]
+                                .iter()
+                                .zip(&cur_sparse_val[span.clone()])
+                            {
+                                let c = compact as usize;
+                                for &(row_at, value) in
+                                    &readers_data[readers_offsets[c]..readers_offsets[c + 1]]
+                                {
+                                    let sides = &mut rebuilt[row_at as usize];
+                                    for lane in 0..lanes_len {
+                                        sides[lane] -= value * earlier[lane];
+                                    }
+                                }
+                            }
+                        },
+                    )
                 } else {
+                    if !cur_has_dense_all {
+                        let span = cur_sparse_offsets[group]..cur_sparse_offsets[group + 1];
+                        for (&idx, &val) in cur_sparse_idx[span.clone()].iter().zip(&cur_sparse_val[span]) {
+                            prev_scratch[idx as usize] = val;
+                        }
+                    }
+                    let dense_base = group * prev_count;
                     let mut waiting = terms[group].iter().peekable();
                     for (row, reads) in reads.iter().enumerate() {
                         let sides = &mut cells[at_row[row]];
@@ -330,7 +906,11 @@ impl InitializationSystem<'_> {
                             let Some(&(unknown, value)) = reads.get(at) else {
                                 continue;
                             };
-                            let earlier = &before[group * size + unknown];
+                            let earlier = if cur_has_dense_all {
+                                &cur_dense[dense_base + unknown]
+                            } else {
+                                &prev_scratch[unknown]
+                            };
                             if value.is_finite() && earlier.iter().all(|value| *value == 0.0) {
                                 continue;
                             }
@@ -339,23 +919,24 @@ impl InitializationSystem<'_> {
                             }
                         }
                     }
-                }
-                lu.solve_group(
-                    cells,
-                    reach.as_ref(),
-                    (&at_row, &at_unknown),
-                    &mut spare,
-                    &mut marks,
-                );
-            }
-            for (fit, row) in anchors.iter_mut().enumerate() {
-                let entries: Vec<(usize, f64)> = (line(border + fit)
-                    .filter(|(place, _)| own(point).contains(place)))
-                .map(|(place, value)| (at_unknown[place - point * size], value))
-                .collect();
-                for (group, cells) in walked.chunks(size).enumerate() {
-                    let lanes = &order[group * LANES..((group + 1) * LANES).min(width)];
-                    for &(at, value) in &entries {
+                    if !cur_has_dense_all {
+                        let span = cur_sparse_offsets[group]..cur_sparse_offsets[group + 1];
+                        for &idx in &cur_sparse_idx[span] {
+                            prev_scratch[idx as usize] = [0.0; RING_LANES];
+                        }
+                    }
+                    lu.solve_group(
+                        &mut cells,
+                        lanes.len(),
+                        reach.as_ref(),
+                        (&at_row, &at_unknown),
+                        &mut spare,
+                        &mut marks,
+                    )
+                };
+
+                for (row, entries) in anchors.iter_mut().zip(&anchor_entries) {
+                    for &(at, value) in entries {
                         // An anchor's cell is a positive zero or not zero, so a finite term over a zero read leaves it.
                         if value.is_finite() && cells[at].iter().all(|value| *value == 0.0) {
                             continue;
@@ -365,33 +946,94 @@ impl InitializationSystem<'_> {
                         }
                     }
                 }
+                let live = marks.live_slice();
+                if point == 0 {
+                    for (k, &at) in first_unknown_at.iter().enumerate() {
+                        if used_reach && !live[at] {
+                            continue;
+                        }
+                        let dst = &mut first_by_unknown[k * width..(k + 1) * width];
+                        for (&column, &val) in lanes.iter().zip(&cells[at]) {
+                            dst[column] = val;
+                        }
+                    }
+                }
+                if point + 1 == last {
+                    for (k, &at) in next_unknown.iter().enumerate() {
+                        if used_reach && !live[at] {
+                            continue;
+                        }
+                        let dst = &mut last_by_unknown[k * width..(k + 1) * width];
+                        for (&column, &val) in lanes.iter().zip(&cells[at]) {
+                            dst[column] = val;
+                        }
+                    }
+                } else {
+                    if used_reach {
+                        for (k, &at) in next_unknown.iter().enumerate() {
+                            if !live[at] {
+                                continue;
+                            }
+                            let value = cells[at];
+                            if value.iter().any(|&v| v != 0.0) {
+                                next_sparse_idx.push(k as u32);
+                                next_sparse_val.push(value);
+                            }
+                        }
+                    } else {
+                        for (k, &at) in next_unknown.iter().enumerate() {
+                            let value = cells[at];
+                            if value.iter().any(|&v| v != 0.0) {
+                                next_sparse_idx.push(k as u32);
+                                next_sparse_val.push(value);
+                            }
+                        }
+                    }
+                    next_sparse_offsets.push(next_sparse_idx.len());
+                    if next_has_dense_all {
+                        let base = group * next_count;
+                        for (k, &at) in next_unknown.iter().enumerate() {
+                            next_dense[base + k] = cells[at];
+                        }
+                    } else if holds_right {
+                        for (k, &at) in next_unknown.iter().enumerate() {
+                            next_dense[k] = cells[at];
+                        }
+                    }
+                }
+                if used_reach {
+                    for (cell, &is_live) in cells.iter_mut().zip(live) {
+                        if is_live {
+                            *cell = [0.0; RING_LANES];
+                        }
+                    }
+                } else {
+                    cells.fill([0.0; RING_LANES]);
+                }
             }
-            if point == 0 {
-                first.clone_from(&walked);
-                first_unknown.clone_from(&at_unknown);
+            if point + 1 < last {
+                core::mem::swap(&mut cur_sparse_offsets, &mut next_sparse_offsets);
+                core::mem::swap(&mut cur_sparse_idx, &mut next_sparse_idx);
+                core::mem::swap(&mut cur_sparse_val, &mut next_sparse_val);
+                core::mem::swap(&mut cur_dense, &mut next_dense);
             }
-            before = walked;
-            prev_unknown = at_unknown;
             factors.push(lu);
         }
         let corner = size + fits;
-        let mut matrix = vec![vec![0.0; corner + 1]; corner];
-        let add = |cells: &mut Vec<f64>,
-                   source: &[[f64; LANES]],
-                   source_unknown: &[usize],
-                   place: usize,
-                   value: f64| {
-            let side =
-                |at: usize| source[slot_of[at] / LANES * size + source_unknown[place]][slot_of[at] % LANES];
-            for (at, &seed) in read.iter().enumerate() {
-                cells[seed] += value * side(at);
+        let stride = corner + 1;
+        let mut matrix = vec![0.0; corner * stride];
+        let add = |cells: &mut [f64], source: &[f64], compact: usize, value: f64| {
+            let row = &source[compact * width..(compact + 1) * width];
+            for (&seed, &side) in read.iter().zip(&row[..read.len()]) {
+                cells[seed] += value * side;
             }
-            for fit in 0..fits {
-                cells[size + fit] += value * side(read.len() + fit);
+            for (cell, &side) in cells[size..size + fits].iter_mut().zip(&row[read.len()..seeds]) {
+                *cell += value * side;
             }
-            cells[corner] -= value * side(seeds);
+            cells[corner] -= value * row[seeds];
         };
-        for (row, cells) in matrix.iter_mut().enumerate().take(size) {
+        for row in 0..size {
+            let cells = &mut matrix[row * stride..row * stride + stride];
             let slot = last * size + row;
             cells[corner] = right[slot];
             for (place, value) in line(slot) {
@@ -400,14 +1042,19 @@ impl InitializationSystem<'_> {
                 } else if place >= border {
                     cells[size + place - border] += value;
                 } else if place < size {
-                    add(cells, &first, &first_unknown, place, value);
+                    add(cells, &first_by_unknown, first_pos[place], value);
                 } else {
-                    add(cells, &before, &prev_unknown, place - (last - 1) * size, value);
+                    add(
+                        cells,
+                        &last_by_unknown,
+                        last_pos[place - (last - 1) * size],
+                        value,
+                    );
                 }
             }
         }
         for (fit, row) in anchors.iter().enumerate() {
-            let cells = &mut matrix[size + fit];
+            let cells = &mut matrix[(size + fit) * stride..(size + fit) * stride + stride];
             cells[corner] = right[border + fit] - row[seeds];
             for (at, &seed) in read.iter().enumerate() {
                 cells[seed] += row[at];
@@ -423,7 +1070,13 @@ impl InitializationSystem<'_> {
                 }
             }
         }
-        let answer = eliminate(matrix)?;
+        let answer = reduced_flat(&mut matrix, corner, 1).map_err(|at| {
+            if at < size {
+                last * size + at
+            } else {
+                border + at - size
+            }
+        })?;
         let mut update = vec![0.0; right.len()];
         update[last * size..points * size].copy_from_slice(&answer[..size]);
         update[border..].copy_from_slice(&answer[size..]);
@@ -444,12 +1097,11 @@ impl InitializationSystem<'_> {
 #[cfg(test)]
 mod tests {
     use super::{Block, ROUNDING, inverse, reduced};
-    use crate::elimination::{LANES, Marks};
+    use crate::elimination::{Marks, RING_LANES};
     use crate::{Jacobian, UnknownId};
 
     fn reduced_by_pivot(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
         let size = matrix.len();
-        let mut slots: Vec<usize> = (0..size).collect();
         let largest = |most: f64, cell: f64| if cell.abs() > most { cell.abs() } else { most };
         let mut across: Vec<f64> = (matrix.iter())
             .map(|row| row[..size].iter().copied().fold(0.0, largest))
@@ -470,10 +1122,9 @@ mod tests {
                 down[pivot]
             };
             if matrix[best][pivot].abs() <= ROUNDING * reach {
-                return Err(slots[pivot]);
+                return Err(pivot);
             }
             matrix.swap(pivot, best);
-            slots.swap(pivot, best);
             across.swap(pivot, best);
             let (above, below) = matrix.split_at_mut(pivot + 1);
             let leading = &above[pivot][pivot..];
@@ -548,6 +1199,58 @@ mod tests {
             let panel = reduced(matrix).expect("rank");
             for (a, b) in one.iter().flatten().zip(panel.iter().flatten()) {
                 assert_eq!(a.to_bits(), b.to_bits(), "size {size}, shape {shape}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_positive_zero_panel_keeps_every_bit_across_partial_tiles() {
+        let mut state = 0xD1B5_4A32_D192_ED03_u64;
+        let half = super::PANEL / 2;
+        for (size, sides, swap_half) in [(96, 3, false), (145, 5, false), (145, 3, true)] {
+            let mut matrix = vec![vec![0.0; size + sides]; size];
+            for (row_idx, row) in matrix.iter_mut().enumerate() {
+                for (col_idx, cell) in row.iter_mut().enumerate() {
+                    if row_idx < super::PANEL {
+                        let in_first_half = row_idx < half;
+                        if col_idx < super::PANEL {
+                            if (col_idx < half) != in_first_half {
+                                continue;
+                            }
+                        } else {
+                            let tile = (col_idx - super::PANEL) / super::TILE_W;
+                            if (in_first_half && tile == 0) || (!in_first_half && tile == 1) {
+                                continue;
+                            }
+                        }
+                    } else if next(&mut state) < 0.2 {
+                        continue;
+                    }
+                    let scale = match (row_idx + col_idx) % 3 {
+                        0 => 1e-4,
+                        1 => 1.0,
+                        _ => 1e4,
+                    };
+                    let v = (next(&mut state) - 0.5) * scale;
+                    *cell = if v == 0.0 { 0.0 } else { v };
+                }
+                let diag = if swap_half && row_idx < half {
+                    half - 1 - row_idx
+                } else if swap_half && row_idx < super::PANEL {
+                    super::PANEL + half - 1 - row_idx
+                } else {
+                    row_idx
+                };
+                row[diag] = 2e4 + next(&mut state) * 1e4;
+            }
+            let one = reduced_by_pivot(matrix.clone()).expect("rank");
+            let panel = reduced(matrix).expect("rank");
+            for (a, b) in one.iter().flatten().zip(panel.iter().flatten()) {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "size {size}, sides {sides}, swap_half {swap_half}"
+                );
             }
         }
     }
@@ -760,7 +1463,7 @@ mod tests {
             .collect();
         assert_eq!(
             hex,
-            "cf8a842fd3e17358f1d2980482d9999c17b4f452b6d2dd8eb7f2c537a3ecf10e"
+            "14cb548d51049e50ddb154b3f2990ce73c1faf38db65a372e8fbf1f6b3901ebb"
         );
     }
 
@@ -788,19 +1491,40 @@ mod tests {
             .map(|side| (0..size).map(|row| value(side, row)).collect())
             .collect();
         let (at_row, at_unknown) = ([2, 0, 3, 1], [1, 3, 0, 2]);
-        let mut group = vec![[0.0; LANES]; size];
+        let mut group = vec![[0.0; RING_LANES]; size];
         for (lane, side) in sides.iter().enumerate() {
             for (row, &value) in side.iter().enumerate() {
                 group[at_row[row]][lane] = value;
             }
         }
-        let (mut spare, mut marks) = (vec![[0.0; LANES]; size], Marks::new(size));
-        whole.solve_group(&mut group, None, (&at_row, &at_unknown), &mut spare, &mut marks);
+        let (mut spare, mut marks) = (vec![[0.0; RING_LANES]; size], Marks::new(size));
+        group[at_row[0]][width] = 7.0;
+        whole.solve_group(
+            &mut group,
+            width,
+            None,
+            (&at_row, &at_unknown),
+            &mut spare,
+            &mut marks,
+        );
+        assert_eq!(group[at_unknown[0]][width].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(group[at_row[0]][width].to_bits(), 7.0_f64.to_bits());
         for (lane, mut alone) in sides.into_iter().enumerate() {
             whole.solve(&mut alone);
             for (unknown, value) in alone.iter().enumerate() {
                 assert_eq!(value.to_bits(), group[at_unknown[unknown]][lane].to_bits());
             }
         }
+    }
+
+    #[test]
+    fn reduced_names_the_unknown_without_a_pivot_after_row_swaps() {
+        let matrix = vec![
+            vec![1.0, 0.0, 0.0, 0.0],
+            vec![2.0, 1.0, 1.0, 0.0],
+            vec![0.0, 1.0, 1.0, 0.0],
+        ];
+        assert_eq!(reduced(matrix.clone()), Err(2));
+        assert_eq!(reduced_by_pivot(matrix), Err(2));
     }
 }

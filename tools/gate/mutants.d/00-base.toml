@@ -2513,7 +2513,7 @@ new = '''
         let _ = arrivals.pop();
         arrivals.extend(restamped);
 '''
-test = "-p ng-validate --lib day::tests::a_packet_holding_the_reference_day_admits_the_timeline_the_arenas_port_does"
+test = "-p ng-contract --lib boundary::day::tests::an_event_at_or_after_the_moment_enters_as_the_port_parses_it_and_a_meal_as_its_parts"
 
 [[mutant]]
 name = "packet-hash-leaves-the-day-out"
@@ -4476,7 +4476,7 @@ name = "thermoreceptor-reads-at-the-height-site"
 path = "crates/ng-contract/src/compile.rs"
 old = '''Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.0),'''
 new = '''Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.1),'''
-test = "-p ng-contract --lib publication::the_carriages_tissue_end_the_skin_thermoreceptor_and_the_skin_exit_read_the_one_skin_row"
+test = "-p ng-contract --lib publication::the_thermoreceptor_reads_the_landmarks_sampled_store_and_never_its_height_store"
 
 [[mutant]]
 name = "projection-read-by-the-wrong-reader"
@@ -4555,7 +4555,7 @@ name = "skin-edge-reads-every-downstream-site"
 path = "crates/ng-contract/src/law.rs"
 old = '''self.read_at(port.source, Where::DownIn(D::SET))'''
 new = '''self.read_at(port.source, Where::Down)'''
-test = "-p ng-contract --lib skin_vessels::the_skin_edge_scales_its_resistance_by_the_exponential_of_the_field_and_every_other_edge_is_unmoved"
+test = "-p ng-contract --lib skin_vessels::downstream_if_in_reads_only_sites_in_its_set_even_when_every_end_holds_a_row"
 
 [[mutant]]
 name = "guard-place-unchecked"
@@ -4947,6 +4947,7 @@ path = "crates/ng-validate/src/body/packet.rs"
 old = '''        ("ns.breath-start", 1_000.0),'''
 new = '''        ("ns.breath-start", 0.0),'''
 test = "-p ng-validate --test body_run the_whole_body_breathes_from_its_rest_and_its_beat_heat_report_counts_what_the_core_receives"
+budget = 1000
 
 [[mutant]]
 name = "pleural-recoil-reads-the-walls-elastance"
@@ -5140,6 +5141,7 @@ new = '''        let shut = k.scale(rate, open);
         let nothing = k.subtract(shut, shut);
         let value = k.add(rate, nothing);'''
 test = "-p ng-validate --test body_run at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges"
+budget = 1000
 
 [[mutant]]
 name = "leaks-run-out-of-the-body"
@@ -5149,6 +5151,7 @@ old = '''pub(super) fn leaks(schema: &mut Schema) -> Result<(), AdmissionError> 
 new = '''pub(super) fn leaks(schema: &mut Schema) -> Result<(), AdmissionError> {
     let into = BoundaryDirection::OutOfBody;'''
 test = "-p ng-validate --test body_run at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges"
+budget = 1000
 
 [[mutant]]
 name = "nitrogen-gas-leaks-into-the-airway"
@@ -5158,6 +5161,7 @@ old = '''    let lung = site::<CapillaryBed>("pulmonary bed")?;
 new = '''    let lung = site::<TissueSite>("conducting airway")?;
     schema.boundary::<NitrogenGas>(NITROGEN_LEAK, into, lung, Space::Gas)?;'''
 test = "-p ng-validate --test body_run at_a_quarter_the_body_passes_its_policy_and_its_certificate_refuses_each_leak_between_edges"
+budget = 1000
 
 [[mutant]]
 name = "sleep-lowers-no-gain"
@@ -5516,6 +5520,7 @@ old = '''        let enclosure = k.upstream(&ports.extravascular_pressure);
         let inside = k.subtract(tissue, enclosure);'''
 new = '''        let inside = tissue;'''
 test = "-p ng-validate --test body_run the_whole_body_admits_runs_its_first_minute_and_holds_its_pins"
+budget = 1000
 
 [[mutant]]
 name = "the-lungs-rest-volume-moves-the-chests-rest-pressure"
@@ -5531,6 +5536,7 @@ path = "crates/ng-metabolism/src/heat.rs"
 old = '''        let (core, here) = (k.read(core), k.at_site(own));'''
 new = '''        let (here, core) = (k.read(core), k.at_site(own));'''
 test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+budget = 1000
 
 [[mutant]]
 name = "dry-heat-clothes-radiation-alone"
@@ -5538,6 +5544,7 @@ path = "crates/ng-metabolism/src/heat.rs"
 old = '''        let value = clothed(&mut k, &clothing, both, bare);'''
 new = '''        let value = clothed(&mut k, &clothing, radiant, bare);'''
 test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+budget = 1000
 
 [[mutant]]
 name = "convection-adds-its-exponent"
@@ -5545,6 +5552,7 @@ path = "crates/ng-metabolism/src/heat.rs"
 old = '''        let power = k.scale(log, exponent);'''
 new = '''        let power = k.add(log, exponent);'''
 test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+budget = 1000
 
 [[mutant]]
 name = "evaporation-reads-a-saturated-room"
@@ -5552,6 +5560,7 @@ path = "crates/ng-metabolism/src/heat.rs"
 old = '''        let in_room = k.scale(in_air, humidity);'''
 new = '''        let in_room = in_air;'''
 test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+budget = 1000
 
 [[mutant]]
 name = "evaporation-posts-twice-its-heat"
@@ -5560,3 +5569,4 @@ old = '''        let value = k.algebraic(&rate);'''
 new = '''        let once = k.algebraic(&rate);
         let value = k.add(once, once);'''
 test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+budget = 1000

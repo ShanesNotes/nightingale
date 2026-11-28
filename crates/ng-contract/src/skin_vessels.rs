@@ -12,6 +12,8 @@ const SKIN_TEMPERATURE: f64 = 5.0;
 const DILATOR: f64 = 0.5;
 const CONSTRICTOR: f64 = 2.0;
 const RATIO: &str = "skin log resistance ratio";
+const BLOOD_RATIO: &str = "blood log resistance ratio";
+const BLOOD_LOG: f64 = 2.0;
 const SKIN_FACTOR_OPS: usize = 3;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -19,6 +21,7 @@ enum Ratio {
     Read,
     Unread,
     NoBed,
+    EveryBlood,
 }
 
 struct Sites {
@@ -162,25 +165,38 @@ fn compiled(ratio: Ratio) -> Result<(CompiledBody, Sites), AdmissionError> {
             k.finish(value, cv.every_mode(), class)
         });
         cv.define_at(&out, value);
-        let ratio = (ratio != Ratio::Unread).then(|| {
-            let temperatures: PerfusionTemperatures = cv.receive();
-            let dilator = ports.effect::<Acetylcholine>();
-            let reference =
-                cv.parameter::<Reference<Temperature>>(key("ns.skin-reference"), Admissible::finite());
-            let width = cv.parameter::<Deviation<Temperature>>(key("cv.skin-width"), Admissible::positive());
-            let (out, read) = cv.site_field::<Beds<Skin>, Dimensionless>(RATIO, Admissible::finite());
-            let value = cv.site_kernel(|mut k| {
-                let felt = k.at_junction(&dilator);
-                let (skin, reference) = (temperatures.tissue(&mut k), k.parameter(&reference));
-                let (warmth, width) = (k.deviation(skin, reference), k.parameter(&width));
-                let quotient = k.divide(warmth, width);
-                let local = k.as_dimension(quotient);
-                let value = k.add(felt, local);
-                k.finish(value, cv.every_mode(), class)
-            });
-            cv.define_at(&out, value);
-            read
-        });
+        let ratio = match ratio {
+            Ratio::Unread => None,
+            Ratio::Read | Ratio::NoBed => {
+                let temperatures: PerfusionTemperatures = cv.receive();
+                let dilator = ports.effect::<Acetylcholine>();
+                let reference =
+                    cv.parameter::<Reference<Temperature>>(key("ns.skin-reference"), Admissible::finite());
+                let width =
+                    cv.parameter::<Deviation<Temperature>>(key("cv.skin-width"), Admissible::positive());
+                let (out, read) = cv.site_field::<Beds<Skin>, Dimensionless>(RATIO, Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    let felt = k.at_junction(&dilator);
+                    let (skin, reference) = (temperatures.tissue(&mut k), k.parameter(&reference));
+                    let (warmth, width) = (k.deviation(skin, reference), k.parameter(&width));
+                    let quotient = k.divide(warmth, width);
+                    let local = k.as_dimension(quotient);
+                    let value = k.add(felt, local);
+                    k.finish(value, cv.every_mode(), class)
+                });
+                cv.define_at(&out, value);
+                Some(read)
+            }
+            Ratio::EveryBlood => {
+                let (out, _) = cv.site_field::<Blood, Dimensionless>(BLOOD_RATIO, Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    let value = k.zero::<Dimensionless>();
+                    k.finish(value, cv.every_mode(), class)
+                });
+                cv.define_at(&out, value);
+                Some(crate::law::ReadPort::field(self::cv(BLOOD_RATIO)))
+            }
+        };
         let alpha = ports.effect::<Norepinephrine>();
         let resistance =
             cv.edge_parameter::<VascularEdge, Resistance>(key("cv.resistance"), Admissible::positive());
@@ -241,7 +257,7 @@ fn bench(ratio: Ratio) -> Bench {
         let pressure = measure::<Pressure>(1.0);
         (packet.synthetic(key("cv.pressure"), Binding::Site(site), pressure, note)).expect("once");
     }
-    if ratio != Ratio::Unread {
+    if matches!(ratio, Ratio::Read | Ratio::NoBed) {
         let reference = measure::<Reference<Temperature>>(REFERENCE);
         (packet.synthetic(key("ns.skin-reference"), Binding::Body, reference, note)).expect("once");
         let width = measure::<Deviation<Temperature>>(WIDTH);
@@ -283,6 +299,17 @@ fn bench(ratio: Ratio) -> Bench {
     if ratio == Ratio::Read {
         let row = bench.ratio();
         bench.set(row, log_ratio());
+    }
+    if ratio == Ratio::EveryBlood {
+        for site in [
+            bench.sites.artery,
+            bench.sites.vein,
+            bench.sites.bed,
+            bench.sites.liver,
+        ] {
+            let row = bench.algebraic("CV", BLOOD_RATIO, Context::Site(site));
+            bench.set(row, BLOOD_LOG);
+        }
     }
     bench
 }
@@ -421,9 +448,33 @@ fn the_skin_edge_scales_its_resistance_by_the_exponential_of_the_field_and_every
             ];
             sites.map(|site| bench.algebraic("CV", crate::scope::BLOOD_PRESSURE, Context::Site(site)))
         };
+        let plain_conductance = 1.0 / held;
+        let feeder_conductance = 1.0 / (held * crate::pinned::exp(log));
+        let expected_slopes: [Vec<(Context, u64)>; 4] = [
+            vec![
+                (feeder, (-feeder_conductance).to_bits()),
+                (back, plain_conductance.to_bits()),
+            ],
+            vec![
+                (draining, plain_conductance.to_bits()),
+                (back, (-plain_conductance).to_bits()),
+            ],
+            vec![
+                (feeder, feeder_conductance.to_bits()),
+                (draining, (-plain_conductance).to_bits()),
+            ],
+            Vec::new(),
+        ];
         let mut compared = 0;
-        for (row, twin) in pressures(&read).into_iter().zip(pressures(&unread)) {
-            let found = away(&read.slopes(row));
+        for ((row, twin), mut expected) in pressures(&read)
+            .into_iter()
+            .zip(pressures(&unread))
+            .zip(expected_slopes)
+        {
+            expected.sort_by_key(|(context, _)| *context);
+            let slopes = read.slopes(row);
+            assert_eq!(slopes, expected, "every plain edge's analytical pressure slope");
+            let found = away(&slopes);
             assert_eq!(
                 found,
                 away(&unread.slopes(twin)),
@@ -434,6 +485,65 @@ fn the_skin_edge_scales_its_resistance_by_the_exponential_of_the_field_and_every
         assert_eq!(
             compared, 4,
             "the two other edges, each with a slope at both its ends"
+        );
+    }
+}
+
+#[test]
+fn downstream_if_in_reads_only_sites_in_its_set_even_when_every_end_holds_a_row() {
+    let bench = bench(Ratio::EveryBlood);
+    let [feeder, draining, back] = bench.plain();
+    let held = RESISTANCE * CONSTRICTOR;
+    let programs = bench.body.programs();
+    let rows = bench.body.rows();
+    let mut bound: Vec<(Context, SiteId)> = Vec::new();
+    for instance in bench.body.instances() {
+        if programs[instance.program().index()].law != cv("circulation")
+            || !matches!(instance.target(), crate::body::Target::Row(_))
+        {
+            continue;
+        }
+        for input in &instance.inputs {
+            let crate::body::Bound::Unknown(unknown) = input else {
+                continue;
+            };
+            let RowKind::Algebraic(Slot {
+                law,
+                at: Context::Site(site),
+            }) = rows[unknown.index()].kind()
+            else {
+                continue;
+            };
+            if law == cv(BLOOD_RATIO) {
+                bound.push((instance.context, site));
+            }
+        }
+    }
+    bound.sort_unstable();
+    assert_eq!(
+        bound,
+        [(feeder, bench.sites.bed)],
+        "only the edge ending at the skin bed binds the downstream ratio row"
+    );
+    let flows = [
+        (feeder, (UP - DOWN) / (held * crate::pinned::exp(BLOOD_LOG))),
+        (draining, (DOWN - DOWN) / held),
+        (back, (DOWN - UP) / held),
+    ];
+    let mut expected: Vec<(Context, u64)> = (flows.iter())
+        .map(|&(at, flow)| (at, (0.0 - flow).to_bits()))
+        .collect();
+    expected.sort_by_key(|(context, _)| *context);
+    assert_eq!(
+        bench.residuals(cv("circulation")),
+        expected,
+        "non-skin edges stay unscaled even when their downstream ends hold a ratio row"
+    );
+    for off_set in [bench.sites.artery, bench.sites.vein] {
+        let row = bench.algebraic("CV", BLOOD_RATIO, Context::Site(off_set));
+        assert!(
+            bench.slopes(row).is_empty(),
+            "no edge depends on the ratio row at {off_set:?}"
         );
     }
 }

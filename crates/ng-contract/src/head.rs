@@ -233,27 +233,31 @@ fn holds_float(set: AdmissibleSet, value: f64) -> bool {
 
 fn check_admissible(body: &CompiledBody, step: &VerifiedStep) -> Result<(), TrialFailure> {
     let state = step.state();
-    let rows = body.rows();
+    let admissible = body.tape.admissible.as_slice();
     let amounts_end = state.amounts.len();
     let memory_end = amounts_end + state.memory.len();
-    for (row, &amount) in rows[..amounts_end].iter().zip(&state.amounts) {
-        if !row.admissible().holds(amount) {
+    for (at, (&set, &amount)) in admissible[..amounts_end].iter().zip(&state.amounts).enumerate() {
+        if !set.holds(amount) {
             return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
-                source: body.row_source(row.id()),
+                source: body.row_source(body.rows()[at].id()),
             }));
         }
     }
-    for (row, &value) in rows[amounts_end..memory_end].iter().zip(&state.memory) {
-        if !holds_float(row.admissible(), value) {
+    for (offset, (&set, &value)) in admissible[amounts_end..memory_end]
+        .iter()
+        .zip(&state.memory)
+        .enumerate()
+    {
+        if !holds_float(set, value) {
             return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
-                source: body.row_source(row.id()),
+                source: body.row_source(body.rows()[amounts_end + offset].id()),
             }));
         }
     }
-    for (row, &value) in rows[memory_end..].iter().zip(&state.algebraic) {
-        if !holds_float(row.admissible(), value) {
+    for (offset, (&set, &value)) in admissible[memory_end..].iter().zip(&state.algebraic).enumerate() {
+        if !holds_float(set, value) {
             return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
-                source: body.row_source(row.id()),
+                source: body.row_source(body.rows()[memory_end + offset].id()),
             }));
         }
     }
