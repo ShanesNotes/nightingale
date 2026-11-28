@@ -531,7 +531,6 @@ const ZERO_STAND_INS: &[(&str, Zero)] = &[
     ("mt.sweat-chloride", zero::<Chloride>),
     ("mt.sweat-sodium", zero::<Sodium>),
     ("mt.sweat-water", zero::<Water>),
-    ("rs.airway-heat", zero::<Energy>),
     ("rs.expired-carbon-dioxide", zero::<CarbonDioxide>),
     ("rs.expired-nitrogen-gas", zero::<NitrogenGas>),
     ("rs.expired-oxygen", zero::<Oxygen>),
@@ -702,6 +701,7 @@ fn packet_of(
     set::<Dimensionless>(&mut packet, "ns.peripheral-gain", Binding::Body, peripheral)?;
     oxygen_per_lactate(&mut packet, body)?;
     tissue_heat(&mut packet, evaporation_amplitude)?;
+    twins(&mut packet)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -1104,9 +1104,7 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
 /// core store's capacity `c_body m_core` (MT-013, MT-015), the skin store's `c_body m_skin` (MT-013, MT-014), the skin's
 /// conductance `K_min A` (MT-020, MT-021), radiation's `h_r A` (MT-021, MT-022), still air's `h_c0 A` (MT-021,
 /// MT-023), still air's speed `v_0` (MT-024) and its width (MT-025), the Lewis relation (MT-026), the skin's
-/// wettedness from diffusion (MT-027), the latent heat (MT-028) and the vapour form's constants (MT-030 to MT-033),
-/// with Kingma's `c` for degrees Celsius moved onto the room's absolute scale. The room's air speed is its ratio to
-/// 0.1 m/s, so still air reads 1.
+/// wettedness from diffusion (MT-027). The room's air speed is its ratio to 0.1 m/s, so still air reads 1.
 /// Model defaults with no row: the thermal zero (ticket 12's second ruling), the airway store's conductance, the air
 /// speed's exponent (Stolwijk's square root), one clo's conductance over the body's surface for dry heat (Gagge's
 /// 0.155 m2 C/W a clo) and for vapour (0.143), and the evaporation's forcing, which keeps the period and amplitude of
@@ -1130,13 +1128,33 @@ fn tissue_heat(packet: &mut ParameterPacket<SyntheticFixture>, amplitude: f64) -
     set::<HeatConductance>(packet, "mt.clothing-vapour-conductance", body, 1.8e5)?;
     set::<Quotient<Temperature, Pressure>>(packet, "mt.lewis-relation", body, 2.2)?;
     set::<Dimensionless>(packet, "mt.diffusion-wettedness", body, 0.06)?;
-    set::<Quotient<Rate<Energy>, Rate<Water>>>(packet, "mt.latent-heat", body, 2.2e7)?;
-    set::<Pressure>(packet, "mt.vapour-reference", body, 7.50062)?;
-    set::<Dimensionless>(packet, "mt.vapour-a", body, 16.6536)?;
-    set::<Temperature>(packet, "mt.vapour-b", body, 4030.183)?;
-    set::<Temperature>(packet, "mt.vapour-c", body, 235.0 - THERMAL_ZERO)?;
     set::<Time>(packet, "mt.evaporation-period", body, 300.0)?;
     set::<Dimensionless>(packet, "mt.evaporation-amplitude", body, amplitude)
+}
+
+/// The constants the skin's and the airway's laws both read, one design value each for the two cards' keys, so one
+/// room gives the skin and the airway one saturated vapour pressure and their water one latent heat: water's latent
+/// heat (MT-028, and RS-015, which research 16 says one record should serve with it) and the vapour form's (MT-030 to
+/// MT-033, which the respiratory keys bind to as well), with Kingma's `c` for degrees Celsius moved onto the room's
+/// absolute scale.
+fn twins(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    for key in ["mt.latent-heat", "rs.latent-heat"] {
+        set::<Quotient<Rate<Energy>, Rate<Water>>>(packet, key, body, 2.2e7)?;
+    }
+    for key in ["mt.vapour-reference", "rs.vapour-reference"] {
+        set::<Pressure>(packet, key, body, 7.50062)?;
+    }
+    for key in ["mt.vapour-a", "rs.vapour-a"] {
+        set::<Dimensionless>(packet, key, body, 16.6536)?;
+    }
+    for key in ["mt.vapour-b", "rs.vapour-b"] {
+        set::<Temperature>(packet, key, body, 4030.183)?;
+    }
+    for key in ["mt.vapour-c", "rs.vapour-c"] {
+        set::<Temperature>(packet, key, body, 235.0 - THERMAL_ZERO)?;
+    }
+    Ok(())
 }
 
 /// The debt's oxygen to each lactate is the lactate burn's own counts, read from the compiled body.
@@ -1234,8 +1252,8 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// the widest gap between edges, each rounded up to one significant figure. The onset is pinned at 30 s because the
 /// figures are taken there, inside the admission's own fall of energy, which puts energy's above a settled onset's, so
 /// moving the onset moves them. The salts' excess grows to the run's end, so a longer run leaves their bounds (body
-/// ticket 17). Energy's figures belong to the held feeds and to the evaporation's forcing, which swings the skin's
-/// evaporative heat (body ticket 12), and are measured again when body tickets 13 to 16 land. The payers of the stroke
+/// ticket 17). Energy's figures are sized by native-contract 85's rule from the reference run, which includes the
+/// airway's latent heat (body ticket 12), and are sized again when body tickets 13 to 16 land. The payers of the stroke
 /// work and of the work of breathing take a hydrogen bound of their own, since their cells settle as their works do,
 /// and each is judged on its own. Oxygen and carbon dioxide as species keep only held pools that never move, so the
 /// slice's bound for an unmoved species holds them.
@@ -1247,12 +1265,12 @@ const ELEMENT_BOUNDS: [(Element, f64, f64, f64); 3] = [
 const PAYER_HYDROGEN: (f64, f64, f64) = (0.4, 4e-2, 2e-2);
 const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
 const SPECIES_BOUNDS: [(Species, f64, f64, f64); 7] = [
-    (Species::Energy, 2e6, 2e5, 1e5),
-    (Species::Water, 2e-1, 8e-3, 4e-3),
-    (Species::Sodium, 6e-3, 6e-4, 9e-6),
+    (Species::Energy, 3e6, 2e5, 8e4),
+    (Species::Water, 2e-1, 7e-3, 4e-3),
+    (Species::Sodium, 6e-3, 6e-4, 1e-5),
     (Species::Chloride, 6e-3, 6e-4, 1e-5),
     (Species::Potassium, 3e-4, 3e-5, 5e-7),
-    (Species::Vasopressin, 6e-2, 5e-3, 3e-4),
+    (Species::Vasopressin, 5e-2, 5e-3, 3e-4),
     (Species::NitrogenGas, 2e4, 2e1, 8.0),
 ];
 const SETTLING_TIME: u64 = 20 * SECOND;
@@ -1348,8 +1366,6 @@ fn respiratory(
     set::<Rate<Volume>>(packet, "rs.airway-mixing", body, MIXING)?;
     set::<Quotient<Volume, Water>>(packet, "rs.water-volume", body, 24_000.0)?;
     set::<Rate<Volume>>(packet, "rs.alveolar-ventilation", body, alveolar_ventilation())?;
-    set::<Dimensionless>(packet, "rs.room-humidity", body, 0.5)?;
-    set::<Pressure>(packet, "rs.room-vapour-pressure", body, 20.0)?;
     for (key, value) in [
         ("ns.breath-rate", breath_rate),
         ("ns.drive-rise", BODY_RHYTHM.rise),

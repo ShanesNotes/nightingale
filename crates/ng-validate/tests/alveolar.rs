@@ -34,6 +34,10 @@ const DEAD_SPACE: f64 = 500.0;
 const WATER_VOLUME: f64 = 10.0;
 const HUMIDITY: f64 = 0.5;
 const ROOM_VAPOUR: f64 = 20.0;
+/// The room's air, where the vapour form's exponent `a - b / (T + c)` is zero, so the room's saturated vapour pressure
+/// is `rs.vapour-reference` exactly and the closed forms read it as `P_r`.
+const AIR: f64 = 300.0;
+const VAPOUR_B: f64 = 1.0;
 const INTERSTITIUM_WATER_SET: f64 = 1_000.0;
 const INTERSTITIUM_WATER_SPEED: f64 = 1.0;
 
@@ -427,8 +431,10 @@ fn packet(body: &CompiledBody, unit: Case) -> Result<ParameterPacket<SyntheticFi
     set::<Rate<Volume>>(p, "rs.airway-mixing", m)?;
     set::<Quotient<Volume, Water>>(p, "rs.water-volume", WATER_VOLUME)?;
     set::<Rate<Volume>>(p, "rs.alveolar-ventilation", m / 2.0)?;
-    set::<Dimensionless>(p, "rs.room-humidity", HUMIDITY)?;
-    set::<Pressure>(p, "rs.room-vapour-pressure", unit.room_vapour)?;
+    set::<Pressure>(p, "rs.vapour-reference", unit.room_vapour)?;
+    set::<Dimensionless>(p, "rs.vapour-a", VAPOUR_B / AIR)?;
+    set::<Temperature>(p, "rs.vapour-b", VAPOUR_B)?;
+    set::<Temperature>(p, "rs.vapour-c", 0.0)?;
     set::<Water>(p, "fixture.water-set", INTERSTITIUM_WATER_SET)?;
     set::<Rate<Dimensionless>>(p, "fixture.water-speed", INTERSTITIUM_WATER_SPEED)?;
     set::<Dimensionless>(p, "fixture.drive-scale", 1.0)?;
@@ -491,14 +497,34 @@ struct Settled {
     water: [f64; 2],
 }
 
-fn sitting_up() -> Result<Vec<BoundaryEvent>, AdmissionError> {
+fn sitting_up() -> Result<BoundaryEvent, AdmissionError> {
     let id = InputId::new(Digest::of_canonical(b"sits up"));
     let upright = Posture::new(Measure::new(1.0)?, Legs::Standing)?;
-    Ok(vec![BoundaryEvent::new(
+    Ok(BoundaryEvent::new(
         id,
         SimTime::from_ns(SECOND),
         BoundaryInput::Posture(upright),
-    )])
+    ))
+}
+
+/// The lining reads the room's air and humidity, so every admission states the room at the start.
+fn the_room() -> Result<BoundaryEvent, AdmissionError> {
+    let room = Room {
+        air: Measure::new(AIR)?,
+        radiant: Measure::new(AIR)?,
+        humidity: Measure::new(HUMIDITY)?,
+        air_speed: Measure::new(1.0)?,
+        pressure: Measure::new(ROOM)?,
+        oxygen: Measure::new(INSPIRED[0])?,
+        carbon_dioxide: Measure::new(INSPIRED[1])?,
+        clothing: Measure::new(0.0)?,
+    };
+    let id = InputId::new(Digest::of_canonical(b"the room"));
+    Ok(BoundaryEvent::new(
+        id,
+        SimTime::from_ns(0),
+        BoundaryInput::Room(room),
+    ))
 }
 
 fn run<T>(
@@ -510,7 +536,10 @@ fn run<T>(
     let core = ng_solver::Core::new(SECOND / 100);
     let store = MemoryStore::default();
     let lens = body.lens(Vec::new(), NonZeroU64::MIN.saturating_add(SECOND - 1))?;
-    let events = if unit.upright { sitting_up()? } else { Vec::new() };
+    let mut events = vec![the_room()?];
+    if unit.upright {
+        events.push(sitting_up()?);
+    }
     let port = BoundaryPort::new(events)?;
     let session = admit_solved(&body, packet(&body, unit)?, port, &core, &lens, &store)?.session;
     let session = run_until(session, SimTime::from_ns(seconds * SECOND))

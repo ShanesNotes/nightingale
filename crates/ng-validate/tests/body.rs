@@ -419,7 +419,6 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         .map(|hold| format!("{} {:?} {:?} {}\n", hold.card, hold.held, hold.release, hold.line))
         .collect();
     expect![[r#"
-        RS Route("airway heat") Ticket(12, "RS") 01:171-172, 873
         GI Route("gut water") Ticket(13, "GI") 01:54, 876
         GI Route("gut sodium") Ticket(13, "GI") 01:77, 876
         GI Route("gut potassium") Ticket(13, "GI") 01:94, 876
@@ -614,9 +613,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 143: routes 84, pools 59
-        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 14, "MT": 41, "RS": 1}
-        by ticket {"09": 3, "12": 4, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 142: routes 83, pools 59
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 14, "MT": 41}
+        by ticket {"09": 3, "12": 3, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -925,10 +924,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1465 {"algebraic": 196, "amount": 1251, "memory": 18}, columns 1463, jacobian nonzeros 10162, blocks 415, largest block 669, parameter slots 761, conserved combinations 396, held pools 318, held route columns 84
-        model hash be9016bb66748635d1c87d442f2fe2ef43bea39e89de8b06ec8438d369e15326
-        conserved basis 1bf2932821027a356d7765de3b4b00d83ca12a00052ed472c40acc3f1baade8f
-        stated packet ff66376d7d9576cd2fd2c76d6330e763d8aa73be3973568e9cb235b181c8737a
+        rows 1465 {"algebraic": 196, "amount": 1251, "memory": 18}, columns 1463, jacobian nonzeros 10167, blocks 414, largest block 671, parameter slots 763, conserved combinations 396, held pools 318, held route columns 83
+        model hash 7079446c2128f12b9537b0a2f64601666589a8a5e8594560b0fe16d72a042b4f
+        conserved basis d32be123062bf6a1028dca58c8e5339b9bbaf40f9fdd406ef121274a3f468d13
+        stated packet 1b4ff884fff2a2e4ededd0ef13d1b1eb073fab240571233b1202b124b4872e0c
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -1041,12 +1040,12 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     };
     let stated = Stated {
         species: [
-            (Species::Energy, 2e6),
+            (Species::Energy, 3e6),
             (Species::Water, 2e-1),
             (Species::Sodium, 6e-3),
             (Species::Chloride, 6e-3),
             (Species::Potassium, 3e-4),
-            (Species::Vasopressin, 6e-2),
+            (Species::Vasopressin, 5e-2),
             (Species::NitrogenGas, 2e4),
         ],
         elements: [

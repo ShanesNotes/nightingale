@@ -24,7 +24,6 @@ pub struct Hold {
     pub line: &'static str,
 }
 
-const RS: &str = Respiratory::CARD;
 const GI: &str = Gastrointestinal::CARD;
 const EN: &str = Endocrine::CARD;
 const HP: &str = Hepatic::CARD;
@@ -81,7 +80,6 @@ use Space::{Cells, Interstitium};
 
 /// Every hold of the whole body, by card. Its rows equal the compiled body's coverage manifest.
 pub const HOLD_TABLE: &[Hold] = &[
-    route(RS, "airway heat", CONSTANT, Ticket(12, RS), "01:171-172, 873"),
     route(GI, "gut water", MEAL, Ticket(13, GI), "01:54, 876"),
     route(GI, "gut sodium", MEAL, Ticket(13, GI), "01:77, 876"),
     route(GI, "gut potassium", MEAL, Ticket(13, GI), "01:94, 876"),

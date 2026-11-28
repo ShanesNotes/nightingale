@@ -4,20 +4,11 @@ use ng_respiratory::{Ventilation, exchange};
 
 /// A held enclosure's fluid must exist, so while the abdomen is held the respiratory card keeps a declaration and the
 /// pleural fluid needs no entry in it.
-const HELD: &str =
-    "body fixture: the pleural fluid while the abdomen is held, and airway heat until conduction";
-
-constant_routes! {Respiratory;
-    AirwayHeat => "rs.airway-heat",
-}
+const HELD: &str = "body fixture: the pleural fluid while the abdomen is held";
 
 pub(super) fn respiratory(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
-    let declaration = HeldDeclaration::<Respiratory>::new(CONSTANT.to_vec(), Vec::new(), HELD);
-    let mut held = body.hold(declaration)?;
-    {
-        let (laws, ports) = held.stand_ins();
-        constants(laws, ports)?;
-    }
+    let declaration = HeldDeclaration::<Respiratory>::new(Vec::new(), Vec::new(), HELD);
+    let held = body.hold(declaration)?;
     let (mut laws, ports) = body.respiratory(Some(held))?.parts();
     let ventilation = Ventilation::declare(&mut laws, &ports)?;
     let plasma: LungGases<Reads<'_, Respiratory>> = laws.receive();
@@ -25,6 +16,7 @@ pub(super) fn respiratory(body: &mut Assembly<'_>) -> Result<(), AdmissionError>
     ventilation.pleural(&mut laws, &ports)?;
     ventilation.work(&mut laws, &ports)?;
     ventilation.water(&mut laws, &ports)?;
+    ventilation.airway_heat(&mut laws, &ports)?;
     body.add(laws.finish());
     Ok(())
 }
