@@ -37,12 +37,25 @@ impl Seal for InputId {
 /// `amount` through the named boundary, from the event's instant until `ends`, at the constant rate that delivers
 /// it: "applied once" shows as a total received. Overlapping deliveries add. `check_delivery` refuses a boundary that
 /// carries another species.
+fn copy_measure<Q>(m: &Measure<Q>) -> Measure<Q> {
+    Measure::new(m.value()).expect("measure is finite")
+}
 pub struct Delivered<Q> {
     pub boundary: &'static str,
     pub amount: Measure<Q>,
     pub ends: SimTime,
 }
+impl<Q> Clone for Delivered<Q> {
+    fn clone(&self) -> Self {
+        Self {
+            boundary: self.boundary,
+            amount: copy_measure(&self.amount),
+            ends: self.ends,
+        }
+    }
+}
 pub type WaterDelivery = Delivered<Water>;
+#[derive(Clone)]
 pub enum BoundaryInput {
     Water(WaterDelivery),
     Sodium(Delivered<Sodium>),
@@ -57,6 +70,7 @@ pub enum BoundaryInput {
     Void(Gate),
     Meal(Meal),
 }
+#[derive(Clone, Copy)]
 pub struct Meal {
     ends: SimTime,
     amounts: [f64; Meal::SPECIES.len()],
@@ -180,6 +194,20 @@ pub struct Room {
     pub carbon_dioxide: Measure<Dimensionless>,
     pub clothing: Measure<Dimensionless>,
 }
+impl Clone for Room {
+    fn clone(&self) -> Self {
+        Self {
+            air: copy_measure(&self.air),
+            radiant: copy_measure(&self.radiant),
+            humidity: copy_measure(&self.humidity),
+            air_speed: copy_measure(&self.air_speed),
+            pressure: copy_measure(&self.pressure),
+            oxygen: copy_measure(&self.oxygen),
+            carbon_dioxide: copy_measure(&self.carbon_dioxide),
+            clothing: copy_measure(&self.clothing),
+        }
+    }
+}
 impl Room {
     fn values(&self) -> [f64; ROOM.len()] {
         let Self {
@@ -279,6 +307,7 @@ const ROOM: [Lasting; 8] = [
 ];
 /// `trunk` is the sine of the trunk's angle from flat: 0 lying flat, 1 sitting up or standing, a negative
 /// value head down.
+#[derive(Clone, Copy)]
 pub struct Posture {
     trunk: f64,
     legs: Legs,
@@ -316,6 +345,7 @@ impl Legs {
         .ok_or(Malformed)
     }
 }
+#[derive(Clone)]
 pub struct BoundaryEvent {
     id: InputId,
     at: SimTime,

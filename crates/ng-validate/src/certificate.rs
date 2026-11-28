@@ -7,7 +7,7 @@ use ng_contract::{
 };
 use ng_record::{
     AcceptedStep, CheckpointError, ConservationFeed, ConservationRefusal, ConservationView, Curve,
-    HistorySeal, HistorySegment, OldestFirst, Session,
+    HistorySeal, HistorySegment, OldestFirst, RetainedCursor, RetainedSpan, Session,
 };
 
 const SECOND: u64 = 1_000_000_000;
@@ -565,6 +565,157 @@ impl Certificate {
     pub fn rhythm(&self) -> Option<&RhythmResult> {
         self.rhythm.as_ref()
     }
+    /// Worst fixed-window drift per combination from this passing certificate.
+    pub fn drift_tally(&self) -> DriftTally {
+        DriftTally {
+            basis: self.basis,
+            policy: self.policy,
+            worst_drifts: (self.results.iter())
+                .map(|result| (result.quantity, result.worst_drift))
+                .collect(),
+            exceeded_closure_bound: vec![false; self.results.len()],
+        }
+    }
+    /// Checks this certificate's worst drifts against a revised policy under the same basis, windows,
+    /// closure limits, rounding and edge policy without rerunning or regenerating the history (record 0008).
+    pub fn recheck_drift(&self, prior: &CertificatePolicy, revised: &CertificatePolicy) -> DriftRecheck {
+        self.drift_tally().recheck(prior, revised)
+    }
+}
+
+/// Result of certifying a verified flight recorder span from the store alone. Kept distinct from a whole-run
+/// `Certificate` so a partial span cannot produce a whole-run `DriftTally` or recheck drift bounds for the
+/// full run.
+#[derive(Debug)]
+pub struct SuffixCertificate {
+    certificate: Certificate,
+    opened: SimTime,
+    from_revision: u64,
+}
+impl SuffixCertificate {
+    pub fn seal(&self) -> HistorySeal {
+        self.certificate.seal()
+    }
+    pub fn basis(&self) -> Digest {
+        self.certificate.basis()
+    }
+    pub fn policy(&self) -> Digest {
+        self.certificate.policy()
+    }
+    pub fn windows(&self) -> SlidingWindows {
+        self.certificate.windows()
+    }
+    pub fn span(&self) -> Interval {
+        self.certificate.span()
+    }
+    pub fn opened(&self) -> SimTime {
+        self.opened
+    }
+    pub fn from_revision(&self) -> u64 {
+        self.from_revision
+    }
+    pub fn results(&self) -> &[QuantityResult] {
+        self.certificate.results()
+    }
+    pub fn coverage(&self) -> &CoverageManifest {
+        self.certificate.coverage()
+    }
+    pub fn support(&self) -> &[HeldSupport] {
+        self.certificate.support()
+    }
+    pub fn pieces(&self) -> u64 {
+        self.certificate.pieces()
+    }
+    pub fn rhythm(&self) -> Option<&RhythmResult> {
+        self.certificate.rhythm()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DriftRecheck {
+    /// Every combination's worst drift over the complete run holds under the revised drift bounds.
+    Passes,
+    /// At least one combination exceeded its revised drift bound; naming the earliest failing window
+    /// requires rerunning the pinned build or regenerating the history.
+    NeedsRerun { quantity: QuantityId },
+    /// The revised policy changed basis, windows, expected drift, row rounding, edge policy or a closure
+    /// limit, or the prior policy does not match this tally.
+    IncompatiblePolicy,
+}
+
+/// Worst fixed-window drift per combination from a complete run that passed closure, used to check a
+/// revised drift bound without regenerating the history (record 0008).
+#[derive(Clone, Debug)]
+pub struct DriftTally {
+    basis: Digest,
+    policy: Digest,
+    worst_drifts: Vec<(QuantityId, Compensated)>,
+    exceeded_closure_bound: Vec<bool>,
+}
+impl DriftTally {
+    pub fn basis(&self) -> Digest {
+        self.basis
+    }
+    pub fn policy(&self) -> Digest {
+        self.policy
+    }
+    pub fn worst_drifts(&self) -> &[(QuantityId, Compensated)] {
+        &self.worst_drifts
+    }
+    pub fn recheck(&self, prior: &CertificatePolicy, revised: &CertificatePolicy) -> DriftRecheck {
+        if prior.digest() != self.policy
+            || prior.basis != self.basis
+            || revised.basis != self.basis
+            || prior.windows != revised.windows
+            || prior.expected != revised.expected
+            || prior.rounding.last_places_an_update != revised.rounding.last_places_an_update
+            || prior.rounding.updates_a_step != revised.rounding.updates_a_step
+            || !same_edges(&prior.edges, &revised.edges)
+            || prior.quantities.len() != revised.quantities.len()
+            || self.worst_drifts.len() != revised.quantities.len()
+            || self.exceeded_closure_bound.len() != revised.quantities.len()
+        {
+            return DriftRecheck::IncompatiblePolicy;
+        }
+        for (before, after) in prior.quantities.iter().zip(&revised.quantities) {
+            if before.quantity != after.quantity
+                || before.absolute.bits() != after.absolute.bits()
+                || Compensated::of(&before.relative).bits() != Compensated::of(&after.relative).bits()
+                || before.drift.is_some() != after.drift.is_some()
+            {
+                return DriftRecheck::IncompatiblePolicy;
+            }
+        }
+        for ((&(quantity, worst), &exceeded_closure), after) in (self.worst_drifts.iter())
+            .zip(&self.exceeded_closure_bound)
+            .zip(&revised.quantities)
+        {
+            if let Some(bound) = after.drift {
+                if !worst.at_most(bound) {
+                    return DriftRecheck::NeedsRerun { quantity };
+                }
+            } else if exceeded_closure {
+                return DriftRecheck::NeedsRerun { quantity };
+            }
+        }
+        DriftRecheck::Passes
+    }
+}
+
+fn same_edges(before: &Option<EdgePolicy>, after: &Option<EdgePolicy>) -> bool {
+    match (before, after) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.windows == b.windows
+                && a.rates.len() == b.rates.len()
+                && a.rates.iter().zip(&b.rates).all(|(x, y)| {
+                    x.quantity == y.quantity
+                        && x.settled.bits() == y.settled.bits()
+                        && x.settling.map(Compensated::bits) == y.settling.map(Compensated::bits)
+                })
+        }
+        _ => false,
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CertificateCheck {
@@ -691,6 +842,7 @@ struct Carried {
 }
 struct Pair {
     drifted: Option<CertificateFailure>,
+    exceeded_closure_bound: Vec<usize>,
     windows: Vec<Window>,
     carried: Vec<Carried>,
 }
@@ -761,6 +913,7 @@ fn pair(
         |start: u64| Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length)).ok_or(coverage);
     let mut opened = None;
     let mut drifted = [None; 2];
+    let mut exceeded_closure_bound = Vec::new();
     let mut windows = Vec::with_capacity(2 * policy.quantities.len());
     for (at, limits) in policy.quantities.iter().enumerate() {
         let quantity = limits.quantity;
@@ -792,6 +945,9 @@ fn pair(
                 }
                 Outcome::Drifts => {
                     drifted[index].get_or_insert_with(|| failure(CertificateCheck::Drift, balance.drift));
+                    if limits.drift.is_none() {
+                        exceeded_closure_bound.push(at);
+                    }
                 }
                 Outcome::Holds => {}
             }
@@ -832,6 +988,7 @@ fn pair(
     }
     Ok(Pair {
         drifted,
+        exceeded_closure_bound,
         windows,
         carried,
     })
@@ -960,6 +1117,11 @@ impl<'p> Rhythm<'p> {
             self.widest = Some(stretch);
         }
     }
+    fn anchor_open_tail_at_last_edge(&mut self) {
+        if self.last_close.is_none() {
+            self.admission = self.since;
+        }
+    }
     fn snapshot(&self, head: u64) -> Result<RhythmResult, CertificateFailure> {
         let tail = Self {
             limits: self.limits,
@@ -1007,6 +1169,7 @@ struct Windows<'p, 'r> {
     last: u64,
     from: u64,
     worst: Vec<Option<QuantityResult>>,
+    exceeded_closure_bound: Vec<bool>,
     most: Vec<Option<[(Compensated, Interval); 2]>>,
     drifted: Option<CertificateFailure>,
     failed: Option<CertificateFailure>,
@@ -1029,6 +1192,7 @@ impl<'p, 'r> Windows<'p, 'r> {
             last,
             from: first,
             worst: vec![None; policy.quantities.len()],
+            exceeded_closure_bound: vec![false; policy.quantities.len()],
             most: vec![None; routes.len()],
             drifted: None,
             failed: None,
@@ -1081,6 +1245,9 @@ impl<'p, 'r> Windows<'p, 'r> {
                 Err(failure) => (self.failed, self.done) = (Some(failure), true),
                 Ok(pair) => {
                     self.drifted = self.drifted.or(pair.drifted);
+                    for index in pair.exceeded_closure_bound {
+                        self.exceeded_closure_bound[index] = true;
+                    }
                     self.keep_the_earliest_worst(pair.windows);
                     self.keep_the_earliest_most(pair.carried);
                 }
@@ -1149,6 +1316,7 @@ impl<'p, 'r> Windows<'p, 'r> {
     }
     fn heap_bytes(&self) -> usize {
         self.worst.capacity() * size_of::<Option<QuantityResult>>()
+            + self.exceeded_closure_bound.capacity() * size_of::<bool>()
             + self.most.capacity() * size_of::<Option<[(Compensated, Interval); 2]>>()
             + self.rhythm.as_ref().map_or(0, Rhythm::heap_bytes)
     }
@@ -1346,6 +1514,85 @@ impl<'m, 'p> CertificateFold<'m, 'p> {
     pub fn pieces(&self) -> u64 {
         self.windows.pieces
     }
+    /// Returns the first failure already observed (history, closure, fixed-window drift, stopped rhythm or
+    /// edge drift) even before `coverage_ns` is reached, so a flight recorder can latch while the failing
+    /// window's span is still whole.
+    pub fn failure(&self) -> Option<CertificateFailure> {
+        if let Some(seal) = self.feed.pending_before_head() {
+            return Some(of_history(CertificateCheck::History(
+                CheckpointError::HistoryMissing { seal },
+            )));
+        }
+        if let Some(error) = self.history_error {
+            return Some(of_history(CertificateCheck::History(error)));
+        }
+        if let Some(failure) = self.windows.failed.or(self.windows.drifted) {
+            return Some(failure);
+        }
+        let rhythm = self.windows.rhythm.as_ref()?;
+        if let Some(failure) = rhythm.stopped.or(rhythm.drifted) {
+            return Some(failure);
+        }
+        let head = self.feed.span()?.end().nanoseconds();
+        let since = rhythm.since;
+        if head.saturating_sub(since) > rhythm.limits.windows.widest_ns {
+            return Some(CertificateFailure {
+                check: CertificateCheck::RhythmStopped,
+                quantity: None,
+                window: Interval::new(SimTime::from_ns(since), SimTime::from_ns(head)),
+                residual: Compensated::ZERO,
+                allowance: None,
+            });
+        }
+        None
+    }
+    /// The earliest window start still open across fixed sliding windows and rhythm edge windows, if any.
+    pub fn oldest_open_window_start(&self) -> Option<SimTime> {
+        let fixed = (!self.windows.done).then_some(SimTime::from_ns(self.windows.from));
+        let edge = self.windows.rhythm.as_ref().map(|rhythm| {
+            let tail = rhythm.last_close.unwrap_or(rhythm.admission);
+            let start = rhythm.open.first().map_or(tail, |&(opened, _)| opened.min(tail));
+            SimTime::from_ns(start)
+        });
+        match (fixed, edge) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+    /// The oldest revision whose complete link this fold's feed may still read from its store across a
+    /// 64-link page boundary.
+    pub fn oldest_retained_revision(&self) -> Option<u64> {
+        self.feed.oldest_retained_revision()
+    }
+    /// Worst fixed-window drift per combination when this run has reached coverage and passed closure,
+    /// history and rhythm checks, even when a fixed-window drift bound failed.
+    pub fn drift_tally(&self) -> Option<DriftTally> {
+        let span = self.feed.span()?;
+        if span.length_ns() < self.windows.policy.windows.coverage_ns
+            || self.feed.pending_before_head().is_some()
+            || self.history_error.is_some()
+            || self.windows.failed.is_some()
+        {
+            return None;
+        }
+        if let Some(rhythm) = &self.windows.rhythm
+            && rhythm.snapshot(span.end().nanoseconds()).is_err()
+        {
+            return None;
+        }
+        let worst_drifts = self
+            .windows
+            .worst
+            .iter()
+            .map(|entry| entry.map(|result| (result.quantity, result.worst_drift)))
+            .collect::<Option<Vec<_>>>()?;
+        Some(DriftTally {
+            basis: self.windows.policy.basis,
+            policy: self.windows.policy.digest(),
+            worst_drifts,
+            exceeded_closure_bound: self.windows.exceeded_closure_bound.clone(),
+        })
+    }
     /// Heap and inline bytes currently held by this fold and its feed.
     pub fn memory_bytes(&self) -> usize {
         let trailing_heap = self
@@ -1421,6 +1668,107 @@ pub fn certify(
         }
     }
     windows.finish(view, span)
+}
+
+/// Certifies a verified flight recorder span from the store alone, without running a core, streaming links
+/// through `retained`'s paged cursor using `certify`'s exact window evaluator over every window contained in
+/// `retained`. Returns `SuffixCertificate` rather than `Certificate` so partial spans cannot produce a
+/// whole-run `DriftTally`.
+pub fn certify_flight_recorder(
+    retained: &RetainedSpan<'_, '_>,
+    policy: &CertificatePolicy,
+) -> Result<SuffixCertificate, CertificateFailure> {
+    let coverage = of_history(CertificateCheck::Coverage);
+    if policy.basis != retained.basis().digest() {
+        return Err(coverage);
+    }
+    let rhythm = match &policy.edges {
+        Some(limits) => {
+            let clock = limits.windows.clock;
+            let declared = retained.rhythms().find(|&(_, phase)| phase == clock);
+            Some(
+                declared
+                    .ok_or_else(|| of_history(CertificateCheck::UndeclaredRhythm))?
+                    .0,
+            )
+        }
+        None => None,
+    };
+    let covered = retained.span().ok_or(coverage)?;
+    let ExpectedDrift::Zero = policy.expected;
+    let length = policy.windows.window_ns.get();
+    let first = covered.start().nanoseconds();
+    let head = covered.end().nanoseconds();
+    let one_window = policy.windows.coverage_ns == length;
+    let has_fixed = if one_window {
+        first == retained.opened().nanoseconds() && covered.length_ns() >= length
+    } else {
+        covered.length_ns() >= length
+    };
+    let last = if !has_fixed || one_window {
+        first
+    } else {
+        head - length
+    };
+    let routes = retained.basis().coverage().held_routes();
+    let mut windows = Windows::new(policy, routes, (first, last), rhythm);
+    if !has_fixed {
+        windows.done = true;
+    }
+    if let Some(edge) = &mut windows.rhythm {
+        edge.admission = retained.opened().nanoseconds();
+        edge.since = first;
+    }
+    let history = |error| of_history(CertificateCheck::History(error));
+    if has_fixed {
+        let read = |cursor: &mut RetainedCursor<'_>| cursor.next().ok_or(coverage)?.map_err(history);
+        let mut early = retained.from(covered.start());
+        let mut late = match rhythm {
+            Some(_) => retained.from(covered.start()),
+            None => retained.from(SimTime::from_ns(first + length)),
+        };
+        let (mut trailing, mut leading) = (read(&mut early)?, read(&mut late)?);
+        windows.arrive(&leading.1);
+        loop {
+            match windows.offer((trailing.0, &trailing.1), (leading.0, &leading.1)) {
+                Need::Trailing => trailing = read(&mut early)?,
+                Need::Leading => {
+                    leading = read(&mut late)?;
+                    windows.arrive(&leading.1);
+                }
+                Need::Finish => break,
+            }
+        }
+        if rhythm.is_some() {
+            for next in late {
+                windows.arrive(&next.map_err(history)?.1);
+            }
+        }
+    } else if rhythm.is_some() {
+        for next in retained.from(covered.start()) {
+            windows.arrive(&next.map_err(history)?.1);
+        }
+    }
+    if retained.from_revision() > 0
+        && let Some(edge) = &mut windows.rhythm
+    {
+        edge.anchor_open_tail_at_last_edge();
+    }
+    if let Some(failure) = windows.failed.or(windows.drifted) {
+        return Err(failure);
+    }
+    if !has_fixed {
+        if let Some(edge) = &windows.rhythm {
+            edge.snapshot(head)?;
+        }
+        return Err(coverage);
+    }
+    let certificate = windows.snapshot(retained.seal(), retained.basis().coverage(), covered)?;
+    Ok(SuffixCertificate {
+        certificate,
+        opened: retained.opened(),
+        from_revision: retained.from_revision(),
+    })
 }
 
 #[cfg(test)]

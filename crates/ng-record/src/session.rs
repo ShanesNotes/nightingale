@@ -75,6 +75,10 @@ impl<'m, S> Session<'m, S> {
     pub(crate) fn store(&self) -> &'m dyn HistoryStore {
         self.store
     }
+    /// Whether this session publishes links to the exact `HistoryStore` instance at `store`.
+    pub fn uses_store(&self, store: &dyn HistoryStore) -> bool {
+        core::ptr::addr_eq(self.store, store)
+    }
     pub fn conservation(&self) -> ConservationView<'_> {
         self.record.conservation(self.store)
     }
@@ -164,6 +168,15 @@ impl<'m> Session<'m, Running> {
         let span_ns = solver.next_step(record.accepted());
         let outcome = record.attempt(solver, Attempt::First { span_ns });
         settle(solver, store, record, Vec::new(), outcome)
+    }
+    /// Hands the session's store every accepted link that still waits, returning the oldest seal the store
+    /// still refuses, if any.
+    pub fn flush_store(&mut self) -> Result<(), CheckpointError> {
+        self.record.keep_waiting(self.store);
+        match self.record.oldest_unkept() {
+            Some(seal) => Err(CheckpointError::StoreFailed { seal }),
+            None => Ok(()),
+        }
     }
     /// A checkpoint of the accepted head, which never cuts an interval. It is refused while the store has not
     /// kept every link, so the bytes it returns are complete with that store.

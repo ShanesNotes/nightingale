@@ -1,8 +1,9 @@
-use crate::history::{History, Start, push_bits};
+use crate::history::{History, HistorySegment, Start, Witness, push_bits};
 use crate::record::PatientRecord;
 use core::cmp::Ordering;
 use ng_contract::{
-    ByteReader, Compensated, CompiledBody, Digest, ImageParts, Malformed, RecordHash, RunIdentity, SimTime,
+    AcceptedHead, ByteReader, Compensated, CompiledBody, Digest, ImageParts, Malformed, RecordHash,
+    RunIdentity, SimTime,
 };
 
 /// A checkpoint's only form: the envelope's bytes, so a rewind, a recover and a resume take one path.
@@ -39,9 +40,11 @@ pub enum CheckpointError {
     Malformed,
     /// The parts parsed, and they are not the image the chain recorded for this head.
     SealMismatch,
-    /// The store has no link for this seal.
+    /// The store has no link or witness for this seal.
     HistoryMissing { seal: Digest },
-    /// A link that does not chain to its seal, does not parse or does not reach the opening.
+    /// The store holds a valid witness for this seal, and its complete link was trimmed.
+    HistoryTrimmed { seal: Digest },
+    /// A link or witness that does not chain to its seal, does not parse or does not reach the opening.
     HistoryAltered { seal: Digest },
     /// The oldest link the session's store has not kept. No checkpoint exists until a later step's store
     /// keeps it.
@@ -57,10 +60,20 @@ pub enum CheckpointError {
 /// accepted, and a store that loses a link fails the next walk that needs it, by that link's seal. During a
 /// time-order walk, a link lost after the initial chain check fails only if a cursor later reads its page,
 /// and when links on several pages are lost mid-walk the oldest damaged page's newest lost link is reported.
+/// A trimming store also answers `resolve_witness` with each step's 96-byte witness so `restore`, `rewind`
+/// and `recover` verify every seal back to admission without reparsing discarded ledgers.
 pub trait HistoryStore {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>>;
     /// Keeping a seal it holds changes nothing, so every session of a run may share one store.
     fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError>;
+    /// The 96-byte chain witness for `seal`, when this store keeps witnesses.
+    fn resolve_witness(&self, _seal: &Digest) -> Option<Witness> {
+        None
+    }
+    /// Keeps a link together with its already-computed 96-byte witness. Defaults to `keep`.
+    fn keep_with_witness(&self, seal: Digest, link: &[u8], _witness: Witness) -> Result<(), CheckpointError> {
+        self.keep(seal, link)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -254,6 +267,7 @@ pub(crate) fn write(
         branch,
         history,
     } = sections;
+    let opened = history.opened().unwrap_or(image.time);
     let image = image.canonical();
     let mut body = (image.len() as u64).to_be_bytes().to_vec();
     body.extend_from_slice(&image);
@@ -264,6 +278,13 @@ pub(crate) fn write(
         push_bits(&mut body, *value);
     }
     body.extend_from_slice(history.origin().image.as_bytes());
+    if history.format() == RecordFormat::V2
+        && let Some(link) = history.head_link_bytes()
+    {
+        body.extend_from_slice(&opened.nanoseconds().to_be_bytes());
+        body.extend_from_slice(&(link.len() as u64).to_be_bytes());
+        body.extend_from_slice(&link);
+    }
     let mut bytes = history.format().magic().to_vec();
     bytes.extend_from_slice(&[0; 32]);
     bytes.extend_from_slice(&(body.len() as u64).to_be_bytes());
@@ -275,6 +296,21 @@ pub(crate) fn write(
     let raw = Digest::of_canonical(&bytes[RAW_DIGEST_END..]);
     bytes[MAGIC_LENGTH..RAW_DIGEST_END].copy_from_slice(raw.as_bytes());
     Checkpoint { bytes }
+}
+
+pub(crate) struct Trailer {
+    pub(crate) opened: SimTime,
+    pub(crate) head_link: Vec<u8>,
+}
+
+fn validate_trailer(revision: u64, trailer: &Option<Trailer>) -> Result<(), CheckpointError> {
+    let Some(Trailer { head_link, .. }) = trailer else {
+        return Ok(());
+    };
+    if revision == 0 || head_link.is_empty() {
+        return Err(CheckpointError::Malformed);
+    }
+    Ok(())
 }
 
 pub(crate) fn restore<'m>(
@@ -297,11 +333,18 @@ pub(crate) fn restore<'m>(
         branch,
         opening,
         origin,
+        trailer,
     } = parts;
-    if let Continuing::Rewind(_, parent) | Continuing::Recover(_, parent) = continuing
-        && (header.format != parent.format() || !parent.holds(header.seal, header.revision, store)?)
-    {
-        return Err(CheckpointError::NotOnThisBranch);
+    validate_trailer(header.revision, &trailer)?;
+    if let Continuing::Rewind(_, parent) | Continuing::Recover(_, parent) = continuing {
+        if header.format != parent.format() || !parent.holds(header.seal, header.revision, store)? {
+            return Err(CheckpointError::NotOnThisBranch);
+        }
+        if let (Some(parent_opened), Some(trailer)) = (parent.opened(), &trailer)
+            && trailer.opened != parent_opened
+        {
+            return Err(CheckpointError::Malformed);
+        }
     }
     let start = Start {
         format: header.format,
@@ -310,7 +353,7 @@ pub(crate) fn restore<'m>(
         image: origin,
         parameters: image.parameters().digest(),
     };
-    let history = History::walked(body, start, header.seal, header.revision, store)?;
+    let history = History::walked(body, start, header.seal, header.revision, trailer, store)?;
     let branch = match continuing {
         Continuing::Resume => branch,
         Continuing::Rewind(fork, _) | Continuing::Recover(fork, _) => {
@@ -325,6 +368,59 @@ pub(crate) fn restore<'m>(
     PatientRecord::restored(body, expected.clone(), parts)
 }
 
+pub(crate) struct VerifiedBase {
+    pub(crate) format: RecordFormat,
+    pub(crate) origin: Digest,
+    pub(crate) branch: Digest,
+    pub(crate) opened: SimTime,
+    pub(crate) revision: u64,
+    pub(crate) seal: Digest,
+    pub(crate) head: Option<HistorySegment>,
+}
+
+pub(crate) fn verify_base(
+    saved: &Checkpoint,
+    expected: &RunIdentity,
+    body: &CompiledBody,
+    store: &dyn HistoryStore,
+) -> Result<VerifiedBase, CheckpointError> {
+    let header = opened(saved.as_bytes())?;
+    if header.identity != expected.digest() {
+        return Err(CheckpointError::IdentityMismatch);
+    }
+    let parts = Parts::read(header.body, body).map_err(|_| CheckpointError::Malformed)?;
+    let Parts {
+        image,
+        branch,
+        opening,
+        origin,
+        trailer,
+    } = parts;
+    validate_trailer(header.revision, &trailer)?;
+    let image_time = image.time;
+    let start = Start {
+        format: header.format,
+        run: expected.digest(),
+        opening,
+        image: origin,
+        parameters: image.parameters().digest(),
+    };
+    let history = History::walked(body, start, header.seal, header.revision, trailer, store)?;
+    let restored = AcceptedHead::restored(image, header.format.hash());
+    if restored.image_digest() != history.head_image() {
+        return Err(CheckpointError::SealMismatch);
+    }
+    Ok(VerifiedBase {
+        format: header.format,
+        origin: history.origin().seal,
+        branch: branch.id(),
+        opened: history.opened().unwrap_or(image_time),
+        revision: header.revision,
+        seal: header.seal,
+        head: history.head_segment().cloned(),
+    })
+}
+
 pub(crate) struct Restored {
     pub(crate) branch: BranchAncestry,
     pub(crate) image: ImageParts,
@@ -336,21 +432,33 @@ struct Parts {
     branch: BranchAncestry,
     opening: Vec<Compensated>,
     origin: Digest,
+    trailer: Option<Trailer>,
 }
 impl Parts {
     fn read(bytes: &[u8], body: &CompiledBody) -> Result<Self, Malformed> {
         let mut read = ByteReader::new(bytes);
-        let count = read.count(1)?;
-        let image = ImageParts::parse(body, read.take(count)?)?;
+        let image_len = read.count(1)?;
+        let image = ImageParts::parse(body, read.take(image_len)?)?;
         let branch = BranchAncestry::read(&mut read)?;
         let opening = read.compensated_list(body.conserved_basis().combinations().len())?;
         let origin = read.digest()?;
-        read.finish()?;
+        let prefix_len = 8 + image_len + 32 + 8 + branch.forks().len() * 48 + 8 + opening.len() * 16 + 32;
+        let trailer = if bytes.len() == prefix_len {
+            read.finish()?;
+            None
+        } else {
+            let opened = read.time()?;
+            let link_len = read.count(1)?;
+            let head_link = read.take(link_len)?.to_vec();
+            read.finish()?;
+            Some(Trailer { opened, head_link })
+        };
         Ok(Self {
             image,
             branch,
             opening,
             origin,
+            trailer,
         })
     }
 }
