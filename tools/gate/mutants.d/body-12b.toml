@@ -85,6 +85,15 @@ test = "-p ng-validate --test body_run blood_carries_heat_from_the_core_store_to
 budget = 2000
 
 [[mutant]]
+name = "the-carriage-reads-each-temperature-against-itself"
+path = "crates/ng-cardiovascular/src/carriage.rs"
+old = '''        let across = k.subtract(core, tissue);'''
+new = '''        let (nothing, none) = (k.subtract(core, core), k.subtract(tissue, tissue));
+        let across = k.add(nothing, none);'''
+test = "-p ng-validate --test body_run blood_carries_heat_from_the_core_store_to_the_skin_store_at_the_skin_beds_inflow"
+budget = 2000
+
+[[mutant]]
 name = "the-carriage-reads-twice-the-skin-beds-inflow"
 path = "crates/ng-cardiovascular/src/carriage.rs"
 old = '''        let flow = k.volume_flow(water);'''
@@ -97,8 +106,8 @@ budget = 2000
 name = "the-skin-arteriole-drops-its-dilator-gain"
 path = "crates/ng-cardiovascular/src/circulation.rs"
 old = '''        let opened = k.scale(felt, gain);'''
-new = '''        let _ = gain;
-        let opened = felt;'''
+new = '''        let none = k.subtract(gain, gain);
+        let opened = k.add(felt, none);'''
 test = "-p ng-validate --test body_run the_skin_arteriole_opens_with_the_dilator_and_the_skins_warmth_and_no_other_edge_reads_either"
 budget = 1000
 
