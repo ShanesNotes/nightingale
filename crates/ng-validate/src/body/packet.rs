@@ -29,6 +29,9 @@ const CORE_REFERENCE: f64 = 310.15;
 const SKIN_REFERENCE: f64 = 307.15;
 /// The skin's evaporative heat the start guesses, near where the body admits in its room.
 const EVAPORATION_AT_REST: f64 = 2.2e5;
+/// Each salt's concentration on the secreted sweat at no sweat, and its rise per share of the gland's maximal rate.
+const SWEAT_FLOOR: f64 = 10.0;
+const SWEAT_SLOPE: f64 = 40.0;
 const EVAPORATION_AMPLITUDE: f64 = 0.5;
 
 /// The viscosity the packet's edge resistances are stated at. It was read once, at 08a's admitted start from an
@@ -345,7 +348,11 @@ fn start_guess(row: RowKind) -> f64 {
                 "core_temperature" => CORE_REFERENCE,
                 "tissue_temperature" if bed == "skin heat site" => SKIN_REFERENCE,
                 "tissue_temperature" => CORE_REFERENCE,
-                "sudomotor command" | "constrictor command" | "shiver command" | "shiver_drive" => 0.0,
+                "sudomotor command"
+                | "constrictor command"
+                | "shiver command"
+                | "shiver_drive"
+                | "sweat rate" => 0.0,
                 "skin arteriole exponent" => 0.0,
                 _ => 1.0,
             }
@@ -537,9 +544,6 @@ const ZERO_STAND_INS: &[(&str, Zero)] = &[
     ("hp.albumin-synthesis", zero::<Albumin>),
     ("hp.fixed-acid-made", zero::<FixedAcid>),
     ("hp.insulin-first-pass", zero::<Insulin>),
-    ("mt.sweat-chloride", zero::<Chloride>),
-    ("mt.sweat-sodium", zero::<Sodium>),
-    ("mt.sweat-water", zero::<Water>),
     ("rs.expired-carbon-dioxide", zero::<CarbonDioxide>),
     ("rs.expired-nitrogen-gas", zero::<NitrogenGas>),
     ("rs.expired-oxygen", zero::<Oxygen>),
@@ -713,6 +717,7 @@ fn packet_of(
     twins(&mut packet)?;
     thermostat(&mut packet)?;
     skin_bed(&mut packet)?;
+    sweat(&mut packet)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -1228,6 +1233,24 @@ fn skin_bed(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admiss
     set::<Dimensionless>(packet, "cv.unit", body, 1.0)
 }
 
+/// The sweat's keys, every value synthetic. Each maps to research 16: the sweat gland's maximal rate `m_max` (MT-035)
+/// and its width `b_sw` against the skin's temperature (MT-036), the width `w` of `smooth_min(E_rsw, E_max, w)`
+/// (MT-029), and the concentration each salt rides at on the secreted sweat, its floor `c_0` and slope `k_c`, sodium's
+/// (MT-037, MT-038) and chloride's (MT-039, MT-040). Model defaults: the sweat gland's `ln 2`, with no row, and
+/// chloride's floor and slope at sodium's values, so the sweat carries no net charge, as the gut's salts carry none and
+/// the body's charge holds to its closure.
+fn sweat(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    set::<Rate<Water>>(packet, "mt.sweat-gland-maximal-rate", body, 0.1)?;
+    set::<Deviation<Temperature>>(packet, "mt.sweat-width", body, 4.0)?;
+    set::<Dimensionless>(packet, "mt.ln-two", body, core::f64::consts::LN_2)?;
+    set::<Rate<Energy>>(packet, "mt.evaporation-width", body, 1e3)?;
+    set::<Quotient<Sodium, Water>>(packet, "mt.sweat-sodium-floor", body, SWEAT_FLOOR)?;
+    set::<Quotient<Sodium, Water>>(packet, "mt.sweat-sodium-slope", body, SWEAT_SLOPE)?;
+    set::<Quotient<Chloride, Water>>(packet, "mt.sweat-chloride-floor", body, SWEAT_FLOOR)?;
+    set::<Quotient<Chloride, Water>>(packet, "mt.sweat-chloride-slope", body, SWEAT_SLOPE)
+}
+
 /// The debt's oxygen to each lactate is the lactate burn's own counts, read from the compiled body.
 fn oxygen_per_lactate(
     packet: &mut ParameterPacket<SyntheticFixture>,
@@ -1323,11 +1346,13 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// the widest gap between edges, each rounded up to one significant figure. The onset is pinned at 30 s because the
 /// figures are taken there, inside the admission's own fall of energy, which puts energy's above a settled onset's, so
 /// moving the onset moves them. The salts' excess grows to the run's end, so a longer run leaves their bounds (body
-/// ticket 17). Energy's figures are sized by native-contract 85's rule from the reference run, which includes the
-/// airway's latent heat (body ticket 12), and are sized again when body tickets 13 to 16 land. The payers of the stroke
-/// work and of the work of breathing take a hydrogen bound of their own, since their cells settle as their works do,
-/// and each is judged on its own. Oxygen and carbon dioxide as species keep only held pools that never move, so the
-/// slice's bound for an unmoved species holds them.
+/// ticket 17). Their figures carry the sweat's salts, which follow the skin as evaporation's forcing leaves the mean
+/// that admission holds it at, and vasopressin's drift and settling rate carry the sweat's water (body ticket 12).
+/// Energy's figures are sized by native-contract 85's rule from the reference run, which includes the airway's latent
+/// heat (body ticket 12), and are sized again when body tickets 13 to 16 land. The payers of the stroke work and of the
+/// work of breathing take a hydrogen bound of their own, since their cells settle as their works do, and each is judged
+/// on its own. Oxygen and carbon dioxide as species keep only held pools that never move, so the slice's bound for an
+/// unmoved species holds them.
 const ELEMENT_BOUNDS: [(Element, f64, f64, f64); 3] = [
     (Element::Carbon, 7e2, 3e1, 1e1),
     (Element::Hydrogen, 2e-4, 2e-5, 2e-6),
@@ -1338,10 +1363,10 @@ const PAYERS: [&str; 2] = [STROKE_PAYER, BREATH_PAYER];
 const SPECIES_BOUNDS: [(Species, f64, f64, f64); 7] = [
     (Species::Energy, 3e6, 2e5, 8e4),
     (Species::Water, 2e-1, 7e-3, 4e-3),
-    (Species::Sodium, 5e-3, 5e-4, 9e-6),
-    (Species::Chloride, 6e-3, 5e-4, 1e-5),
+    (Species::Sodium, 9e-3, 9e-4, 4e-5),
+    (Species::Chloride, 9e-3, 9e-4, 4e-5),
     (Species::Potassium, 3e-4, 3e-5, 5e-7),
-    (Species::Vasopressin, 5e-2, 5e-3, 3e-4),
+    (Species::Vasopressin, 6e-2, 5e-3, 4e-4),
     (Species::NitrogenGas, 2e4, 2e1, 8.0),
 ];
 const SETTLING_TIME: u64 = 20 * SECOND;

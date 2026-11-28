@@ -204,9 +204,6 @@ pub const HOLD_TABLE: &[Hold] = &[
     pool::<AminoAcids, Beds<Tubule>>(BC, Cells, UNCROSSED, Ticket(18, RN), "01:209"),
     pool::<DietBase, CapillaryBed>(BC, Interstitium, KEPT_BACK, Ticket(18, FL), "01:546, 881"),
     pool::<FixedAcid, CapillaryBed>(BC, Interstitium, KEPT_BACK, Ticket(18, FL), "01:253, 881"),
-    route(MT, "sweat water", CONSTANT, Ticket(12, MT), "01:62"),
-    route(MT, "sweat sodium", CONSTANT, Ticket(12, MT), "01:82"),
-    route(MT, "sweat chloride", CONSTANT, Ticket(12, MT), "01:115"),
     route(MT, "pulmonary bed glucose feed", FEED, Ticket(16, MT), "01:190"),
     route(
         MT,

@@ -510,9 +510,6 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         BC Pool(AminoAcids, Cells, Tissue(Tubule)) Ticket(18, "RN") 01:209
         BC Pool(DietBase, Interstitium, Class(CapillaryBed)) Ticket(18, "FL") 01:546, 881
         BC Pool(FixedAcid, Interstitium, Class(CapillaryBed)) Ticket(18, "FL") 01:253, 881
-        MT Route("sweat water") Ticket(12, "MT") 01:62
-        MT Route("sweat sodium") Ticket(12, "MT") 01:82
-        MT Route("sweat chloride") Ticket(12, "MT") 01:115
         MT Route("pulmonary bed glucose feed") Ticket(16, "MT") 01:190
         MT Route("pulmonary bed fatty acid feed") Ticket(16, "MT") 01:200
         MT Route("pulmonary bed cell water out") Ticket(17, "FL") 01:58, 880
@@ -622,9 +619,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 142: routes 83, pools 59
-        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 14, "MT": 41}
-        by ticket {"09": 3, "12": 3, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 139: routes 80, pools 59
+        by card {"BC": 18, "EN": 25, "GI": 25, "HC": 6, "HP": 13, "MS": 14, "MT": 38}
+        by ticket {"09": 3, "13": 16, "14": 6, "15": 9, "16": 33, "17": 34, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -981,10 +978,10 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(stated),
     );
     expect![[r#"
-        rows 1478 {"algebraic": 205, "amount": 1254, "memory": 19}, columns 1467, jacobian nonzeros 10230, blocks 417, largest block 681, parameter slots 809, conserved combinations 397, held pools 318, held route columns 83
-        model hash 1affbee8e59345f9315cbb2db0a94a1ba98776a2b7e4221811b7f8bc58142e66
-        conserved basis 1c607f0740d783c1105f5ebd43e20e578d7561ef92b15d06ed878c67b01451c7
-        stated packet 321466d4b556102ea1a0de9db54ff8e5a5ada55393938f8bb1f219dff969537a
+        rows 1479 {"algebraic": 206, "amount": 1254, "memory": 19}, columns 1467, jacobian nonzeros 10238, blocks 417, largest block 682, parameter slots 814, conserved combinations 397, held pools 318, held route columns 80
+        model hash 1921a8f674b67c89940285032e62867bea5fcbaf1e04d915470be7fd87f08a0f
+        conserved basis 02e124038ff982ed095bbd65e46b53b21d6c198aa27e828b1efeb328bedb666f
+        stated packet d280289bfa0b20873d80a9f0c169ffefb3d657a78c6cd3aa73e143039178ac26
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -1099,10 +1096,10 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
         species: [
             (Species::Energy, 3e6),
             (Species::Water, 2e-1),
-            (Species::Sodium, 5e-3),
-            (Species::Chloride, 6e-3),
+            (Species::Sodium, 9e-3),
+            (Species::Chloride, 9e-3),
             (Species::Potassium, 3e-4),
-            (Species::Vasopressin, 5e-2),
+            (Species::Vasopressin, 6e-2),
             (Species::NitrogenGas, 2e4),
         ],
         elements: [

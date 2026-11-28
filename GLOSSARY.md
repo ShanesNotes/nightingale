@@ -369,6 +369,13 @@ The skin store's heat to the room by radiation and convection, a rate. It reads 
 **Skin evaporative heat**:
 The skin store's heat that leaves with the water evaporating from the skin, a rate. The water leaves the skin bed at that rate over the latent heat, so the two stand in one fixed proportion.
 
+**Sweat rate**:
+The water the sweat glands secrete, a rate. MT defines it as a row of the body from one kernel at the skin bed: the glands' maximal rate, times the acetylcholine effect at the skin junction, times e raised to ln 2 times the skin store's temperature above the skin reference over a width. So it rises with that effect and as the skin warms. The skin evaporates what it can of the sweat, and the sweat's sodium and chloride ride on all of it, at a concentration that rises with the sweat rate.
+
+**Unevaporated sweat**:
+The sweat the skin cannot evaporate, a rate, which leaves the skin bed as water alone. It is the heat the sweat would carry off if all of it evaporated, less the part of that heat the skin can take, over the latent heat. The part the skin can take is that heat smoothly capped at the most the skin can evaporate in its room.
+_Avoid_: drip
+
 **Left-out space**:
 A space the schema states this body does not model, with its reason, such as cell water in a bench with no cell-water law. Its pools are not amounts, and no law may move or read them. Every other pool is an amount some transfer must move or a held declaration holds; one that neither covers is an orphan pool, which compilation refuses.
 
@@ -538,7 +545,7 @@ The thermostat's cold command for the skin's vessels: it rises as its weighted s
 The thermostat's cold command for shivering, with its own weights and threshold. Arrow 87's shiver drive is the command smoothly capped at one, shifted so that a zero command gives a zero drive and scaled so that the drive stays under one.
 
 **Skin reference**:
-The fixed skin temperature, a parameter of the body, that the thermostat compares the skin thermoreceptor's store with. Unlike the core's set point, it never moves. CV's skin arteriole exponent reads it too, against the skin store's temperature.
+The fixed skin temperature, a parameter of the body, that the thermostat compares the skin thermoreceptor's store with. Unlike the core's set point, it never moves. CV's skin arteriole exponent reads it too, against the skin store's temperature, and so does MT's sweat rate, against the temperature of the store the skin bed sits in.
 
 **Skin arteriole exponent**:
 An algebraic row CV defines at each skin bed. The skin arteriole's resistance, the resistance of the plain edge into that bed, is multiplied by e raised to it. It is minus the log of one plus the dilator gain times the acetylcholine effect at the skin junction, less ln 2 times the skin store's temperature above the skin reference over a width. So the skin arteriole opens as that effect rises and as the skin warms. An edge into any other site reads zero and keeps its resistance.

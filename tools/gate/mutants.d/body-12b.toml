@@ -118,3 +118,60 @@ old = '''        let both = k.add(dilated, warmed);'''
 new = '''        let both = k.subtract(dilated, warmed);'''
 test = "-p ng-validate --test body_run the_skin_arteriole_opens_with_the_dilator_and_the_skins_warmth_and_no_other_edge_reads_either"
 budget = 1000
+
+[[mutant]]
+name = "the-sweat-rate-falls-as-the-skin-warms"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let doublings = k.scale(widths, ln_two);'''
+new = '''        let doublings = k.scale(widths, ln_two);
+        let none = k.zero();
+        let doublings = k.subtract(none, doublings);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+budget = 1000
+
+[[mutant]]
+name = "evaporation-leaves-out-its-sweat-term"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let value = k.add(diffusing, wetting);'''
+new = '''        let value = diffusing;'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+budget = 1000
+
+[[mutant]]
+name = "the-unevaporated-sweat-turns-its-sign"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let left = k.subtract(secreting, taken);'''
+new = '''        let left = k.subtract(taken, secreting);'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+budget = 1000
+
+[[mutant]]
+name = "the-salts-ride-on-the-evaporated-water"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''    let secreted = &sweat.rate;'''
+new = '''    let carried = laws.algebraic::<Rate<Water>>("evaporated water", Admissible::finite());
+    let evaporated = laws.kernel(|mut k| {
+        let (own, heat, latent) = (k.algebraic(&carried), k.algebraic(&rate), k.parameter(&latent));
+        let ratio = k.divide(heat, latent);
+        let water: Expr<'_, '_, Mt, Rate<Water>> = k.as_dimension(ratio);
+        let residual = k.subtract(own, water);
+        k.finish(residual, laws.every_mode(), class)
+    });
+    laws.residual(&carried, evaporated);
+    let secreted = &carried;'''
+test = "-p ng-validate --test body_run each_tissue_heat_law_matches_its_form_in_two_rooms_and_evaporation_posts_water_and_heat_in_one_proportion"
+budget = 1000
+
+[[mutant]]
+name = "the-forcing-moves-onto-the-sweat-term"
+path = "crates/ng-metabolism/src/heat.rs"
+old = '''        let diffusing = k.scale(diffusing, wandering);
+        let (_, taken) = taken(&mut k, &sweat.rate, (&latent, &width), capacity);
+        let dried = k.scale(taken, wettedness);
+        let wetting = k.subtract(taken, dried);'''
+new = '''        let (_, taken) = taken(&mut k, &sweat.rate, (&latent, &width), capacity);
+        let dried = k.scale(taken, wettedness);
+        let wetting = k.subtract(taken, dried);
+        let wetting = k.scale(wetting, wandering);'''
+test = "-p ng-validate --test body_run evaporation_bears_its_forcing_on_the_diffusion_term_alone_where_the_sweat_term_outweighs_it"
+budget = 1000

@@ -4,15 +4,8 @@ use ng_contract::catalog::{MyocardialWorkAndBedFlow, PlasmaGases, Reads, WorkOfB
 use ng_contract::*;
 use ng_metabolism::{GasRoutes, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion, tissue_heat};
 
-constant_routes! {Metabolism;
-    Sweat<Water> => "mt.sweat-water",
-    Sweat<Sodium> => "mt.sweat-sodium",
-    Sweat<Chloride> => "mt.sweat-chloride",
-}
-
 pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
-    let mut supplies = CONSTANT.to_vec();
-    supplies.extend(GLUCOSE_FEED);
+    let mut supplies = GLUCOSE_FEED.to_vec();
     supplies.extend(FAT_FEED);
     supplies.extend(CELL_WATER_OUT);
     let declaration = HeldDeclaration::<Metabolism>::new(supplies, Vec::new(), FIXED)
@@ -23,7 +16,6 @@ pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
         .pool::<Glycerol, Beds<Fat>>(Space::Cells);
     let mut held = body.hold(declaration)?;
     let (laws, ports) = held.stand_ins();
-    constants(laws, ports)?;
     feeds(laws, ports)?;
     let (mut laws, ports) = body.metabolism(Some(held))?.parts();
     let oxygen = GasRoutes::<Oxygen>::request(&mut laws, &ports);
